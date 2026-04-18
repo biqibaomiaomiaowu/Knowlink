@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ def test_week1_freeze_docs_are_linked_from_readme_and_contract():
 
     assert "docs/contracts/week1-cao-le-freeze.md" in readme
     assert "docs/demo-assets-baseline.md" in readme
+    assert "docs/demo-assets-first-edition.md" in readme
     assert "week1-cao-le-freeze.md" in api_contract
     assert "../demo-assets-baseline.md" in api_contract
 
@@ -346,6 +348,153 @@ def test_citation_schemas_reject_missing_or_mixed_locator_fields(schema_path: st
         build_validator(schema_path).validate(payload)
 
 
+@pytest.mark.parametrize(
+    ("schema_path", "payload"),
+    [
+        (
+            "schemas/ai/quiz_generation.schema.json",
+            {
+                "quizType": "exam_drill",
+                "questions": [
+                    {
+                        "stemMd": "1+1=?",
+                        "options": ["1", "2"],
+                        "correctAnswer": "2",
+                        "explanationMd": "基础算术。",
+                        "difficultyLevel": "easy",
+                    }
+                ],
+            },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {
+                "tasks": [
+                    {
+                        "taskType": "redo_quiz",
+                        "priorityScore": 80,
+                        "reasonText": "错题集中。",
+                        "recommendedMinutes": 15,
+                    }
+                ],
+            },
+        ),
+    ],
+)
+def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload: dict):
+    build_validator(schema_path).validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("schema_path", "payload"),
+    [
+        (
+            "schemas/ai/quiz_generation.schema.json",
+            {"quizType": "exam_drill"},
+        ),
+        (
+            "schemas/ai/quiz_generation.schema.json",
+            {"quizType": "exam_drill", "questions": []},
+        ),
+        (
+            "schemas/ai/quiz_generation.schema.json",
+            {
+                "quizType": "exam_drill",
+                "questions": [
+                    {
+                        "stemMd": "题干",
+                        "options": ["A", "B"],
+                        "correctAnswer": "A",
+                        "explanationMd": "解释",
+                        "difficultyLevel": "expert",
+                    }
+                ],
+            },
+        ),
+        (
+            "schemas/ai/quiz_generation.schema.json",
+            {
+                "quizType": "exam_drill",
+                "questions": [
+                    {
+                        "stemMd": "题干",
+                        "options": ["A", "B"],
+                        "correctAnswer": "A",
+                        "explanationMd": "解释",
+                        "difficultyLevel": "easy",
+                        "questionType": "single_choice",
+                    }
+                ],
+            },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {},
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {"tasks": []},
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {
+                "tasks": [
+                    {
+                        "taskType": "memorize",
+                        "priorityScore": 80,
+                        "reasonText": "原因",
+                        "recommendedMinutes": 15,
+                    }
+                ]
+            },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {
+                "tasks": [
+                    {
+                        "taskType": "redo_quiz",
+                        "priorityScore": 101,
+                        "reasonText": "原因",
+                        "recommendedMinutes": 15,
+                    }
+                ]
+            },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {
+                "tasks": [
+                    {
+                        "taskType": "redo_quiz",
+                        "priorityScore": 80,
+                        "reasonText": "原因",
+                        "recommendedMinutes": 0,
+                    }
+                ]
+            },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {
+                "tasks": [
+                    {
+                        "taskType": "redo_quiz",
+                        "priorityScore": 80,
+                        "reasonText": "原因",
+                        "recommendedMinutes": 15,
+                        "intensity": "high",
+                    }
+                ]
+            },
+        ),
+    ],
+)
+def test_quiz_and_review_schemas_reject_invalid_payloads(schema_path: str, payload: dict):
+    with pytest.raises(ValidationError):
+        build_validator(schema_path).validate(payload)
+
+
 def test_normalized_document_schema_enforces_resource_specific_locations():
     validator = build_validator("schemas/parse/normalized_document.schema.json")
 
@@ -442,3 +591,48 @@ def test_demo_asset_baseline_covers_fixed_joint_test_set():
 
     assert "sha256:<hex>" in baseline_doc
     assert "不在仓库中提交任何演示二进制文件" in baseline_doc
+
+
+def test_first_edition_manifest_matches_first_edition_doc():
+    first_edition_doc = load_text("docs/demo-assets-first-edition.md")
+    manifest = load_json("server/seeds/demo_assets_manifest.json")
+
+    assert manifest["assetSetId"] == "first-edition-what-is-set"
+    assert manifest["manualImportCourseTitle"] == "KnowLink 固定联调课"
+    assert manifest["localBaseDir"] == "local_assets/first-edition/what-is-set"
+    assert "local_assets/first-edition/what-is-set/" in first_edition_doc
+
+    expected_assets = {
+        "mp4": ("knowlink-demo-main.mp4", "集合的初见.mp4", "video/mp4", 38985139),
+        "pdf": ("knowlink-demo-handout.pdf", "1_1_what_is_set.pdf", "application/pdf", 135310),
+        "pptx": (
+            "knowlink-demo-slides.pptx",
+            "1_1_what_is_set.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            88576,
+        ),
+        "docx": (
+            "knowlink-demo-notes.docx",
+            "集合的初见.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            40485,
+        ),
+    }
+
+    assert len(manifest["assets"]) == len(expected_assets)
+    assert {asset["resourceType"] for asset in manifest["assets"]} == set(expected_assets)
+    for asset in manifest["assets"]:
+        normalized_name, original_name, mime_type, size_bytes = expected_assets[asset["resourceType"]]
+        assert asset["normalizedName"] == normalized_name
+        assert asset["originalName"] == original_name
+        assert asset["relativePath"] == normalized_name
+        assert asset["mimeType"] == mime_type
+        assert asset["sizeBytes"] == size_bytes
+        assert asset["trackedInGit"] is False
+        assert asset["sourceKind"] == "original"
+        assert re.fullmatch(r"sha256:[0-9a-f]{64}", asset["checksum"])
+        expected_row = (
+            f"| `{asset['resourceType']}` | `{original_name}` | `{normalized_name}` | `{mime_type}` | "
+            f"{size_bytes} | `{asset['checksum']}` |"
+        )
+        assert expected_row in first_edition_doc
