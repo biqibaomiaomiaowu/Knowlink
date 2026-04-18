@@ -133,3 +133,31 @@ def test_create_course_then_dashboard_shows_recent_course():
     recent_courses = dashboard["data"]["recentCourses"]
     assert recent_courses
     assert recent_courses[0]["title"] in {"线性代数强化课", "高数期末冲刺课"}
+
+
+def test_delete_missing_resource_returns_not_found():
+    status, created = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/courses",
+            headers=AUTH_HEADERS | {"idempotency-key": "delete-resource-course-1"},
+            json_body={
+                "title": "资源删除边界课",
+                "entryType": "manual_import",
+                "goalText": "验证资源删除错误码",
+                "preferredStyle": "balanced",
+            },
+        )
+    )
+    assert status == 201
+    course_id = created["data"]["course"]["courseId"]
+
+    delete_status, delete_payload = asyncio.run(
+        request(
+            "DELETE",
+            f"/api/v1/courses/{course_id}/resources/99999",
+            headers=AUTH_HEADERS,
+        )
+    )
+    assert delete_status == 404
+    assert delete_payload["errorCode"] == "resource.not_found"

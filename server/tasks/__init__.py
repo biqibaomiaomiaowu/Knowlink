@@ -1,1 +1,1 @@
-"""Task entrypoints and placeholders."""
+"""Task entry points and placeholders."""

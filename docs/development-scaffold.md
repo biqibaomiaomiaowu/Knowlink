@@ -7,7 +7,7 @@
 - 后端依赖方向固定为 `router -> service -> repository/pipeline protocol`。
 - 当前 `server/infra/repositories/memory.py` 只是 demo 适配器，后续可以替换成数据库实现，但 router 不应再直接引用它。
 - DTO 固定在 `server/schemas/common.py`、`server/schemas/requests.py`、`server/schemas/responses.py`。
-- 客户端路由固定为 `home / import / recommend / progress / inquiry / handout / qa / quiz / review`。
+- 客户端路由固定为 `/`、`/import`、`/recommend`、`/courses/:courseId/progress`、`/courses/:courseId/inquiry`、`/courses/:courseId/handout`、`/courses/:courseId/qa/:sessionId`、`/quizzes/:quizId`、`/courses/:courseId/review`。
 - 当前仓库按 Flutter APP 交付组织，不承接快应用工程。
 
 ## 2. 各条线入口

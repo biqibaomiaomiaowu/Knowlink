@@ -56,7 +56,13 @@ class ResourceService:
 
     def delete_resource(self, *, course_id: int, resource_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
-        self.resources.delete_resource(course_id, resource_id)
+        deleted = self.resources.delete_resource(course_id, resource_id)
+        if not deleted:
+            raise ServiceError(
+                message="Resource was not found.",
+                error_code="resource.not_found",
+                status_code=404,
+            )
         return {"deleted": True, "resourceId": resource_id}
 
     def _ensure_course(self, course_id: int) -> dict[str, object]:
