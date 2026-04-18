@@ -26,3 +26,4 @@ include = ["server*"]
 [tool.pytest.ini_options]
 testpaths = ["server/tests"]
 addopts = "-q"
+pythonpath = ["."]

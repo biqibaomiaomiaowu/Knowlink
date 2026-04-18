@@ -47,10 +47,10 @@ class MemoryScaffoldRepository:
 
     def delete_resource(self, course_id: int, resource_id: int) -> bool:
         resources = self.store.list_resources(course_id)
-        self.store.resources[course_id] = [
-            item for item in resources if item["resourceId"] != resource_id
-        ]
-        return True
+        remaining = [item for item in resources if item["resourceId"] != resource_id]
+        deleted = len(remaining) != len(resources)
+        self.store.resources[course_id] = remaining
+        return deleted
 
     def create_parse_run(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
         return self.store.create_parse_run(course_id)
