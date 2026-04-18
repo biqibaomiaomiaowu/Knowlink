@@ -72,7 +72,7 @@
 | Flutter 页面与交互 | 朱春雯 | 曹乐 | 包括页面布局、主题、路由、Provider 绑定 |
 | FastAPI 路由与服务 | 杨彩艺 | 曹乐 | 包括 API、任务入队、聚合状态 |
 | `course_catalog` 与推荐契约 | 曹乐 | 杨彩艺 | 目录语义、推荐字段和确认入课流程 |
-| B 站导入预留接口与扫码登录预留接口 | 曹乐 | 杨彩艺 | 第 1 周由曹乐冻结路径、状态语义、错误码和 DTO，第 2 周由曹乐补当前 `501` stub 实现，真实下载服务接入再由杨彩艺实现 |
+| B 站导入预留接口与扫码登录预留接口 | 曹乐 | 杨彩艺 | 第 1 周由曹乐冻结路径、状态语义、错误码和 DTO，第 2 周由杨彩艺按冻结结果补当前 `501` stub，真实下载服务接入仍由杨彩艺实现 |
 | AIGC Prompt 与生成策略 | 曹乐 | 杨彩艺 | 由曹乐定义策略，杨彩艺负责服务接入 |
 | OCR / 文档解析与结构化策略 | 曹乐 | 杨彩艺 | 解析规则和输出结构由曹乐主导 |
 | 数据库与数据关系 | 曹乐 | 杨彩艺 | 表结构由曹乐定，落库实现由杨彩艺完成 |
@@ -89,7 +89,7 @@
 - `server/parsers/**`
 - `courses`、`parse_runs`、`handout_versions`、`knowledge_points`、`mastery_records`、`review_task_runs` 的字段设计
 - 所有 AI 输出 JSON Schema
-- B 站单视频导入接口预留 contract、第 2 周 stub 实现、扫码登录接口预留 contract、第 2 周 stub 实现、`bilibili_import_run` 状态语义
+- B 站单视频导入接口预留 contract、扫码登录接口预留 contract、`bilibili_import_run` 状态语义
 - 讲义生成策略、问答策略、测验生成策略、复习推荐策略
 - OCR / PDF / PPTX / DOCX 解析后的结构规范
 - 引用模型与保真策略
@@ -198,7 +198,7 @@
 | `ParseProgressPage` 辅助展示 | `GET /api/v1/courses/{courseId}/parse/summary` | 杨彩艺 | 可展示摘要，但不能替代 `pipeline-status` 作为主轮询接口 |
 | 运维 / 调试 | `POST /api/v1/async-tasks/{taskId}/retry` | 杨彩艺 | 仅后端或演示排障使用，朱春雯不直接依赖 |
 | `QaPage` 独立会话页 | `/courses/:courseId/qa/:sessionId` | 朱春雯 | 这是独立 QA 会话页；最终讲义页内嵌 QA 也复用同一后端会话 contract |
-| B 站导入与扫码登录接口预留 | `/api/v1/courses/{courseId}/resources/imports/bilibili`、`/api/v1/bilibili-import-runs/{importRunId}/status`、`/api/v1/bilibili/auth/qr/sessions` 等 | 曹乐 | 第 1 周先冻结 contract，第 2 周由曹乐完成接口预留实现，当前统一返回 `501`，不作为朱春雯的真实联调入口 |
+| B 站导入与扫码登录接口预留 | `/api/v1/courses/{courseId}/resources/imports/bilibili`、`/api/v1/bilibili-import-runs/{importRunId}/status`、`/api/v1/bilibili/auth/qr/sessions` 等 | 曹乐（业务） / 杨彩艺（实现） | 第 1 周先由曹乐冻结 contract 与状态语义，第 2 周由杨彩艺按冻结结果落地 `501` stub，不作为朱春雯的真实联调入口 |
 
 ### 6.3 接口 contract owner
 
@@ -215,6 +215,7 @@
 - 页面消费字段由朱春雯确认后冻结。
 - 带路径参数的课程接口一律以 path 中的 `courseId` 为准，请求体不重复传同义字段；当前唯一保留请求体 `courseId` 的场景是 `POST /api/v1/qa/messages`。
 - B 站导入路径、扫码登录状态字段和 `bilibili.not_implemented` 错误码语义由曹乐先冻结，接通前不允许前后端各自扩写。
+- B 站预留接口对应的 `server/api/routers/**`、`server/domain/services/**`、`server/schemas/**` stub 落地由杨彩艺负责，但不得偏离曹乐冻结的业务 contract。
 
 ## 7. 引用表唯一写入入口
 

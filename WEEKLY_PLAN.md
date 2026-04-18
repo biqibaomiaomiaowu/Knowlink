@@ -139,7 +139,7 @@
   - 向量化
 - 定义问询题模板和 `learning_preferences` 字段语义。
 - 与杨彩艺确认 `parse_run` 聚合状态和 `pipeline-status` 返回结构。
-- 实现第 1 周已预留的 B 站单视频导入接口与扫码登录接口，当前阶段统一返回 `501`：
+- 复核第 1 周已预留的 B 站单视频导入接口与扫码登录接口 contract，确认当前阶段统一返回 `501` 的业务语义：
   - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
   - `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
   - `GET /api/v1/bilibili-import-runs/{importRunId}/status`
@@ -177,6 +177,15 @@
 - 实现问询接口：
   - `GET /api/v1/courses/{courseId}/inquiry/questions`
   - `POST /api/v1/courses/{courseId}/inquiry/answers`
+- 按曹乐第 1 周冻结的 contract 落地 B 站单视频导入接口与扫码登录接口 `501` stub：
+  - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
+  - `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
+  - `GET /api/v1/bilibili-import-runs/{importRunId}/status`
+  - `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
+  - `POST /api/v1/bilibili/auth/qr/sessions`
+  - `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
+  - `GET /api/v1/bilibili/auth/session`
+  - `DELETE /api/v1/bilibili/auth/session`
 - 落库基础解析结果，至少能写入 `course_segments` 和 `knowledge_points`。
 
 ### 4.5 本周交付物

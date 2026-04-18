@@ -895,6 +895,7 @@ exports/{courseId}/handouts/v{versionNo}.md
 - 认证：`Authorization: Bearer <token>`
 - MVP 认证策略：固定 demo token，对应单个种子化 demo 用户；不做注册、登录和刷新 token 流程
 - 幂等：以下写接口必须支持 `Idempotency-Key`
+  - 确认推荐入课
   - 创建课程
   - 上传完成
   - 发起解析
