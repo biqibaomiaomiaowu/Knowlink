@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KnowLinkHandoutBlocks",
+  "type": "object",
+  "required": ["title", "summary", "blocks"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blocks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["title", "summary", "contentMd", "estimatedMinutes", "knowledgePointIds", "citations"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentMd": {
+            "type": "string",
+            "minLength": 1
+          },
+          "estimatedMinutes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "knowledgePointIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "citations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["resourceId", "refLabel"],
+              "properties": {
+                "resourceId": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "segmentId": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "pageNo": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "startSec": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "endSec": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "refLabel": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

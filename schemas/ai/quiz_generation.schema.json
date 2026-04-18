@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KnowLinkQuizGeneration",
+  "type": "object",
+  "required": ["quizType", "questions"],
+  "properties": {
+    "quizType": {
+      "type": "string",
+      "enum": ["block_check", "chapter_review", "exam_drill"]
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["stemMd", "options", "correctAnswer", "explanationMd", "difficultyLevel"],
+        "properties": {
+          "stemMd": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "correctAnswer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "explanationMd": {
+            "type": "string",
+            "minLength": 1
+          },
+          "difficultyLevel": {
+            "type": "string",
+            "enum": ["easy", "medium", "hard"]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

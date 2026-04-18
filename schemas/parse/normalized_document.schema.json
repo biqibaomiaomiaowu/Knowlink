@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KnowLinkNormalizedDocument",
+  "type": "object",
+  "required": ["resourceType", "segments"],
+  "properties": {
+    "resourceType": {
+      "type": "string",
+      "enum": ["mp4", "pdf", "srt", "pptx", "docx"]
+    },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["segmentType", "orderNo", "textContent"],
+        "properties": {
+          "segmentType": {
+            "type": "string",
+            "enum": ["video_transcript", "pdf_text", "slide_text", "doc_paragraph"]
+          },
+          "orderNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "textContent": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pageNo": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

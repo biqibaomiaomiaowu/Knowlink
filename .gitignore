@@ -1,0 +1,52 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.iml
+
+# Local environment
+.env
+.env.*
+!.env.example
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+*.egg-info/
+build/
+dist/
+*.db
+*.sqlite
+*.sqlite3
+
+# Flutter / Dart
+.dart_tool/
+client_flutter/.dart_tool/
+client_flutter/.packages
+client_flutter/.flutter-plugins
+client_flutter/.flutter-plugins-dependencies
+client_flutter/build/
+coverage/
+
+# Logs and temp files
+*.log
+*.tmp
+*.pid
+*.out
+*.swp
+
+# Local Codex workspace data
+.codex

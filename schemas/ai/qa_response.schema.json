@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KnowLinkQaResponse",
+  "type": "object",
+  "required": ["answerMd", "answerType", "citations"],
+  "properties": {
+    "answerMd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "answerType": {
+      "type": "string",
+      "enum": ["direct_answer", "clarification", "insufficient_evidence"]
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["resourceId", "refLabel"],
+        "properties": {
+          "resourceId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pageNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "startSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refLabel": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,105 @@
+[
+  {
+    "catalogId": "math-final-01",
+    "title": "高等数学期末冲刺",
+    "provider": "KnowLink Seed",
+    "level": "intermediate",
+    "estimatedHours": 4,
+    "tags": ["高等数学", "期末", "极限", "导数"],
+    "supportedStyles": ["exam", "balanced"],
+    "defaultResourceManifest": [
+      {
+        "resourceType": "mp4",
+        "required": true,
+        "description": "主课程视频"
+      },
+      {
+        "resourceType": "pdf",
+        "required": true,
+        "description": "配套讲义 PDF"
+      },
+      {
+        "resourceType": "pptx",
+        "required": false,
+        "description": "配套课件 PPTX"
+      },
+      {
+        "resourceType": "docx",
+        "required": false,
+        "description": "补充讲义 DOCX"
+      },
+      {
+        "resourceType": "srt",
+        "required": false,
+        "description": "字幕文件"
+      }
+    ]
+  },
+  {
+    "catalogId": "math-grad-02",
+    "title": "考研数学基础巩固",
+    "provider": "KnowLink Seed",
+    "level": "beginner",
+    "estimatedHours": 6,
+    "tags": ["考研", "数学", "基础", "入门"],
+    "supportedStyles": ["detailed", "balanced"],
+    "defaultResourceManifest": [
+      {
+        "resourceType": "mp4",
+        "required": true,
+        "description": "主课程视频"
+      },
+      {
+        "resourceType": "pdf",
+        "required": true,
+        "description": "配套讲义 PDF"
+      },
+      {
+        "resourceType": "pptx",
+        "required": false,
+        "description": "配套课件 PPTX"
+      },
+      {
+        "resourceType": "docx",
+        "required": false,
+        "description": "补充讲义 DOCX"
+      }
+    ]
+  },
+  {
+    "catalogId": "linear-final-01",
+    "title": "线性代数高频题型课",
+    "provider": "KnowLink Seed",
+    "level": "intermediate",
+    "estimatedHours": 3,
+    "tags": ["线性代数", "期末", "矩阵", "特征值"],
+    "supportedStyles": ["exam", "quick"],
+    "defaultResourceManifest": [
+      {
+        "resourceType": "mp4",
+        "required": true,
+        "description": "主课程视频"
+      },
+      {
+        "resourceType": "pdf",
+        "required": true,
+        "description": "配套讲义 PDF"
+      },
+      {
+        "resourceType": "pptx",
+        "required": false,
+        "description": "配套课件 PPTX"
+      },
+      {
+        "resourceType": "docx",
+        "required": false,
+        "description": "补充讲义 DOCX"
+      },
+      {
+        "resourceType": "srt",
+        "required": false,
+        "description": "字幕文件"
+      }
+    ]
+  }
+]
