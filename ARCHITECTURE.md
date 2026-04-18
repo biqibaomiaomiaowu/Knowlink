@@ -10,6 +10,7 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 - 已就位：`router -> service -> repository` 依赖方向、`memory` demo 适配器、AI pipeline 占位、解析器占位、任务 payload、Flutter `qa` 独立页面与 course-flow 状态骨架。
 - 占位未接通：PostgreSQL/Redis/MinIO 真正读写、SQLAlchemy model 与 migration 落表、Dramatiq broker、OCR/ASR/LLM Provider。
 - 文档中的 MVP 承诺表示“接口与模块边界冻结”，具体实现状态以 README 和 [docs/development-scaffold.md](./docs/development-scaffold.md) 为准。
+- 曹乐 owner 的 Week 1 冻结项与固定联调资料集基线以 [docs/contracts/week1-cao-le-freeze.md](./docs/contracts/week1-cao-le-freeze.md) 和 [docs/demo-assets-baseline.md](./docs/demo-assets-baseline.md) 为准。
 
 ---
 
@@ -36,7 +37,7 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 
 - 社交、排行榜、评论
 - 多人协作
-- 通用在线视频平台抓取
+- 当前阶段不落通用在线视频平台抓取实现，B 站单视频导入只预留接口 contract
 - 快应用工程实现
 - 全量 WebSocket 流式输出
 - 复杂知识图谱
@@ -52,9 +53,9 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 
 ### 2.5 MVP 硬边界
 
-- 鉴权采用单 demo 用户方案：后端种子化 1 个用户，Flutter 通过环境变量携带固定 Bearer token。
+- 鉴权采用单 demo 用户方案：后端种子化 1 个用户，Flutter 通过环境变量 `KNOWLINK_DEMO_TOKEN` 携带固定 Bearer token。
 - 智能课程推荐必须是真实可用能力，而不是页面 mock。
-- 推荐来源固定为 `course_catalog` 种子目录，不接外部课程平台抓取。
+- 推荐来源固定为 `course_catalog` 种子目录，不接外部课程平台抓取；B 站单视频导入当前只冻结接口，不接通下载运行时。
 - 推荐策略采用“规则排序 + AI 推荐理由文案”组合，确保 4 周内可稳定落地。
 - 策划书中的“移动端 APP / 快应用”按本仓边界收敛为“Flutter APP 交付优先”，快应用不在当前代码仓实现。
 
@@ -932,6 +933,8 @@ exports/{courseId}/handouts/v{versionNo}.md
 
 - 推荐请求至少固定：`goalText`、`selfLevel`、`timeBudgetMinutes`、`examAt`、`preferredStyle`
 - 推荐结果至少固定：`catalogId`、`title`、`provider`、`estimatedHours`、`fitScore`、`reasons[]`、`defaultResourceManifest`
+- 排序按 `fitScore` 降序；同分保持 `course_catalog` 种子顺序，不额外引入第二排序字段
+- 推荐理由文案在 Week 1 只允许使用冻结稿中的固定文案集合，避免前后端各自扩写
 - `confirm` 必须返回真实 `courseId`，不能只返回前端 mock 状态
 
 ### 资源上传
@@ -942,6 +945,24 @@ exports/{courseId}/handouts/v{versionNo}.md
 | `POST` | `/api/v1/courses/{courseId}/resources/upload-complete` | 上传完成回调，服务端校验对象元数据 |
 | `GET` | `/api/v1/courses/{courseId}/resources` | 课程资源列表 |
 | `DELETE` | `/api/v1/courses/{courseId}/resources/{resourceId}` | 删除资源 |
+
+### B 站导入预留接口
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/v1/courses/{courseId}/resources/imports/bilibili` | 预留 B 站单视频导入任务创建 |
+| `GET` | `/api/v1/courses/{courseId}/resources/imports/bilibili` | 预留 B 站导入任务列表 |
+| `GET` | `/api/v1/bilibili-import-runs/{importRunId}/status` | 预留 B 站导入任务状态 |
+| `POST` | `/api/v1/bilibili-import-runs/{importRunId}/cancel` | 预留 B 站导入任务取消 |
+| `POST` | `/api/v1/bilibili/auth/qr/sessions` | 预留扫码登录会话创建 |
+| `GET` | `/api/v1/bilibili/auth/qr/sessions/{sessionId}` | 预留扫码登录会话轮询 |
+| `GET` | `/api/v1/bilibili/auth/session` | 预留当前登录态查询 |
+| `DELETE` | `/api/v1/bilibili/auth/session` | 预留当前登录态清除 |
+
+约束：
+
+- 当前以上接口全部返回 `501`，只冻结 path、字段和错误码。
+- 只为单个公开视频链接预留 contract，不覆盖番剧、合集、收藏夹和批量解析。
 
 ### 流水线与问询
 
@@ -1006,11 +1027,13 @@ exports/{courseId}/handouts/v{versionNo}.md
   - `handout_version`
   - `quiz`
   - `review_task_run`
+  - `bilibili_import_run`
 - `entity.id` 固定为对应领域实体主键。
 - `POST /courses/{courseId}/parse/start` 返回 `entity.type = parse_run`。
 - `POST /courses/{courseId}/handouts/generate` 返回 `entity.type = handout_version`。
 - `POST /courses/{courseId}/quizzes/generate` 返回 `entity.type = quiz`。
 - `POST /courses/{courseId}/review-tasks/regenerate` 返回 `entity.type = review_task_run`。
+- `POST /courses/{courseId}/resources/imports/bilibili` 未来接通后返回 `entity.type = bilibili_import_run`；当前阶段统一返回 `501`。
 
 状态查询约定：
 
@@ -1020,6 +1043,7 @@ exports/{courseId}/handouts/v{versionNo}.md
   - `handout_version`：`GET /api/v1/handout-versions/{handoutVersionId}/status`
   - `quiz`：`GET /api/v1/quizzes/{quizId}/status`
   - `review_task_run`：`GET /api/v1/review-task-runs/{reviewTaskRunId}/status`
+  - `bilibili_import_run`：`GET /api/v1/bilibili-import-runs/{importRunId}/status`
 - 子任务状态只用于后台排障和重试，不作为 Flutter 主轮询入口。
 
 聚合状态接口统一返回：
@@ -1059,6 +1083,12 @@ exports/{courseId}/handouts/v{versionNo}.md
 4. 资源满足最低条件后，课程转为 `resource_ready`。
 5. 用户发起 `parse/start`，创建 `parse_run`、一个 `parse_pipeline` 根任务和多个子 `async_task`。
 6. 解析成功后课程转为 `inquiry_ready`。
+
+## 12.2A B 站单视频导入预留
+
+1. Flutter 未来可提交单个 B 站公开视频链接到 `POST /courses/{courseId}/resources/imports/bilibili`。
+2. 服务端未来将创建一个 `bilibili_import_run` 并把下载过程映射到根任务。
+3. 当前仓库只冻结这套接口 contract，不创建真实任务，也不落下载实现。
 
 ## 12.3 生成讲义
 

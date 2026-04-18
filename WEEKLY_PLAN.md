@@ -47,6 +47,16 @@
   - 测验题结构
   - 复习任务结构
   - OCR / 文档解析输出规范
+- 预留 B 站单视频导入接口与扫码登录接口 contract：
+  - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
+  - `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
+  - `GET /api/v1/bilibili-import-runs/{importRunId}/status`
+  - `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
+  - `POST /api/v1/bilibili/auth/qr/sessions`
+  - `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
+  - `GET /api/v1/bilibili/auth/session`
+  - `DELETE /api/v1/bilibili/auth/session`
+- 冻结 `bilibili_import_run` 命名与 `bilibili.not_implemented` 错误码，但第 1 周不要求接口已可访问。
 - 冻结 demo 鉴权与 demo 课程目录种子数据。
 - 准备统一测试资料集和演示课程标题。
 
@@ -92,6 +102,7 @@
 
 - 冻结版表结构。
 - 冻结版关键 DTO。
+- B 站单视频导入与扫码登录接口路径、错误码和状态命名完成预留。
 - Flutter 页面壳子可运行。
 - FastAPI 服务可启动。
 - 推荐页可返回真实推荐结果并确认入课。
@@ -104,6 +115,7 @@
 - README、架构文档、分工文档、周计划文档互相能对上。
 - 第 2 周开发不再需要讨论核心命名。
 - 推荐页不再依赖 mock 数据。
+- B 站预留接口的路径、错误码和 `bilibili_import_run` 命名在文档中已冻结，但实现延后到第 2 周。
 
 ## 4. 第 2 周：上传、解析、问询链路
 
@@ -127,6 +139,16 @@
   - 向量化
 - 定义问询题模板和 `learning_preferences` 字段语义。
 - 与杨彩艺确认 `parse_run` 聚合状态和 `pipeline-status` 返回结构。
+- 实现第 1 周已预留的 B 站单视频导入接口与扫码登录接口，当前阶段统一返回 `501`：
+  - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
+  - `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
+  - `GET /api/v1/bilibili-import-runs/{importRunId}/status`
+  - `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
+  - `POST /api/v1/bilibili/auth/qr/sessions`
+  - `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
+  - `GET /api/v1/bilibili/auth/session`
+  - `DELETE /api/v1/bilibili/auth/session`
+- 复核 `bilibili_import_run` 状态语义与 `bilibili.not_implemented` 错误码，当前阶段不接通真实下载实现。
 
 ### 4.3 朱春雯
 
@@ -163,12 +185,14 @@
 - 能看到真实解析进度。
 - 解析完成后能进入问询页并保存答案。
 - 数据库中能看到真实 `parse_run`、`async_task`、`segment`、`knowledge_point` 数据。
+- B 站单视频导入与扫码登录接口预留已可访问，并明确当前统一返回 `501`。
 
 ### 4.6 本周验收
 
 - 固定资料集可稳定跑通上传和解析。
 - 解析失败时前端能看到明确错误，不会卡死在 loading。
 - 问询字段和后续讲义生成字段完全对齐。
+- B 站接口的路径、错误码和 `bilibili_import_run` 命名在架构文档、分工文档和 API contract 中完全一致，且接口当前能返回统一未实现错误。
 
 ## 5. 第 3 周：讲义、联动、问答链路
 

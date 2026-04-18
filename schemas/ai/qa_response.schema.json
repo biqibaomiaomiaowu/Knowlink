@@ -1,6 +1,85 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "KnowLinkQaResponse",
+  "$defs": {
+    "citationLocator": {
+      "oneOf": [
+        {
+          "required": ["pageNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["slideNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["anchorKey"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["startSec", "endSec"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
   "type": "object",
   "required": ["answerMd", "answerType", "citations"],
   "properties": {
@@ -14,10 +93,10 @@
     },
     "citations": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["resourceId", "refLabel"],
-        "properties": {
+        "items": {
+          "type": "object",
+          "required": ["resourceId", "refLabel"],
+          "properties": {
           "resourceId": {
             "type": "integer",
             "minimum": 1
@@ -25,6 +104,14 @@
           "pageNo": {
             "type": "integer",
             "minimum": 1
+          },
+          "slideNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "anchorKey": {
+            "type": "string",
+            "minLength": 1
           },
           "startSec": {
             "type": "integer",
@@ -34,14 +121,19 @@
             "type": "integer",
             "minimum": 0
           },
-          "refLabel": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "additionalProperties": false
+            "refLabel": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "allOf": [
+            {
+              "$ref": "#/$defs/citationLocator"
+            }
+          ],
+          "additionalProperties": false
+        }
       }
-    }
   },
   "additionalProperties": false
 }

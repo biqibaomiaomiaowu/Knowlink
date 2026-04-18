@@ -1,6 +1,85 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "KnowLinkHandoutBlocks",
+  "$defs": {
+    "citationLocator": {
+      "oneOf": [
+        {
+          "required": ["pageNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["slideNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["anchorKey"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["startSec", "endSec"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
   "type": "object",
   "required": ["title", "summary", "blocks"],
   "properties": {
@@ -61,6 +140,14 @@
                   "type": "integer",
                   "minimum": 1
                 },
+                "slideNo": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "anchorKey": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "startSec": {
                   "type": "integer",
                   "minimum": 0
@@ -74,6 +161,11 @@
                   "minLength": 1
                 }
               },
+              "allOf": [
+                {
+                  "$ref": "#/$defs/citationLocator"
+                }
+              ],
               "additionalProperties": false
             }
           }

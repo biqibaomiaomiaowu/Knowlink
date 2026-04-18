@@ -1,6 +1,133 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "KnowLinkNormalizedDocument",
+  "$defs": {
+    "pdfSegment": {
+      "allOf": [
+        {
+          "properties": {
+            "segmentType": {
+              "const": "pdf_text"
+            }
+          }
+        },
+        {
+          "required": ["pageNo"]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "pptxSegment": {
+      "allOf": [
+        {
+          "properties": {
+            "segmentType": {
+              "const": "slide_text"
+            }
+          }
+        },
+        {
+          "required": ["slideNo"]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "docxSegment": {
+      "allOf": [
+        {
+          "properties": {
+            "segmentType": {
+              "const": "doc_paragraph"
+            }
+          }
+        },
+        {
+          "required": ["anchorKey"]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "videoSegment": {
+      "allOf": [
+        {
+          "properties": {
+            "segmentType": {
+              "const": "video_transcript"
+            }
+          }
+        },
+        {
+          "required": ["startSec", "endSec"]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
   "type": "object",
   "required": ["resourceType", "segments"],
   "properties": {
@@ -38,11 +165,109 @@
           "pageNo": {
             "type": "integer",
             "minimum": 1
+          },
+          "slideNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "anchorKey": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "additionalProperties": false
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "resourceType": {
+            "const": "pdf"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "segments": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pdfSegment"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resourceType": {
+            "const": "pptx"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "segments": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pptxSegment"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resourceType": {
+            "const": "docx"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "segments": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/docxSegment"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resourceType": {
+            "enum": ["mp4", "srt"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "segments": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/videoSegment"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

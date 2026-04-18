@@ -164,12 +164,12 @@ class RuntimeStore:
         ]
         for index, (block_title, location) in enumerate(materials):
             block_id = self.next_id("handout_block")
+            start_sec = 120 + index * 300
+            end_sec = 300 + index * 300
             citation = {
                 "resourceId": 501 + index,
                 "refLabel": "结构化来源锚点",
                 **location,
-                "startSec": 120 + index * 300,
-                "endSec": 300 + index * 300,
             }
             blocks.append(
                 {
@@ -177,8 +177,8 @@ class RuntimeStore:
                     "title": block_title,
                     "summary": "按考试优先级整理的知识块",
                     "contentMd": f"### {block_title}\n- 重点：定义、题型、常见陷阱",
-                    "startSec": citation["startSec"],
-                    "endSec": citation["endSec"],
+                    "startSec": start_sec,
+                    "endSec": end_sec,
                     "pageFrom": location.get("pageNo"),
                     "pageTo": (location.get("pageNo") or 0) + 1 if "pageNo" in location else None,
                     "slideNo": location.get("slideNo"),

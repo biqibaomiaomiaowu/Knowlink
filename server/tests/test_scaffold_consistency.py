@@ -144,7 +144,21 @@ def test_upload_contract_accepts_pptx_and_docx():
         assert upload_complete["data"]["resourceType"] == resource_type
 
 
-def test_handout_and_jump_target_support_mixed_citation_types():
+def test_handout_qa_and_jump_target_keep_single_locator_per_citation():
+    def locator_group_count(citation: dict[str, object]) -> int:
+        groups = 0
+        if citation.get("pageNo") is not None:
+            groups += 1
+        if citation.get("slideNo") is not None:
+            groups += 1
+        if citation.get("anchorKey") is not None:
+            groups += 1
+        if citation.get("startSec") is not None or citation.get("endSec") is not None:
+            assert citation.get("startSec") is not None
+            assert citation.get("endSec") is not None
+            groups += 1
+        return groups
+
     create_status, create_body = asyncio.run(
         request(
             "POST",
@@ -208,9 +222,38 @@ def test_handout_and_jump_target_support_mixed_citation_types():
     assert any(block["citations"][0].get("pageNo") for block in blocks)
     assert any(block["citations"][0].get("slideNo") for block in blocks)
     assert any(block["citations"][0].get("anchorKey") for block in blocks)
+    assert all(locator_group_count(block["citations"][0]) == 1 for block in blocks)
 
+    first_block_id = blocks[0]["blockId"]
     second_block_id = blocks[1]["blockId"]
     third_block_id = blocks[2]["blockId"]
+
+    qa_status, qa_body = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/qa/messages",
+            headers=AUTH_HEADERS,
+            json_body={
+                "courseId": course_id,
+                "handoutBlockId": first_block_id,
+                "question": "这个定义和题型有什么联系？",
+            },
+        )
+    )
+    assert qa_status == 200
+    assert locator_group_count(qa_body["data"]["citations"][0]) == 1
+
+    jump_pdf_status, jump_pdf_body = asyncio.run(
+        request(
+            "GET",
+            f"/api/v1/handout-blocks/{first_block_id}/jump-target",
+            headers=AUTH_HEADERS,
+        )
+    )
+    assert jump_pdf_status == 200
+    assert jump_pdf_body["data"]["pageNo"] == 2
+    assert jump_pdf_body["data"]["startSec"] == 120
+    assert jump_pdf_body["data"]["endSec"] == 300
 
     jump_slide_status, jump_slide_body = asyncio.run(
         request(
