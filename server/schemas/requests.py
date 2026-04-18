@@ -73,7 +73,6 @@ class SubmitQuizRequest(CamelModel):
 
 
 class ProgressData(CamelModel):
-    course_id: int
     handout_version_id: int | None = None
     last_handout_block_id: int | None = None
     last_video_resource_id: int | None = None

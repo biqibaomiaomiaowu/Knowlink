@@ -21,6 +21,7 @@
   - `POST /api/v1/courses/{courseId}/handouts/generate`
   - `POST /api/v1/courses/{courseId}/quizzes/generate`
   - `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
+- 带路径参数的课程接口一律以 path 中的 `courseId` 为准；请求体不再重复传同义 `courseId`，`POST /api/v1/qa/messages` 是唯一例外。
 
 ## 2. 统一成功响应
 
@@ -275,6 +276,37 @@
 }
 ```
 
+### `GET /api/v1/courses/{courseId}/resources`
+
+响应 `data`：
+
+```json
+{
+  "items": [
+    {
+      "resourceId": 501,
+      "resourceType": "pdf",
+      "originalName": "chapter-1.pdf",
+      "objectKey": "raw/1/101/temp/chapter-1.pdf",
+      "ingestStatus": "ready",
+      "validationStatus": "passed",
+      "processingStatus": "pending"
+    }
+  ]
+}
+```
+
+### `DELETE /api/v1/courses/{courseId}/resources/{resourceId}`
+
+响应 `data`：
+
+```json
+{
+  "deleted": true,
+  "resourceId": 501
+}
+```
+
 ### `POST /api/v1/courses/{courseId}/parse/start`
 
 响应 `data`：
@@ -347,6 +379,40 @@
   }
 }
 ```
+
+### `GET /api/v1/courses/{courseId}/parse/summary`
+
+响应 `data`：
+
+```json
+{
+  "courseId": 101,
+  "activeParseRunId": 9001,
+  "segmentCount": 12,
+  "knowledgePointCount": 5
+}
+```
+
+说明：
+
+- 这是解析完成后的辅助摘要接口。
+- Flutter 主轮询入口仍然是 `GET /api/v1/courses/{courseId}/pipeline-status`。
+
+### `POST /api/v1/async-tasks/{taskId}/retry`
+
+响应 `data`：
+
+```json
+{
+  "taskId": 7001,
+  "status": "queued",
+  "nextAction": "poll"
+}
+```
+
+说明：
+
+- 这是后端和演示排障用辅助接口，不作为页面主流程依赖。
 
 ## 7. 问询与讲义
 
@@ -587,6 +653,29 @@
 }
 ```
 
+### `GET /api/v1/qa/sessions/{sessionId}/messages`
+
+响应 `data`：
+
+```json
+{
+  "items": [
+    {
+      "sessionId": 6001,
+      "messageId": 6002,
+      "answerMd": "定义控制了题型的判断边界。",
+      "citations": [
+        {
+          "resourceId": 501,
+          "refLabel": "PDF 第 2 页",
+          "pageNo": 2
+        }
+      ]
+    }
+  ]
+}
+```
+
 ### `POST /api/v1/courses/{courseId}/quizzes/generate`
 
 响应结构与其他异步生成接口一致，`entity.type = quiz`。
@@ -699,6 +788,17 @@
 }
 ```
 
+### `POST /api/v1/review-tasks/{reviewTaskId}/complete`
+
+响应 `data`：
+
+```json
+{
+  "reviewTaskId": 8401,
+  "completed": true
+}
+```
+
 ## 9. 最近学习位置
 
 ### `GET /api/v1/courses/{courseId}/progress`
@@ -720,4 +820,20 @@
 
 ### `POST /api/v1/courses/{courseId}/progress`
 
-请求体与 `GET` 返回结构一致，但 `lastActivityAt` 可由服务端补写。
+请求：
+
+```json
+{
+  "handoutVersionId": 3001,
+  "lastHandoutBlockId": 4001,
+  "lastVideoResourceId": 501,
+  "lastPositionSec": 180,
+  "lastDocResourceId": 502,
+  "lastPageNo": 3
+}
+```
+
+说明：
+
+- `courseId` 以 path 为准，请求体不重复传 `courseId`。
+- `lastActivityAt` 可由服务端补写。

@@ -84,6 +84,8 @@
 
 只允许曹乐主写的内容：
 
+- `server/ai/**`
+- `server/parsers/**`
 - `courses`、`parse_runs`、`handout_versions`、`knowledge_points`、`mastery_records`、`review_task_runs` 的字段设计
 - 所有 AI 输出 JSON Schema
 - 讲义生成策略、问答策略、测验生成策略、复习推荐策略
@@ -102,7 +104,11 @@
 
 - `client_flutter/lib/features/**`
 - `client_flutter/lib/app/**`
+- `client_flutter/lib/core/config/**`
+- `client_flutter/lib/core/network/**`
 - `client_flutter/lib/core/widgets/**`
+- `client_flutter/lib/shared/models/**`
+- `client_flutter/lib/shared/providers/**`
 - 页面 UI、路由、主题、状态展示、交互动效
 - 页面级 mock 数据和交互占位
 
@@ -119,6 +125,7 @@
 - `server/api/routers/**`
 - `server/domain/services/**`
 - `server/domain/repositories/**`
+- `server/schemas/**`
 - `server/tasks/**`
 - `server/infra/**`
 - 上传、任务调度、缓存、对象存储、部署、日志、监控
@@ -158,6 +165,8 @@
 | `CourseImportPage` | `POST /api/v1/courses` | 杨彩艺 |
 | `CourseImportPage` | `POST /api/v1/courses/{courseId}/resources/upload-init` | 杨彩艺 |
 | `CourseImportPage` | `POST /api/v1/courses/{courseId}/resources/upload-complete` | 杨彩艺 |
+| `CourseImportPage` | `GET /api/v1/courses/{courseId}/resources` | 杨彩艺 |
+| `CourseImportPage` | `DELETE /api/v1/courses/{courseId}/resources/{resourceId}` | 杨彩艺 |
 | `ParseProgressPage` `courseFlowProvider` | `POST /api/v1/courses/{courseId}/parse/start` | 杨彩艺 |
 | `ParseProgressPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/pipeline-status` | 杨彩艺 |
 | `InquiryPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/inquiry/questions` | 杨彩艺 |
@@ -168,6 +177,7 @@
 | `HandoutPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/handouts/latest/blocks` | 杨彩艺 |
 | `HandoutPage` `activeBlockProvider` | `GET /api/v1/handout-blocks/{blockId}/jump-target` | 杨彩艺 |
 | `QaPage` `courseFlowProvider` | `POST /api/v1/qa/messages` | 杨彩艺 |
+| `QaPage` `courseFlowProvider` | `GET /api/v1/qa/sessions/{sessionId}/messages` | 杨彩艺 |
 | `QuizPage` `courseFlowProvider` | `POST /api/v1/courses/{courseId}/quizzes/generate` | 杨彩艺 |
 | `QuizPage` `courseFlowProvider` | `GET /api/v1/quizzes/{quizId}` | 杨彩艺 |
 | `QuizPage` `courseFlowProvider` | `GET /api/v1/quizzes/{quizId}/status` | 杨彩艺 |
@@ -175,10 +185,19 @@
 | `ReviewPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/review-tasks` | 杨彩艺 |
 | `ReviewPage` `courseFlowProvider` | `POST /api/v1/courses/{courseId}/review-tasks/regenerate` | 杨彩艺 |
 | `ReviewPage` `courseFlowProvider` | `GET /api/v1/review-task-runs/{reviewTaskRunId}/status` | 杨彩艺 |
+| `ReviewPage` `courseFlowProvider` | `POST /api/v1/review-tasks/{reviewTaskId}/complete` | 杨彩艺 |
 | `ReviewPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/progress` | 杨彩艺 |
 | `ReviewPage` `courseFlowProvider` | `POST /api/v1/courses/{courseId}/progress` | 杨彩艺 |
 
-### 6.2 接口 contract owner
+### 6.2 辅助接口与使用约束
+
+| 场景 | 接口 | 主负责人 | 约束 |
+|---|---|---|---|
+| `ParseProgressPage` 辅助展示 | `GET /api/v1/courses/{courseId}/parse/summary` | 杨彩艺 | 可展示摘要，但不能替代 `pipeline-status` 作为主轮询接口 |
+| 运维 / 调试 | `POST /api/v1/async-tasks/{taskId}/retry` | 杨彩艺 | 仅后端或演示排障使用，朱春雯不直接依赖 |
+| `QaPage` 独立会话页 | `/courses/:courseId/qa/:sessionId` | 朱春雯 | 这是独立 QA 会话页；最终讲义页内嵌 QA 也复用同一后端会话 contract |
+
+### 6.3 接口 contract owner
 
 | 接口层面 | 主负责人 |
 |---|---|
@@ -191,6 +210,7 @@
 - DTO 由杨彩艺整理为接口文档初稿。
 - 业务字段含义由曹乐确认。
 - 页面消费字段由朱春雯确认后冻结。
+- 带路径参数的课程接口一律以 path 中的 `courseId` 为准，请求体不重复传同义字段；当前唯一保留请求体 `courseId` 的场景是 `POST /api/v1/qa/messages`。
 
 ## 7. 引用表唯一写入入口
 
