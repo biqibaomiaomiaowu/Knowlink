@@ -15,6 +15,7 @@ Thumbs.db
 venv/
 .envrc
 .python-version
+local_assets/
 
 # Python
 __pycache__/

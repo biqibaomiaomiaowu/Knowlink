@@ -18,9 +18,10 @@
 - 每个文件都要记录 `checksum`，格式固定为 `sha256:<hex>`
 - 上传接口演示时统一回填 `originalName`、`mimeType`、`sizeBytes`、`checksum`
 - 固定资料集默认绑定手动导入课程标题 `KnowLink 固定联调课`
+- 首版资料的项目内本地副本统一放在 `local_assets/first-edition/what-is-set/`
 
 ## 3. 使用约束
 
 - 推荐演示使用 `server/seeds/course_catalog.json` 中的 seed 标题；固定资料集主要用于手动导入和全链路联调
 - 即使某条推荐课程的 `defaultResourceManifest` 中把 `pptx` 或 `docx` 标为可选，固定联调资料集也必须携带这两类文件，以验证 mixed citation 与 jump-target 行为
-- 不在仓库中提交任何演示二进制文件；真实样例由线下共享目录或对象存储统一管理
+- 不在仓库中提交任何演示二进制文件；真实样例可放在线下共享目录、对象存储或项目内 `local_assets/` 的 gitignored 本地目录

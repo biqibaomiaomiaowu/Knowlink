@@ -1,0 +1,51 @@
+{
+  "assetSetId": "first-edition-what-is-set",
+  "manualImportCourseTitle": "KnowLink 固定联调课",
+  "localBaseDir": "local_assets/first-edition/what-is-set",
+  "assets": [
+    {
+      "resourceType": "mp4",
+      "normalizedName": "knowlink-demo-main.mp4",
+      "originalName": "集合的初见.mp4",
+      "relativePath": "knowlink-demo-main.mp4",
+      "mimeType": "video/mp4",
+      "sizeBytes": 38985139,
+      "checksum": "sha256:55fa962beef83f57d1568f4ee9d7fcaf9d86e8f90521b65da0c577f2ad9b6a17",
+      "trackedInGit": false,
+      "sourceKind": "original"
+    },
+    {
+      "resourceType": "pdf",
+      "normalizedName": "knowlink-demo-handout.pdf",
+      "originalName": "1_1_what_is_set.pdf",
+      "relativePath": "knowlink-demo-handout.pdf",
+      "mimeType": "application/pdf",
+      "sizeBytes": 135310,
+      "checksum": "sha256:5c4e50b9d6de0ed739b3a45be876f958c6d194a0ff87e66fe2f18f32242c7da8",
+      "trackedInGit": false,
+      "sourceKind": "original"
+    },
+    {
+      "resourceType": "pptx",
+      "normalizedName": "knowlink-demo-slides.pptx",
+      "originalName": "1_1_what_is_set.pptx",
+      "relativePath": "knowlink-demo-slides.pptx",
+      "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "sizeBytes": 88576,
+      "checksum": "sha256:30ea64e0775ee77dcfc26794173c1393520b53bed6ece46c0cef43cb9d4f7641",
+      "trackedInGit": false,
+      "sourceKind": "original"
+    },
+    {
+      "resourceType": "docx",
+      "normalizedName": "knowlink-demo-notes.docx",
+      "originalName": "集合的初见.docx",
+      "relativePath": "knowlink-demo-notes.docx",
+      "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "sizeBytes": 40485,
+      "checksum": "sha256:0b29a64b87c88bbe2597af046ef754ad1010d24f467f9a13e0ad397725555326",
+      "trackedInGit": false,
+      "sourceKind": "original"
+    }
+  ]
+}

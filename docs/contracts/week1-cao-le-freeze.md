@@ -88,6 +88,7 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
 - 每周联调默认使用 `1 mp4 + 1 pdf + 1 pptx + 1 docx`
 - `srt` 是可选辅助输入，不单独构成联调通过条件
 - 仓库内只维护清单、命名规则、MIME 和 checksum 规范，不提交二进制样例
+- 当前首版资料集的项目内本地副本放在 `local_assets/first-edition/what-is-set/`，并由 `server/seeds/demo_assets_manifest.json` 记录映射关系
 - 虽然推荐目录中的 `pptx/docx` 可标为可选资源，但固定联调资料集必须包含它们，用于覆盖 mixed citation 场景
 
 ## 7. Week 1 验收口径
