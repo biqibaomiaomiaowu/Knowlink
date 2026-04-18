@@ -208,6 +208,47 @@ class UploadInitData(CamelModel):
     expires_at: datetime
 
 
+class BilibiliImportRunSummary(CamelModel):
+    import_run_id: int
+    course_id: int
+    status: str
+    video_url: str
+    task_id: int | None = None
+    resource_id: int | None = None
+
+
+class BilibiliImportListData(CamelModel):
+    items: list[BilibiliImportRunSummary]
+
+
+class BilibiliImportRunStatusData(CamelModel):
+    import_run_id: int
+    course_id: int
+    status: str
+    video_url: str
+    task_id: int | None = None
+    resource_id: int | None = None
+    next_action: str | None = None
+    error_code: str | None = None
+
+
+class BilibiliAuthQrSessionData(CamelModel):
+    session_id: str
+    status: str
+    qr_code_url: str | None = None
+    expires_at: datetime | None = None
+
+
+class BilibiliAuthSessionData(CamelModel):
+    login_status: str
+    user_nickname: str | None = None
+    expires_at: datetime | None = None
+
+
+class BilibiliAuthSessionDeleteData(CamelModel):
+    deleted: bool
+
+
 class SimpleSavedData(CamelModel):
     saved: bool
     answer_count: int

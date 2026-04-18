@@ -22,6 +22,10 @@
 - `resource.not_found`: 资源不存在
 - `resource.invalid_payload`: 上传完成回调字段不完整
 
+## Bilibili
+
+- `bilibili.not_implemented`: B 站导入与扫码登录接口已预留，但当前服务尚未接通
+
 ## Pipeline
 
 - `pipeline.not_ready`: 当前课程状态不允许发起解析

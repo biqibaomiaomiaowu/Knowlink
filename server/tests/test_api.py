@@ -161,3 +161,68 @@ def test_delete_missing_resource_returns_not_found():
     )
     assert delete_status == 404
     assert delete_payload["errorCode"] == "resource.not_found"
+
+
+def test_bilibili_routes_require_auth():
+    requests_to_check = [
+        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {"videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"}),
+        ("GET", "/api/v1/courses/101/resources/imports/bilibili", None),
+        ("GET", "/api/v1/bilibili-import-runs/9001/status", None),
+        ("POST", "/api/v1/bilibili-import-runs/9001/cancel", None),
+        ("POST", "/api/v1/bilibili/auth/qr/sessions", None),
+        ("GET", "/api/v1/bilibili/auth/qr/sessions/session-demo-1", None),
+        ("GET", "/api/v1/bilibili/auth/session", None),
+        ("DELETE", "/api/v1/bilibili/auth/session", None),
+    ]
+
+    for method, path, payload in requests_to_check:
+        status, body = asyncio.run(request(method, path, json_body=payload))
+        assert status == 401
+        assert body["errorCode"] == "auth.token_missing"
+
+
+def test_bilibili_reserved_routes_return_not_implemented():
+    requests_to_check = [
+        ("POST", "/api/v1/courses/101/resources/imports/bilibili", None),
+        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {}),
+        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {"videoUrl": ""}),
+        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {"videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"}),
+        ("GET", "/api/v1/courses/101/resources/imports/bilibili", None),
+        ("GET", "/api/v1/bilibili-import-runs/9001/status", None),
+        ("POST", "/api/v1/bilibili-import-runs/9001/cancel", None),
+        ("POST", "/api/v1/bilibili/auth/qr/sessions", None),
+        ("GET", "/api/v1/bilibili/auth/qr/sessions/session-demo-1", None),
+        ("GET", "/api/v1/bilibili/auth/session", None),
+        ("DELETE", "/api/v1/bilibili/auth/session", None),
+    ]
+
+    for method, path, payload in requests_to_check:
+        status, body = asyncio.run(
+            request(
+                method,
+                path,
+                headers=AUTH_HEADERS,
+                json_body=payload,
+            )
+        )
+        assert status == 501
+        assert body["errorCode"] == "bilibili.not_implemented"
+
+
+def test_bilibili_import_openapi_keeps_reserved_request_body():
+    schema = app.openapi()
+    path, operation = next(
+        (path, item["post"])
+        for path, item in schema["paths"].items()
+        if path.endswith("/courses/{course_id}/resources/imports/bilibili")
+    )
+
+    assert path.startswith("/api/v1/")
+    request_body = operation["requestBody"]
+    content_schema = request_body["content"]["application/json"]["schema"]
+    assert any(
+        item.get("$ref", "").endswith("/BilibiliImportRequest")
+        for item in content_schema.get("anyOf", [])
+    )
+    component_schema = schema["components"]["schemas"]["BilibiliImportRequest"]
+    assert "videoUrl" in component_schema["properties"]

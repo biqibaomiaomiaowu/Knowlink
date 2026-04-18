@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from server.config.settings import Settings, get_settings
 from server.domain.services import (
+    BilibiliService,
     CourseService,
     HandoutService,
     HomeService,
@@ -80,6 +81,10 @@ async def get_course_service(
     repo: MemoryScaffoldRepository = Depends(get_memory_repository),
 ) -> CourseService:
     return CourseService(courses=repo, idempotency=repo)
+
+
+async def get_bilibili_service() -> BilibiliService:
+    return BilibiliService()
 
 
 async def get_home_service(

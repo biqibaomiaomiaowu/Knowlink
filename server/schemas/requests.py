@@ -48,6 +48,13 @@ class UploadCompleteRequest(CamelModel):
     checksum: str
 
 
+class BilibiliImportRequest(CamelModel):
+    video_url: str | None = Field(
+        default=None,
+        description="预留的 B 站单视频链接。stub 阶段允许为空，正式接通后收紧为必填。",
+    )
+
+
 class InquiryAnswerItem(CamelModel):
     key: str
     value: str | int
