@@ -18,10 +18,10 @@ async def create_qa_message(
     return api_ok(request, data)
 
 
-@router.get("/sessions/{session_id}/messages")
+@router.get("/sessions/{sessionId}/messages")
 async def get_session_messages(
-    session_id: int,
+    sessionId: int,
     request: Request,
     service: QaService = Depends(get_qa_service),
 ):
-    return api_ok(request, service.get_session_messages(session_id=session_id))
+    return api_ok(request, service.get_session_messages(session_id=sessionId))

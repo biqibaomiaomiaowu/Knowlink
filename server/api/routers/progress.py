@@ -8,20 +8,20 @@ from server.schemas.requests import ProgressData
 router = APIRouter(prefix="/courses", tags=["progress"])
 
 
-@router.get("/{course_id}/progress")
+@router.get("/{courseId}/progress")
 async def get_progress(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: ProgressService = Depends(get_progress_service),
 ):
-    return api_ok(request, service.get_progress(course_id=course_id))
+    return api_ok(request, service.get_progress(course_id=courseId))
 
 
-@router.post("/{course_id}/progress")
+@router.post("/{courseId}/progress")
 async def update_progress(
-    course_id: int,
+    courseId: int,
     payload: ProgressData,
     request: Request,
     service: ProgressService = Depends(get_progress_service),
 ):
-    return api_ok(request, service.update_progress(course_id=course_id, payload=payload))
+    return api_ok(request, service.update_progress(course_id=courseId, payload=payload))

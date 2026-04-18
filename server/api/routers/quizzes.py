@@ -8,42 +8,42 @@ from server.schemas.requests import SubmitQuizRequest
 router = APIRouter(tags=["quizzes"])
 
 
-@router.post("/courses/{course_id}/quizzes/generate")
+@router.post("/courses/{courseId}/quizzes/generate")
 async def generate_quiz(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: QuizService = Depends(get_quiz_service),
 ):
     data = service.generate_quiz(
-        course_id=course_id,
+        course_id=courseId,
         idempotency_key=request.headers.get("Idempotency-Key"),
     )
     return api_ok(request, data)
 
 
-@router.get("/quizzes/{quiz_id}")
+@router.get("/quizzes/{quizId}")
 async def get_quiz(
-    quiz_id: int,
+    quizId: int,
     request: Request,
     service: QuizService = Depends(get_quiz_service),
 ):
-    return api_ok(request, service.get_quiz(quiz_id=quiz_id))
+    return api_ok(request, service.get_quiz(quiz_id=quizId))
 
 
-@router.get("/quizzes/{quiz_id}/status")
+@router.get("/quizzes/{quizId}/status")
 async def get_quiz_status(
-    quiz_id: int,
+    quizId: int,
     request: Request,
     service: QuizService = Depends(get_quiz_service),
 ):
-    return api_ok(request, service.get_quiz_status(quiz_id=quiz_id))
+    return api_ok(request, service.get_quiz_status(quiz_id=quizId))
 
 
-@router.post("/quizzes/{quiz_id}/attempts")
+@router.post("/quizzes/{quizId}/attempts")
 async def submit_quiz(
-    quiz_id: int,
+    quizId: int,
     payload: SubmitQuizRequest,
     request: Request,
     service: QuizService = Depends(get_quiz_service),
 ):
-    return api_ok(request, service.submit_quiz(quiz_id=quiz_id, payload=payload))
+    return api_ok(request, service.submit_quiz(quiz_id=quizId, payload=payload))

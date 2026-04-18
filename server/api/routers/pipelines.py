@@ -7,50 +7,50 @@ from server.domain.services import PipelineService
 router = APIRouter(tags=["pipelines"])
 
 
-@router.post("/courses/{course_id}/parse/start")
+@router.post("/courses/{courseId}/parse/start")
 async def start_parse(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: PipelineService = Depends(get_pipeline_service),
 ):
     data = service.start_parse(
-        course_id=course_id,
+        course_id=courseId,
         idempotency_key=request.headers.get("Idempotency-Key"),
     )
     return api_ok(request, data)
 
 
-@router.get("/parse-runs/{parse_run_id}")
+@router.get("/parse-runs/{parseRunId}")
 async def get_parse_run(
-    parse_run_id: int,
+    parseRunId: int,
     request: Request,
     service: PipelineService = Depends(get_pipeline_service),
 ):
-    return api_ok(request, service.get_parse_run(parse_run_id=parse_run_id))
+    return api_ok(request, service.get_parse_run(parse_run_id=parseRunId))
 
 
-@router.get("/courses/{course_id}/pipeline-status")
+@router.get("/courses/{courseId}/pipeline-status")
 async def get_pipeline_status(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: PipelineService = Depends(get_pipeline_service),
 ):
-    return api_ok(request, service.get_pipeline_status(course_id=course_id))
+    return api_ok(request, service.get_pipeline_status(course_id=courseId))
 
 
-@router.get("/courses/{course_id}/parse/summary")
+@router.get("/courses/{courseId}/parse/summary")
 async def get_parse_summary(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: PipelineService = Depends(get_pipeline_service),
 ):
-    return api_ok(request, service.get_parse_summary(course_id=course_id))
+    return api_ok(request, service.get_parse_summary(course_id=courseId))
 
 
-@router.post("/async-tasks/{task_id}/retry")
+@router.post("/async-tasks/{taskId}/retry")
 async def retry_async_task(
-    task_id: int,
+    taskId: int,
     request: Request,
     service: PipelineService = Depends(get_pipeline_service),
 ):
-    return api_ok(request, service.retry_async_task(task_id=task_id))
+    return api_ok(request, service.retry_async_task(task_id=taskId))

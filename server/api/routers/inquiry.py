@@ -8,24 +8,24 @@ from server.schemas.requests import InquiryAnswersRequest
 router = APIRouter(prefix="/courses", tags=["inquiry"])
 
 
-@router.get("/{course_id}/inquiry/questions")
+@router.get("/{courseId}/inquiry/questions")
 async def get_inquiry_questions(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
 ):
-    return api_ok(request, service.get_questions(course_id=course_id))
+    return api_ok(request, service.get_questions(course_id=courseId))
 
 
-@router.post("/{course_id}/inquiry/answers")
+@router.post("/{courseId}/inquiry/answers")
 async def save_inquiry_answers(
-    course_id: int,
+    courseId: int,
     payload: InquiryAnswersRequest,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
 ):
     data = service.save_answers(
-        course_id=course_id,
+        course_id=courseId,
         payload=payload,
     )
     return api_ok(request, data)

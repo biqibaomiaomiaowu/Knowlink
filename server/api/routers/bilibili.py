@@ -8,9 +8,9 @@ from server.schemas.requests import BilibiliImportRequest
 router = APIRouter(tags=["bilibili"])
 
 
-@router.post("/courses/{course_id}/resources/imports/bilibili")
+@router.post("/courses/{courseId}/resources/imports/bilibili")
 async def create_bilibili_import(
-    course_id: int,
+    courseId: int,
     request: Request,
     payload: BilibiliImportRequest | None = None,
     service: BilibiliService = Depends(get_bilibili_service),
@@ -18,41 +18,41 @@ async def create_bilibili_import(
     return api_ok(
         request,
         service.create_import(
-            course_id=course_id,
+            course_id=courseId,
             video_url=payload.video_url if payload else None,
             idempotency_key=request.headers.get("Idempotency-Key"),
         ),
     )
 
 
-@router.get("/courses/{course_id}/resources/imports/bilibili")
+@router.get("/courses/{courseId}/resources/imports/bilibili")
 async def list_bilibili_imports(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: BilibiliService = Depends(get_bilibili_service),
 ):
-    return api_ok(request, service.list_imports(course_id=course_id))
+    return api_ok(request, service.list_imports(course_id=courseId))
 
 
-@router.get("/bilibili-import-runs/{import_run_id}/status")
+@router.get("/bilibili-import-runs/{importRunId}/status")
 async def get_bilibili_import_status(
-    import_run_id: int,
+    importRunId: int,
     request: Request,
     service: BilibiliService = Depends(get_bilibili_service),
 ):
-    return api_ok(request, service.get_import_status(import_run_id=import_run_id))
+    return api_ok(request, service.get_import_status(import_run_id=importRunId))
 
 
-@router.post("/bilibili-import-runs/{import_run_id}/cancel")
+@router.post("/bilibili-import-runs/{importRunId}/cancel")
 async def cancel_bilibili_import(
-    import_run_id: int,
+    importRunId: int,
     request: Request,
     service: BilibiliService = Depends(get_bilibili_service),
 ):
     return api_ok(
         request,
         service.cancel_import(
-            import_run_id=import_run_id,
+            import_run_id=importRunId,
             idempotency_key=request.headers.get("Idempotency-Key"),
         ),
     )
@@ -66,13 +66,13 @@ async def create_bilibili_qr_session(
     return api_ok(request, service.create_qr_session())
 
 
-@router.get("/bilibili/auth/qr/sessions/{session_id}")
+@router.get("/bilibili/auth/qr/sessions/{sessionId}")
 async def get_bilibili_qr_session(
-    session_id: str,
+    sessionId: str,
     request: Request,
     service: BilibiliService = Depends(get_bilibili_service),
 ):
-    return api_ok(request, service.get_qr_session(session_id=session_id))
+    return api_ok(request, service.get_qr_session(session_id=sessionId))
 
 
 @router.get("/bilibili/auth/session")

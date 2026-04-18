@@ -17,15 +17,15 @@ async def recommend_courses(
     return api_ok(request, flow_service.recommend(payload=payload))
 
 
-@router.post("/{catalog_id}/confirm")
+@router.post("/{catalogId}/confirm")
 async def confirm_recommendation(
-    catalog_id: str,
+    catalogId: str,
     payload: ConfirmRecommendationRequest,
     request: Request,
     flow_service: RecommendationFlowService = Depends(get_recommendation_flow_service),
 ):
     data = flow_service.confirm(
-        catalog_id=catalog_id,
+        catalog_id=catalogId,
         payload=payload,
         idempotency_key=request.headers.get("Idempotency-Key"),
     )

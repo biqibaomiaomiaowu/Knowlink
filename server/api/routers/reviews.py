@@ -7,41 +7,41 @@ from server.domain.services import ReviewService
 router = APIRouter(tags=["reviews"])
 
 
-@router.get("/courses/{course_id}/review-tasks")
+@router.get("/courses/{courseId}/review-tasks")
 async def get_review_tasks(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: ReviewService = Depends(get_review_service),
 ):
-    return api_ok(request, service.list_review_tasks(course_id=course_id))
+    return api_ok(request, service.list_review_tasks(course_id=courseId))
 
 
-@router.post("/courses/{course_id}/review-tasks/regenerate")
+@router.post("/courses/{courseId}/review-tasks/regenerate")
 async def regenerate_review_tasks(
-    course_id: int,
+    courseId: int,
     request: Request,
     service: ReviewService = Depends(get_review_service),
 ):
     data = service.regenerate_review_tasks(
-        course_id=course_id,
+        course_id=courseId,
         idempotency_key=request.headers.get("Idempotency-Key"),
     )
     return api_ok(request, data)
 
 
-@router.get("/review-task-runs/{review_task_run_id}/status")
+@router.get("/review-task-runs/{reviewTaskRunId}/status")
 async def get_review_run_status(
-    review_task_run_id: int,
+    reviewTaskRunId: int,
     request: Request,
     service: ReviewService = Depends(get_review_service),
 ):
-    return api_ok(request, service.get_review_run_status(review_task_run_id=review_task_run_id))
+    return api_ok(request, service.get_review_run_status(review_task_run_id=reviewTaskRunId))
 
 
-@router.post("/review-tasks/{review_task_id}/complete")
+@router.post("/review-tasks/{reviewTaskId}/complete")
 async def complete_review_task(
-    review_task_id: int,
+    reviewTaskId: int,
     request: Request,
     service: ReviewService = Depends(get_review_service),
 ):
-    return api_ok(request, service.complete_review_task(review_task_id=review_task_id))
+    return api_ok(request, service.complete_review_task(review_task_id=reviewTaskId))
