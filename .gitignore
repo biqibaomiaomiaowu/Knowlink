@@ -12,6 +12,9 @@ Thumbs.db
 .env.*
 !.env.example
 .venv/
+venv/
+.envrc
+.python-version
 
 # Python
 __pycache__/
@@ -50,3 +53,4 @@ coverage/
 
 # Local Codex workspace data
 .codex
+AGENTS.md
