@@ -1,43 +1,71 @@
 class CourseFlowState {
   const CourseFlowState({
     this.courseId,
+    this.lifecycleStatus = 'draft',
+    this.pipelineStage = 'idle',
     this.pipelineStatus = 'idle',
-    this.inquiryVersion = 0,
-    this.handoutVersionId,
-    this.qaSessionId,
+    this.progressPct = 0,
+    this.activeParseRunId,
+    this.activeHandoutVersionId,
+    this.nextAction = 'none',
+    this.sessionId,
+    this.quizId,
     this.quizAttemptId,
-    this.reviewTaskCount = 0,
-    this.progressPercent = 0,
+    this.reviewTaskRunId,
   });
 
   final String? courseId;
+  final String lifecycleStatus;
+  final String pipelineStage;
   final String pipelineStatus;
-  final int inquiryVersion;
-  final int? handoutVersionId;
-  final int? qaSessionId;
+  final int progressPct;
+  final int? activeParseRunId;
+  final int? activeHandoutVersionId;
+  final String nextAction;
+  final int? sessionId;
+  final int? quizId;
   final int? quizAttemptId;
-  final int reviewTaskCount;
-  final int progressPercent;
+  final int? reviewTaskRunId;
 
   CourseFlowState copyWith({
     String? courseId,
+    String? lifecycleStatus,
+    String? pipelineStage,
     String? pipelineStatus,
-    int? inquiryVersion,
-    int? handoutVersionId,
-    int? qaSessionId,
+    int? progressPct,
+    int? activeParseRunId,
+    bool clearActiveParseRunId = false,
+    int? activeHandoutVersionId,
+    bool clearActiveHandoutVersionId = false,
+    String? nextAction,
+    int? sessionId,
+    bool clearSessionId = false,
+    int? quizId,
+    bool clearQuizId = false,
     int? quizAttemptId,
-    int? reviewTaskCount,
-    int? progressPercent,
+    bool clearQuizAttemptId = false,
+    int? reviewTaskRunId,
+    bool clearReviewTaskRunId = false,
   }) {
     return CourseFlowState(
       courseId: courseId ?? this.courseId,
+      lifecycleStatus: lifecycleStatus ?? this.lifecycleStatus,
+      pipelineStage: pipelineStage ?? this.pipelineStage,
       pipelineStatus: pipelineStatus ?? this.pipelineStatus,
-      inquiryVersion: inquiryVersion ?? this.inquiryVersion,
-      handoutVersionId: handoutVersionId ?? this.handoutVersionId,
-      qaSessionId: qaSessionId ?? this.qaSessionId,
-      quizAttemptId: quizAttemptId ?? this.quizAttemptId,
-      reviewTaskCount: reviewTaskCount ?? this.reviewTaskCount,
-      progressPercent: progressPercent ?? this.progressPercent,
+      progressPct: progressPct ?? this.progressPct,
+      activeParseRunId: clearActiveParseRunId
+          ? null
+          : activeParseRunId ?? this.activeParseRunId,
+      activeHandoutVersionId: clearActiveHandoutVersionId
+          ? null
+          : activeHandoutVersionId ?? this.activeHandoutVersionId,
+      nextAction: nextAction ?? this.nextAction,
+      sessionId: clearSessionId ? null : sessionId ?? this.sessionId,
+      quizId: clearQuizId ? null : quizId ?? this.quizId,
+      quizAttemptId: clearQuizAttemptId ? null : quizAttemptId ?? this.quizAttemptId,
+      reviewTaskRunId: clearReviewTaskRunId
+          ? null
+          : reviewTaskRunId ?? this.reviewTaskRunId,
     );
   }
 }

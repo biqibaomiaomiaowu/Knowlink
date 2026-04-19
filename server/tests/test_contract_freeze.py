@@ -55,6 +55,20 @@ def test_bilibili_reserved_contract_is_aligned_across_docs():
     assert "B 站导入预留接口与扫码登录预留接口" in team_division
 
 
+def test_bilibili_stub_owner_is_consistent_across_collaboration_docs():
+    freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
+    team_division = load_text("TEAM_DIVISION.md")
+    weekly_plan = load_text("WEEKLY_PLAN.md")
+
+    assert "由曹乐在第 2 周完成 stub 实现" not in freeze_doc
+    assert "杨彩艺" in freeze_doc
+    assert "`501` stub" in freeze_doc
+    assert "接口主负责人是杨彩艺" in team_division
+    assert "第 2 周由杨彩艺按冻结结果补当前 `501` stub" in team_division
+    assert "当前阶段统一返回 `501`" in weekly_plan
+    assert "由曹乐在第 2 周完成 stub 实现" not in weekly_plan
+
+
 def test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape():
     api_contract = load_text("docs/contracts/api-contract.md")
 
@@ -131,6 +145,21 @@ def test_freeze_doc_tracks_seed_titles_and_fixed_manual_course_title():
         assert item["title"] in freeze_doc
 
     assert "KnowLink 固定联调课" in freeze_doc
+
+
+def test_collaboration_docs_expose_change_flow_and_priority_matrices():
+    readme = load_text("README.md")
+    team_division = load_text("TEAM_DIVISION.md")
+    scaffold = load_text("docs/development-scaffold.md")
+
+    assert "文档优先级矩阵" in readme
+    assert "api-contract.md" in readme
+    assert "ARCHITECTURE.md" in readme
+    assert "TEAM_DIVISION.md" in readme
+
+    assert "Schema / Contract 变更流程" in team_division
+    assert "文档优先级矩阵" in team_division
+    assert "当前完成度矩阵" in scaffold
 
 
 @pytest.mark.parametrize(

@@ -11,10 +11,11 @@
 
 ## 1. 分工原则
 
-- 单写 owner 原则：每个核心模块、表和接口必须有唯一主负责人。
+- 单 owner 原则：每个核心模块、表和接口必须有唯一主负责人；协作、确认和实现职责只写在说明列，不在 owner 列混写。
 - 契约优先原则：跨人协作先冻结数据结构和接口，再各自实现。
 - 页面和接口对齐原则：Flutter 页面、Provider、DTO、API 路径要在本文件中可一一对应。
 - 并行但不重复原则：允许同时开发，但禁止两个人同时写同一层核心逻辑。
+- 文档分工口径：`WEEKLY_PLAN.md` 只安排时间和交付节奏，不改变本文件中的主负责人定义。
 
 ## 2. 团队角色
 
@@ -72,10 +73,10 @@
 | Flutter 页面与交互 | 朱春雯 | 曹乐 | 包括页面布局、主题、路由、Provider 绑定 |
 | FastAPI 路由与服务 | 杨彩艺 | 曹乐 | 包括 API、任务入队、聚合状态 |
 | `course_catalog` 与推荐契约 | 曹乐 | 杨彩艺 | 目录语义、推荐字段和确认入课流程 |
-| B 站导入预留接口与扫码登录预留接口 | 曹乐 | 杨彩艺 | 第 1 周由曹乐冻结路径、状态语义、错误码和 DTO，第 2 周由杨彩艺按冻结结果补当前 `501` stub，真实下载服务接入仍由杨彩艺实现 |
+| B 站导入预留接口与扫码登录预留接口 | 杨彩艺 | 曹乐 | 接口主负责人是杨彩艺；第 1 周由曹乐冻结业务 contract、状态语义和错误码，第 2 周由杨彩艺按冻结结果补当前 `501` stub |
 | AIGC Prompt 与生成策略 | 曹乐 | 杨彩艺 | 由曹乐定义策略，杨彩艺负责服务接入 |
 | OCR / 文档解析与结构化策略 | 曹乐 | 杨彩艺 | 解析规则和输出结构由曹乐主导 |
-| 数据库与数据关系 | 曹乐 | 杨彩艺 | 表结构由曹乐定，落库实现由杨彩艺完成 |
+| 数据库与数据关系 | 曹乐 | 杨彩艺 | 数据关系、业务语义与状态边界由曹乐定义，落库实现由杨彩艺完成 |
 | MinIO / Redis / PostgreSQL 接入 | 杨彩艺 | 曹乐 | 基础设施落地与任务链路实现 |
 | 演示内容、比赛材料 | 曹乐 | 全员 | 页面截图、讲解顺序、答辩稿统一管理 |
 
@@ -87,7 +88,8 @@
 
 - `server/ai/**`
 - `server/parsers/**`
-- `courses`、`parse_runs`、`handout_versions`、`knowledge_points`、`mastery_records`、`review_task_runs` 的字段设计
+- `courses`、`learning_preferences`、`handout_versions`、`knowledge_points`、`mastery_records`、`review_task_runs` 的业务字段语义设计
+- `parse_runs`、`async_tasks`、`quizzes` 的状态语义与业务边界确认
 - 所有 AI 输出 JSON Schema
 - B 站单视频导入接口预留 contract、扫码登录接口预留 contract、`bilibili_import_run` 状态语义
 - 讲义生成策略、问答策略、测验生成策略、复习推荐策略
@@ -152,8 +154,8 @@
 | `qa_sessions` `qa_messages` | 杨彩艺 | 会话落库和接口主导，内容结构与引用规则由曹乐定义 |
 | `quizzes` `quiz_questions` `quiz_attempts` `quiz_attempt_items` | 杨彩艺 | 服务和判分主导，题目结构由曹乐定义 |
 | `mastery_records` `review_task_runs` `review_tasks` | 曹乐 | 评分到掌握度、复习规则由曹乐定义，后端实现由杨彩艺完成 |
-| `user_course_progress` | 朱春雯定义展示需求，杨彩艺实现 | 前端决定需要恢复什么，后端负责落库 |
-| `vector_documents` | 曹乐定义投影规则，杨彩艺实现 | 检索投影字段与写入流程协同完成 |
+| `user_course_progress` | 杨彩艺 | 展示字段由朱春雯确认，后端负责落库与接口 |
+| `vector_documents` | 杨彩艺 | 投影规则由曹乐确认，写入流程与检索实现由后端负责 |
 
 ## 6. API 与页面对应关系
 
@@ -198,15 +200,15 @@
 | `ParseProgressPage` 辅助展示 | `GET /api/v1/courses/{courseId}/parse/summary` | 杨彩艺 | 可展示摘要，但不能替代 `pipeline-status` 作为主轮询接口 |
 | 运维 / 调试 | `POST /api/v1/async-tasks/{taskId}/retry` | 杨彩艺 | 仅后端或演示排障使用，朱春雯不直接依赖 |
 | `QaPage` 独立会话页 | `/courses/:courseId/qa/:sessionId` | 朱春雯 | 这是独立 QA 会话页；最终讲义页内嵌 QA 也复用同一后端会话 contract |
-| B 站导入与扫码登录接口预留 | `/api/v1/courses/{courseId}/resources/imports/bilibili`、`/api/v1/bilibili-import-runs/{importRunId}/status`、`/api/v1/bilibili/auth/qr/sessions` 等 | 曹乐（业务） / 杨彩艺（实现） | 第 1 周先由曹乐冻结 contract 与状态语义，第 2 周由杨彩艺按冻结结果落地 `501` stub，不作为朱春雯的真实联调入口 |
+| B 站导入与扫码登录接口预留 | `/api/v1/courses/{courseId}/resources/imports/bilibili`、`/api/v1/bilibili-import-runs/{importRunId}/status`、`/api/v1/bilibili/auth/qr/sessions` 等 | 杨彩艺 | 接口主负责人是杨彩艺；业务 contract、状态语义和 `bilibili.not_implemented` 错误码由曹乐第 1 周冻结，第 2 周由杨彩艺落地 `501` stub，不作为朱春雯的真实联调入口 |
 
-### 6.3 接口 contract owner
+### 6.3 接口 contract 责任链
 
-| 接口层面 | 主负责人 |
-|---|---|
-| 路径、请求字段、响应字段、错误码实现 | 杨彩艺 |
-| 字段业务含义、状态枚举、AI 输出结构 | 曹乐 |
-| 页面展示字段和交互期望 | 朱春雯 |
+| 环节 | 负责人 | 说明 |
+|---|---|---|
+| 路径、请求字段、响应字段、错误码实现 | 杨彩艺 | 负责接口文档初稿、DTO 落地和后端实现 |
+| 字段业务含义、状态枚举、AI 输出结构确认 | 曹乐 | 负责业务语义、状态枚举和 AI / parse 结构冻结 |
+| 页面展示字段和交互期望确认 | 朱春雯 | 负责页面消费字段、交互期望和展示约束确认 |
 
 规则：
 
@@ -244,7 +246,7 @@
 
 必须先冻结：
 
-- 关键表结构
+- 关键表业务语义与状态边界
 - 核心状态枚举
 - 关键接口路径与 DTO
 - 讲义块、问答、测验、复习任务的响应结构
@@ -297,7 +299,7 @@
 
 依赖：
 
-- 只依赖冻结后的表结构与接口定义
+- 只依赖冻结后的业务语义、状态边界与接口定义
 
 交付物：
 
@@ -406,7 +408,7 @@
 ### 10.1 曹乐
 
 - 架构文档与分工文档
-- 核心表结构定义
+- 核心表业务语义与状态边界
 - `course_catalog` 与推荐字段语义
 - 解析输出规范
 - AIGC 输入输出 Schema
@@ -427,14 +429,33 @@
 - 异步任务系统
 - 数据库落库与部署脚本
 
-## 11. 冲突处理规则
+## 11. Schema / Contract 变更流程
 
-- 需要改表结构：先找曹乐。
+1. 先确认 authority：接口路径、DTO、错误码以 `docs/contracts/api-contract.md` 为准；领域语义和状态模型以 `ARCHITECTURE.md` 为准；owner 以本文件为准。
+2. 由提出变更的人先改文档：接口字段改 `docs/contracts/api-contract.md`，状态或领域语义改 `ARCHITECTURE.md`，owner 或协作边界改本文件。
+3. 文档冻结后再改代码：后端先改 `server/schemas/**` 与实现，Flutter 再按冻结后的 DTO 对齐页面消费。
+4. 所有 schema / contract 变更都要补测试：至少覆盖 `server/tests/test_contract_freeze.py`、`server/tests/test_scaffold_consistency.py` 或对应 Flutter 最小契约测试。
+5. 若实现发现字段不够，先提文档变更，不允许前后端私自扩写或改义。
+
+## 12. 文档优先级矩阵
+
+| 文档 | 优先级 | 用途 |
+|---|---|---|
+| `docs/contracts/api-contract.md` | P0 | 接口路径、请求字段、响应字段、错误码、DTO |
+| `ARCHITECTURE.md` | P0 | 状态模型、目录边界、领域语义、主链路设计 |
+| `TEAM_DIVISION.md` | P1 | owner、协作边界、变更流程 |
+| `docs/contracts/week1-cao-le-freeze.md` | P1 | 曹乐冻结的业务语义、推荐规则、demo 基线 |
+| `docs/development-scaffold.md` | P1 | 当前完成度、已接通与未接通范围 |
+| `WEEKLY_PLAN.md` | P2 | 排期、阶段目标与每周交付物 |
+
+## 13. 冲突处理规则
+
+- 需要改表结构或状态语义：先找曹乐确认业务含义，再由杨彩艺落到接口和存储实现。
 - 需要改接口响应：先找杨彩艺，曹乐确认业务语义，朱春雯确认页面消费。
-- 需要改页面字段：先找朱春雯，若涉及接口新增字段，再走接口变更流程。
+- 需要改页面字段：先找朱春雯，若涉及接口新增字段，再走第 11 节变更流程。
 - 需要改 AIGC 输出格式：先找曹乐，不允许后端或前端私自扩展。
 
-## 12. 开工前检查清单
+## 14. 开工前检查清单
 
 - `ARCHITECTURE.md` 中表名、接口名、状态名已冻结
 - 本文档中的 owner 没有重叠冲突

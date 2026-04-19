@@ -1,10 +1,11 @@
 # 曹乐 Week 1 冻结稿
 
-本文件是曹乐在第 1 周的 owner 交付验收入口，用于把已经分散在架构、接口 contract、schema 和种子数据中的冻结项收成一份可核对清单。
+本文件是曹乐在第 1 周的业务语义冻结验收入口，用于把已经分散在架构、接口 contract、schema 和种子数据中的冻结项收成一份可核对清单。
 
 - 适用时间：2026-04-20 至 2026-04-26
-- 适用范围：只覆盖曹乐 owner 的业务语义、状态枚举、AI/解析 contract、推荐规则和 demo 基线
+- 适用范围：只覆盖曹乐冻结的业务语义、状态枚举、AI/解析 contract、推荐规则和 demo 基线
 - 不包含：migration 落表、FastAPI router/service 实现、Flutter 页面接线
+- owner 口径说明：本文件中的 owner 只表示业务 contract owner；`router/service` stub 实现 owner 以 [TEAM_DIVISION.md](../../TEAM_DIVISION.md) 为准，周次排期与交付节奏以 [WEEKLY_PLAN.md](../../WEEKLY_PLAN.md) 为准
 
 ## 1. 核心表语义
 
@@ -19,7 +20,7 @@
 | `quizzes` | 测验版本入口；题目结构由 AI schema 定义，后端实现不得自行扩写题型字段 |
 | `review_task_runs` | 复习重算版本入口；重算原因、生成数量和状态语义先冻结，再由后端落库实现 |
 
-字段全集与索引仍以 [ARCHITECTURE.md](../../ARCHITECTURE.md) 第 10 节为准；本文件只负责冻结业务含义和验收口径。
+字段全集与索引仍以 [ARCHITECTURE.md](../../ARCHITECTURE.md) 第 10 节为准，主负责人仍以 [TEAM_DIVISION.md](../../TEAM_DIVISION.md) 的 owner 表为准；本文件只负责冻结业务含义和验收口径。
 
 ## 2. 核心状态枚举
 
@@ -98,11 +99,11 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
 - AI / parse schema 已能表达 PDF / PPTX / DOCX / 视频四类定位信息
 - demo token、联调课程标题、固定资料集命名规则已写成文档，后续联调不再口头约定
 
-## 8. 第 1 周接口预留 / 第 2 周预留实现（曹乐 owner）
+## 8. 第 1 周接口预留 / 第 2 周 stub 实现（业务语义冻结）
 
-- 以下内容在第 1 周先完成接口与错误码预留，在第 2 周完成 stub 实现。
+- 以下内容在第 1 周先完成接口与错误码预留，在第 2 周完成当前 `501` stub 实现。
 - 第 1 周验收范围只包含路径、命名、错误码和状态语义冻结，不要求接口已可访问。
-- B 站单视频导入接口和扫码登录接口由曹乐在第 2 周完成 stub 实现，并沿用第 1 周已冻结的 contract。
+- B 站单视频导入接口和扫码登录接口由杨彩艺在第 2 周按曹乐第 1 周冻结的 contract 完成 `501` stub 实现。
 - 当前仅预留以下路径，不接通真实下载实现：
   - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
   - `GET /api/v1/courses/{courseId}/resources/imports/bilibili`

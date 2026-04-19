@@ -382,6 +382,7 @@ def test_scaffold_structure_and_docs_are_aligned():
         ROOT / "server/parsers/docx.py",
         ROOT / "server/tasks/payloads.py",
         ROOT / "client_flutter/lib/features/qa/qa_page.dart",
+        ROOT / "client_flutter/test/shared/course_flow_providers_test.dart",
         ROOT / "docs/development-scaffold.md",
     ]
     for path in required_paths:
@@ -405,8 +406,10 @@ def test_scaffold_structure_and_docs_are_aligned():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/contracts/api-contract.md").read_text(encoding="utf-8")
+    scaffold = (ROOT / "docs/development-scaffold.md").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     pubspec = (ROOT / "client_flutter/pubspec.yaml").read_text(encoding="utf-8")
+    architecture_scaffold = architecture.split("### 7.1 后端", 1)[1].split("---", 1)[0]
     assert "MP4 + PDF + PPTX + DOCX" in readme
     assert "MP4 + PDF + PPTX + DOCX" in architecture
     assert "resourceType\": \"pptx\"" in contract
@@ -420,6 +423,17 @@ def test_scaffold_structure_and_docs_are_aligned():
     assert "masteryDelta" in contract
     assert "recommendedSegment" in contract
     assert "快应用工程实现" in architecture
+    assert "文档优先级矩阵" in readme
+    assert "当前完成度矩阵" in scaffold
+    assert "server/schemas/api.py" not in architecture_scaffold
+    assert "app_factory.py" in architecture_scaffold
+    assert "router.py" in architecture_scaffold
+    assert "response.py" in architecture_scaffold
+    assert "memory_runtime.py" in architecture_scaffold
+    assert "client_flutter/test/" in architecture_scaffold
+    assert "week1-cao-le-freeze.md" in architecture_scaffold
+    assert "demo-assets-baseline.md" in architecture_scaffold
+    assert "demo-assets-first-edition.md" in architecture_scaffold
     assert "starlette" not in pyproject
     assert "httpx" not in pyproject
     assert "cupertino_icons" not in pubspec

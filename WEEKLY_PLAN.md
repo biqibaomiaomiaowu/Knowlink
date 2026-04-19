@@ -31,14 +31,14 @@
 
 ### 3.1 本周目标
 
-- 冻结核心表结构、关键状态枚举、关键接口 DTO。
+- 冻结核心表业务语义、关键状态枚举、关键接口 DTO。
 - 起好 Flutter 和 FastAPI 工程骨架。
 - 打通 `智能推荐 -> 确认入课 -> 创建课程` 的真实链路。
 - 准备统一演示资料和联调基线。
 
 ### 3.2 曹乐
 
-- 冻结核心表定义：`courses`、`course_resources`、`parse_runs`、`async_tasks`、`learning_preferences`、`handout_versions`、`quizzes`、`review_task_runs`。
+- 冻结核心表业务语义与状态边界：`courses`、`course_resources`、`parse_runs`、`async_tasks`、`learning_preferences`、`handout_versions`、`quizzes`、`review_task_runs`。
 - 冻结 `course_catalog`、推荐排序字段和推荐理由字段。
 - 冻结核心状态：`lifecycle_status`、`pipeline_stage`、`pipeline_status`、`async_tasks.status`。
 - 输出 AI 与解析 contract：
@@ -100,7 +100,7 @@
 
 ### 3.5 本周交付物
 
-- 冻结版表结构。
+- 冻结版业务语义与状态边界。
 - 冻结版关键 DTO。
 - B 站单视频导入与扫码登录接口路径、错误码和状态命名完成预留。
 - Flutter 页面壳子可运行。
@@ -342,7 +342,7 @@
 ## 7. 每周站会最少要确认的 5 件事
 
 - 这周要打通的主链路是什么。
-- 当前是否存在阻塞下游的 DTO 或表结构未冻结项。
+- 当前是否存在阻塞下游的 DTO、业务语义或状态边界未冻结项。
 - 哪个接口已可联调，哪个接口仍只能用 mock。
 - 固定资料集跑到哪一步，报错点在哪里。
 - 本周末录屏演示由谁准备，演示路径是否已经固定。

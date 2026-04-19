@@ -27,35 +27,66 @@ class CourseFlowController extends Notifier<CourseFlowState> {
   CourseFlowState build() => const CourseFlowState();
 
   void startCourse(String courseId) {
+    if (state.courseId == courseId) {
+      return;
+    }
     state = state.copyWith(courseId: courseId);
+  }
+
+  void setLifecycleStatus(String status) {
+    state = state.copyWith(lifecycleStatus: status);
+  }
+
+  void setPipelineStage(String stage) {
+    state = state.copyWith(pipelineStage: stage);
   }
 
   void setPipelineStatus(String status) {
     state = state.copyWith(pipelineStatus: status);
   }
 
-  void setInquiryVersion(int version) {
-    state = state.copyWith(inquiryVersion: version);
+  void setProgressPct(int progressPct) {
+    state = state.copyWith(progressPct: progressPct);
   }
 
-  void setHandoutVersion(int? handoutVersionId) {
-    state = state.copyWith(handoutVersionId: handoutVersionId);
+  void setActiveParseRun(int? parseRunId) {
+    state = parseRunId == null
+        ? state.copyWith(clearActiveParseRunId: true)
+        : state.copyWith(activeParseRunId: parseRunId);
   }
 
-  void setQaSession(int? sessionId) {
-    state = state.copyWith(qaSessionId: sessionId);
+  void setActiveHandoutVersion(int? handoutVersionId) {
+    state = handoutVersionId == null
+        ? state.copyWith(clearActiveHandoutVersionId: true)
+        : state.copyWith(activeHandoutVersionId: handoutVersionId);
+  }
+
+  void setNextAction(String nextAction) {
+    state = state.copyWith(nextAction: nextAction);
+  }
+
+  void setSession(int? sessionId) {
+    state = sessionId == null
+        ? state.copyWith(clearSessionId: true)
+        : state.copyWith(sessionId: sessionId);
+  }
+
+  void setQuiz(int? quizId) {
+    state = quizId == null
+        ? state.copyWith(clearQuizId: true)
+        : state.copyWith(quizId: quizId);
   }
 
   void setQuizAttempt(int? attemptId) {
-    state = state.copyWith(quizAttemptId: attemptId);
+    state = attemptId == null
+        ? state.copyWith(clearQuizAttemptId: true)
+        : state.copyWith(quizAttemptId: attemptId);
   }
 
-  void setReviewTaskCount(int count) {
-    state = state.copyWith(reviewTaskCount: count);
-  }
-
-  void setProgressPercent(int percent) {
-    state = state.copyWith(progressPercent: percent);
+  void setReviewTaskRun(int? reviewTaskRunId) {
+    state = reviewTaskRunId == null
+        ? state.copyWith(clearReviewTaskRunId: true)
+        : state.copyWith(reviewTaskRunId: reviewTaskRunId);
   }
 }
 

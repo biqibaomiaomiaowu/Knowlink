@@ -220,52 +220,89 @@ flowchart LR
 
 ```text
 server/
+  Dockerfile
   app.py
   config/
-    settings.py
     logging.py
+    settings.py
   api/
+    app_factory.py
     deps.py
+    response.py
+    router.py
     routers/
+      bilibili.py
       courses.py
-      resources.py
-      pipelines.py
-      inquiry.py
       handouts.py
+      health.py
+      home.py
+      inquiry.py
+      pipelines.py
+      progress.py
       qa.py
       quizzes.py
-      reviews.py
-      progress.py
       recommendations.py
+      resources.py
+      reviews.py
   domain/
     models/
+      records.py
     repositories/
+      interfaces.py
     services/
+      bilibili.py
+      courses.py
+      handouts.py
+      home.py
+      inquiry.py
+      pipelines.py
+      progress.py
+      qa.py
+      quizzes.py
+      recommendations.py
+      resources.py
+      reviews.py
   schemas/
+    base.py
     common.py
     requests.py
     responses.py
-    api.py
   tasks/
     broker.py
     payloads.py
-    worker.py
     scheduler.py
+    worker.py
   ai/
     pipelines/
+      base.py
+      handout.py
+      inquiry.py
+      qa.py
+      quiz.py
+      recommendation.py
+      review.py
   parsers/
+    base.py
     video.py
     pdf.py
     pptx.py
     docx.py
     normalize.py
   infra/
+    auth.py
     db/
     queue/
     repositories/
+      memory.py
+      memory_runtime.py
     storage/
-    auth.py
+  seeds/
+    course_catalog.json
+    demo_assets_manifest.json
   tests/
+    test_api.py
+    test_contract_freeze.py
+    test_scaffold_consistency.py
 ```
 
 说明：
@@ -274,6 +311,7 @@ server/
 - `domain` 只承载业务语义，不依赖 HTTP。
 - `infra/repositories/memory.py` 是当前 demo 适配器；真实仓储后续按同一协议替换。
 - `infra` 统一放数据库、队列、对象存储和仓储适配器等基础设施封装。
+- 以上是当前关键骨架快照；历史兼容文件已经移除，不再出现在目录树中。
 
 ### 7.2 Flutter
 
@@ -284,16 +322,23 @@ client_flutter/
     app/
       app.dart
       router/
+        app_router.dart
       theme/
+        app_theme.dart
     core/
+      config/
+        app_config.dart
       network/
-      storage/
-      utils/
+        api_client.dart
       widgets/
+        app_scaffold.dart
     shared/
       models/
-      enums/
+        course_flow_state.dart
+        recommendation_card.dart
       providers/
+        course_flow_providers.dart
+        course_recommend_provider.dart
     features/
       home/
       course_import/
@@ -304,6 +349,10 @@ client_flutter/
       qa/
       quiz/
       review/
+  test/
+    shared/
+      course_flow_providers_test.dart
+    smoke_test.dart
 ```
 
 ### 7.3 仓库级资产
@@ -313,15 +362,30 @@ docs/
   contracts/
     api-contract.md
     error-codes.md
+    week1-cao-le-freeze.md
+  development-scaffold.md
+  demo-assets-baseline.md
+  demo-assets-first-edition.md
 schemas/
   ai/
+    handout_blocks.schema.json
+    qa_response.schema.json
+    quiz_generation.schema.json
+    review_tasks.schema.json
   parse/
-server/
-  seeds/
+    normalized_document.schema.json
 .github/
   workflows/
+    ci.yml
+client_flutter/
+  test/
+    smoke_test.dart
+server/
+  seeds/
 docker-compose.yml
 .env.example
+pyproject.toml
+README.md
 ```
 
 ---
@@ -346,6 +410,20 @@ docker-compose.yml
 - `inquiry_ready`：解析完成，已产出课程摘要与知识点，允许问询。
 - `learning_ready`：已有可用讲义版本，允许学习。
 - `failed`：课程不可用，需要人工处理或重新导入。
+
+当前骨架已覆盖的状态迁移：
+
+| 触发事件 | 当前课程状态变化 | 当前仓库口径 |
+|---|---|---|
+| `POST /api/v1/courses` | `draft / idle / idle` | 已在 `server/infra/repositories/memory_runtime.py` 与 `server/tests/test_api.py` 覆盖 |
+| `POST /api/v1/courses/{courseId}/resources/upload-complete` | 课程级状态暂不变更；资源记录进入 `ingestStatus=ready`、`validationStatus=passed`、`processingStatus=pending` | 当前 scaffold 只把“资源已就绪”落在 `course_resources`，还没有单独推进到课程级 `resource_ready / upload / succeeded` |
+| `POST /api/v1/courses/{courseId}/parse/start` | `draft / idle / idle -> inquiry_ready / parse / succeeded`，并更新 `active_parse_run_id` | 已在 `parse/start`、`pipeline-status` 及相关 pytest 中覆盖 |
+| `POST /api/v1/courses/{courseId}/handouts/generate` | `inquiry_ready / parse / succeeded -> learning_ready / handout / succeeded`，并更新 `active_handout_version_id` | 已在 handout 生成、blocks、jump-target、QA 链路中覆盖 |
+
+补充说明：
+
+- `resource_ready`、`upload`、`queued`、`running`、`partial_success`、`archived`、`failed` 仍然是冻结 contract 的合法状态枚举。
+- 当前内存态 scaffold 还没有把这些中间态和失败态接成完整运行时状态机，因此文档中的状态全集与“当前已覆盖迁移”需要分开理解。
 
 ## 8.2 解析版本线
 
