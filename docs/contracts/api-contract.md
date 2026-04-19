@@ -2,6 +2,8 @@
 
 本文件冻结 MVP 阶段前后端共享的请求字段、响应字段、异步返回结构和 demo 鉴权策略。曹乐 owner 的 Week 1 冻结项与固定联调资料集基线见 [week1-cao-le-freeze.md](./week1-cao-le-freeze.md) 和 [../demo-assets-baseline.md](../demo-assets-baseline.md)。若与其他文档冲突，以本文件为准。
 
+文档冲突优先级矩阵见 [ARCHITECTURE.md](../../ARCHITECTURE.md) 第 23 节。
+
 ## 1. 通用约定
 
 - 所有业务接口前缀为 `/api/v1`。

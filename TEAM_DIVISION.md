@@ -12,6 +12,7 @@
 ## 1. 分工原则
 
 - 单写 owner 原则：每个核心模块、表和接口必须有唯一主负责人。
+- 若出现“定义+实现”双人协作写法，默认前者负责 contract 语义 owner，后者负责实现 owner；表格“主负责人”列只保留一个名字。
 - 契约优先原则：跨人协作先冻结数据结构和接口，再各自实现。
 - 页面和接口对齐原则：Flutter 页面、Provider、DTO、API 路径要在本文件中可一一对应。
 - 并行但不重复原则：允许同时开发，但禁止两个人同时写同一层核心逻辑。
@@ -144,16 +145,16 @@
 |---|---|---|
 | `users` `courses` `course_catalog` | 曹乐 | 业务语义由产品侧定义 |
 | `course_resources` | 杨彩艺 | 上传、校验、对象存储回调主导 |
-| `parse_runs` `async_tasks` | 杨彩艺 | 任务系统与运行状态主导 |
+| `parse_runs` `async_tasks` | 曹乐 | 主写状态语义与字段命名；任务链路实现由杨彩艺负责 |
 | `course_segments` `knowledge_points` `segment_knowledge_points` `knowledge_point_evidences` | 曹乐 | 解析结果结构和知识点关系主导 |
 | `learning_preferences` | 曹乐 | 问询字段语义由产品/AIGC 主导 |
 | `handout_versions` `handout_blocks` `handout_block_knowledge_points` | 曹乐 | 讲义结构主导 |
 | `handout_block_refs` `qa_message_refs` `quiz_question_refs` `review_task_refs` | 曹乐 | 引用规范主导，写入时机见第 7 节 |
-| `qa_sessions` `qa_messages` | 杨彩艺 | 会话落库和接口主导，内容结构与引用规则由曹乐定义 |
-| `quizzes` `quiz_questions` `quiz_attempts` `quiz_attempt_items` | 杨彩艺 | 服务和判分主导，题目结构由曹乐定义 |
-| `mastery_records` `review_task_runs` `review_tasks` | 曹乐 | 评分到掌握度、复习规则由曹乐定义，后端实现由杨彩艺完成 |
-| `user_course_progress` | 朱春雯定义展示需求，杨彩艺实现 | 前端决定需要恢复什么，后端负责落库 |
-| `vector_documents` | 曹乐定义投影规则，杨彩艺实现 | 检索投影字段与写入流程协同完成 |
+| `qa_sessions` `qa_messages` | 杨彩艺 | 主写会话落库与接口；内容结构与引用规则由曹乐定义 |
+| `quizzes` `quiz_questions` `quiz_attempts` `quiz_attempt_items` | 杨彩艺 | 主写服务和判分；题目结构由曹乐定义 |
+| `mastery_records` `review_task_runs` `review_tasks` | 曹乐 | 主写评分到掌握度与复习规则；后端实现由杨彩艺完成 |
+| `user_course_progress` | 杨彩艺 | 按朱春雯展示需求实现恢复字段并落库 |
+| `vector_documents` | 曹乐 | 主写投影规则与字段语义；杨彩艺负责写入流程实现 |
 
 ## 6. API 与页面对应关系
 

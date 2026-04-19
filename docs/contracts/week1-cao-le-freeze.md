@@ -98,10 +98,10 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
 - AI / parse schema 已能表达 PDF / PPTX / DOCX / 视频四类定位信息
 - demo token、联调课程标题、固定资料集命名规则已写成文档，后续联调不再口头约定
 
-## 8. 第 1 周接口预留 / 第 2 周预留实现（曹乐 owner）
+## 8. 第 1 周接口预留 / 第 2 周预留实现（曹乐 contract owner，杨彩艺实现 owner）
 
 - 以下内容在第 1 周先完成接口与错误码预留，在第 2 周完成 stub 实现。
-- 第 1 周验收范围只包含路径、命名、错误码和状态语义冻结，不要求接口已可访问。
+- 第 1 周验收范围只包含路径、命名、错误码和状态语义冻结，不要求接口已可访问；实现 owner 以 TEAM_DIVISION/WEEKLY_PLAN 的杨彩艺为准。
 - B 站单视频导入接口和扫码登录接口由曹乐在第 2 周完成 stub 实现，并沿用第 1 周已冻结的 contract。
 - 当前仅预留以下路径，不接通真实下载实现：
   - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`

@@ -30,12 +30,24 @@ class CourseFlowController extends Notifier<CourseFlowState> {
     state = state.copyWith(courseId: courseId);
   }
 
+  void setLifecycleStatus(String status) {
+    state = state.copyWith(lifecycleStatus: status);
+  }
+
+  void setPipelineStage(String stage) {
+    state = state.copyWith(pipelineStage: stage);
+  }
+
   void setPipelineStatus(String status) {
     state = state.copyWith(pipelineStatus: status);
   }
 
   void setInquiryVersion(int version) {
     state = state.copyWith(inquiryVersion: version);
+  }
+
+  void setActiveParseRun(int? parseRunId) {
+    state = state.copyWith(activeParseRunId: parseRunId);
   }
 
   void setHandoutVersion(int? handoutVersionId) {
@@ -54,8 +66,13 @@ class CourseFlowController extends Notifier<CourseFlowState> {
     state = state.copyWith(reviewTaskCount: count);
   }
 
+  void setProgressPct(int percent) {
+    state = state.copyWith(progressPct: percent);
+  }
+
+  // Backward-compatible alias for existing call sites.
   void setProgressPercent(int percent) {
-    state = state.copyWith(progressPercent: percent);
+    setProgressPct(percent);
   }
 }
 

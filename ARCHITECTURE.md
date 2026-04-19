@@ -286,13 +286,11 @@ client_flutter/
       router/
       theme/
     core/
+      config/
       network/
-      storage/
-      utils/
       widgets/
     shared/
       models/
-      enums/
       providers/
     features/
       home/
@@ -1322,3 +1320,55 @@ Redis 缓存建议：
 ## 19. 最终结论
 
 KnowLink 第一版不是“大而全”的学习平台，而是一个可在 Flutter 移动端完整演示的单课程 AI 学习闭环。只要把“上传 -> 解析 -> 问询 -> 讲义 -> 问答 -> 测验 -> 复习”这条链路做实，并保证版本隔离、引用合法和接口幂等，产品价值、工程完整性和演示亮点就都成立。
+
+
+---
+
+## 20. Schema / Contract 变更流程
+
+1. **提出变更单**：在 `docs/contracts/` 下补充或更新目标字段、状态、错误码，并标注变更动机。
+2. **先改 contract 文档**：优先更新 `docs/contracts/api-contract.md` 与 `docs/contracts/week1-cao-le-freeze.md`（若涉及冻结项）。
+3. **同步架构与分工**：若影响模块边界或 owner，必须同步更新 `ARCHITECTURE.md`、`TEAM_DIVISION.md`、`WEEKLY_PLAN.md`。
+4. **再改代码与 schema**：最后更新 `schemas/**`、`server/schemas/**`、`client_flutter/lib/shared/models/**` 等实现文件。
+5. **回归一致性检查**：至少检查“字段名、状态枚举、owner、错误码”在上述文档与代码中一致。
+
+不允许“代码先行、文档补录”；若不能在同一提交中同步文档，变更不视为冻结。
+
+## 21. 主链路状态迁移表（课程聚合视角）
+
+| 当前 `lifecycleStatus` | 触发条件 | 下一状态 | `pipelineStage` / `pipelineStatus` 约束 |
+|---|---|---|---|
+| `draft` | 资源满足最小可解析条件 | `resource_ready` | `upload/succeeded` 或 `idle/succeeded` |
+| `resource_ready` | 发起解析 | `resource_ready`（处理中） | `parse/queued -> parse/running` |
+| `resource_ready` | 解析成功且可问询 | `inquiry_ready` | `parse/succeeded`（允许 `partial_success`） |
+| `resource_ready` | 解析失败 | `failed` | `parse/failed` |
+| `inquiry_ready` | 问询完成并发起讲义生成 | `inquiry_ready`（生成中） | `handout/queued -> handout/running` |
+| `inquiry_ready` | 讲义生成成功 | `learning_ready` | `handout/succeeded` |
+| `inquiry_ready` | 讲义生成失败 | `failed` | `handout/failed` |
+| `learning_ready` | 重新解析或重新生成成功 | `learning_ready` | 允许版本号变化，不回退生命周期 |
+| 任意非 `archived` | 人工归档 | `archived` | `pipelineStage=idle` |
+
+说明：`pipelineStage`、`pipelineStatus`、`activeParseRunId`、`activeHandoutVersionId` 的字段名以 `docs/contracts/api-contract.md` 为准。
+
+## 22. 当前完成度矩阵（基于骨架与 contract 口径）
+
+| 维度 | 当前状态 | 依据 |
+|---|---|---|
+| 架构/目录骨架 | 已完成 | `server/**`、`client_flutter/lib/**` 目录已就位 |
+| API contract 冻结 | 已完成（Week 1 范围） | `docs/contracts/api-contract.md`、`week1-cao-le-freeze.md` |
+| Schema 冻结 | 已完成（文档层） | `schemas/ai/**`、`schemas/parse/**` 已存在 |
+| 真实基础设施接通 | 未完成（按计划） | 文档声明 PostgreSQL/Redis/MinIO 为占位未全接通 |
+| B 站导入与扫码登录 | 已冻结 contract，stub 待实现/增强 | Week 1 冻结文档 + 周计划说明 |
+| Flutter 主链路状态模型 | 部分完成，需持续对齐 contract | `course_flow_state.dart` 与 API 字段已对齐核心主链路字段 |
+
+## 23. 文档优先级矩阵（冲突时判定）
+
+| 优先级 | 文档 | 用途 |
+|---|---|---|
+| P0 | `docs/contracts/api-contract.md` | 接口路径、请求/响应字段、错误码、状态枚举的最终口径 |
+| P1 | `docs/contracts/week1-cao-le-freeze.md` | Week 1 冻结项（语义、枚举、理由文案、联调基线） |
+| P2 | `ARCHITECTURE.md` | 模块边界、目录骨架、状态机与数据模型解释 |
+| P3 | `TEAM_DIVISION.md` | owner 边界与协作规则 |
+| P4 | `WEEKLY_PLAN.md` | 周期排期与每周交付节奏 |
+
+冲突处理规则：高优先级文档覆盖低优先级文档；若同优先级冲突，默认以最近一次冻结记录（带日期范围）为准并立即补齐另一份文档。
