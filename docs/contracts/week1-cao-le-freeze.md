@@ -102,7 +102,7 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
 
 - 以下内容在第 1 周先完成接口与错误码预留，在第 2 周完成 stub 实现。
 - 第 1 周验收范围只包含路径、命名、错误码和状态语义冻结，不要求接口已可访问；实现 owner 以 TEAM_DIVISION/WEEKLY_PLAN 的杨彩艺为准。
-- B 站单视频导入接口和扫码登录接口由曹乐在第 2 周完成 stub 实现，并沿用第 1 周已冻结的 contract。
+- B 站单视频导入接口和扫码登录接口由杨彩艺在第 2 周完成 stub 实现，并沿用第 1 周已冻结的 contract。
 - 当前仅预留以下路径，不接通真实下载实现：
   - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
   - `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
