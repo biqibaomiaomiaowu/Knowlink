@@ -355,6 +355,8 @@ client_flutter/
     smoke_test.dart
 ```
 
+Flutter 自动化测试目录为 `client_flutter/test/`，当前包含 `smoke_test.dart` 与 `shared/course_flow_providers_test.dart`。
+
 ### 7.3 仓库级资产
 
 ```text
