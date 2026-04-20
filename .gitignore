@@ -51,6 +51,7 @@ coverage/
 *.pid
 *.out
 *.swp
+.tmp-py312/
 
 # Local Codex workspace data
 .codex
