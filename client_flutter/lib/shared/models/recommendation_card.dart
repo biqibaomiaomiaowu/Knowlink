@@ -1,3 +1,5 @@
+import 'resource_manifest_item.dart';
+
 class RecommendationCardModel {
   const RecommendationCardModel({
     required this.catalogId,
@@ -7,6 +9,7 @@ class RecommendationCardModel {
     required this.estimatedHours,
     required this.fitScore,
     required this.reasons,
+    required this.defaultResourceManifest,
   });
 
   final String catalogId;
@@ -16,6 +19,7 @@ class RecommendationCardModel {
   final int estimatedHours;
   final int fitScore;
   final List<String> reasons;
+  final List<ResourceManifestItemModel> defaultResourceManifest;
 
   factory RecommendationCardModel.fromJson(Map<String, dynamic> json) {
     return RecommendationCardModel(
@@ -26,6 +30,28 @@ class RecommendationCardModel {
       estimatedHours: json['estimatedHours'] as int,
       fitScore: json['fitScore'] as int,
       reasons: (json['reasons'] as List<dynamic>).cast<String>(),
+      defaultResourceManifest:
+          (json['defaultResourceManifest'] as List<dynamic>)
+              .map(
+                (item) => ResourceManifestItemModel.fromJson(
+                  Map<String, dynamic>.from(item as Map),
+                ),
+              )
+              .toList(),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'catalogId': catalogId,
+      'title': title,
+      'provider': provider,
+      'level': level,
+      'estimatedHours': estimatedHours,
+      'fitScore': fitScore,
+      'reasons': reasons,
+      'defaultResourceManifest':
+          defaultResourceManifest.map((item) => item.toJson()).toList(),
+    };
   }
 }
