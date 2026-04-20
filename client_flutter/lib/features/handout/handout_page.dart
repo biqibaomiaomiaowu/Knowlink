@@ -27,7 +27,7 @@ class HandoutPage extends StatelessWidget {
           const SizedBox(height: 12),
           FilledButton(
             onPressed: () => context.go('/courses/$courseId/qa/6001'),
-            child: const Text('进入独立 QA 骨架页'),
+            child: const Text('进入独立 QA 页面'),
           ),
         ],
       ),

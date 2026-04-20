@@ -20,8 +20,7 @@ class QaPage extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Text(
-            '课程 $courseId 的 QA 会话 $sessionId 会在这里展示。'
-            ' 组员可以在此接入块级追问、引用展示和复习卡片生成。',
+            '课程 $courseId 的 QA 会话 $sessionId 会在这里展示，可在此接入块级追问、引用展示和复习卡片生成。',
           ),
         ),
       ),

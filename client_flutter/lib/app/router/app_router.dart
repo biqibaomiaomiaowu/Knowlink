@@ -11,57 +11,61 @@ import '../../features/quiz/quiz_page.dart';
 import '../../features/review/review_page.dart';
 
 class AppRouter {
-  static final router = GoRouter(
-    routes: [
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const HomePage(),
-      ),
-      GoRoute(
-        path: '/import',
-        builder: (context, state) => const CourseImportPage(),
-      ),
-      GoRoute(
-        path: '/recommend',
-        builder: (context, state) => const CourseRecommendPage(),
-      ),
-      GoRoute(
-        path: '/courses/:courseId/progress',
-        builder: (context, state) => ParseProgressPage(
-          courseId: state.pathParameters['courseId'] ?? '101',
+  static GoRouter createRouter() {
+    return GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const HomePage(),
         ),
-      ),
-      GoRoute(
-        path: '/courses/:courseId/inquiry',
-        builder: (context, state) => InquiryPage(
-          courseId: state.pathParameters['courseId'] ?? '101',
+        GoRoute(
+          path: '/import',
+          builder: (context, state) => const CourseImportPage(),
         ),
-      ),
-      GoRoute(
-        path: '/courses/:courseId/handout',
-        builder: (context, state) => HandoutPage(
-          courseId: state.pathParameters['courseId'] ?? '101',
+        GoRoute(
+          path: '/recommend',
+          builder: (context, state) => const CourseRecommendPage(),
         ),
-      ),
-      GoRoute(
-        path: '/courses/:courseId/qa/:sessionId',
-        builder: (context, state) => QaPage(
-          courseId: state.pathParameters['courseId'] ?? '101',
-          sessionId: state.pathParameters['sessionId'] ?? '6001',
+        GoRoute(
+          path: '/courses/:courseId/progress',
+          builder: (context, state) => ParseProgressPage(
+            courseId: state.pathParameters['courseId']!,
+          ),
         ),
-      ),
-      GoRoute(
-        path: '/quizzes/:quizId',
-        builder: (context, state) => QuizPage(
-          quizId: state.pathParameters['quizId'] ?? '8001',
+        GoRoute(
+          path: '/courses/:courseId/inquiry',
+          builder: (context, state) => InquiryPage(
+            courseId: state.pathParameters['courseId']!,
+          ),
         ),
-      ),
-      GoRoute(
-        path: '/courses/:courseId/review',
-        builder: (context, state) => ReviewPage(
-          courseId: state.pathParameters['courseId'] ?? '101',
+        GoRoute(
+          path: '/courses/:courseId/handout',
+          builder: (context, state) => HandoutPage(
+            courseId: state.pathParameters['courseId']!,
+          ),
         ),
-      ),
-    ],
-  );
+        GoRoute(
+          path: '/courses/:courseId/qa/:sessionId',
+          builder: (context, state) => QaPage(
+            courseId: state.pathParameters['courseId']!,
+            sessionId: state.pathParameters['sessionId']!,
+          ),
+        ),
+        GoRoute(
+          path: '/quizzes/:quizId',
+          builder: (context, state) => QuizPage(
+            quizId: state.pathParameters['quizId']!,
+          ),
+        ),
+        GoRoute(
+          path: '/courses/:courseId/review',
+          builder: (context, state) => ReviewPage(
+            courseId: state.pathParameters['courseId']!,
+          ),
+        ),
+      ],
+    );
+  }
+
+  static final router = createRouter();
 }

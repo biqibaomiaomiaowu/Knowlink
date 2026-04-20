@@ -12,7 +12,7 @@ class CourseImportPage extends StatelessWidget {
       body: Card(
         child: Padding(
           padding: EdgeInsets.all(16),
-          child: Text('这里接课程名称、MP4、PDF、PPTX、DOCX 的真实上传链路，SRT 作为可选辅助输入。'),
+          child: Text('这里承接课程名称、MP4、PDF、PPTX、DOCX 的真实上传链路，SRT 作为可选辅助输入。'),
         ),
       ),
     );

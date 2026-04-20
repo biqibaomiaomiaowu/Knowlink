@@ -26,6 +26,28 @@ class CourseFlowController extends Notifier<CourseFlowState> {
   @override
   CourseFlowState build() => const CourseFlowState();
 
+  void syncCreatedCourse({
+    required int courseId,
+    required String lifecycleStatus,
+    required String pipelineStage,
+    required String pipelineStatus,
+  }) {
+    state = state.copyWith(
+      courseId: courseId.toString(),
+      lifecycleStatus: lifecycleStatus,
+      pipelineStage: pipelineStage,
+      pipelineStatus: pipelineStatus,
+      progressPct: 0,
+      clearActiveParseRunId: true,
+      clearActiveHandoutVersionId: true,
+      nextAction: 'none',
+      clearSessionId: true,
+      clearQuizId: true,
+      clearQuizAttemptId: true,
+      clearReviewTaskRunId: true,
+    );
+  }
+
   void startCourse(String courseId) {
     if (state.courseId == courseId) {
       return;
