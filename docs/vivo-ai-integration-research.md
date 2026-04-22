@@ -2,7 +2,7 @@
 
 本文件用于沉淀中国高校计算机大赛 AIGC 创新赛 vivo 文档站的可复用接入事实，服务于后续 agent 检索、KnowLink 落地设计与具体工程接入。
 
-- 适用范围：vivo 比赛文档站中当前已抓到的 29 个节点、19 篇正文页、10 个分类页
+- 适用范围：vivo 比赛文档站中当前已抓到的 29 个节点，其中 19 个 article 正文节点、10 个 category 目录节点（无独立正文）
 - 不替代：`ARCHITECTURE.md`、`docs/contracts/api-contract.md`、`docs/contracts/error-codes.md`
 - authoritative 口径：本文件是第三方能力研究与实现参考，不是 KnowLink 自身 contract
 
@@ -18,73 +18,75 @@
 doc_set_id: vivo_aigc_competition_2026-04-21
 vendor: vivo_aigc
 source_site: https://aigc.vivo.com.cn
-business_code: 9b2ca654118cac5b4eb2883515326b8d
 snapshot_at: 2026-04-21
+last_verified_at: 2026-04-22
+snapshot_basis:
+  tree_endpoint: /vstack/webapi/service/doc/tree
+  detail_endpoint: /vstack/webapi/service/doc/info/v1
 snapshot_files:
   docs_json: docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json
-  probe_json: docs/vendor-snapshots/vivo-aigc/2026-04-21-probe.json
 coverage:
   total_nodes: 29
   article_nodes: 19
   category_nodes: 10
 extraction_methods:
-  - tree_api
-  - doc_info_api
-  - dom_probe
+  - 调用 /vstack/webapi/service/doc/tree 获取目录树与父子关系
+  - 调用 /vstack/webapi/service/doc/info/v1 获取单页正文详情
 known_limits:
-  - 10 个分类页在 doc/info 接口中返回 {"retcode":0,"msg":"success","data":{}}
-  - DOM probe 没有为这 10 个分类页抓到新增请求，只读到旧页面残留 DOM
-  - 当前正文快照主要来自 HTML 文本，未单独保留页面资源图片
+  - 10 个分类节点在 /vstack/webapi/service/doc/info/v1 中返回 {"retcode":0,"msg":"success","data":{}}
+  - 分类节点只提供树结构，不提供独立正文
+  - 当前 docs.json 只保留清洗后的正文文本，不保留原始 HTML 与上游运营元数据
 last_verified_from:
-  - 已登录浏览器页面
-  - 导出的 docs.json 与 probe.json
+  - /vstack/webapi/service/doc/tree 的目录树响应
+  - /vstack/webapi/service/doc/info/v1 的单页详情响应
+  - 导出的 docs.json
 ```
 
 ## 3. 页面索引
 
 判定规则：
 
-- `article`：`text` 非空且不等于 `success`
-- `category`：`doc/info` 空 `data`，且目录树有子节点
+- `article`：`/vstack/webapi/service/doc/info/v1?docId=...` 返回非空 `data`，且 `docs.json` 中 `text` 非空
+- `category`：`/vstack/webapi/service/doc/info/v1?docId=...` 返回空 `data`，且 `/vstack/webapi/service/doc/tree` 中存在子节点
 - `must_read=true`：实际实现时通常需要直接阅读的正文页
 
-| doc_id | title | page_kind | parent_doc_id | child_doc_ids | tree_path | capability_tags | content_length | must_read | content_ref |
+| doc_id | title | page_kind | parent_doc_id | child_doc_ids | tree_path | capability_tags | content_length | must_read | snapshot_file |
 |---|---|---|---|---|---|---|---:|---|---|
-| 1676 | 文档中心 | category | - | 1746,1677,1720 | 文档中心 | `platform.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1676` |
-| 1746 | 使用指引 | article | 1676 | - | 文档中心 > 使用指引 | `platform.overview` | 3035 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1746` |
-| 1677 | 鉴权方式 | article | 1676 | - | 文档中心 > 鉴权方式 | `platform.access` | 3748 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1677` |
-| 1720 | 接口文档 | category | 1676 | 1744,1724,2200,1727,1728,1725,1726,1729 | 文档中心 > 接口文档 | `platform.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1720` |
-| 1744 | 文本生成 | category | 1720 | 1745,1805 | 文档中心 > 接口文档 > 文本生成 | `llm.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1744` |
-| 1745 | 大模型 | article | 1744 | - | 文档中心 > 接口文档 > 文本生成 > 大模型 | `llm.chat` | 45431 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1745` |
-| 1805 | Function calling | article | 1744 | - | 文档中心 > 接口文档 > 文本生成 > Function calling | `llm.function_calling` | 5870 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1805` |
-| 1724 | 图片生成 | category | 1720 | 1732 | 文档中心 > 接口文档 > 图片生成 | `image.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1724` |
-| 1732 | 图片生成 | article | 1724 | - | 文档中心 > 接口文档 > 图片生成 > 图片生成 | `image.generation` | 14255 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1732` |
-| 2200 | 视频生成 | category | 1720 | 2201 | 文档中心 > 接口文档 > 视频生成 | `video.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=2200` |
-| 2201 | 视频生成 | article | 2200 | - | 文档中心 > 接口文档 > 视频生成 > 视频生成 | `video.generation` | 11900 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=2201` |
-| 1727 | 视觉技术 | category | 1720 | 1737 | 文档中心 > 接口文档 > 视觉技术 | `vision.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1727` |
-| 1737 | 通用OCR | article | 1727 | - | 文档中心 > 接口文档 > 视觉技术 > 通用OCR | `vision.ocr` | 8221 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1737` |
-| 1728 | 自然语言处理 | category | 1720 | 1733,1734,2060,2061 | 文档中心 > 接口文档 > 自然语言处理 | `nlp.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1728` |
-| 1733 | 文本翻译 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 文本翻译 | `nlp.translation` | 6133 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1733` |
-| 1734 | 文本向量 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 文本向量 | `nlp.embedding` | 6483 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1734` |
-| 2060 | 文本相似度 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 文本相似度 | `nlp.similarity` | 5299 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=2060` |
-| 2061 | 查询改写 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 查询改写 | `nlp.query_rewrite` | 7378 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=2061` |
-| 1725 | ASR | category | 1720 | 1738,1740,1739,2065,2068 | 文档中心 > 接口文档 > ASR | `asr.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1725` |
-| 1738 | 实时短语音识别 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 实时短语音识别 | `asr.realtime_short` | 11997 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1738` |
-| 1740 | 长语音听写 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 长语音听写 | `asr.long_dictation` | 10510 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1740` |
-| 1739 | 长语音转写 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 长语音转写 | `asr.long_transcription` | 13340 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1739` |
-| 2065 | 方言自由说 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 方言自由说 | `asr.dialect_free_speech` | 12701 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=2065` |
-| 2068 | 同声音传译 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 同声音传译 | `asr.same_voice_interpretation` | 18857 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=2068` |
-| 1726 | TTS | category | 1720 | 1735,2062 | 文档中心 > 接口文档 > TTS | `tts.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1726` |
-| 1735 | 音频生成 | article | 1726 | - | 文档中心 > 接口文档 > TTS > 音频生成 | `tts.audio_generation` | 28176 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1735` |
-| 2062 | 声音复刻 | article | 1726 | - | 文档中心 > 接口文档 > TTS > 声音复刻 | `tts.voice_clone` | 8760 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=2062` |
-| 1729 | LBS | category | 1720 | 1736 | 文档中心 > 接口文档 > LBS | `lbs.index` | 7 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1729` |
-| 1736 | 地理编码(POI搜索) | article | 1729 | - | 文档中心 > 接口文档 > LBS > 地理编码(POI搜索) | `lbs.poi_search` | 18117 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json#docId=1736` |
+| 1676 | 文档中心 | category | - | 1746,1677,1720 | 文档中心 | `platform.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1746 | 使用指引 | article | 1676 | - | 文档中心 > 使用指引 | `platform.overview` | 582 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1677 | 鉴权方式 | article | 1676 | - | 文档中心 > 鉴权方式 | `platform.access` | 1336 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1720 | 接口文档 | category | 1676 | 1744,1724,2200,1727,1728,1725,1726,1729 | 文档中心 > 接口文档 | `platform.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1744 | 文本生成 | category | 1720 | 1745,1805 | 文档中心 > 接口文档 > 文本生成 | `llm.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1745 | 大模型 | article | 1744 | - | 文档中心 > 接口文档 > 文本生成 > 大模型 | `llm.chat` | 15745 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1805 | Function calling | article | 1744 | - | 文档中心 > 接口文档 > 文本生成 > Function calling | `llm.function_calling` | 2833 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1724 | 图片生成 | category | 1720 | 1732 | 文档中心 > 接口文档 > 图片生成 | `image.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1732 | 图片生成 | article | 1724 | - | 文档中心 > 接口文档 > 图片生成 > 图片生成 | `image.generation` | 4441 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 2200 | 视频生成 | category | 1720 | 2201 | 文档中心 > 接口文档 > 视频生成 | `video.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 2201 | 视频生成 | article | 2200 | - | 文档中心 > 接口文档 > 视频生成 > 视频生成 | `video.generation` | 3675 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1727 | 视觉技术 | category | 1720 | 1737 | 文档中心 > 接口文档 > 视觉技术 | `vision.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1737 | 通用OCR | article | 1727 | - | 文档中心 > 接口文档 > 视觉技术 > 通用OCR | `vision.ocr` | 2526 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1728 | 自然语言处理 | category | 1720 | 1733,1734,2060,2061 | 文档中心 > 接口文档 > 自然语言处理 | `nlp.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1733 | 文本翻译 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 文本翻译 | `nlp.translation` | 1816 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1734 | 文本向量 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 文本向量 | `nlp.embedding` | 2511 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 2060 | 文本相似度 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 文本相似度 | `nlp.similarity` | 1873 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 2061 | 查询改写 | article | 1728 | - | 文档中心 > 接口文档 > 自然语言处理 > 查询改写 | `nlp.query_rewrite` | 2306 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1725 | ASR | category | 1720 | 1738,1740,1739,2065,2068 | 文档中心 > 接口文档 > ASR | `asr.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1738 | 实时短语音识别 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 实时短语音识别 | `asr.realtime_short` | 2711 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1740 | 长语音听写 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 长语音听写 | `asr.long_dictation` | 3487 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1739 | 长语音转写 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 长语音转写 | `asr.long_transcription` | 4329 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 2065 | 方言自由说 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 方言自由说 | `asr.dialect_free_speech` | 2896 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 2068 | 同声音传译 | article | 1725 | - | 文档中心 > 接口文档 > ASR > 同声音传译 | `asr.same_voice_interpretation` | 4829 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1726 | TTS | category | 1720 | 1735,2062 | 文档中心 > 接口文档 > TTS | `tts.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1735 | 音频生成 | article | 1726 | - | 文档中心 > 接口文档 > TTS > 音频生成 | `tts.audio_generation` | 10454 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 2062 | 声音复刻 | article | 1726 | - | 文档中心 > 接口文档 > TTS > 声音复刻 | `tts.voice_clone` | 2759 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1729 | LBS | category | 1720 | 1736 | 文档中心 > 接口文档 > LBS | `lbs.index` | 0 | false | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
+| 1736 | 地理编码(POI搜索) | article | 1729 | - | 文档中心 > 接口文档 > LBS > 地理编码(POI搜索) | `lbs.poi_search` | 3839 | true | `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` |
 
-分类页统一判定理由：
+分类节点统一判定理由：
 
-- `doc/info` 返回空 `data`
-- 目录树中存在明确子节点
-- `docs/vendor-snapshots/vivo-aigc/2026-04-21-probe.json` 的 DOM probe 未抓到新请求，只读到旧页面残留 DOM
+- `/vstack/webapi/service/doc/tree` 返回了明确的父子节点关系
+- `/vstack/webapi/service/doc/info/v1` 对这 10 个节点返回空 `data`
+- 同一树下的 article 子节点能返回非空正文，因此这些节点当前应视为目录节点而不是漏抓正文
 
 ## 4. 能力总览
 
@@ -973,9 +975,9 @@ must_read_order: [1677, 1736]
 confidence: high
 ```
 
-## 8. 分类页判定与缺失说明
+## 8. 分类节点判定与无独立正文说明
 
-以下节点当前被视为分类页而非缺失正文页：
+当前以下 10 个节点统一按“分类节点”处理，而不是“正文抓取遗漏”：
 
 - `1676 文档中心`
 - `1720 接口文档`
@@ -988,13 +990,17 @@ confidence: high
 - `1726 TTS`
 - `1729 LBS`
 
-原因：
+判定依据：
 
-- `docs/vendor-snapshots/vivo-aigc/2026-04-21-docs.json` 中这 10 个节点的 `raw.data` 都为空对象
-- 同一快照中已经抓到它们的子正文页
-- `docs/vendor-snapshots/vivo-aigc/2026-04-21-probe.json` 未显示新的详情请求
+- `/vstack/webapi/service/doc/tree` 为这些节点返回了稳定的父子层级关系，且都存在明确子节点
+- `/vstack/webapi/service/doc/info/v1` 对这 10 个节点返回 `{"retcode":0,"msg":"success","data":{}}`
+- 同一批快照里已经拿到这些分类节点下的正文子页，因此空 `data` 更符合“目录节点无独立正文”而不是“详情抓漏”
 
-因此，当前“未抓到”的不是正文，而是目录页本身没有正文。
+落库与检索口径：
+
+- 页面索引中这 10 个节点的 `page_kind` 固定为 `category`
+- `content_length` 统一记为 `0`
+- 真正可用于实现与摘要抽取的正文内容应以下游 article 子页为准，不直接对分类节点补写伪正文
 
 ## 9. KnowLink 落地提示
 
@@ -1026,4 +1032,4 @@ confidence: high
 - 多个 ASR / TTS / OCR 文档使用 `http://` 或 `ws://` 示例，生产环境是否统一支持 `https://` / `wss://` 需要联调再确认
 - `1732` 中“预计 4.24 前支持 base64 图片”是 2026-04-21 快照时的未来承诺，不应提前假定已上线
 - `1733`、`1734`、`2060`、`2061` 的本文件只保留实现级事实；具体请求字段名在真正接入时仍应二次回看对应原文
-- 如果 vivo 后续把分类页改成带正文，优先修改页面索引中的 `page_kind`、`content_length`、`source_doc_ids`，再决定是否扩写能力摘要
+- 如果 `/vstack/webapi/service/doc/info/v1` 后续开始为当前 category 节点返回非空 `data`，应先回修页面索引中的 `page_kind`、`content_length` 与 `must_read`，再决定是否扩写能力摘要
