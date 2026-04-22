@@ -73,6 +73,7 @@
 | 模块边界、目录树、状态全集 | `ARCHITECTURE.md` | 负责定义系统边界与冻结的目标结构 |
 | 请求/响应字段、示例 payload、错误码 | `docs/contracts/api-contract.md`、`docs/contracts/error-codes.md` | 这是接口 contract 的直接依据 |
 | 曹乐负责冻结的业务语义、枚举和 AI / parse contract | `docs/contracts/week1-cao-le-freeze.md` | 只负责业务语义冻结，不代表 `router/service` 实现 owner |
+| 第三方 AI 能力研究、vivo 比赛文档快照与实现注意事项 | `docs/vivo-ai-integration-research.md` | 这是第三方能力研究入口，不替代仓库自身 contract |
 | 人员主负责人定义 | `TEAM_DIVISION.md` | `WEEKLY_PLAN.md` 只描述时间与交付节奏，不改 owner |
 | 周次目标和演示节奏 | `WEEKLY_PLAN.md` | 它是排期文档，不是“当前已经实现”的证明 |
 | 仓库入口与阅读顺序 | `README.md` | 负责把人导向上面这些文档，不重复定义细节 |
