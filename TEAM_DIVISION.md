@@ -77,7 +77,7 @@
 | AIGC Prompt 与生成策略 | 曹乐 | 杨彩艺 | 由曹乐定义策略，杨彩艺负责服务接入 |
 | OCR / 文档解析与结构化策略 | 曹乐 | 杨彩艺 | 解析规则和输出结构由曹乐主导 |
 | 数据库与数据关系 | 曹乐 | 杨彩艺 | 数据关系、业务语义与状态边界由曹乐定义，落库实现由杨彩艺完成 |
-| MinIO / Redis / PostgreSQL 接入 | 杨彩艺 | 曹乐 | 基础设施落地与任务链路实现 |
+| MinIO / Redis / PostgreSQL 接入 | 杨彩艺 | 曹乐 | 第 1 周只完成配置、本地编排、基础迁移和 scaffold；真实读写、持久化仓储与任务链路进入第 2 周实现 |
 | 演示内容、比赛材料 | 曹乐 | 全员 | 页面截图、讲解顺序、答辩稿统一管理 |
 
 ## 4. 单写 owner 边界
@@ -293,8 +293,8 @@
 - FastAPI 工程
 - 路由文件
 - 基础响应封装
-- PostgreSQL / Redis / MinIO 接入
-- `async_tasks` 根任务/子任务模型
+- PostgreSQL / Redis / MinIO / Worker 的配置、本地编排与基础迁移 scaffold
+- `async_tasks` 根任务/子任务模型、任务 payload 与 worker / scheduler 占位
 - demo 用户鉴权与 `course_catalog` seed 装载
 
 依赖：
@@ -307,6 +307,7 @@
 - 健康检查
 - 基础表迁移
 - 空实现路由
+- 基础设施与 `async_tasks` 当前只按第 1 周 scaffold 验收；真实运行时和状态流转进入第 2 周
 
 ### 工作包 C：AI / 解析 / 数据契约
 

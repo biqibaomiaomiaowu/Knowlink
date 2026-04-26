@@ -88,10 +88,10 @@
 ### 3.4 杨彩艺
 
 - 起 `server` 工程骨架。
-- 接入 FastAPI、PostgreSQL、Redis、MinIO。
-- 建第一批 migration 骨架。
+- 接入 FastAPI，完成 PostgreSQL / Redis / MinIO / Worker 的本地编排、配置项与 scaffold。
+- 建第一批 SQLAlchemy model 与 Alembic migration 骨架。
 - 建立基础响应结构、健康检查、日志、配置读取。
-- 建立 `async_tasks` 根任务 / 子任务模型和基础 router 空实现。
+- 建立 `async_tasks` 根任务 / 子任务模型、任务 payload 与 worker / scheduler 占位；第 1 周不要求真实任务状态流转。
 - 实现 demo 用户鉴权和 `course_catalog` seed 装载。
 - 实现推荐接口：
   - `POST /api/v1/recommendations/courses`
@@ -106,6 +106,8 @@
 - Flutter 页面壳子可运行。
 - FastAPI 服务可启动。
 - 推荐页可返回真实推荐结果并确认入课。
+- PostgreSQL / Redis / MinIO / Worker 第 1 周只验收配置、本地编排、基础迁移和占位 scaffold，不验收真实运行时接通。
+- `async_tasks` 第 1 周只验收表模型、payload、worker / scheduler 占位和异步返回结构，不验收真实状态机。
 - demo Bearer token 与 `course_catalog` 种子数据准备完成。
 - 固定联调资料集准备完成。
 
@@ -115,6 +117,7 @@
 - README、架构文档、分工文档、周计划文档互相能对上。
 - 第 2 周开发不再需要讨论核心命名。
 - 推荐页不再依赖 mock 数据。
+- 完整 SQLAlchemy 持久化仓储、Redis / MinIO 真实读写、Dramatiq 消费和 `async_tasks` 真实状态流转不作为第 1 周验收项，统一进入第 2 周上传 / 解析链路。
 - B 站预留接口的路径、错误码和 `bilibili_import_run` 命名在文档中已冻结，但实现延后到第 2 周。
 
 ## 4. 第 2 周：上传、解析、问询链路
@@ -169,7 +172,8 @@
 ### 4.4 杨彩艺
 
 - 实现创建课程、上传初始化、上传完成、资源列表接口。
-- 实现 `parse_runs`、`async_tasks`、`course_resources` 的最小可用链路。
+- 接通创建课程、上传、解析所需的最小 SQLAlchemy 持久化仓储、MinIO 真实读写、Redis / Dramatiq broker 与 worker 消费链路。
+- 实现 `parse_runs`、`async_tasks`、`course_resources` 的最小可用链路，其中解析根任务至少能完成 `queued -> running -> succeeded/failed` 状态流转。
 - 实现解析接口：
   - `POST /api/v1/courses/{courseId}/parse/start`
   - `GET /api/v1/courses/{courseId}/pipeline-status`
@@ -193,13 +197,14 @@
 - 能创建一门课程并上传资料。
 - 能看到真实解析进度。
 - 解析完成后能进入问询页并保存答案。
-- 数据库中能看到真实 `parse_run`、`async_task`、`segment`、`knowledge_point` 数据。
+- 数据库中能看到真实 `parse_run`、`async_task`、`segment`、`knowledge_point` 数据，且 `async_task` 状态能反映解析任务推进。
 - B 站单视频导入与扫码登录接口预留已可访问，并明确当前统一返回 `501`。
 
 ### 4.6 本周验收
 
 - 固定资料集可稳定跑通上传和解析。
 - 解析失败时前端能看到明确错误，不会卡死在 loading。
+- `pipeline-status` 能反映解析任务的进度、最终状态和失败信息。
 - 问询字段和后续讲义生成字段完全对齐。
 - B 站接口的路径、错误码和 `bilibili_import_run` 命名在架构文档、分工文档和 API contract 中完全一致，且接口当前能返回统一未实现错误。
 
