@@ -381,6 +381,13 @@ def test_scaffold_structure_and_docs_are_aligned():
         ROOT / "server/parsers/pptx.py",
         ROOT / "server/parsers/docx.py",
         ROOT / "server/tasks/payloads.py",
+        ROOT / "server/infra/db/base.py",
+        ROOT / "server/infra/db/session.py",
+        ROOT / "server/infra/db/models/course.py",
+        ROOT / "server/infra/db/models/resource.py",
+        ROOT / "server/infra/db/models/parse_run.py",
+        ROOT / "server/infra/db/models/async_task.py",
+        ROOT / "alembic/versions/1b319cfadeb3_init_tables.py",
         ROOT / "client_flutter/lib/features/qa/qa_page.dart",
         ROOT / "client_flutter/test/shared/course_flow_providers_test.dart",
         ROOT / "docs/development-scaffold.md",
@@ -391,7 +398,6 @@ def test_scaffold_structure_and_docs_are_aligned():
     removed_paths = [
         ROOT / "server/schemas/api.py",
         ROOT / "server/domain/services/runtime.py",
-        ROOT / "server/infra/db/session.py",
         ROOT / "server/infra/queue/broker.py",
         ROOT / "server/infra/storage/client.py",
         ROOT / "client_flutter/lib/shared/providers/session_provider.dart",
@@ -425,6 +431,9 @@ def test_scaffold_structure_and_docs_are_aligned():
     assert "快应用工程实现" in architecture
     assert "文档优先级矩阵" in readme
     assert "当前完成度矩阵" in scaffold
+    assert "基础四表 SQLAlchemy model 与 Alembic 初始化迁移" in scaffold
+    assert "已接纳" in scaffold
+    assert "完整 SQLAlchemy 持久化仓储仍未接通" in scaffold
     assert "server/schemas/api.py" not in architecture_scaffold
     assert "app_factory.py" in architecture_scaffold
     assert "router.py" in architecture_scaffold
@@ -437,3 +446,55 @@ def test_scaffold_structure_and_docs_are_aligned():
     assert "starlette" not in pyproject
     assert "httpx" not in pyproject
     assert "cupertino_icons" not in pubspec
+
+
+def test_basic_database_four_table_scaffold_is_accepted():
+    sources = {
+        "courses": (ROOT / "server/infra/db/models/course.py").read_text(encoding="utf-8"),
+        "course_resources": (ROOT / "server/infra/db/models/resource.py").read_text(encoding="utf-8"),
+        "parse_runs": (ROOT / "server/infra/db/models/parse_run.py").read_text(encoding="utf-8"),
+        "async_tasks": (ROOT / "server/infra/db/models/async_task.py").read_text(encoding="utf-8"),
+    }
+    migration = (ROOT / "alembic/versions/1b319cfadeb3_init_tables.py").read_text(encoding="utf-8")
+    session = (ROOT / "server/infra/db/session.py").read_text(encoding="utf-8")
+
+    expected_fields = {
+        "courses": [
+            "active_parse_run_id",
+            "created_at",
+            "updated_at",
+        ],
+        "course_resources": [
+            "resource_type",
+            "object_key",
+            "ingest_status",
+            "validation_status",
+            "processing_status",
+            "created_at",
+        ],
+        "parse_runs": [
+            "progress_pct",
+            "started_at",
+            "finished_at",
+            "created_at",
+        ],
+        "async_tasks": [
+            "parse_run_id",
+            "task_type",
+            "payload_json",
+            "result_json",
+            "error_message",
+            "created_at",
+        ],
+    }
+
+    for table_name, fields in expected_fields.items():
+        assert f'__tablename__ = "{table_name}"' in sources[table_name]
+        assert f"'{table_name}'" in migration or f'"{table_name}"' in migration
+        for field in fields:
+            assert field in sources[table_name], f"{field} missing in {table_name} model"
+            assert f"'{field}'" in migration or f'"{field}"' in migration, f"{field} missing in migration"
+
+    assert "BaseSettings" in session
+    assert "create_async_engine" in session
+    assert "target_metadata = Base.metadata" in (ROOT / "alembic/env.py").read_text(encoding="utf-8")
