@@ -40,12 +40,14 @@
 | B 站预留接口 | 已实现 `501` stub | `server/api/routers/bilibili.py`、`server/domain/services/bilibili.py`，并由 `test_api.py`、`test_contract_freeze.py` 校验 |
 | Flutter 路由、页面、provider 骨架 | scaffold 已覆盖 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位 |
 | Flutter 自动化测试 | 已覆盖启动 smoke + course flow provider 语义 | `client_flutter/test/smoke_test.dart` 与 `client_flutter/test/shared/course_flow_providers_test.dart` |
-| PostgreSQL / Redis / MinIO / Worker 真实运行时 | 未接通 | `server/infra/db/`、`server/infra/queue/`、`server/infra/storage/`、`server/tasks/*.py` 目前仍为骨架/占位 |
+| 基础四表 SQLAlchemy model 与 Alembic 初始化迁移 | 已接纳 | `courses`、`course_resources`、`parse_runs`、`async_tasks` 四表已在 `server/infra/db/models/` 与 `alembic/versions/1b319cfadeb3_init_tables.py` 覆盖 |
+| PostgreSQL / Redis / MinIO / Worker 真实运行时 | 部分接纳 | 数据库 model 与初始迁移已接纳；完整 SQLAlchemy 持久化仓储、Redis、MinIO、Dramatiq Worker 仍未接通 |
 
 ## 5. 当前未接通的部分
 
-- PostgreSQL / Redis / MinIO 真实读写
-- SQLAlchemy model 与 Alembic 落表
+- 完整 SQLAlchemy 持久化仓储仍未接通，当前 service/repository 仍使用内存态 demo 适配器
+- 基础四表之外的业务表尚未落库，包括解析产物、讲义、QA、测验、掌握度和复习任务相关表
+- Redis / MinIO 真实读写
 - Dramatiq broker 和真实 worker 消费
 - OCR / ASR / LLM provider 接入
 - Flutter 页面真实数据接线和交互打磨

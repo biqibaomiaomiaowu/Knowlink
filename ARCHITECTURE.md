@@ -8,7 +8,8 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 
 - 当前仓库已调整为“可让组员并行开工的骨架版”，不是“真实基础设施已全量接通”的完成版。
 - 已就位：`router -> service -> repository` 依赖方向、`memory` demo 适配器、AI pipeline 占位、解析器占位、任务 payload、Flutter `qa` 独立页面与 course-flow 状态骨架。
-- 占位未接通：PostgreSQL/Redis/MinIO 真正读写、SQLAlchemy model 与 migration 落表、Dramatiq broker、OCR/ASR/LLM Provider。
+- 已接纳：`courses`、`course_resources`、`parse_runs`、`async_tasks` 四张基础表的 SQLAlchemy model 与 Alembic 初始化迁移。
+- 占位未接通：完整 SQLAlchemy 持久化仓储、基础四表之外的业务表、Redis/MinIO 真正读写、Dramatiq broker、OCR/ASR/LLM Provider。
 - 文档中的 MVP 承诺表示“接口与模块边界冻结”，具体实现状态以 README 和 [docs/development-scaffold.md](./docs/development-scaffold.md) 为准。
 - 曹乐 owner 的 Week 1 冻结项与固定联调资料集基线以 [docs/contracts/week1-cao-le-freeze.md](./docs/contracts/week1-cao-le-freeze.md) 和 [docs/demo-assets-baseline.md](./docs/demo-assets-baseline.md) 为准。
 
@@ -291,6 +292,14 @@ server/
   infra/
     auth.py
     db/
+      base.py
+      dependencies.py
+      session.py
+      models/
+        async_task.py
+        course.py
+        parse_run.py
+        resource.py
     queue/
     repositories/
       memory.py
