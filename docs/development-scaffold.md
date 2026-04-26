@@ -41,14 +41,17 @@
 | Flutter 路由、页面、provider 骨架 | scaffold 已覆盖 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位 |
 | Flutter 自动化测试 | 已覆盖启动 smoke + course flow provider 语义 | `client_flutter/test/smoke_test.dart` 与 `client_flutter/test/shared/course_flow_providers_test.dart` |
 | 基础四表 SQLAlchemy model 与 Alembic 初始化迁移 | 已接纳 | `courses`、`course_resources`、`parse_runs`、`async_tasks` 四表已在 `server/infra/db/models/` 与 `alembic/versions/1b319cfadeb3_init_tables.py` 覆盖 |
-| PostgreSQL / Redis / MinIO / Worker 真实运行时 | 部分接纳 | 数据库 model 与初始迁移已接纳；完整 SQLAlchemy 持久化仓储、Redis、MinIO、Dramatiq Worker 仍未接通 |
+| `async_tasks` 任务骨架 | Week 1 scaffold 已完成 | 已有表模型、任务 payload、worker / scheduler 占位和内存态异步返回结构；真实状态流转进入 Week 2 |
+| PostgreSQL / Redis / MinIO / Worker 真实运行时 | Week 1 scaffold 已完成，真实接入进入 Week 2 | 数据库 model 与初始迁移已接纳；完整 SQLAlchemy 持久化仓储、Redis、MinIO、Dramatiq Worker 仍未接通 |
 
 ## 5. 当前未接通的部分
 
+- 以下内容不作为 Week 1 验收缺口，统一进入 Week 2 起的真实接入范围。
 - 完整 SQLAlchemy 持久化仓储仍未接通，当前 service/repository 仍使用内存态 demo 适配器
 - 基础四表之外的业务表尚未落库，包括解析产物、讲义、QA、测验、掌握度和复习任务相关表
 - Redis / MinIO 真实读写
 - Dramatiq broker 和真实 worker 消费
+- `async_tasks` 真实状态流转与子任务消费
 - OCR / ASR / LLM provider 接入
 - Flutter 页面真实数据接线和交互打磨
 
