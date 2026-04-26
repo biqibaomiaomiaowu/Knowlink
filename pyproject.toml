@@ -12,6 +12,28 @@ dependencies = [
   "fastapi==0.110.3",
   "uvicorn==0.30.6",
   "pydantic>=2.7,<3.0",
+   # 数据库
+   # 业务异步用
+  "asyncpg>=0.29,<1.0",
+  # alembic 迁移专用同步驱动
+  "psycopg2-binary>=2.9,<3.0",
+  "sqlalchemy>=2.0,<3.0",
+  "alembic>=1.13,<2.0",
+  # 任务队列
+  "dramatiq>=1.17,<2.0",
+  "redis>=5.0,<6.0",
+  # 对象存储
+  "minio>=7.2,<8.0",
+  
+  # AI/解析（MVP 需要）
+  "openai>=1.54,<2.0",
+  "pypdf>=4.0,<5.0",
+  "python-pptx>=0.6,<1.0",
+  "python-docx>=1.1,<2.0",
+  # 工具
+  "python-dotenv>=1.0,<2.0",
+  "pydantic-settings>=2.4,<3.0",
+
 ]
 
 [project.optional-dependencies]

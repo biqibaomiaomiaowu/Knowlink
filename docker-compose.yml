@@ -5,11 +5,11 @@ services:
       dockerfile: server/Dockerfile
     command: uvicorn server.app:app --host 0.0.0.0 --port 8000
     env_file:
-      - .env.example
+      - .env
     ports:
       - "8000:8000"
     volumes:
-      - .:/workspace
+       - .:/workspace
     working_dir: /workspace
     depends_on:
       - postgres
@@ -22,9 +22,9 @@ services:
       dockerfile: server/Dockerfile
     command: python -m server.tasks.worker
     env_file:
-      - .env.example
+      - .env
     volumes:
-      - .:/workspace
+       - .:/workspace
     working_dir: /workspace
     depends_on:
       - postgres
@@ -37,9 +37,9 @@ services:
       dockerfile: server/Dockerfile
     command: python -m server.tasks.scheduler
     env_file:
-      - .env.example
+      - .env
     volumes:
-      - .:/workspace
+       - .:/workspace
     working_dir: /workspace
     depends_on:
       - postgres
