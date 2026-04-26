@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/course_import/course_import_page.dart';
@@ -9,6 +11,7 @@ import '../../features/parse_progress/parse_progress_page.dart';
 import '../../features/qa/qa_page.dart';
 import '../../features/quiz/quiz_page.dart';
 import '../../features/review/review_page.dart';
+import '../../shared/providers/course_flow_providers.dart';
 
 class AppRouter {
   static GoRouter createRouter() {
@@ -20,7 +23,13 @@ class AppRouter {
         ),
         GoRoute(
           path: '/import',
-          builder: (context, state) => const CourseImportPage(),
+          builder: (context, state) {
+            final courseId = state.uri.queryParameters['courseId'];
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: CourseImportPage(courseId: courseId),
+            );
+          },
         ),
         GoRoute(
           path: '/recommend',
@@ -28,28 +37,46 @@ class AppRouter {
         ),
         GoRoute(
           path: '/courses/:courseId/progress',
-          builder: (context, state) => ParseProgressPage(
-            courseId: state.pathParameters['courseId']!,
-          ),
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: ParseProgressPage(courseId: courseId),
+            );
+          },
         ),
         GoRoute(
           path: '/courses/:courseId/inquiry',
-          builder: (context, state) => InquiryPage(
-            courseId: state.pathParameters['courseId']!,
-          ),
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: InquiryPage(courseId: courseId),
+            );
+          },
         ),
         GoRoute(
           path: '/courses/:courseId/handout',
-          builder: (context, state) => HandoutPage(
-            courseId: state.pathParameters['courseId']!,
-          ),
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: HandoutPage(courseId: courseId),
+            );
+          },
         ),
         GoRoute(
           path: '/courses/:courseId/qa/:sessionId',
-          builder: (context, state) => QaPage(
-            courseId: state.pathParameters['courseId']!,
-            sessionId: state.pathParameters['sessionId']!,
-          ),
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: QaPage(
+                courseId: courseId,
+                sessionId: state.pathParameters['sessionId']!,
+              ),
+            );
+          },
         ),
         GoRoute(
           path: '/quizzes/:quizId',
@@ -59,13 +86,63 @@ class AppRouter {
         ),
         GoRoute(
           path: '/courses/:courseId/review',
-          builder: (context, state) => ReviewPage(
-            courseId: state.pathParameters['courseId']!,
-          ),
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: ReviewPage(courseId: courseId),
+            );
+          },
         ),
       ],
     );
   }
 
   static final router = createRouter();
+}
+
+class _CourseFlowSync extends ConsumerStatefulWidget {
+  const _CourseFlowSync({
+    required this.child,
+    this.courseId,
+  });
+
+  final String? courseId;
+  final Widget child;
+
+  @override
+  ConsumerState<_CourseFlowSync> createState() => _CourseFlowSyncState();
+}
+
+class _CourseFlowSyncState extends ConsumerState<_CourseFlowSync> {
+  @override
+  void initState() {
+    super.initState();
+    _scheduleSync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CourseFlowSync oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.courseId != widget.courseId) {
+      _scheduleSync();
+    }
+  }
+
+  void _scheduleSync() {
+    final courseId = widget.courseId;
+    if (courseId == null || courseId.isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.courseId != courseId) {
+        return;
+      }
+      ref.read(courseFlowProvider.notifier).startCourse(courseId);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

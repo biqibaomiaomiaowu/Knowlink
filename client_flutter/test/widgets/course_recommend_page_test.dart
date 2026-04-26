@@ -82,6 +82,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(CourseImportPage), findsOneWidget);
+      expect(find.text('当前课程：101'), findsOneWidget);
+      expect(container.read(courseFlowProvider).courseId, '101');
 
       await tester.pump(const Duration(seconds: 4));
       await tester.pumpAndSettle();
