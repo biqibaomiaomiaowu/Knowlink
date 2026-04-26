@@ -35,10 +35,10 @@
 |---|---|---|
 | FastAPI app / router 骨架 | 已落地 | `server/app.py`、`server/api/app_factory.py`、`server/api/router.py` 与 `server/api/routers/*.py` 已存在 |
 | 领域 service + 仓储协议 + 内存态 demo | 已落地 | `server/domain/services/*.py`、`server/domain/repositories/interfaces.py`、`server/infra/repositories/memory.py`、`memory_runtime.py` |
-| 推荐、创建课程、上传、解析、问询、讲义、QA、测验、复习接口 | scaffold 已覆盖 | `server/tests/test_api.py` 与 `server/tests/test_scaffold_consistency.py` 覆盖主链路 smoke、幂等和展示字段 |
+| 推荐、创建课程、上传、解析、问询、讲义、QA、测验、复习接口 | scaffold 已覆盖；推荐和确认入课已完成 Week 1 本地 smoke | `server/tests/test_api.py` 与 `server/tests/test_scaffold_consistency.py` 覆盖主链路 smoke、幂等和展示字段 |
 | AI / parse contract 与引用约束 | 已落地 | `schemas/ai/*.schema.json`、`schemas/parse/normalized_document.schema.json`，并由 `server/tests/test_contract_freeze.py` 覆盖 |
 | B 站预留接口 | 已实现 `501` stub | `server/api/routers/bilibili.py`、`server/domain/services/bilibili.py`，并由 `test_api.py`、`test_contract_freeze.py` 校验 |
-| Flutter 路由、页面、provider 骨架 | scaffold 已覆盖 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位 |
+| Flutter 路由、页面、provider 骨架 | scaffold 已覆盖；推荐页 Week 1 本地联调已跑通 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位 |
 | Flutter 自动化测试 | 已覆盖启动 smoke + course flow provider 语义 | `client_flutter/test/smoke_test.dart` 与 `client_flutter/test/shared/course_flow_providers_test.dart` |
 | 基础四表 SQLAlchemy model 与 Alembic 初始化迁移 | 已接纳 | `courses`、`course_resources`、`parse_runs`、`async_tasks` 四表已在 `server/infra/db/models/` 与 `alembic/versions/1b319cfadeb3_init_tables.py` 覆盖 |
 | `async_tasks` 任务骨架 | Week 1 scaffold 已完成 | 已有表模型、任务 payload、worker / scheduler 占位和内存态异步返回结构；真实状态流转进入 Week 2 |
@@ -53,7 +53,8 @@
 - Dramatiq broker 和真实 worker 消费
 - `async_tasks` 真实状态流转与子任务消费
 - OCR / ASR / LLM provider 接入
-- Flutter 页面真实数据接线和交互打磨
+- 推荐页之外的 Flutter 页面真实数据接线和交互打磨
+- FastAPI 当前未配置 CORS；Flutter Web 本地验收可用独立 Chrome 临时绕过浏览器 CORS 限制，正式是否加 CORS 由后端 owner 后续决定
 
 ## 6. Schema / Contract 变更流
 
