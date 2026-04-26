@@ -60,8 +60,7 @@ class _CourseRecommendPageState extends ConsumerState<CourseRecommendPage> {
     final state = ref.watch(courseRecommendProvider);
     final notifier = ref.read(courseRecommendProvider.notifier);
     final isDraftLocked = state.isFetchingRecommendations || state.isConfirming;
-    final isSubmitDisabled =
-        isDraftLocked ||
+    final isSubmitDisabled = isDraftLocked ||
         _timeBudgetErrorText != null ||
         _examAtErrorText != null;
 
@@ -129,8 +128,7 @@ class _CourseRecommendPageState extends ConsumerState<CourseRecommendPage> {
                 return;
               }
               final minutes = int.tryParse(trimmed);
-              if (minutes != null &&
-                  minutes >= _minimumTimeBudgetMinutes) {
+              if (minutes != null && minutes >= _minimumTimeBudgetMinutes) {
                 setState(() {
                   _timeBudgetErrorText = null;
                 });
@@ -497,7 +495,8 @@ class _CreatedCourseCard extends StatelessWidget {
             ],
             const SizedBox(height: 16),
             OutlinedButton(
-              onPressed: () => context.go('/import'),
+              onPressed: () =>
+                  context.go('/import?courseId=${course.courseId}'),
               child: const Text('前往自主导入页'),
             ),
           ],

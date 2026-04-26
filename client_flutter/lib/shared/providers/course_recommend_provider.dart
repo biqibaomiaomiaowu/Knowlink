@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/network/api_client.dart';
@@ -7,6 +9,26 @@ import '../models/recommendation_enums.dart';
 import '../models/recommendation_card.dart';
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+
+class CourseConfirmIdempotencyStore {
+  final Map<String, String> _keysByFingerprint = {};
+
+  String resolveKey({
+    required String fingerprint,
+    required String catalogId,
+  }) {
+    return _keysByFingerprint.putIfAbsent(
+      fingerprint,
+      () => 'recommend-confirm-$catalogId-'
+          '${DateTime.now().microsecondsSinceEpoch}',
+    );
+  }
+}
+
+final courseConfirmIdempotencyStoreProvider =
+    Provider<CourseConfirmIdempotencyStore>(
+  (ref) => CourseConfirmIdempotencyStore(),
+);
 
 class CourseRecommendController
     extends AutoDisposeNotifier<CourseRecommendState> {
@@ -178,13 +200,10 @@ class CourseRecommendController
     required String catalogId,
     required ConfirmRecommendationRequestModel request,
   }) {
-    return [
-      catalogId,
-      request.goalText,
-      request.preferredStyle.name,
-      request.examAt?.toIso8601String() ?? '',
-      request.titleOverride ?? '',
-    ].join('|');
+    return jsonEncode({
+      'catalogId': catalogId,
+      'request': request.toJson(),
+    });
   }
 
   String _resolveIdempotencyKey({
@@ -196,7 +215,10 @@ class CourseRecommendController
       return state.lastConfirmIdempotencyKey!;
     }
 
-    return 'recommend-confirm-$catalogId-${DateTime.now().microsecondsSinceEpoch}';
+    return ref.read(courseConfirmIdempotencyStoreProvider).resolveKey(
+          fingerprint: fingerprint,
+          catalogId: catalogId,
+        );
   }
 }
 

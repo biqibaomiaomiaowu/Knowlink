@@ -7,16 +7,25 @@ import '../../shared/models/recommendation_request.dart';
 import '../config/app_config.dart';
 
 class ApiClient {
-  ApiClient()
-      : _dio = Dio(
-          BaseOptions(
-            baseUrl: AppConfig.apiBaseUrl,
-            headers: {
-              'Authorization': 'Bearer ${AppConfig.demoToken}',
-              'Content-Type': 'application/json',
-            },
-          ),
-        );
+  ApiClient({
+    Dio? dio,
+    HttpClientAdapter? httpClientAdapter,
+    String? baseUrl,
+    String? demoToken,
+  }) : _dio = dio ??
+            Dio(
+              BaseOptions(
+                baseUrl: baseUrl ?? AppConfig.apiBaseUrl,
+                headers: {
+                  'Authorization': 'Bearer ${demoToken ?? AppConfig.demoToken}',
+                  'Content-Type': 'application/json',
+                },
+              ),
+            ) {
+    if (httpClientAdapter != null) {
+      _dio.httpClientAdapter = httpClientAdapter;
+    }
+  }
 
   final Dio _dio;
 

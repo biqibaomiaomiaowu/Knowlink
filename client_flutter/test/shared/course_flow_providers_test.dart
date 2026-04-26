@@ -49,8 +49,7 @@ void main() {
     expect(updated.reviewTaskRunId, isNull);
   });
 
-  test('switching to a different course keeps current flow snapshot until sync',
-      () {
+  test('switching to a different course clears downstream flow state', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
@@ -73,17 +72,17 @@ void main() {
 
     final state = container.read(courseFlowProvider);
     expect(state.courseId, '102');
-    expect(state.lifecycleStatus, 'inquiry_ready');
-    expect(state.pipelineStage, 'handout');
-    expect(state.pipelineStatus, 'running');
-    expect(state.progressPct, 65);
-    expect(state.activeParseRunId, 9001);
-    expect(state.activeHandoutVersionId, 3001);
-    expect(state.nextAction, 'poll');
-    expect(state.sessionId, 6001);
-    expect(state.quizId, 8001);
-    expect(state.quizAttemptId, 8201);
-    expect(state.reviewTaskRunId, 8301);
+    expect(state.lifecycleStatus, 'draft');
+    expect(state.pipelineStage, 'idle');
+    expect(state.pipelineStatus, 'idle');
+    expect(state.progressPct, 0);
+    expect(state.activeParseRunId, isNull);
+    expect(state.activeHandoutVersionId, isNull);
+    expect(state.nextAction, 'none');
+    expect(state.sessionId, isNull);
+    expect(state.quizId, isNull);
+    expect(state.quizAttemptId, isNull);
+    expect(state.reviewTaskRunId, isNull);
   });
 
   test('starting the same course preserves existing flow state', () {

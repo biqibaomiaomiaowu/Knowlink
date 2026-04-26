@@ -11,6 +11,7 @@ import 'package:knowlink_client/features/parse_progress/parse_progress_page.dart
 import 'package:knowlink_client/features/qa/qa_page.dart';
 import 'package:knowlink_client/features/quiz/quiz_page.dart';
 import 'package:knowlink_client/features/review/review_page.dart';
+import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
 
 void main() {
   testWidgets('frozen routes resolve to expected pages', (tester) async {
@@ -60,5 +61,44 @@ void main() {
 
     router.go('/');
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('course routes sync URL courseId into course flow', (
+    tester,
+  ) async {
+    final container = ProviderContainer();
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    router.go('/import');
+    await tester.pumpAndSettle();
+    expect(find.byType(CourseImportPage), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, isNull);
+
+    router.go('/import?courseId=101');
+    await tester.pumpAndSettle();
+    expect(find.byType(CourseImportPage), findsOneWidget);
+    expect(find.textContaining('101'), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '101');
+
+    router.go('/courses/205/progress');
+    await tester.pumpAndSettle();
+    expect(find.byType(ParseProgressPage), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '205');
+
+    router.go('/courses/306/qa/9876');
+    await tester.pumpAndSettle();
+    expect(find.byType(QaPage), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '306');
   });
 }

@@ -230,6 +230,92 @@ void main() {
     expect(state.activeConfirmCatalogId, isNull);
   });
 
+  test('confirmRecommendation reuses session key after provider disposal',
+      () async {
+    final fakeApiClient = FakeApiClient(
+      recommendations: const [],
+      confirmResult: ConfirmRecommendationResultModel(
+        course: CourseSummaryModel(
+          courseId: 101,
+          title: '高数期末冲刺课',
+          entryType: 'recommendation',
+          catalogId: 'math-final-01',
+          lifecycleStatus: 'draft',
+          pipelineStage: 'idle',
+          pipelineStatus: 'idle',
+          updatedAt: DateTime.utc(2026, 4, 18, 15),
+        ),
+        createdFromCatalogId: 'math-final-01',
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final subscription = container.listen(
+      courseRecommendProvider,
+      (_, __) {},
+      fireImmediately: true,
+    );
+
+    await container
+        .read(courseRecommendProvider.notifier)
+        .confirmRecommendation('math-final-01');
+    final firstKey = fakeApiClient.confirmCalls.single.idempotencyKey;
+
+    subscription.close();
+    await container.pump();
+
+    await container
+        .read(courseRecommendProvider.notifier)
+        .confirmRecommendation('math-final-01');
+
+    expect(fakeApiClient.confirmCalls, hasLength(2));
+    expect(fakeApiClient.confirmCalls.first.idempotencyKey, firstKey);
+    expect(fakeApiClient.confirmCalls.last.idempotencyKey, firstKey);
+  });
+
+  test('fetchRecommendations keeps session idempotency key for same confirm',
+      () async {
+    final fakeApiClient = FakeApiClient(
+      recommendations: const [],
+      confirmResult: ConfirmRecommendationResultModel(
+        course: CourseSummaryModel(
+          courseId: 101,
+          title: '高数期末冲刺课',
+          entryType: 'recommendation',
+          catalogId: 'math-final-01',
+          lifecycleStatus: 'draft',
+          pipelineStage: 'idle',
+          pipelineStatus: 'idle',
+          updatedAt: DateTime.utc(2026, 4, 18, 15),
+        ),
+        createdFromCatalogId: 'math-final-01',
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final notifier = container.read(courseRecommendProvider.notifier);
+
+    await notifier.confirmRecommendation('math-final-01');
+    final firstKey = fakeApiClient.confirmCalls.single.idempotencyKey;
+
+    await notifier.fetchRecommendations();
+    await notifier.confirmRecommendation('math-final-01');
+
+    expect(fakeApiClient.confirmCalls, hasLength(2));
+    expect(fakeApiClient.confirmCalls.first.idempotencyKey, firstKey);
+    expect(fakeApiClient.confirmCalls.last.idempotencyKey, firstKey);
+  });
+
   test('stale confirm results are ignored after the draft changes', () async {
     final confirmCompleter = Completer<ConfirmRecommendationResultModel>();
     final fakeApiClient = FakeApiClient(

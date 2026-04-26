@@ -52,7 +52,7 @@ class CourseFlowController extends Notifier<CourseFlowState> {
     if (state.courseId == courseId) {
       return;
     }
-    state = state.copyWith(courseId: courseId);
+    state = CourseFlowState(courseId: courseId);
   }
 
   void setLifecycleStatus(String status) {
