@@ -18,6 +18,8 @@ jobs:
           python -m pip install .[dev]
       - name: Run backend tests
         run: python -m pytest
+      - name: Validate Alembic migration SQL
+        run: alembic upgrade head --sql
 
   flutter:
     runs-on: ubuntu-latest
