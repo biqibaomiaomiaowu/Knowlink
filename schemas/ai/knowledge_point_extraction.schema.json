@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KnowLinkKnowledgePointExtraction",
+  "$defs": {
+    "stableKey": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "difficultyLevel": {
+      "type": "string",
+      "enum": ["beginner", "intermediate", "advanced"]
+    },
+    "score0To100": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "relevanceScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "evidenceLocator": {
+      "oneOf": [
+        {
+          "required": ["pageNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["slideNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["anchorKey"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["startSec", "endSec"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "required": ["knowledgePoints", "segmentKnowledgePoints", "knowledgePointEvidences"],
+  "properties": {
+    "knowledgePoints": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "knowledgePointKey",
+          "displayName",
+          "canonicalName",
+          "description",
+          "difficultyLevel",
+          "importanceScore",
+          "aliases",
+          "sortNo"
+        ],
+        "properties": {
+          "knowledgePointKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "canonicalName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "difficultyLevel": {
+            "$ref": "#/$defs/difficultyLevel"
+          },
+          "importanceScore": {
+            "$ref": "#/$defs/score0To100"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "sortNo": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "segmentKnowledgePoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["segmentKey", "knowledgePointKey", "relevanceScore", "sortNo"],
+        "properties": {
+          "segmentKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "knowledgePointKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "relevanceScore": {
+            "$ref": "#/$defs/relevanceScore"
+          },
+          "sortNo": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "knowledgePointEvidences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "segmentKey",
+          "knowledgePointKey",
+          "evidenceType",
+          "sortNo"
+        ],
+        "properties": {
+          "segmentKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "knowledgePointKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "evidenceType": {
+            "type": "string",
+            "enum": ["definition", "example", "formula", "teacher_emphasis", "exercise", "summary"]
+          },
+          "pageNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "slideNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "anchorKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sortNo": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "allOf": [
+          {
+            "$ref": "#/$defs/evidenceLocator"
+          }
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

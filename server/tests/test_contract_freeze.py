@@ -37,6 +37,29 @@ def test_week1_freeze_docs_are_linked_from_readme_and_contract():
     assert "../demo-assets-baseline.md" in api_contract
 
 
+def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
+
+    assert "week2-cao-le-parse-inquiry-contract.md" in api_contract
+    assert "schemas/ai/knowledge_point_extraction.schema.json" in week2_contract
+    assert "schemas/parse/normalized_document.schema.json" in week2_contract
+
+    for token in (
+        "`course_segments`",
+        "`knowledge_points`",
+        "`segment_knowledge_points`",
+        "`knowledge_point_evidences`",
+        "`vector_documents`",
+        "`learning_preferences`",
+    ):
+        assert token in week2_contract
+
+    for step_code in ("resource_validate", "caption_extract", "document_parse", "knowledge_extract", "vectorize"):
+        assert step_code in api_contract
+        assert step_code in week2_contract
+
+
 def test_bilibili_reserved_contract_is_aligned_across_docs():
     architecture = load_text("ARCHITECTURE.md")
     api_contract = load_text("docs/contracts/api-contract.md")
@@ -524,22 +547,223 @@ def test_quiz_and_review_schemas_reject_invalid_payloads(schema_path: str, paylo
         build_validator(schema_path).validate(payload)
 
 
+def assert_knowledge_extraction_references_are_declared(payload: dict, known_segment_keys: set[str]) -> None:
+    knowledge_point_keys = {item["knowledgePointKey"] for item in payload["knowledgePoints"]}
+
+    for relation in payload["segmentKnowledgePoints"]:
+        assert relation["segmentKey"] in known_segment_keys
+        assert relation["knowledgePointKey"] in knowledge_point_keys
+
+    for evidence in payload["knowledgePointEvidences"]:
+        assert evidence["segmentKey"] in known_segment_keys
+        assert evidence["knowledgePointKey"] in knowledge_point_keys
+
+
+def test_knowledge_point_extraction_schema_accepts_valid_payload():
+    payload = {
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": "kp-limit",
+                "displayName": "函数极限",
+                "canonicalName": "function_limit",
+                "description": "函数在自变量趋近某点时的稳定趋势。",
+                "difficultyLevel": "intermediate",
+                "importanceScore": 92,
+                "aliases": ["极限", "limit"],
+                "sortNo": 1,
+            }
+        ],
+        "segmentKnowledgePoints": [
+            {
+                "segmentKey": "seg-pdf-1",
+                "knowledgePointKey": "kp-limit",
+                "relevanceScore": 0.92,
+                "sortNo": 1,
+            }
+        ],
+        "knowledgePointEvidences": [
+            {
+                "segmentKey": "seg-pdf-1",
+                "knowledgePointKey": "kp-limit",
+                "evidenceType": "definition",
+                "pageNo": 2,
+                "sortNo": 1,
+            }
+        ],
+    }
+
+    build_validator("schemas/ai/knowledge_point_extraction.schema.json").validate(payload)
+    assert_knowledge_extraction_references_are_declared(payload, {"seg-pdf-1"})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {
+            "knowledgePoints": [],
+            "segmentKnowledgePoints": [],
+            "knowledgePointEvidences": [],
+        },
+        {
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit",
+                    "displayName": "函数极限",
+                    "canonicalName": "function_limit",
+                    "description": "函数在自变量趋近某点时的稳定趋势。",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 92,
+                    "aliases": [],
+                    "sortNo": 1,
+                }
+            ],
+            "segmentKnowledgePoints": [],
+            "knowledgePointEvidences": [],
+        },
+        {
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit",
+                    "displayName": "函数极限",
+                    "canonicalName": "function_limit",
+                    "description": "函数在自变量趋近某点时的稳定趋势。",
+                    "difficultyLevel": "intermediate",
+                    "importanceScore": 92,
+                    "aliases": [],
+                    "sortNo": 1,
+                    "unexpected": True,
+                }
+            ],
+            "segmentKnowledgePoints": [],
+            "knowledgePointEvidences": [],
+        },
+        {
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit",
+                    "displayName": "函数极限",
+                    "canonicalName": "function_limit",
+                    "description": "函数在自变量趋近某点时的稳定趋势。",
+                    "difficultyLevel": "intermediate",
+                    "importanceScore": 92,
+                    "aliases": [],
+                    "sortNo": 1,
+                }
+            ],
+            "segmentKnowledgePoints": [
+                {
+                    "segmentKey": "seg-pdf-1",
+                    "knowledgePointKey": "kp-limit",
+                    "relevanceScore": 1.1,
+                    "sortNo": 1,
+                }
+            ],
+            "knowledgePointEvidences": [],
+        },
+        {
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit",
+                    "displayName": "函数极限",
+                    "canonicalName": "function_limit",
+                    "description": "函数在自变量趋近某点时的稳定趋势。",
+                    "difficultyLevel": "intermediate",
+                    "importanceScore": 92,
+                    "aliases": [],
+                    "sortNo": 1,
+                }
+            ],
+            "segmentKnowledgePoints": [],
+            "knowledgePointEvidences": [
+                {
+                    "segmentKey": "seg-pdf-1",
+                    "knowledgePointKey": "kp-limit",
+                    "evidenceType": "definition",
+                    "pageNo": 2,
+                    "slideNo": 3,
+                    "sortNo": 1,
+                }
+            ],
+        },
+    ],
+)
+def test_knowledge_point_extraction_schema_rejects_invalid_payloads(payload: dict):
+    with pytest.raises(ValidationError):
+        build_validator("schemas/ai/knowledge_point_extraction.schema.json").validate(payload)
+
+
+def test_knowledge_point_extraction_references_must_be_declared():
+    payload = {
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": "kp-limit",
+                "displayName": "函数极限",
+                "canonicalName": "function_limit",
+                "description": "函数在自变量趋近某点时的稳定趋势。",
+                "difficultyLevel": "intermediate",
+                "importanceScore": 92,
+                "aliases": [],
+                "sortNo": 1,
+            }
+        ],
+        "segmentKnowledgePoints": [
+            {
+                "segmentKey": "seg-missing",
+                "knowledgePointKey": "kp-missing",
+                "relevanceScore": 0.9,
+                "sortNo": 1,
+            }
+        ],
+        "knowledgePointEvidences": [
+            {
+                "segmentKey": "seg-missing",
+                "knowledgePointKey": "kp-limit",
+                "evidenceType": "definition",
+                "pageNo": 2,
+                "sortNo": 1,
+            }
+        ],
+    }
+
+    build_validator("schemas/ai/knowledge_point_extraction.schema.json").validate(payload)
+    with pytest.raises(AssertionError):
+        assert_knowledge_extraction_references_are_declared(payload, {"seg-pdf-1"})
+
+
 def test_normalized_document_schema_enforces_resource_specific_locations():
     validator = build_validator("schemas/parse/normalized_document.schema.json")
 
     valid_payloads = [
         {
             "resourceType": "pdf",
-            "segments": [{"segmentType": "pdf_text", "orderNo": 1, "textContent": "limit", "pageNo": 2}],
+            "segments": [
+                {
+                    "segmentKey": "seg-pdf-1",
+                    "segmentType": "pdf_text",
+                    "orderNo": 1,
+                    "textContent": "limit",
+                    "pageNo": 2,
+                }
+            ],
         },
         {
             "resourceType": "pptx",
-            "segments": [{"segmentType": "slide_text", "orderNo": 1, "textContent": "matrix", "slideNo": 6}],
+            "segments": [
+                {
+                    "segmentKey": "seg-pptx-1",
+                    "segmentType": "slide_text",
+                    "orderNo": 1,
+                    "textContent": "matrix",
+                    "slideNo": 6,
+                }
+            ],
         },
         {
             "resourceType": "docx",
             "segments": [
                 {
+                    "segmentKey": "seg-docx-1",
                     "segmentType": "doc_paragraph",
                     "orderNo": 1,
                     "textContent": "integral",
@@ -551,6 +775,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "resourceType": "mp4",
             "segments": [
                 {
+                    "segmentKey": "seg-video-1",
                     "segmentType": "video_transcript",
                     "orderNo": 1,
                     "textContent": "video",
@@ -563,6 +788,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "resourceType": "srt",
             "segments": [
                 {
+                    "segmentKey": "seg-srt-1",
                     "segmentType": "video_transcript",
                     "orderNo": 1,
                     "textContent": "subtitle",
@@ -576,31 +802,91 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
     invalid_payloads = [
         {
             "resourceType": "pdf",
-            "segments": [{"segmentType": "pdf_text", "orderNo": 1, "textContent": "limit", "anchorKey": "bad"}],
+            "segments": [
+                {
+                    "segmentKey": "seg-pdf-bad-1",
+                    "segmentType": "pdf_text",
+                    "orderNo": 1,
+                    "textContent": "limit",
+                    "anchorKey": "bad",
+                }
+            ],
         },
         {
             "resourceType": "pdf",
-            "segments": [{"segmentType": "pdf_text", "orderNo": 1, "textContent": "limit", "startSec": 10}],
+            "segments": [
+                {
+                    "segmentKey": "seg-pdf-bad-2",
+                    "segmentType": "pdf_text",
+                    "orderNo": 1,
+                    "textContent": "limit",
+                    "startSec": 10,
+                }
+            ],
         },
         {
             "resourceType": "pptx",
-            "segments": [{"segmentType": "slide_text", "orderNo": 1, "textContent": "matrix", "pageNo": 2}],
+            "segments": [
+                {
+                    "segmentKey": "seg-pptx-bad-1",
+                    "segmentType": "slide_text",
+                    "orderNo": 1,
+                    "textContent": "matrix",
+                    "pageNo": 2,
+                }
+            ],
         },
         {
             "resourceType": "docx",
-            "segments": [{"segmentType": "doc_paragraph", "orderNo": 1, "textContent": "integral", "slideNo": 6}],
+            "segments": [
+                {
+                    "segmentKey": "seg-docx-bad-1",
+                    "segmentType": "doc_paragraph",
+                    "orderNo": 1,
+                    "textContent": "integral",
+                    "slideNo": 6,
+                }
+            ],
         },
         {
             "resourceType": "mp4",
-            "segments": [{"segmentType": "video_transcript", "orderNo": 1, "textContent": "video", "pageNo": 2}],
+            "segments": [
+                {
+                    "segmentKey": "seg-video-bad-1",
+                    "segmentType": "video_transcript",
+                    "orderNo": 1,
+                    "textContent": "video",
+                    "pageNo": 2,
+                }
+            ],
         },
         {
             "resourceType": "mp4",
-            "segments": [{"segmentType": "video_transcript", "orderNo": 1, "textContent": "video", "startSec": 0}],
+            "segments": [
+                {
+                    "segmentKey": "seg-video-bad-2",
+                    "segmentType": "video_transcript",
+                    "orderNo": 1,
+                    "textContent": "video",
+                    "startSec": 0,
+                }
+            ],
         },
         {
             "resourceType": "srt",
-            "segments": [{"segmentType": "video_transcript", "orderNo": 1, "textContent": "subtitle", "endSec": 45}],
+            "segments": [
+                {
+                    "segmentKey": "seg-srt-bad-1",
+                    "segmentType": "video_transcript",
+                    "orderNo": 1,
+                    "textContent": "subtitle",
+                    "endSec": 45,
+                }
+            ],
+        },
+        {
+            "resourceType": "pdf",
+            "segments": [{"segmentType": "pdf_text", "orderNo": 1, "textContent": "missing key", "pageNo": 2}],
         },
     ]
 

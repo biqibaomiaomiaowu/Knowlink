@@ -140,8 +140,13 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["segmentType", "orderNo", "textContent"],
+        "required": ["segmentKey", "segmentType", "orderNo", "textContent"],
         "properties": {
+          "segmentKey": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+          },
           "segmentType": {
             "type": "string",
             "enum": ["video_transcript", "pdf_text", "slide_text", "doc_paragraph"]
