@@ -1,6 +1,6 @@
 # KnowLink API Contract
 
-本文件冻结 MVP 阶段前后端共享的请求字段、响应字段、异步返回结构和 demo 鉴权策略。曹乐 owner 的 Week 1 冻结项与固定联调资料集基线见 [week1-cao-le-freeze.md](./week1-cao-le-freeze.md) 和 [../demo-assets-baseline.md](../demo-assets-baseline.md)。若与其他文档冲突，以本文件为准。
+本文件冻结 MVP 阶段前后端共享的请求字段、响应字段、异步返回结构和 demo 鉴权策略。曹乐 owner 的 Week 1 冻结项与固定联调资料集基线见 [week1-cao-le-freeze.md](./week1-cao-le-freeze.md) 和 [../demo-assets-baseline.md](../demo-assets-baseline.md)；Week 2 解析与问询业务 contract 见 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md)。若与其他文档冲突，以本文件为准。
 
 ## 1. 通用约定
 
@@ -32,7 +32,12 @@
 - 固定联调资料集只版本化清单与规范，不在仓库中提交 `mp4/pdf/pptx/docx` 二进制样例。
 - demo 鉴权变量名固定为 `.env` / `.env.example` 中的 `KNOWLINK_DEMO_TOKEN`。
 
-### 1.2 核心状态枚举
+### 1.2 Week 2 解析与问询冻结入口
+
+- 曹乐负责的解析产物字段说明、解析步骤映射、`pipeline-status` 进度 / 状态 / 失败 / `partial_success` 语义，以及问询题到 `learning_preferences` 的映射，以 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md) 为验收入口。
+- 本文件中的 API 示例只展示接口形态；解析产物和问询落库的业务含义以 Week 2 冻结入口为准。
+
+### 1.3 核心状态枚举
 
 - `lifecycleStatus`: `draft` `resource_ready` `inquiry_ready` `learning_ready` `archived` `failed`
 - `pipelineStage`: `idle` `upload` `parse` `inquiry` `handout`
@@ -251,6 +256,8 @@
 ```
 
 ## 6. 上传与解析
+
+解析产物、步骤聚合、`partial_success` 判定和问询偏好落库规则见 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md)。本节只冻结 API 请求 / 响应形态。
 
 ### `POST /api/v1/courses/{courseId}/resources/upload-init`
 
@@ -565,6 +572,12 @@ stub 阶段约束：
   }
 }
 ```
+
+说明：
+
+- `steps[].code` 固定聚合为 `resource_validate`、`caption_extract`、`document_parse`、`knowledge_extract`、`vectorize`。
+- `pipelineStatus = partial_success` 表示解析产物已满足进入问询的最低条件，但存在非关键资源或非关键步骤失败；此时 `nextAction` 仍可为 `enter_inquiry`。
+- `progressPct`、步骤权重、失败条件和 `partial_success` 细则以 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md) 第 3 节为准。
 
 ### `GET /api/v1/courses/{courseId}/parse/summary`
 
