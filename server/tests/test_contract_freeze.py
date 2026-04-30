@@ -80,6 +80,20 @@ def test_normalized_document_segment_types_match_week2_contract():
         assert f"`{segment_type}`" in week2_contract
 
 
+def test_parse_contract_documents_quality_gate_and_vision_env_vars():
+    week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
+
+    for token in (
+        "U+FFFF",
+        "U+FFFD",
+        "KNOWLINK_ENABLE_MARKITDOWN_OCR",
+        "KNOWLINK_VIVO_APP_KEY",
+        "KNOWLINK_VIVO_BASE_URL",
+        "KNOWLINK_VIVO_VISION_MODEL",
+    ):
+        assert token in week2_contract
+
+
 def test_bilibili_reserved_contract_is_aligned_across_docs():
     architecture = load_text("ARCHITECTURE.md")
     api_contract = load_text("docs/contracts/api-contract.md")
@@ -966,6 +980,67 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
     for payload in invalid_payloads:
         with pytest.raises(ValidationError):
             validator.validate(payload)
+
+
+@pytest.mark.parametrize("segment_type", ["docx_block_text", "ocr_text", "formula", "image_caption"])
+def test_normalized_document_schema_accepts_docx_visual_segments_with_section_path(segment_type: str):
+    validator = build_validator("schemas/parse/normalized_document.schema.json")
+
+    validator.validate(
+        {
+            "resourceType": "docx",
+            "segments": [
+                {
+                    "segmentKey": f"seg-docx-{segment_type.replace('_', '-')}",
+                    "segmentType": segment_type,
+                    "orderNo": 1,
+                    "textContent": "clean text",
+                    "sectionPath": ["第 1 章"],
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("bad_location", ["pageNo", "slideNo", "startSec", "endSec"])
+def test_normalized_document_schema_rejects_docx_non_section_locations(bad_location: str):
+    validator = build_validator("schemas/parse/normalized_document.schema.json")
+    payload = {
+        "resourceType": "docx",
+        "segments": [
+            {
+                "segmentKey": f"seg-docx-bad-{bad_location}",
+                "segmentType": "image_caption",
+                "orderNo": 1,
+                "textContent": "clean text",
+                "sectionPath": ["第 1 章"],
+                bad_location: 1,
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        validator.validate(payload)
+
+
+@pytest.mark.parametrize("bad_text", ["bad\ufffftext", "bad\ufffdtext", "bad\x00text", "bad\x01text", "bad\x19text"])
+def test_normalized_document_schema_rejects_garbled_text_content(bad_text: str):
+    validator = build_validator("schemas/parse/normalized_document.schema.json")
+    payload = {
+        "resourceType": "pdf",
+        "segments": [
+            {
+                "segmentKey": "seg-pdf-garbled",
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": bad_text,
+                "pageNo": 1,
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        validator.validate(payload)
 
 
 def test_demo_asset_baseline_covers_fixed_joint_test_set():

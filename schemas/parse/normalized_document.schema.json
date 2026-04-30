@@ -71,7 +71,7 @@
         {
           "properties": {
             "segmentType": {
-              "enum": ["docx_block_text", "formula"]
+              "enum": ["docx_block_text", "ocr_text", "formula", "image_caption"]
             }
           }
         },
@@ -165,7 +165,10 @@
           },
           "textContent": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "not": {
+              "pattern": "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F\\uFFFD\\uFFFF]"
+            }
           },
           "startSec": {
             "type": "integer",

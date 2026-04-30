@@ -20,6 +20,23 @@
 - `schemas/parse/normalized_document.schema.json` 描述 parser 产物时使用 camelCase，例如 `segmentType`、`pageNo`、`sectionPath`。
 - `normalized_document.segments[].segmentType` 与 `course_segments.segment_type` 使用同一组业务枚举。
 
+解析质量门禁：
+
+- 所有 parser 输出 normalized document 前必须统一清洗 `textContent`，成功 segment 不得包含 `U+FFFF`、`U+FFFD`、NUL、C0/C1 控制字符等乱码。
+- 纯点线、纯符号噪声行和清洗后空行必须过滤；清洗后无有效文本的 segment 不得进入成功产物。
+- PDF 文本层缺失或出现强乱码时，优先尝试页级 OCR / 视觉增强；增强失败且无干净文本时跳过该页，若所有页均不可用则解析失败。
+- PPTX / DOCX 原生文本、表格和 OMML 公式优先结构化抽取；内嵌图片、截图型公式或截图型图表可走视觉增强，输出仍必须保留原资源定位。
+- OCR / 视觉增强默认关闭；仅在配置 `KNOWLINK_ENABLE_MARKITDOWN_OCR` 或 `KNOWLINK_VIVO_APP_KEY` 等环境变量后启用，未配置 key 时不得访问网络。
+
+视觉增强环境变量：
+
+| 变量 | 语义 |
+|---|---|
+| `KNOWLINK_ENABLE_MARKITDOWN_OCR` | 是否启用 MarkItDown 作为 PDF 页级 OCR fallback，默认关闭。 |
+| `KNOWLINK_VIVO_APP_KEY` | 蓝心 / vivo 视觉能力调用 key；为空时不发起网络请求。 |
+| `KNOWLINK_VIVO_BASE_URL` | 蓝心 / vivo 视觉能力基础地址。 |
+| `KNOWLINK_VIVO_VISION_MODEL` | 视觉模型标识，用于 OCR、截图公式和图表说明。 |
+
 ## 1. 解析产物字段说明
 
 ### 1.1 `course_segments`
@@ -51,6 +68,7 @@
 - 每条 segment 必须且只能使用与 `resourceType` 匹配的一组定位字段。
 - `mp4` / `srt` 使用 `start_sec + end_sec`；`pdf` 使用 `page_no`；`pptx` 使用 `slide_no`；`docx` 在 segment 层使用 `section_path + order_no`，对外 citation 使用 `anchorKey`。
 - 不得为 DOCX 伪造页码，不得把 PDF 页码和视频时间写入同一条 segment。
+- DOCX 的 `docx_block_text`、`ocr_text`、`formula`、`image_caption` 均只能使用 `section_path + order_no` 定位，不得使用 `page_no`、`slide_no`、`start_sec` 或 `end_sec`。
 
 ### 1.2 `knowledge_points`
 
