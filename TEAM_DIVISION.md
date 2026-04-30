@@ -74,8 +74,8 @@
 | FastAPI 路由与服务 | 杨彩艺 | 曹乐 | 包括 API、任务入队、聚合状态 |
 | `course_catalog` 与推荐契约 | 曹乐 | 杨彩艺 | 目录语义、推荐字段和确认入课流程 |
 | B 站导入预留接口与扫码登录预留接口 | 杨彩艺 | 曹乐 | 接口主负责人是杨彩艺；第 1 周由曹乐冻结业务 contract、状态语义和错误码，第 2 周由杨彩艺按冻结结果补当前 `501` stub |
-| AIGC Prompt 与生成策略 | 曹乐 | 杨彩艺 | 由曹乐定义策略，杨彩艺负责服务接入 |
-| OCR / 文档解析与结构化策略 | 曹乐 | 杨彩艺 | 解析规则和输出结构由曹乐主导 |
+| AIGC Prompt、赛方 AI 能力业务适配与生成策略 | 曹乐 | 杨彩艺 | 曹乐负责 `server/ai/**`、`server/parsers/**` 内 OCR / ASR / LLM / Embedding 等能力的业务输入输出、prompt、AI 输出 JSON Schema / parse schema、降级和产物策略，不包含 `server/schemas/**` API DTO；杨彩艺负责服务接入与运行时接线 |
+| OCR / ASR / 文档解析与结构化策略 | 曹乐 | 杨彩艺 | 解析规则、输出结构和解析侧产物归一化由曹乐主导 |
 | 数据库与数据关系 | 曹乐 | 杨彩艺 | 数据关系、业务语义与状态边界由曹乐定义，落库实现由杨彩艺完成 |
 | MinIO / Redis / PostgreSQL 接入 | 杨彩艺 | 曹乐 | 第 1 周只完成配置、本地编排、基础迁移和 scaffold；真实读写、持久化仓储与任务链路进入第 2 周实现 |
 | 演示内容、比赛材料 | 曹乐 | 全员 | 页面截图、讲解顺序、答辩稿统一管理 |
@@ -88,6 +88,7 @@
 
 - `server/ai/**`
 - `server/parsers/**`
+- 赛方 AI 能力在 `server/ai/**` 与 `server/parsers/**` 内的业务适配、输入输出映射、prompt、AI 输出 JSON Schema / parse schema、错误降级、结果校验和产物归一化策略，不包含 `server/schemas/**` API DTO
 - `courses`、`learning_preferences`、`handout_versions`、`knowledge_points`、`mastery_records`、`review_task_runs` 的业务字段语义设计
 - `parse_runs`、`async_tasks`、`quizzes` 的状态语义与业务边界确认
 - 所有 AI 输出 JSON Schema
@@ -137,7 +138,7 @@
 杨彩艺只读不写的内容：
 
 - Flutter 页面布局与视觉规范
-- AI 策略定义
+- `server/ai/**` 与 `server/parsers/**` 内的 AI 策略定义、赛方 AI 能力业务适配和解析 / 生成产物策略；不限制其负责运行时接线、任务调度、仓储 / DB、配置注入和 API 错误返回
 - 核心表设计的业务含义
 
 ## 5. 数据表 owner 对照
@@ -345,6 +346,11 @@
 - `parse_runs`
 - `async_tasks`
 - 解析输出结构冻结
+
+协作边界：
+
+- 曹乐负责 `server/ai/**` 与 `server/parsers/**` 内的 parser 内核、赛方 AI 能力业务适配、prompt、AI 输出 JSON Schema / parse schema、解析与生成产物策略。
+- 杨彩艺负责 FastAPI router / service、worker 调度、provider 运行时接线、配置注入、仓储落库、状态聚合和稳定性。
 
 解锁后续：
 

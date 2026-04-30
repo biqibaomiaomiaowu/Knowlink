@@ -140,8 +140,11 @@
   - 文档解析
   - 知识点抽取
   - 向量化
+- 负责 `server/ai/**` 与 `server/parsers/**` 中赛方 AI 能力的业务适配与产物策略，包括 OCR、ASR、LLM、Embedding 等与解析 / 生成产物直接相关的业务输入输出映射、prompt、AI 输出 JSON Schema / parse schema、结果校验、错误降级和产物归一化；不包含 `server/schemas/**` API DTO。
+- 实现 PDF / PPTX / DOCX / MP4 / SRT 的解析策略，输出 normalized document、segments、knowledge point extraction 产物和 vector document 输入内容策略；资源读取、worker 编排、DB 写入和状态流转由杨彩艺负责。
+- 定义解析侧 `failed` / `partial_success` / `succeeded` 判定业务语义。
 - 定义问询题模板和 `learning_preferences` 字段语义。
-- 与杨彩艺确认 `parse_run` 聚合状态和 `pipeline-status` 返回结构。
+- 与杨彩艺确认 `parse_run` 聚合状态和 `pipeline-status` 返回结构；杨彩艺负责聚合计算、API DTO、错误返回和落库实现。
 - 复核第 1 周已预留的 B 站单视频导入接口与扫码登录接口 contract，确认当前阶段统一返回 `501` 的业务语义：
   - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
   - `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
@@ -172,12 +175,13 @@
 ### 4.4 杨彩艺
 
 - 实现创建课程、上传初始化、上传完成、资源列表接口。
-- 接通创建课程、上传、解析所需的最小 SQLAlchemy 持久化仓储、MinIO 真实读写、Redis / Dramatiq broker 与 worker 消费链路。
+- 接通创建课程、上传、解析运行时所需的最小 SQLAlchemy 持久化仓储、MinIO 真实读写、Redis / Dramatiq broker 与 worker 消费链路。
 - 实现 `parse_runs`、`async_tasks`、`course_resources` 的最小可用链路，其中解析根任务至少能完成 `queued -> running -> succeeded/failed` 状态流转。
 - 实现解析接口：
   - `POST /api/v1/courses/{courseId}/parse/start`
   - `GET /api/v1/courses/{courseId}/pipeline-status`
   - `GET /api/v1/parse-runs/{parseRunId}`
+- 负责解析接口到 worker / task / repository / DB 的运行时接线、配置注入、状态聚合和 API 错误返回；解析 / AI 产物策略由曹乐负责。
 - 实现问询接口：
   - `GET /api/v1/courses/{courseId}/inquiry/questions`
   - `POST /api/v1/courses/{courseId}/inquiry/answers`
@@ -190,7 +194,7 @@
   - `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
   - `GET /api/v1/bilibili/auth/session`
   - `DELETE /api/v1/bilibili/auth/session`
-- 落库基础解析结果，至少能写入 `course_segments` 和 `knowledge_points`。
+- 消费曹乐提供的 parser / AI adapter 产物并落库基础解析结果，至少能写入 `course_segments` 和 `knowledge_points`。
 
 ### 4.5 本周交付物
 
