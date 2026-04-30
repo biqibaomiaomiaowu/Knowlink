@@ -14,6 +14,12 @@
 - [schemas/parse/normalized_document.schema.json](../../schemas/parse/normalized_document.schema.json)
 - [schemas/ai/knowledge_point_extraction.schema.json](../../schemas/ai/knowledge_point_extraction.schema.json)
 
+命名约定：
+
+- 本文件描述落库字段时使用 snake_case，例如 `segment_type`、`page_no`、`section_path`。
+- `schemas/parse/normalized_document.schema.json` 描述 parser 产物时使用 camelCase，例如 `segmentType`、`pageNo`、`sectionPath`。
+- `normalized_document.segments[].segmentType` 与 `course_segments.segment_type` 使用同一组业务枚举。
+
 ## 1. 解析产物字段说明
 
 ### 1.1 `course_segments`
@@ -230,6 +236,8 @@
 ## 4. 问询题到 `learning_preferences` 的映射
 
 问询题 key 固定由 `GET /api/v1/courses/{courseId}/inquiry/questions` 下发，提交时 `answers[].key` 必须命中已下发 key。服务端保存时写入 `learning_preferences`，同时保留原始答案快照到 `inquiry_answers_json`。
+
+Week 2 v1 问询模板最低只要求接口下发 `goal_type`、`mastery_level`、`time_budget_minutes`、`handout_style`、`explanation_granularity` 5 个必填 key。`exam_at`、`language_style`、`focus_knowledge_points` 是保存与推导规则，可在后续问询模板版本中下发；本周不强制 Flutter 页面展示。
 
 | inquiry key | 允许值 / 类型 | 写入字段 | 规则 |
 |---|---|---|---|

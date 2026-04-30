@@ -7,7 +7,7 @@
         {
           "properties": {
             "segmentType": {
-              "const": "pdf_text"
+              "enum": ["pdf_page_text", "ocr_text", "formula", "image_caption"]
             }
           }
         },
@@ -39,7 +39,7 @@
         {
           "properties": {
             "segmentType": {
-              "const": "slide_text"
+              "enum": ["ppt_slide_text", "ocr_text", "formula", "image_caption"]
             }
           }
         },
@@ -71,12 +71,12 @@
         {
           "properties": {
             "segmentType": {
-              "const": "doc_paragraph"
+              "enum": ["docx_block_text", "formula"]
             }
           }
         },
         {
-          "required": ["anchorKey"]
+          "required": ["sectionPath"]
         },
         {
           "not": {
@@ -103,7 +103,7 @@
         {
           "properties": {
             "segmentType": {
-              "const": "video_transcript"
+              "const": "video_caption"
             }
           }
         },
@@ -149,7 +149,15 @@
           },
           "segmentType": {
             "type": "string",
-            "enum": ["video_transcript", "pdf_text", "slide_text", "doc_paragraph"]
+            "enum": [
+              "video_caption",
+              "pdf_page_text",
+              "ppt_slide_text",
+              "docx_block_text",
+              "ocr_text",
+              "formula",
+              "image_caption"
+            ]
           },
           "orderNo": {
             "type": "integer",
@@ -178,6 +186,13 @@
           "anchorKey": {
             "type": "string",
             "minLength": 1
+          },
+          "sectionPath": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "additionalProperties": false

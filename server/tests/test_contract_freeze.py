@@ -60,6 +60,26 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
         assert step_code in week2_contract
 
 
+def test_normalized_document_segment_types_match_week2_contract():
+    week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
+    schema = load_json("schemas/parse/normalized_document.schema.json")
+    expected_segment_types = {
+        "video_caption",
+        "pdf_page_text",
+        "ppt_slide_text",
+        "docx_block_text",
+        "ocr_text",
+        "formula",
+        "image_caption",
+    }
+
+    schema_segment_types = set(schema["properties"]["segments"]["items"]["properties"]["segmentType"]["enum"])
+    assert schema_segment_types == expected_segment_types
+
+    for segment_type in expected_segment_types:
+        assert f"`{segment_type}`" in week2_contract
+
+
 def test_bilibili_reserved_contract_is_aligned_across_docs():
     architecture = load_text("ARCHITECTURE.md")
     api_contract = load_text("docs/contracts/api-contract.md")
@@ -740,7 +760,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-pdf-1",
-                    "segmentType": "pdf_text",
+                    "segmentType": "pdf_page_text",
                     "orderNo": 1,
                     "textContent": "limit",
                     "pageNo": 2,
@@ -752,7 +772,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-pptx-1",
-                    "segmentType": "slide_text",
+                    "segmentType": "ppt_slide_text",
                     "orderNo": 1,
                     "textContent": "matrix",
                     "slideNo": 6,
@@ -764,9 +784,10 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-docx-1",
-                    "segmentType": "doc_paragraph",
+                    "segmentType": "docx_block_text",
                     "orderNo": 1,
                     "textContent": "integral",
+                    "sectionPath": ["第 1 章", "积分"],
                     "anchorKey": "section-integral",
                 }
             ],
@@ -776,7 +797,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-video-1",
-                    "segmentType": "video_transcript",
+                    "segmentType": "video_caption",
                     "orderNo": 1,
                     "textContent": "video",
                     "startSec": 0,
@@ -789,7 +810,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-srt-1",
-                    "segmentType": "video_transcript",
+                    "segmentType": "video_caption",
                     "orderNo": 1,
                     "textContent": "subtitle",
                     "startSec": 30,
@@ -805,7 +826,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-pdf-bad-1",
-                    "segmentType": "pdf_text",
+                    "segmentType": "pdf_page_text",
                     "orderNo": 1,
                     "textContent": "limit",
                     "anchorKey": "bad",
@@ -817,7 +838,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-pdf-bad-2",
-                    "segmentType": "pdf_text",
+                    "segmentType": "pdf_page_text",
                     "orderNo": 1,
                     "textContent": "limit",
                     "startSec": 10,
@@ -829,7 +850,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-pptx-bad-1",
-                    "segmentType": "slide_text",
+                    "segmentType": "ppt_slide_text",
                     "orderNo": 1,
                     "textContent": "matrix",
                     "pageNo": 2,
@@ -841,7 +862,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-docx-bad-1",
-                    "segmentType": "doc_paragraph",
+                    "segmentType": "docx_block_text",
                     "orderNo": 1,
                     "textContent": "integral",
                     "slideNo": 6,
@@ -853,7 +874,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-video-bad-1",
-                    "segmentType": "video_transcript",
+                    "segmentType": "video_caption",
                     "orderNo": 1,
                     "textContent": "video",
                     "pageNo": 2,
@@ -865,7 +886,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-video-bad-2",
-                    "segmentType": "video_transcript",
+                    "segmentType": "video_caption",
                     "orderNo": 1,
                     "textContent": "video",
                     "startSec": 0,
@@ -877,7 +898,7 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             "segments": [
                 {
                     "segmentKey": "seg-srt-bad-1",
-                    "segmentType": "video_transcript",
+                    "segmentType": "video_caption",
                     "orderNo": 1,
                     "textContent": "subtitle",
                     "endSec": 45,
@@ -886,7 +907,56 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
         },
         {
             "resourceType": "pdf",
-            "segments": [{"segmentType": "pdf_text", "orderNo": 1, "textContent": "missing key", "pageNo": 2}],
+            "segments": [{"segmentType": "pdf_page_text", "orderNo": 1, "textContent": "missing key", "pageNo": 2}],
+        },
+        {
+            "resourceType": "pdf",
+            "segments": [
+                {
+                    "segmentKey": "seg-pdf-old-type",
+                    "segmentType": "pdf_text",
+                    "orderNo": 1,
+                    "textContent": "old type",
+                    "pageNo": 2,
+                }
+            ],
+        },
+        {
+            "resourceType": "pptx",
+            "segments": [
+                {
+                    "segmentKey": "seg-pptx-old-type",
+                    "segmentType": "slide_text",
+                    "orderNo": 1,
+                    "textContent": "old type",
+                    "slideNo": 1,
+                }
+            ],
+        },
+        {
+            "resourceType": "docx",
+            "segments": [
+                {
+                    "segmentKey": "seg-docx-old-type",
+                    "segmentType": "doc_paragraph",
+                    "orderNo": 1,
+                    "textContent": "old type",
+                    "sectionPath": ["第 1 章"],
+                }
+            ],
+        },
+        {
+            "resourceType": "mp4",
+            "segments": [
+                {
+                    "segmentKey": "seg-video-old-type",
+                    "segmentType": "video_transcript",
+                    "orderNo": 1,
+                    "textContent": "old type",
+                    "startSec": 0,
+                    "endSec": 1,
+                }
+            ],
         },
     ]
 
