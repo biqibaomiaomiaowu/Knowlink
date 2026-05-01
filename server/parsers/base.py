@@ -10,8 +10,8 @@ ParserStatus = Literal["succeeded", "failed", "skipped"]
 NormalizedDocument = dict[str, Any]
 NormalizedSegment = dict[str, Any]
 
-_GARBLED_TEXT_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufffd\uffff]")
-_PURE_DOT_LINE_RE = re.compile(r"^[.\-_=~·•。…\s]{4,}$")
+_GARBLED_TEXT_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufffd\uffff\u0b80-\u0bff]")
+_PURE_DOT_LINE_RE = re.compile(r"^[.\-_=~·•。…\s]+$")
 _PURE_NOISE_LINE_RE = re.compile(r"^[^\w\u4e00-\u9fff]{4,}$", re.UNICODE)
 _REPEATED_SYMBOL_LINE_RE = re.compile(r"^(.)\1{3,}$")
 _USEFUL_MATH_CHARS = set("=+-*/^_()[]{}<>≤≥≈≠∫∑∏√π∞→←↔")
@@ -134,6 +134,22 @@ def has_garbled_text(text: str | None) -> bool:
     return _GARBLED_TEXT_RE.search(text or "") is not None
 
 
+def is_duplicate_text(candidate: str, existing_texts: list[str]) -> bool:
+    normalized_candidate = _compact_text(candidate)
+    if len(normalized_candidate) < 4:
+        return False
+
+    for existing_text in existing_texts:
+        normalized_existing = _compact_text(existing_text)
+        if not normalized_existing:
+            continue
+        if normalized_candidate == normalized_existing:
+            return True
+        if normalized_candidate in normalized_existing or normalized_existing in normalized_candidate:
+            return True
+    return False
+
+
 def _clean_segments(segments: list[NormalizedSegment]) -> list[NormalizedSegment]:
     clean_segments: list[NormalizedSegment] = []
     for segment in segments:
@@ -175,6 +191,10 @@ def _looks_like_garbled_text(text: str) -> bool:
         if char.isalnum() or "\u4e00" <= char <= "\u9fff" or char in _USEFUL_MATH_CHARS
     ]
     return len(visible_chars) >= 8 and len(useful_chars) / len(visible_chars) < 0.2
+
+
+def _compact_text(text: str) -> str:
+    return re.sub(r"[\W_]+", "", clean_text(text).lower(), flags=re.UNICODE)
 
 
 @dataclass(frozen=True)
