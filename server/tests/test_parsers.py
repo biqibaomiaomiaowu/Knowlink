@@ -16,6 +16,7 @@ from pptx.util import Inches
 from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
+from server.ai.asr import AsrSegment, VivoLongAsrClient, get_configured_asr_client
 from server.ai.ocr import OcrAssetResult, OcrBox, VivoOcrClient
 from server.ai.vision import VivoVisionClient, VisionAssetResult, VisionResult, VisualAsset
 from server.parsers import DocxParser, ParserResult, PdfParser, PptxParser, SrtParser, VideoParser, parse_resource
@@ -118,6 +119,19 @@ class FakeOcrClient:
                     for result in self.results
                 )
         return output
+
+
+class FakeAsrClient:
+    def __init__(self, segments: list[AsrSegment] | None = None, error: Exception | None = None) -> None:
+        self.segments = segments or []
+        self.error = error
+        self.calls: list[Path] = []
+
+    def transcribe(self, file_path):
+        self.calls.append(Path(file_path))
+        if self.error is not None:
+            raise self.error
+        return self.segments
 
 
 class RaisingOcrClient:
@@ -1170,6 +1184,73 @@ def test_mp4_parser_returns_asr_not_configured_issue(tmp_path: Path):
     assert issue_codes(result) == ["mp4.asr_not_configured"]
 
 
+def test_mp4_parser_uses_asr_segments_and_validates_schema(tmp_path: Path):
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient(
+        [
+            AsrSegment(text="集合是确定对象组成的整体。", start_sec=0, end_sec=12),
+            AsrSegment(text="元素和集合之间使用属于关系。", start_sec=12, end_sec=28),
+        ]
+    )
+
+    result = VideoParser(asr_client=asr_client).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert issue_codes(result) == []
+    assert asr_client.calls == [video_path]
+    assert document["resourceType"] == "mp4"
+    assert document["segments"] == [
+        {
+            "segmentKey": "mp4-c1",
+            "segmentType": "video_caption",
+            "orderNo": 1,
+            "textContent": "集合是确定对象组成的整体。",
+            "startSec": 0,
+            "endSec": 12,
+        },
+        {
+            "segmentKey": "mp4-c2",
+            "segmentType": "video_caption",
+            "orderNo": 2,
+            "textContent": "元素和集合之间使用属于关系。",
+            "startSec": 12,
+            "endSec": 28,
+        },
+    ]
+
+
+def test_mp4_parser_skips_invalid_asr_timeline_and_keeps_clean_segments(tmp_path: Path):
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient(
+        [
+            AsrSegment(text="bad", start_sec=10, end_sec=10),
+            AsrSegment(text="有效字幕", start_sec=10, end_sec=20),
+        ]
+    )
+
+    result = VideoParser(asr_client=asr_client).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert issue_codes(result) == ["mp4.asr_timeline_invalid"]
+    assert len(document["segments"]) == 1
+    assert document["segments"][0]["textContent"] == "有效字幕"
+
+
+def test_mp4_parser_reports_asr_failure(tmp_path: Path):
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    result = VideoParser(asr_client=FakeAsrClient(error=RuntimeError("timeout"))).parse(video_path)
+
+    assert result.status == "failed"
+    assert result.normalized_document is None
+    assert issue_codes(result) == ["mp4.asr_failed"]
+
+
 def test_first_edition_what_is_set_documents_parse_high_fidelity_under_75_seconds():
     asset_dir = ROOT / "local_assets/first-edition/what-is-set"
     required_files = [
@@ -1535,4 +1616,88 @@ def test_vivo_ocr_client_uses_general_recognition_with_pos_2(monkeypatch):
                 OcrBox(text="第二行", x=0.1, y=0.4, w=0.30000000000000004, h=0.09999999999999998),
             ],
         )
+    ]
+
+
+def test_configured_asr_client_requires_enable_flag(monkeypatch):
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "fake-key")
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_ASR", raising=False)
+
+    assert get_configured_asr_client() is None
+
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_ASR", "true")
+    assert isinstance(get_configured_asr_client(), VivoLongAsrClient)
+
+
+def test_vivo_long_asr_client_runs_multistep_protocol(monkeypatch, tmp_path: Path):
+    audio_path = tmp_path / "lecture.m4a"
+    audio_path.write_bytes(b"audio-bytes")
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self):
+            return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        calls.append({"url": request.full_url, "headers": dict(request.header_items()), "body": request.data})
+        if "/lasr/create?" in request.full_url:
+            return FakeResponse({"code": 0, "data": {"audio_id": "audio-1"}})
+        if "/lasr/upload?" in request.full_url:
+            return FakeResponse({"code": 0, "data": {"audio_id": "audio-1", "total": 1, "slices": 1}})
+        if "/lasr/run?" in request.full_url:
+            return FakeResponse({"code": 0, "data": {"task_id": "task-1"}})
+        if "/lasr/progress?" in request.full_url:
+            return FakeResponse({"code": 0, "data": {"progress": 100}})
+        if "/lasr/result?" in request.full_url:
+            return FakeResponse(
+                {
+                    "code": 0,
+                    "data": {
+                        "result": [
+                            {"onebest": "集合论基础。", "bg": 0, "ed": 2200, "speaker": 1},
+                            {"onebest": "对象组成集合。", "bg": 2200, "ed": 4100, "speaker": 1},
+                            {"onebest": "短句。", "bg": 119100, "ed": 119700, "speaker": 1},
+                        ]
+                    },
+                }
+            )
+        raise AssertionError(request.full_url)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = VivoLongAsrClient(
+        app_key="fake-key",
+        base_url="https://example.invalid",
+        user_id="knowlinkdemo00000000000000000000",
+        engine_id="fileasrrecorder",
+        client_version="test",
+        package="test.pkg",
+        timeout_sec=7,
+        poll_interval_sec=0.01,
+        max_wait_sec=1,
+    )
+
+    segments = client.transcribe(audio_path)
+
+    assert [call["url"].split("?", 1)[0] for call in calls] == [
+        "https://example.invalid/lasr/create",
+        "https://example.invalid/lasr/upload",
+        "https://example.invalid/lasr/run",
+        "https://example.invalid/lasr/progress",
+        "https://example.invalid/lasr/result",
+    ]
+    assert calls[0]["headers"]["Authorization"] == "Bearer fake-key"
+    assert calls[1]["headers"]["Content-type"].startswith("multipart/form-data; boundary=")
+    assert segments == [
+        AsrSegment(text="集合论基础。", start_sec=0, end_sec=3),
+        AsrSegment(text="对象组成集合。", start_sec=3, end_sec=5),
+        AsrSegment(text="短句。", start_sec=120, end_sec=121),
     ]
