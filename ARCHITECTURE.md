@@ -380,7 +380,9 @@ docs/
   demo-assets-first-edition.md
 schemas/
   ai/
+    handout_block.schema.json
     handout_blocks.schema.json
+    handout_outline.schema.json
     qa_response.schema.json
     quiz_generation.schema.json
     review_tasks.schema.json
@@ -419,7 +421,7 @@ README.md
 
 - `draft`：课程已创建，但还没有达到最低可解析资源条件。
 - `resource_ready`：已有最低可用资源，可发起解析。
-- `inquiry_ready`：解析完成，已产出课程摘要与知识点，允许问询。
+- `inquiry_ready`：解析完成，已产出课程摘要与讲义目录；完整知识点可随讲义块按需生成，允许问询。
 - `learning_ready`：已有可用讲义版本，允许学习。
 - `failed`：课程不可用，需要人工处理或重新导入。
 
@@ -734,6 +736,7 @@ exports/{courseId}/handouts/v{versionNo}.md
 - `status`
 - `title`
 - `summary`
+- `outline_json`
 - `style_profile_json`
 - `strategy_snapshot_json`
 - `total_blocks`
@@ -747,11 +750,12 @@ exports/{courseId}/handouts/v{versionNo}.md
 
 - `handout_version_id`
 - `course_id`
+- `outline_key`
 - `block_type`
 - `title`
 - `summary`
-- `content_md`
-- `content_text`
+- `content_md nullable`
+- `content_text nullable`
 - `start_sec nullable`
 - `end_sec nullable`
 - `page_from nullable`
@@ -1076,7 +1080,11 @@ exports/{courseId}/handouts/v{versionNo}.md
 | `POST` | `/api/v1/courses/{courseId}/handouts/generate` | 生成讲义 |
 | `GET` | `/api/v1/handout-versions/{handoutVersionId}/status` | 查询指定讲义版本状态 |
 | `GET` | `/api/v1/courses/{courseId}/handouts/latest` | 获取当前讲义版本摘要 |
+| `GET` | `/api/v1/courses/{courseId}/handouts/latest/outline` | 获取视频时间轴讲义目录 |
 | `GET` | `/api/v1/courses/{courseId}/handouts/latest/blocks` | 获取讲义块列表 |
+| `POST` | `/api/v1/handout-blocks/{blockId}/generate` | 按需生成单个讲义块 |
+| `GET` | `/api/v1/handout-blocks/{blockId}/status` | 查询单个讲义块生成状态 |
+| `GET` | `/api/v1/courses/{courseId}/handouts/current-block` | 根据播放时间查询当前讲义块 |
 | `GET` | `/api/v1/handout-blocks/{blockId}/jump-target` | 获取跳转目标 |
 
 ### 问答、测验、复习
@@ -1350,7 +1358,7 @@ Redis 缓存建议：
 
 - `course_catalog`
 - `courses`、`course_resources`、`parse_runs`、`async_tasks`
-- `course_segments`、`knowledge_points`、`vector_documents`
+- `course_segments`、`handout_outline`、按需生成的 `knowledge_points`、`vector_documents`
 - `learning_preferences`、`handout_versions`、`handout_blocks`
 - `handout_block_refs`、`qa_message_refs`、`quiz_question_refs`、`review_task_refs`
 - `qa_sessions`、`qa_messages`
@@ -1393,9 +1401,9 @@ Redis 缓存建议：
 1. 创建课程
 2. 上传并校验资源
 3. 发起解析并产出 `course_segments`
-4. 抽取 `knowledge_points`
+4. 基于视频字幕生成 `handout_outline`
 5. 收集 `learning_preferences`
-6. 生成 `handout_version + handout_blocks + handout_block_refs`
+6. 点击目录或播放进入某段后，按需生成对应 `handout_blocks + knowledge_points + handout_block_refs`
 7. 生成 1 组测验
 8. 记录 1 次作答
 9. 更新 `mastery_records`

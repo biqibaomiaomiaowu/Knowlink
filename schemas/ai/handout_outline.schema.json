@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KnowLinkHandoutOutline",
+  "description": "Structural schema for video-first handout outlines. Cross-item timeline constraints such as non-overlap, increasing sortNo, and sourceSegmentKeys belonging to the active caption set are contract rules enforced by server.ai.handout_lazy.outline_timeline_issues and generation-time validation.",
+  "$defs": {
+    "stableKey": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "generationStatus": {
+      "type": "string",
+      "enum": ["pending", "generating", "ready", "failed"]
+    }
+  },
+  "type": "object",
+  "required": ["title", "summary", "items"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "outlineKey",
+          "title",
+          "summary",
+          "startSec",
+          "endSec",
+          "sortNo",
+          "generationStatus",
+          "sourceSegmentKeys"
+        ],
+        "properties": {
+          "outlineKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sortNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "generationStatus": {
+            "$ref": "#/$defs/generationStatus"
+          },
+          "sourceSegmentKeys": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/stableKey"
+            }
+          },
+          "topicTags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

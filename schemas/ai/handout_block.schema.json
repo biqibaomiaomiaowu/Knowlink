@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "KnowLinkHandoutBlock",
+  "description": "Schema for a ready handout block produced by the AI generator. API read models may expose pending, generating, or failed blocks with null contentMd and empty citations before this ready payload exists.",
+  "$defs": {
+    "stableKey": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+    },
+    "difficultyLevel": {
+      "type": "string",
+      "enum": ["beginner", "intermediate", "advanced"]
+    },
+    "score0To100": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "citationLocator": {
+      "oneOf": [
+        {
+          "required": ["pageNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["slideNo"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["anchorKey"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["startSec"]
+              },
+              {
+                "required": ["endSec"]
+              }
+            ]
+          }
+        },
+        {
+          "required": ["startSec", "endSec"],
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "required": [
+    "outlineKey",
+    "title",
+    "summary",
+    "contentMd",
+    "estimatedMinutes",
+    "sourceSegmentKeys",
+    "knowledgePoints",
+    "citations"
+  ],
+  "properties": {
+    "outlineKey": {
+      "$ref": "#/$defs/stableKey"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contentMd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "estimatedMinutes": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sourceSegmentKeys": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/stableKey"
+      }
+    },
+    "knowledgePoints": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "knowledgePointKey",
+          "displayName",
+          "description",
+          "difficultyLevel",
+          "importanceScore",
+          "sortNo"
+        ],
+        "properties": {
+          "knowledgePointKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "difficultyLevel": {
+            "$ref": "#/$defs/difficultyLevel"
+          },
+          "importanceScore": {
+            "$ref": "#/$defs/score0To100"
+          },
+          "sortNo": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "citations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["resourceId", "refLabel"],
+        "properties": {
+          "resourceId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "segmentId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "segmentKey": {
+            "$ref": "#/$defs/stableKey"
+          },
+          "pageNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "slideNo": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "anchorKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endSec": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refLabel": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "allOf": [
+          {
+            "$ref": "#/$defs/citationLocator"
+          }
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

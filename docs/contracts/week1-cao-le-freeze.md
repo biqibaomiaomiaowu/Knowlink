@@ -63,6 +63,8 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
 - [schemas/ai/review_tasks.schema.json](../../schemas/ai/review_tasks.schema.json)
 - [schemas/parse/normalized_document.schema.json](../../schemas/parse/normalized_document.schema.json)
 
+其中 `schemas/ai/handout_blocks.schema.json` 是 Week 1 整包讲义 legacy schema，仅用于历史 citation contract 与混合定位能力校验。Week 2 起视频优先讲义链路以 `schemas/ai/handout_outline.schema.json` 和 `schemas/ai/handout_block.schema.json` 为目录与单块讲义的权威 schema。
+
 冻结的引用语义：
 
 - `pageNo` 只用于 PDF
