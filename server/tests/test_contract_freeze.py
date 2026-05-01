@@ -87,9 +87,19 @@ def test_parse_contract_documents_quality_gate_and_vision_env_vars():
         "U+FFFF",
         "U+FFFD",
         "KNOWLINK_ENABLE_MARKITDOWN_OCR",
+        "KNOWLINK_ENABLE_VIVO_OCR",
+        "KNOWLINK_VIVO_APP_ID",
         "KNOWLINK_VIVO_APP_KEY",
         "KNOWLINK_VIVO_BASE_URL",
+        "KNOWLINK_VIVO_OCR_TIMEOUT_SEC",
+        "KNOWLINK_VIVO_OCR_BUSINESS_ID",
         "KNOWLINK_VIVO_VISION_MODEL",
+        "KNOWLINK_VIVO_VISION_TIMEOUT_SEC",
+        "KNOWLINK_VIVO_VISION_BATCH_SIZE",
+        "Doubao-Seed-2.0-mini",
+        "Venn 图",
+        "低质 OCR",
+        "AUB",
     ):
         assert token in week2_contract
 
@@ -1075,7 +1085,7 @@ def test_first_edition_manifest_matches_first_edition_doc():
             "knowlink-demo-notes.docx",
             "集合的初见.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            40485,
+            47149,
         ),
     }
 

@@ -22,20 +22,31 @@
 
 解析质量门禁：
 
-- 所有 parser 输出 normalized document 前必须统一清洗 `textContent`，成功 segment 不得包含 `U+FFFF`、`U+FFFD`、NUL、C0/C1 控制字符等乱码。
+- 所有 parser 输出 normalized document 前必须统一清洗 `textContent`，成功 segment 不得包含 `U+FFFF`、`U+FFFD`、NUL、C0/C1 控制字符、异常脚本噪声等乱码。
 - 纯点线、纯符号噪声行和清洗后空行必须过滤；清洗后无有效文本的 segment 不得进入成功产物。
-- PDF 文本层缺失或出现强乱码时，优先尝试页级 OCR / 视觉增强；增强失败且无干净文本时跳过该页，若所有页均不可用则解析失败。
-- PPTX / DOCX 原生文本、表格和 OMML 公式优先结构化抽取；内嵌图片、截图型公式或截图型图表可走视觉增强，输出仍必须保留原资源定位。
-- OCR / 视觉增强默认关闭；仅在配置 `KNOWLINK_ENABLE_MARKITDOWN_OCR` 或 `KNOWLINK_VIVO_APP_KEY` 等环境变量后启用，未配置 key 时不得访问网络。
+- 解析分三层执行：先用本地 parser 抽文本层、表格和原生公式，再对候选页面 / 图片调用 vivo OCR（`pos=2`，bbox 仅内部使用），最后用多模态视觉模型精准兜底图示、公式、复杂版面和低质 OCR。
+- PDF 文本层缺失或出现强乱码时，优先收集页级渲染图走 OCR；OCR 失败或低质且无干净文本时再走视觉增强，若所有页均不可用则解析失败。
+- PDF / PPTX 若存在可用文本层但页面或 slide 仍包含大图、截图题目或截图图表，可保留原生文本 segment 并追加非重复 OCR / 视觉 segment；低质 OCR 不得污染成功产物，同一页 / slide 内不得重复输出已有文本层内容。
+- PPTX / DOCX 原生文本、表格和 OMML 公式优先结构化抽取；PPTX 内嵌 DOCX / OLE package 优先直接抽取源文本；内嵌图片、截图型公式或截图图表优先 OCR，OCR 不足时走视觉增强，输出仍必须保留原资源定位；PPTX 的 EMF/WMF 等对象可在本机具备 LibreOffice 时通过整 slide 渲染补齐。
+- Venn 图、流程图、坐标图、集合关系图等教学图示必须由多模态视觉模型生成 `image_caption`；OCR 只读出 `ANB`、`AUB`、`A/B/U` 等短标签时不得视为完整图示解析。
+- 数学 OCR 若出现 `AUB`、`ANB`、`ABe`、`CuA/CuB`、`2”`、`card(AB)` 等损坏模式，必须触发视觉兜底或过滤，不得直接进入最终知识点抽取输入。
+- 候选视觉资产未返回干净 segment 时，parser 必须记录明确 issue，例如 `pdf.visual_empty`、`pptx.visual_empty` 或 `pptx.slide_render_unavailable`。
+- OCR 和视觉增强默认关闭；仅在显式配置对应环境变量和 `KNOWLINK_VIVO_APP_KEY` 后启用，未配置 key 时不得访问网络；`ocr_text` 表示图片中可读文字，不限定来源于 OCR API。
 
 视觉增强环境变量：
 
 | 变量 | 语义 |
 |---|---|
 | `KNOWLINK_ENABLE_MARKITDOWN_OCR` | 是否启用 MarkItDown 作为 PDF 页级 OCR fallback，默认关闭。 |
+| `KNOWLINK_ENABLE_VIVO_OCR` | 是否启用 vivo 通用 OCR，默认关闭。 |
+| `KNOWLINK_VIVO_APP_ID` | 蓝心 / vivo 应用 id，保留为赛方能力配置字段。 |
 | `KNOWLINK_VIVO_APP_KEY` | 蓝心 / vivo 视觉能力调用 key；为空时不发起网络请求。 |
 | `KNOWLINK_VIVO_BASE_URL` | 蓝心 / vivo 视觉能力基础地址。 |
-| `KNOWLINK_VIVO_VISION_MODEL` | 视觉模型标识，用于 OCR、截图公式和图表说明。 |
+| `KNOWLINK_VIVO_OCR_TIMEOUT_SEC` | vivo OCR 请求超时时间，默认 `10` 秒。 |
+| `KNOWLINK_VIVO_OCR_BUSINESS_ID` | vivo OCR `businessid`；为空时使用 `aigc{KNOWLINK_VIVO_APP_ID}`。 |
+| `KNOWLINK_VIVO_VISION_MODEL` | 多模态视觉模型标识，默认 `Doubao-Seed-2.0-mini`，用于图片文字、公式和图表说明。 |
+| `KNOWLINK_VIVO_VISION_TIMEOUT_SEC` | 多模态视觉请求超时时间，默认 `20` 秒。 |
+| `KNOWLINK_VIVO_VISION_BATCH_SIZE` | 同一文件视觉资产批量请求大小，默认 `2`，大文件按批拆分。 |
 
 ## 1. 解析产物字段说明
 
