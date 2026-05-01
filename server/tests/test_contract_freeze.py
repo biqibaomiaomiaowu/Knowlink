@@ -150,9 +150,11 @@ def test_parse_contract_documents_quality_gate_and_vision_env_vars():
         "KNOWLINK_VIVO_BASE_URL",
         "KNOWLINK_VIVO_OCR_TIMEOUT_SEC",
         "KNOWLINK_VIVO_OCR_BUSINESS_ID",
+        "KNOWLINK_ENABLE_VIVO_VISION",
         "KNOWLINK_VIVO_VISION_MODEL",
         "KNOWLINK_VIVO_VISION_TIMEOUT_SEC",
         "KNOWLINK_VIVO_VISION_BATCH_SIZE",
+        "vision_model_unsupported",
         "Doubao-Seed-2.0-mini",
         "Venn 图",
         "低质 OCR",
@@ -1358,7 +1360,12 @@ def test_normalized_document_schema_rejects_garbled_text_content(bad_text: str):
 def test_demo_asset_baseline_covers_fixed_joint_test_set():
     baseline_doc = load_text("docs/demo-assets-baseline.md")
 
-    for token in ("knowlink-demo-main.mp4", "knowlink-demo-handout.pdf", "knowlink-demo-slides.pptx", "knowlink-demo-notes.docx"):
+    for token in (
+        "knowlink-demo-main.mp4",
+        "knowlink-demo-handout.pdf",
+        "knowlink-demo-slides.pptx",
+        "knowlink-demo-docx.docx",
+    ):
         assert token in baseline_doc
 
     assert "sha256:<hex>" in baseline_doc
@@ -1384,10 +1391,10 @@ def test_first_edition_manifest_matches_first_edition_doc():
             88576,
         ),
         "docx": (
-            "knowlink-demo-notes.docx",
-            "集合的初见.docx",
+            "knowlink-demo-docx.docx",
+            "集合论基础_讲义.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            47149,
+            62255,
         ),
     }
 

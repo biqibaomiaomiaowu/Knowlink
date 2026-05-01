@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import difflib
 from io import BytesIO
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ from server.ai.vision import (
     analyze_visual_assets,
     get_configured_vision_batch_size,
     get_configured_vision_client,
+    is_vision_model_unsupported_error,
 )
 from server.parsers.base import BaseParser, ParserIssue, ParserResult, clean_text, is_duplicate_text, text_quality_issue
 
@@ -107,7 +109,7 @@ class PdfParser(BaseParser):
                         candidates.append(candidate)
 
                 local_result = _pdf_local_vector_result(page, page_no, text)
-                if local_result is not None and self._vision_client is None:
+                if local_result is not None:
                     entry.asset_id = entry.asset_id or local_result.asset_id
                     local_visual_results.append(local_result)
                 entries.append(entry)
@@ -233,10 +235,15 @@ class PdfParser(BaseParser):
                 )
             except Exception as exc:
                 for asset in chunk:
+                    model_unsupported = is_vision_model_unsupported_error(exc)
                     issues.append(
                         ParserIssue(
-                            code="pdf.vision_failed",
-                            message="PDF page vision enhancement failed.",
+                            code="pdf.vision_model_unsupported" if model_unsupported else "pdf.vision_failed",
+                            message=(
+                                "PDF page vision model does not support image input."
+                                if model_unsupported
+                                else "PDF page vision enhancement failed."
+                            ),
                             details={**asset.location, "error": str(exc)},
                         )
                     )
@@ -370,6 +377,7 @@ class _PdfPageEntry:
     asset_id: str | None = None
     duplicate_texts: list[str] = field(default_factory=list)
     markitdown_page: object | None = None
+    suppress_visual_empty: bool = False
 
 
 def _pdf_visual_candidate(page: object, page_no: int, *, hint: str) -> _PdfVisualCandidate:
@@ -412,6 +420,9 @@ def _pdf_vision_assets_after_ocr(
             continue
         if _ocr_results_need_vlm(page_results):
             visual_assets.append(_candidate_to_visual_asset(candidate))
+            continue
+        if entry.text and _ocr_results_duplicate_text_layer(page_results, entry.duplicate_texts):
+            entry.suppress_visual_empty = True
             continue
         if _ocr_results_are_good(page_results, entry.duplicate_texts):
             continue
@@ -509,6 +520,7 @@ def _build_pdf_segments(
             and not entry.quality_issue
             and _needs_missing_visual_issue(entry.text)
             and not _has_visual_failure(issues, entry.page_no)
+            and not entry.suppress_visual_empty
         ):
             issues.append(
                 ParserIssue(
@@ -584,7 +596,12 @@ def _markitdown_asset_result(entry: _PdfPageEntry) -> tuple[VisionAssetResult | 
 
 def _has_visual_failure(issues: list[ParserIssue], page_no: int) -> bool:
     for issue in issues:
-        if issue.code not in {"pdf.vision_failed", "pdf.ocr_failed", "pdf.ocr_empty"}:
+        if issue.code not in {
+            "pdf.vision_failed",
+            "pdf.vision_model_unsupported",
+            "pdf.ocr_failed",
+            "pdf.ocr_empty",
+        }:
             continue
         details = issue.details or {}
         if details.get("pageNo") == page_no:
@@ -641,6 +658,8 @@ def _ocr_results_to_visual_results(
         entry = entry_map.get(result.asset_id)
         if entry is None:
             continue
+        if entry.text and _ocr_text_duplicates_text_layer(result.text, entry.duplicate_texts):
+            continue
         if _usable_ocr_text(result.text):
             visual_results.append(
                 VisionAssetResult(asset_id=result.asset_id, segment_type="ocr_text", text=result.text)
@@ -658,6 +677,31 @@ def _ocr_results_are_good(results: list[OcrAssetResult], duplicate_texts: list[s
 
 def _ocr_results_need_vlm(results: list[OcrAssetResult]) -> bool:
     return any(_low_quality_ocr_text(result.text) for result in results)
+
+
+def _ocr_results_duplicate_text_layer(results: list[OcrAssetResult], duplicate_texts: list[str]) -> bool:
+    return bool(results) and all(_ocr_text_duplicates_text_layer(result.text, duplicate_texts) for result in results)
+
+
+def _ocr_text_duplicates_text_layer(text: str, duplicate_texts: list[str]) -> bool:
+    candidate = _compact_for_similarity(text)
+    if len(candidate) < 30:
+        return False
+
+    for existing_text in duplicate_texts:
+        existing = _compact_for_similarity(existing_text)
+        if len(existing) < 30:
+            continue
+        length_ratio = len(candidate) / len(existing)
+        if not 0.5 <= length_ratio <= 1.5:
+            continue
+        if difflib.SequenceMatcher(None, existing, candidate).ratio() >= 0.82:
+            return True
+    return False
+
+
+def _compact_for_similarity(text: str) -> str:
+    return re.sub(r"[\W_]+", "", clean_text(text).lower(), flags=re.UNICODE)
 
 
 def _usable_ocr_text(text: str) -> bool:

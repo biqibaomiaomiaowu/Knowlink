@@ -35,7 +35,8 @@
 - Venn 图、流程图、坐标图、集合关系图等教学图示必须由多模态视觉模型生成 `image_caption`；OCR 只读出 `ANB`、`AUB`、`A/B/U` 等短标签时不得视为完整图示解析。
 - 数学 OCR 若出现 `AUB`、`ANB`、`ABe`、`CuA/CuB`、`2”`、`card(AB)` 等损坏模式，必须触发视觉兜底或过滤，不得直接进入最终知识点抽取输入。
 - 候选视觉资产未返回干净 segment 时，parser 必须记录明确 issue，例如 `pdf.visual_empty`、`pptx.visual_empty` 或 `pptx.slide_render_unavailable`。
-- OCR 和视觉增强默认关闭；仅在显式配置对应环境变量和 `KNOWLINK_VIVO_APP_KEY` 后启用，未配置 key 时不得访问网络；`ocr_text` 表示图片中可读文字，不限定来源于 OCR API。
+- OCR 和视觉增强是两个独立开关，默认均关闭；仅在显式配置对应启用环境变量和 `KNOWLINK_VIVO_APP_KEY` 后启用，未配置 key 时不得访问网络；`KNOWLINK_VIVO_APP_KEY` 被 ASR、OCR 或 outline 复用时不得自动启用视觉 LLM；`ocr_text` 表示图片中可读文字，不限定来源于 OCR API。
+- 若视觉模型明确返回 `code=1010` / `Model do not support image input`，parser 必须记录资源专属 issue（例如 `pdf.vision_model_unsupported`、`pptx.vision_model_unsupported`、`docx.vision_model_unsupported`），不得泛化为 `*.vision_failed`。
 
 视觉增强环境变量：
 
@@ -54,7 +55,8 @@
 | `KNOWLINK_VIVO_ASR_TIMEOUT_SEC` | vivo ASR 单次 HTTP 请求超时时间，默认 `30` 秒。 |
 | `KNOWLINK_VIVO_ASR_POLL_INTERVAL_SEC` | ASR 任务进度轮询间隔，默认 `3` 秒。 |
 | `KNOWLINK_VIVO_ASR_MAX_WAIT_SEC` | ASR 任务最长等待时间，默认 `600` 秒。 |
-| `KNOWLINK_VIVO_VISION_MODEL` | 多模态视觉模型标识，默认 `Doubao-Seed-2.0-mini`，用于图片文字、公式和图表说明。 |
+| `KNOWLINK_ENABLE_VIVO_VISION` | 是否启用 vivo 多模态视觉 LLM，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才可创建视觉 client。 |
+| `KNOWLINK_VIVO_VISION_MODEL` | 多模态视觉模型标识，默认 `Doubao-Seed-2.0-mini`；仅在 `KNOWLINK_ENABLE_VIVO_VISION=true` 时生效，用于图片文字、公式和图表说明。 |
 | `KNOWLINK_VIVO_VISION_TIMEOUT_SEC` | 多模态视觉请求超时时间，默认 `20` 秒。 |
 | `KNOWLINK_VIVO_VISION_BATCH_SIZE` | 同一文件视觉资产批量请求大小，默认 `2`，大文件按批拆分。 |
 | `KNOWLINK_VIVO_OUTLINE_MODEL` | 视频目录生成模型，默认优先快模型 `Doubao-Seed-2.0-mini`。 |

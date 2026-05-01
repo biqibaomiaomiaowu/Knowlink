@@ -18,7 +18,14 @@ from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
 from server.ai.asr import AsrSegment, VivoLongAsrClient, get_configured_asr_client
 from server.ai.ocr import OcrAssetResult, OcrBox, VivoOcrClient
-from server.ai.vision import VivoVisionClient, VisionAssetResult, VisionResult, VisualAsset
+from server.ai.vision import (
+    VivoVisionClient,
+    VisionAssetResult,
+    VisionModelUnsupportedError,
+    VisionResult,
+    VisualAsset,
+    get_configured_vision_client,
+)
 from server.parsers import DocxParser, ParserResult, PdfParser, PptxParser, SrtParser, VideoParser, parse_resource
 from server.parsers.base import clean_text, text_quality_issue
 
@@ -145,6 +152,18 @@ class RaisingVisionClient:
 
     def analyze_images(self, assets, *, resource_type, document_context=None):
         raise RuntimeError("vision unavailable")
+
+
+class UnsupportedVisionClient:
+    def analyze_image(self, image_bytes, *, mime_type, resource_type, location, hint=None):
+        raise VisionModelUnsupportedError(
+            "vivo multimodal failed: code=1010 message=Model do not support image input"
+        )
+
+    def analyze_images(self, assets, *, resource_type, document_context=None):
+        raise VisionModelUnsupportedError(
+            "vivo multimodal failed: code=1010 message=Model do not support image input"
+        )
 
 
 def create_text_pdf(path: Path, text: str) -> None:
@@ -362,6 +381,24 @@ def test_pdf_parser_skips_short_duplicate_mixed_page_ocr(monkeypatch, tmp_path: 
     assert [segment["segmentType"] for segment in document["segments"]] == ["pdf_page_text"]
 
 
+def test_pdf_parser_filters_near_duplicate_ocr_for_clean_text_layer(monkeypatch, tmp_path: Path):
+    pdf_path = tmp_path / "near-duplicate-ocr.pdf"
+    create_text_pdf(pdf_path, "Set theory basics Email: ljwang@uestc.edu.cn UESTC computer school 2016")
+    monkeypatch.setattr("server.parsers.pdf._pymupdf_page_needs_visual_ocr", lambda page, text: True)
+    monkeypatch.setattr("server.parsers.pdf._pymupdf_page_png", lambda page: b"page-png")
+    ocr_text = "Set theory basics Email:1jwang@uestc.edu.cn UESTC computer school 2016 D40"
+    ocr_client = FakeOcrClient([OcrAssetResult(asset_id="unused", text=ocr_text, boxes=[])])
+    vision_client = FakeVisionClient([VisionResult(segment_type="image_caption", text="should not be called")])
+
+    result = PdfParser(ocr_client=ocr_client, vision_client=vision_client).parse(pdf_path)
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document["segments"]] == ["pdf_page_text"]
+    assert vision_client.calls == []
+    assert issue_codes(result) == []
+
+
 def test_pdf_parser_reports_empty_visual_result_for_mixed_page(monkeypatch, tmp_path: Path):
     pdf_path = tmp_path / "mixed.pdf"
     create_text_pdf(pdf_path, "Title")
@@ -386,6 +423,20 @@ def test_pdf_parser_keeps_text_when_mixed_page_ocr_fails(monkeypatch, tmp_path: 
     document = assert_valid_normalized_document(result.normalized_document)
     assert [segment["segmentType"] for segment in document["segments"]] == ["pdf_page_text"]
     assert issue_codes(result) == ["pdf.vision_failed"]
+
+
+def test_pdf_parser_reports_unsupported_vision_model(monkeypatch, tmp_path: Path):
+    pdf_path = tmp_path / "mixed.pdf"
+    create_text_pdf(pdf_path, "Title")
+    monkeypatch.setattr("server.parsers.pdf._pymupdf_page_needs_visual_ocr", lambda page, text: True)
+    monkeypatch.setattr("server.parsers.pdf._pymupdf_page_png", lambda page: b"page-png")
+
+    result = PdfParser(vision_client=UnsupportedVisionClient()).parse(pdf_path)
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document["segments"]] == ["pdf_page_text"]
+    assert issue_codes(result) == ["pdf.vision_model_unsupported"]
 
 
 def test_pdf_parser_uses_vivo_ocr_before_vision(monkeypatch, tmp_path: Path):
@@ -521,6 +572,19 @@ def test_pdf_parser_adds_local_caption_for_vector_venn_without_vision(tmp_path: 
     assert "元素 a" in document["segments"][1]["textContent"]
 
 
+def test_pdf_parser_keeps_local_vector_caption_with_vision_enabled(tmp_path: Path):
+    pdf_path = tmp_path / "venn-vector.pdf"
+    create_vector_venn_pdf(pdf_path)
+
+    result = PdfParser(vision_client=FakeVisionClient([])).parse(pdf_path)
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document["segments"]] == ["pdf_page_text", "image_caption"]
+    assert "文氏图" in document["segments"][1]["textContent"]
+    assert "元素 a" in document["segments"][1]["textContent"]
+
+
 def test_pptx_parser_extracts_slide_text_and_validates_schema(tmp_path: Path):
     pptx_path = tmp_path / "deck.pptx"
     presentation = Presentation()
@@ -561,6 +625,29 @@ def test_pptx_parser_adds_local_caption_for_vector_venn_without_vision(tmp_path:
     assert issue_codes(result) == []
     assert [segment["segmentType"] for segment in document["segments"]] == ["ppt_slide_text", "image_caption"]
     assert document["segments"][1]["slideNo"] == 1
+    assert "文氏图" in document["segments"][1]["textContent"]
+    assert "元素 a" in document["segments"][1]["textContent"]
+
+
+def test_pptx_parser_keeps_local_vector_caption_with_vision_enabled(tmp_path: Path):
+    pptx_path = tmp_path / "venn-vector.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    title = slide.shapes.add_textbox(Inches(1), Inches(0.5), Inches(3), Inches(0.5))
+    title.text = "文氏图"
+    slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(1), Inches(1.3), Inches(2.2), Inches(1.4))
+    slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1.3), Inches(1.5), Inches(1.1), Inches(1.1))
+    label_a = slide.shapes.add_textbox(Inches(1.55), Inches(1.75), Inches(0.4), Inches(0.3))
+    label_a.text = "A"
+    point_a = slide.shapes.add_textbox(Inches(2.3), Inches(2.1), Inches(0.4), Inches(0.3))
+    point_a.text = "a"
+    presentation.save(pptx_path)
+
+    result = PptxParser(vision_client=FakeVisionClient([])).parse(pptx_path)
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document["segments"]] == ["ppt_slide_text", "image_caption"]
     assert "文氏图" in document["segments"][1]["textContent"]
     assert "元素 a" in document["segments"][1]["textContent"]
 
@@ -948,6 +1035,25 @@ def test_pptx_parser_keeps_slide_text_when_image_ocr_fails(tmp_path: Path):
     assert issue_codes(result) == ["pptx.vision_failed"]
 
 
+def test_pptx_parser_reports_unsupported_vision_model(tmp_path: Path):
+    pptx_path = tmp_path / "unsupported-vision.pptx"
+    image_path = tmp_path / "screenshot.png"
+    image_path.write_bytes(PNG_BYTES)
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    textbox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(3), Inches(1))
+    textbox.text = "Native slide text"
+    slide.shapes.add_picture(str(image_path), Inches(1), Inches(2), width=Inches(1))
+    presentation.save(pptx_path)
+
+    result = PptxParser(vision_client=UnsupportedVisionClient()).parse(pptx_path)
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document["segments"]] == ["ppt_slide_text"]
+    assert issue_codes(result) == ["pptx.vision_model_unsupported"]
+
+
 def test_docx_parser_extracts_heading_section_path_and_validates_schema(tmp_path: Path):
     docx_path = tmp_path / "document.docx"
     document = Document()
@@ -1063,6 +1169,29 @@ def test_docx_parser_calls_vision_when_ocr_is_low_quality(tmp_path: Path):
     assert document_payload["segments"][1]["textContent"] == "文氏图阴影区域表示 A∩B。"
 
 
+def test_docx_parser_converts_venn_ocr_to_local_caption_without_vision(tmp_path: Path):
+    docx_path = tmp_path / "image-venn-ocr.docx"
+    document = Document()
+    document.add_heading("文氏图章节", level=1)
+    document.add_picture(BytesIO(PNG_BYTES), width=Inches(1))
+    document.save(docx_path)
+    ocr_text = "全集U\nA\naEA\n•bEA\n文氏图：用区域表示集合，用点表示元素"
+    ocr_client = FakeOcrClient([OcrAssetResult(asset_id="unused", text=ocr_text, boxes=[])])
+    vision_client = UnsupportedVisionClient()
+
+    result = DocxParser(ocr_client=ocr_client, vision_client=vision_client).parse(docx_path)
+
+    assert result.status == "succeeded"
+    document_payload = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document_payload["segments"]] == [
+        "docx_block_text",
+        "image_caption",
+    ]
+    assert "a ∈ A" in document_payload["segments"][1]["textContent"]
+    assert "b ∉ A" in document_payload["segments"][1]["textContent"]
+    assert issue_codes(result) == []
+
+
 def test_docx_parser_falls_back_to_vision_when_ocr_fails(tmp_path: Path):
     docx_path = tmp_path / "image-ocr-failed.docx"
     document = Document()
@@ -1078,6 +1207,21 @@ def test_docx_parser_falls_back_to_vision_when_ocr_fails(tmp_path: Path):
     assert len(vision_client.calls) == 1
     assert document_payload["segments"][1]["textContent"] == "函数变化趋势图"
     assert issue_codes(result) == ["docx.ocr_failed"]
+
+
+def test_docx_parser_reports_unsupported_vision_model(tmp_path: Path):
+    docx_path = tmp_path / "image-unsupported-vision.docx"
+    document = Document()
+    document.add_heading("图表章节", level=1)
+    document.add_picture(BytesIO(PNG_BYTES), width=Inches(1))
+    document.save(docx_path)
+
+    result = DocxParser(vision_client=UnsupportedVisionClient()).parse(docx_path)
+
+    assert result.status == "succeeded"
+    document_payload = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document_payload["segments"]] == ["docx_block_text"]
+    assert issue_codes(result) == ["docx.vision_model_unsupported"]
 
 
 def test_docx_parser_reports_empty_visual_result(tmp_path: Path):
@@ -1256,7 +1400,7 @@ def test_first_edition_what_is_set_documents_parse_high_fidelity_under_75_second
     required_files = [
         asset_dir / "knowlink-demo-handout.pdf",
         asset_dir / "knowlink-demo-slides.pptx",
-        asset_dir / "knowlink-demo-notes.docx",
+        asset_dir / "knowlink-demo-docx.docx",
     ]
     if not all(path.exists() for path in required_files):
         pytest.skip("Local first-edition what-is-set assets are not available.")
@@ -1271,7 +1415,7 @@ def test_first_edition_what_is_set_documents_parse_high_fidelity_under_75_second
     parse_inputs = [
         ("pdf", asset_dir / "knowlink-demo-handout.pdf"),
         ("pptx", asset_dir / "knowlink-demo-slides.pptx"),
-        ("docx", asset_dir / "knowlink-demo-notes.docx"),
+        ("docx", asset_dir / "knowlink-demo-docx.docx"),
     ]
     started_at = time.perf_counter()
     results = {resource_type: parse_resource(resource_type, path) for resource_type, path in parse_inputs}
@@ -1306,9 +1450,12 @@ def test_first_edition_what_is_set_documents_parse_high_fidelity_under_75_second
     docx_text = "\n".join(
         segment["textContent"] for segment in results["docx"].normalized_document["segments"]  # type: ignore[index]
     )
-    assert "集合论基础测试题" in docx_text
-    assert "单项选择题" in docx_text
-    assert "参考答案" in docx_text
+    assert "集合论基础" in docx_text
+    assert "集合的初见 · Word 版讲义" in docx_text
+    assert "学习目标" in docx_text
+    docx_segments = results["docx"].normalized_document["segments"]  # type: ignore[index]
+    docx_caption = next(segment for segment in docx_segments if segment["segmentType"] == "image_caption")
+    assert "文氏图" in docx_caption["textContent"]
 
 
 def test_real_parse_outputs_have_no_abnormal_chars_or_same_location_duplicates():
@@ -1345,6 +1492,53 @@ def test_real_parse_outputs_have_no_abnormal_chars_or_same_location_duplicates()
                 normalized != item and normalized not in item and item not in normalized for item in existing
             ), f"{path.name} has duplicate text at {location}: {text!r}"
             existing.append(normalized)
+
+
+def test_configured_vision_client_requires_explicit_enable_flag(monkeypatch):
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "fake-key")
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_VISION", raising=False)
+
+    assert get_configured_vision_client() is None
+
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_VISION", "true")
+
+    assert isinstance(get_configured_vision_client(), VivoVisionClient)
+
+
+def test_vivo_vision_client_reports_unsupported_image_model(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {"error": {"code": 1010, "message": "Model do not support image input"}},
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+    client = VivoVisionClient(
+        app_id="2026764332",
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="text-only-model",
+    )
+
+    with pytest.raises(VisionModelUnsupportedError):
+        client.analyze_images(
+            [
+                VisualAsset(
+                    asset_id="pdf-p1",
+                    image_bytes=b"png-bytes",
+                    mime_type="image/png",
+                    location={"pageNo": 1},
+                )
+            ],
+            resource_type="pdf",
+        )
 
 
 def test_vivo_vision_client_uses_batch_multimodal_chat_request(monkeypatch):

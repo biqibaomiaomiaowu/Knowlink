@@ -28,6 +28,7 @@ from server.ai.vision import (
     analyze_visual_assets,
     get_configured_vision_batch_size,
     get_configured_vision_client,
+    is_vision_model_unsupported_error,
 )
 from server.parsers.base import BaseParser, ParserIssue, ParserResult, clean_text, is_duplicate_text, text_quality_issue
 
@@ -114,8 +115,6 @@ class PptxParser(BaseParser):
                 )
 
             for result in _slide_local_vector_results(slide.shapes, slide_no, image_no, entry.text):
-                if self._vision_client is not None:
-                    break
                 image_no += 1
                 entry.images.append(_PptxImageEntry(image_no=image_no, asset_id=result.asset_id))
                 local_visual_results.append(result)
@@ -220,10 +219,15 @@ class PptxParser(BaseParser):
                 )
             except Exception as exc:
                 for asset in chunk:
+                    model_unsupported = is_vision_model_unsupported_error(exc)
                     issues.append(
                         ParserIssue(
-                            code="pptx.vision_failed",
-                            message="PPTX visual enhancement failed.",
+                            code="pptx.vision_model_unsupported" if model_unsupported else "pptx.vision_failed",
+                            message=(
+                                "PPTX vision model does not support image input."
+                                if model_unsupported
+                                else "PPTX visual enhancement failed."
+                            ),
                             details={**asset.location, "error": str(exc)},
                         )
                     )
@@ -865,7 +869,12 @@ def _slide_render_asset_id(slide_no: int) -> str:
 
 def _has_visual_failure(issues: list[ParserIssue], slide_no: int, image_no: int) -> bool:
     for issue in issues:
-        if issue.code not in {"pptx.vision_failed", "pptx.ocr_failed", "pptx.ocr_empty"}:
+        if issue.code not in {
+            "pptx.vision_failed",
+            "pptx.vision_model_unsupported",
+            "pptx.ocr_failed",
+            "pptx.ocr_empty",
+        }:
             continue
         details = issue.details or {}
         if details.get("slideNo") == slide_no and details.get("imageNo") == image_no:

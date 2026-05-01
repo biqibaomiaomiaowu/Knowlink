@@ -16,7 +16,7 @@
 | `mp4` | `集合的初见.mp4` | `knowlink-demo-main.mp4` | `video/mp4` | 38985139 | `sha256:55fa962beef83f57d1568f4ee9d7fcaf9d86e8f90521b65da0c577f2ad9b6a17` |
 | `pdf` | `1_1_what_is_set.pdf` | `knowlink-demo-handout.pdf` | `application/pdf` | 135310 | `sha256:5c4e50b9d6de0ed739b3a45be876f958c6d194a0ff87e66fe2f18f32242c7da8` |
 | `pptx` | `1_1_what_is_set.pptx` | `knowlink-demo-slides.pptx` | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | 88576 | `sha256:30ea64e0775ee77dcfc26794173c1393520b53bed6ece46c0cef43cb9d4f7641` |
-| `docx` | `集合的初见.docx` | `knowlink-demo-notes.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | 47149 | `sha256:787251a7059e85e9574055a9a8efadfee6cd7946f2c3c14c66f646559a1fa6d4` |
+| `docx` | `集合论基础_讲义.docx` | `knowlink-demo-docx.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | 62255 | `sha256:ab9985c054b9170a118fc19ffef31f93082ea176bf48dbbae6e40705dd8c0d8a` |
 
 ## 3. 维护约束
 

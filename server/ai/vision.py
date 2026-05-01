@@ -74,7 +74,14 @@ class VisionClient(Protocol):
         """Return OCR/formula/caption segments for localized visual assets."""
 
 
+class VisionModelUnsupportedError(RuntimeError):
+    """Raised when the configured model cannot accept image input."""
+
+
 def get_configured_vision_client() -> VisionClient | None:
+    if not _env_bool("KNOWLINK_ENABLE_VIVO_VISION"):
+        return None
+
     app_id = os.getenv("KNOWLINK_VIVO_APP_ID", "").strip()
     app_key = os.getenv("KNOWLINK_VIVO_APP_KEY", "").strip()
     if not app_key:
@@ -237,6 +244,13 @@ class VivoVisionClient:
         try:
             with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
                 body = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError:
+                raise RuntimeError(f"vivo multimodal http {exc.code}: {body}") from exc
+            _raise_vivo_vision_error(payload, prefix=f"vivo multimodal http {exc.code}")
         except (OSError, urllib.error.URLError) as exc:
             raise RuntimeError(f"vivo multimodal request failed: {exc}") from exc
 
@@ -294,8 +308,9 @@ def _chat_base_url(base_url: str) -> str:
 
 
 def _parse_chat_response(payload: dict[str, Any], *, default_asset_id: str | None) -> list[VisionAssetResult]:
-    if "error" in payload:
-        raise RuntimeError(f"vivo multimodal failed: {payload['error']}")
+    error = _error_from_payload(payload)
+    if error is not None:
+        _raise_vivo_vision_error(error, prefix="vivo multimodal failed")
 
     try:
         content = payload["choices"][0]["message"]["content"]
@@ -380,9 +395,61 @@ def clean_context(text: str | None) -> str:
     return compact[:4000]
 
 
+def is_vision_model_unsupported_error(exc: BaseException) -> bool:
+    return isinstance(exc, VisionModelUnsupportedError) or _is_model_unsupported_error(str(exc))
+
+
+def _error_from_payload(payload: dict[str, Any]) -> Any | None:
+    if "error" in payload:
+        return payload["error"]
+    if "choices" not in payload and any(
+        key in payload for key in ("code", "error_code", "errorCode", "message", "error_msg")
+    ):
+        return payload
+    return None
+
+
+def _raise_vivo_vision_error(error: Any, *, prefix: str) -> None:
+    message = f"{prefix}: {_format_error(error)}"
+    if _is_model_unsupported_error(error):
+        raise VisionModelUnsupportedError(message)
+    raise RuntimeError(message)
+
+
+def _is_model_unsupported_error(error: Any) -> bool:
+    code = _error_code(error)
+    text = _format_error(error).lower()
+    return code == "1010" or "model do not support image input" in text or "model does not support image input" in text
+
+
+def _error_code(error: Any) -> str:
+    if not isinstance(error, dict):
+        return ""
+    value = error.get("code") or error.get("error_code") or error.get("errorCode")
+    return str(value).strip()
+
+
+def _format_error(error: Any) -> str:
+    if not isinstance(error, dict):
+        return str(error)
+    code = _error_code(error)
+    message = error.get("message") or error.get("error_msg") or error.get("errorMessage")
+    if code and message:
+        return f"code={code} message={message}"
+    if code:
+        return f"code={code}"
+    if message:
+        return str(message)
+    return str(error)
+
+
 def _should_retry_single(message: str) -> bool:
     lower = message.lower()
     return any(token in lower for token in ("multiple", "too many", "image_url", "content item", "asset"))
+
+
+def _env_bool(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_float(name: str, default: float) -> float:

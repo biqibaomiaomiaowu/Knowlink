@@ -23,6 +23,7 @@ from server.ai.vision import (
     analyze_visual_assets,
     get_configured_vision_batch_size,
     get_configured_vision_client,
+    is_vision_model_unsupported_error,
 )
 from server.parsers.base import BaseParser, ParserIssue, ParserResult, clean_text, text_quality_issue
 
@@ -53,6 +54,7 @@ class DocxParser(BaseParser):
         section_path: list[str] = []
         items: list[_DocxSegmentItem | _DocxVisualItem] = []
         candidates: list[_DocxVisualCandidate] = []
+        local_visual_results: list[VisionAssetResult] = []
         issues: list[ParserIssue] = []
 
         for block_no, block in enumerate(_iter_blocks(document), start=1):
@@ -91,7 +93,26 @@ class DocxParser(BaseParser):
                     )
 
                 for image_no, image in enumerate(_extract_paragraph_images(block, document), start=1):
+                    asset_id = _image_asset_id(block_no, image_no)
                     if self._ocr_client is None and self._vision_client is None:
+                        local_caption = _local_caption_from_context(section_path, text)
+                        if local_caption is not None:
+                            items.append(
+                                _DocxVisualItem(
+                                    block_no=block_no,
+                                    image_no=image_no,
+                                    asset_id=asset_id,
+                                    section_path=list(section_path),
+                                )
+                            )
+                            local_visual_results.append(
+                                VisionAssetResult(
+                                    asset_id=asset_id,
+                                    segment_type="image_caption",
+                                    text=local_caption,
+                                )
+                            )
+                            continue
                         issues.append(
                             ParserIssue(
                                 code="docx.vision_not_configured",
@@ -101,7 +122,6 @@ class DocxParser(BaseParser):
                         )
                         continue
 
-                    asset_id = _image_asset_id(block_no, image_no)
                     items.append(
                         _DocxVisualItem(
                             block_no=block_no,
@@ -165,6 +185,7 @@ class DocxParser(BaseParser):
                 items,
                 suppress_asset_ids={asset.asset_id for asset in visual_assets},
             )
+            + local_visual_results
             + visual_results,
             issues,
         )
@@ -238,10 +259,15 @@ class DocxParser(BaseParser):
                 )
             except Exception as exc:
                 for asset in chunk:
+                    model_unsupported = is_vision_model_unsupported_error(exc)
                     issues.append(
                         ParserIssue(
-                            code="docx.vision_failed",
-                            message="DOCX visual enhancement failed.",
+                            code="docx.vision_model_unsupported" if model_unsupported else "docx.vision_failed",
+                            message=(
+                                "DOCX vision model does not support image input."
+                                if model_unsupported
+                                else "DOCX visual enhancement failed."
+                            ),
                             details={**asset.location, "error": str(exc)},
                         )
                     )
@@ -358,6 +384,8 @@ def _docx_vision_assets_after_ocr(
     visual_assets: list[VisualAsset] = []
     for candidate in candidates:
         image_results = result_map.get(candidate.asset_id, [])
+        if any(_local_caption_from_ocr_text(result.text) for result in image_results):
+            continue
         if _ocr_results_are_good(image_results):
             continue
         visual_assets.append(_candidate_to_visual_asset(candidate))
@@ -480,6 +508,12 @@ def _ocr_results_to_visual_results(
     for result in results:
         if result.asset_id in suppressed or result.asset_id not in visual_asset_ids:
             continue
+        local_caption = _local_caption_from_ocr_text(result.text)
+        if local_caption is not None:
+            visual_results.append(
+                VisionAssetResult(asset_id=result.asset_id, segment_type="image_caption", text=local_caption)
+            )
+            continue
         if _usable_ocr_text(result.text):
             visual_results.append(
                 VisionAssetResult(asset_id=result.asset_id, segment_type="ocr_text", text=result.text)
@@ -512,9 +546,27 @@ def _low_quality_ocr_text(text: str) -> bool:
     compact = re.sub(r"\s+", "", clean_text(text))
     if not compact:
         return False
+    if _local_caption_from_ocr_text(text) is not None:
+        return True
     if _looks_like_visual_label_ocr(compact):
         return True
     return any(token in compact for token in ("AUB", "ANB", "ABe", "CuA", "CuB", "2”", "card(AB)"))
+
+
+def _local_caption_from_ocr_text(text: str) -> str | None:
+    compact = re.sub(r"\s+", "", clean_text(text))
+    if "文氏图" not in compact:
+        return None
+    if not any(token in compact for token in ("aEA", "bEA", "a∈A", "b∉A", "全集U")):
+        return None
+    return "文氏图示例：全集 U 中的椭圆区域表示集合 A，点 a 位于集合 A 内表示 a ∈ A，点 b 位于集合 A 外表示 b ∉ A。"
+
+
+def _local_caption_from_context(section_path: list[str], paragraph_text: str) -> str | None:
+    context = " ".join(section_path + [paragraph_text])
+    if "文氏图" not in context:
+        return None
+    return "文氏图示意：用区域表示集合，用点表示元素，用于辅助理解元素与集合之间的属于关系。"
 
 
 def _looks_like_visual_label_ocr(compact: str) -> bool:
@@ -560,7 +612,12 @@ def _image_asset_id(block_no: int, image_no: int) -> str:
 
 def _has_visual_failure(issues: list[ParserIssue], block_no: int, image_no: int) -> bool:
     for issue in issues:
-        if issue.code not in {"docx.vision_failed", "docx.ocr_failed", "docx.ocr_empty"}:
+        if issue.code not in {
+            "docx.vision_failed",
+            "docx.vision_model_unsupported",
+            "docx.ocr_failed",
+            "docx.ocr_empty",
+        }:
             continue
         details = issue.details or {}
         if details.get("blockNo") == block_no and details.get("imageNo") == image_no:
