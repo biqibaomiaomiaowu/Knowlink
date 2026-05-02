@@ -31,21 +31,33 @@ from server.ai.vision import (
     is_vision_model_unsupported_error,
 )
 from server.parsers.base import BaseParser, ParserIssue, ParserResult, clean_text, is_duplicate_text, text_quality_issue
+from server.parsers.mineru import MineruClient, get_configured_mineru_client, prepend_issues, try_parse_with_mineru
 
 
 class PptxParser(BaseParser):
     resource_type = "pptx"
 
-    def __init__(self, *, ocr_client: OcrClient | None = None, vision_client: VisionClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        ocr_client: OcrClient | None = None,
+        vision_client: VisionClient | None = None,
+        mineru_client: MineruClient | None = None,
+    ) -> None:
         self._ocr_client = ocr_client if ocr_client is not None else get_configured_ocr_client()
         self._vision_client = vision_client if vision_client is not None else get_configured_vision_client()
+        self._mineru_client = mineru_client if mineru_client is not None else get_configured_mineru_client()
         self._vision_batch_size = get_configured_vision_batch_size()
 
     def parse(self, file_path: str | Path) -> ParserResult:
+        mineru_result, mineru_issues = try_parse_with_mineru(self._mineru_client, file_path, resource_type=self.resource_type)
+        if mineru_result is not None:
+            return mineru_result
+
         try:
             presentation = Presentation(str(file_path))
         except Exception as exc:
-            return self._read_failed(file_path, exc)
+            return prepend_issues(self._read_failed(file_path, exc), mineru_issues)
 
         issues: list[ParserIssue] = []
         slide_entries: list[_PptxSlideEntry] = []
@@ -53,11 +65,14 @@ class PptxParser(BaseParser):
         local_visual_results: list[VisionAssetResult] = []
 
         if not presentation.slides:
-            return self._failed(
-                ParserIssue(
-                    code="pptx.slide_text_empty",
-                    message="PPTX has no slides with extractable text; OCR is not configured.",
-                )
+            return prepend_issues(
+                self._failed(
+                    ParserIssue(
+                        code="pptx.slide_text_empty",
+                        message="PPTX has no slides with extractable text; OCR is not configured.",
+                    )
+                ),
+                mineru_issues,
             )
 
         for slide_no, slide in enumerate(presentation.slides, start=1):
@@ -192,9 +207,9 @@ class PptxParser(BaseParser):
         )
 
         if not segments:
-            return self._failed_with_issues(issues)
+            return prepend_issues(self._failed_with_issues(issues), mineru_issues)
 
-        return self._succeeded(segments, issues)
+        return prepend_issues(self._succeeded(segments, issues), mineru_issues)
 
     def _analyze_assets(
         self,

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from server.parsers.base import BaseParser, ParserIssue, ParserResult, ParserScaffold
 from server.parsers.docx import DocxParser
+from server.parsers.mineru import MineruPrecisionClient
 from server.parsers.normalize import NormalizeParserOutput
 from server.parsers.pdf import PdfParser
 from server.parsers.pptx import PptxParser
@@ -31,6 +32,7 @@ def parse_resource(resource_type: str, file_path: str | Path) -> ParserResult:
 __all__ = [
     "BaseParser",
     "DocxParser",
+    "MineruPrecisionClient",
     "ParserIssue",
     "ParserResult",
     "NormalizeParserOutput",

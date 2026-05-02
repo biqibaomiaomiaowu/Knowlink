@@ -29,6 +29,7 @@
 - 所有 parser 输出 normalized document 前必须统一清洗 `textContent`，成功 segment 不得包含 `U+FFFF`、`U+FFFD`、NUL、C0/C1 控制字符、异常脚本噪声等乱码。
 - 纯点线、纯符号噪声行和清洗后空行必须过滤；清洗后无有效文本的 segment 不得进入成功产物。
 - 解析分三层执行：先用本地 parser 抽文本层、表格和原生公式，再对候选页面 / 图片调用 vivo OCR（`pos=2`，bbox 仅内部使用），最后用多模态视觉模型精准兜底图示、公式、复杂版面和低质 OCR。
+- MinerU 精准解析 API 作为可选实验解析路径，只能在显式配置 `KNOWLINK_ENABLE_MINERU=true` 且提供 `KNOWLINK_MINERU_TOKEN` 时启用；默认不得访问网络。MinerU 成功时其 `full.md` / `*_content_list.json` 必须归一化为本 schema 的 segment 类型，失败时记录 `*.mineru_failed` 并回落到本地 parser。
 - PDF 文本层缺失或出现强乱码时，优先收集页级渲染图走 OCR；OCR 失败或低质且无干净文本时再走视觉增强，若所有页均不可用则解析失败。
 - PDF / PPTX 若存在可用文本层但页面或 slide 仍包含大图、截图题目或截图图表，可保留原生文本 segment 并追加非重复 OCR / 视觉 segment；低质 OCR 不得污染成功产物，同一页 / slide 内不得重复输出已有文本层内容。
 - PPTX / DOCX 原生文本、表格和 OMML 公式优先结构化抽取；PPTX 内嵌 DOCX / OLE package 优先直接抽取源文本；内嵌图片、截图型公式或截图图表优先 OCR，OCR 不足时走视觉增强，输出仍必须保留原资源定位；PPTX 的 EMF/WMF 等对象可在本机具备 LibreOffice 时通过整 slide 渲染补齐。
@@ -43,6 +44,19 @@
 | 变量 | 语义 |
 |---|---|
 | `KNOWLINK_ENABLE_MARKITDOWN_OCR` | 是否启用 MarkItDown 作为 PDF 页级 OCR fallback，默认关闭。 |
+| `KNOWLINK_ENABLE_MINERU` | 是否启用 MinerU 精准解析实验路径，默认关闭；只有该开关为真且 token 非空时才会请求 MinerU。 |
+| `KNOWLINK_MINERU_TOKEN` | MinerU 精准解析 API token，不得提交真实值；请求时按 `Authorization: Bearer <token>` 发送。 |
+| `KNOWLINK_MINERU_BASE_URL` | MinerU API 基础地址，默认 `https://mineru.net`。 |
+| `KNOWLINK_MINERU_MODEL_VERSION` | MinerU 模型版本，默认 `vlm`，可选 `pipeline` / `vlm` / `MinerU-HTML`。 |
+| `KNOWLINK_MINERU_LANGUAGE` | MinerU 解析语言，默认 `ch`。 |
+| `KNOWLINK_MINERU_IS_OCR` | 是否请求 MinerU OCR，默认 `true`。 |
+| `KNOWLINK_MINERU_ENABLE_FORMULA` | 是否请求 MinerU 公式识别，默认 `true`。 |
+| `KNOWLINK_MINERU_ENABLE_TABLE` | 是否请求 MinerU 表格识别，默认 `true`。 |
+| `KNOWLINK_MINERU_TIMEOUT_SEC` | MinerU 单次 HTTP 请求超时时间，默认 `30` 秒。 |
+| `KNOWLINK_MINERU_POLL_INTERVAL_SEC` | MinerU 任务进度轮询间隔，默认 `3` 秒。 |
+| `KNOWLINK_MINERU_MAX_WAIT_SEC` | MinerU 单文件解析最长等待时间，默认 `180` 秒。 |
+| `KNOWLINK_MINERU_MAX_RETRIES` | MinerU 文件上传与结果 zip 下载的最大重试次数，默认 `2` 次。 |
+| `KNOWLINK_MINERU_DOWNLOAD_USE_PROXY` | MinerU 结果 zip 下载是否使用系统代理，默认 `false`，即下载走本机原生网络，不走 Clash 代理。 |
 | `KNOWLINK_ENABLE_VIVO_OCR` | 是否启用 vivo 通用 OCR，默认关闭。 |
 | `KNOWLINK_VIVO_APP_ID` | 蓝心 / vivo 应用 id，保留为赛方能力配置字段。 |
 | `KNOWLINK_VIVO_APP_KEY` | 蓝心 / vivo 视觉能力调用 key；为空时不发起网络请求。 |

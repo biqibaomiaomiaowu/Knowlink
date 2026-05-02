@@ -25,6 +25,7 @@ from server.ai.vision import (
     get_configured_vision_client,
     is_vision_model_unsupported_error,
 )
+from server.parsers.mineru import MineruClient, get_configured_mineru_client, prepend_issues, try_parse_with_mineru
 from server.parsers.base import BaseParser, ParserIssue, ParserResult, clean_text, is_duplicate_text, text_quality_issue
 
 
@@ -36,21 +37,27 @@ class PdfParser(BaseParser):
         *,
         ocr_client: OcrClient | None = None,
         vision_client: VisionClient | None = None,
+        mineru_client: MineruClient | None = None,
         enable_markitdown_ocr: bool | None = None,
     ) -> None:
         self._ocr_client = ocr_client if ocr_client is not None else get_configured_ocr_client()
         self._vision_client = vision_client if vision_client is not None else get_configured_vision_client()
+        self._mineru_client = mineru_client if mineru_client is not None else get_configured_mineru_client()
         self._vision_batch_size = get_configured_vision_batch_size()
         self._enable_markitdown_ocr = (
             _env_bool("KNOWLINK_ENABLE_MARKITDOWN_OCR") if enable_markitdown_ocr is None else enable_markitdown_ocr
         )
 
     def parse(self, file_path: str | Path) -> ParserResult:
+        mineru_result, mineru_issues = try_parse_with_mineru(self._mineru_client, file_path, resource_type=self.resource_type)
+        if mineru_result is not None:
+            return mineru_result
+
         pymupdf_result = self._parse_with_pymupdf(file_path)
         if pymupdf_result is not None:
-            return pymupdf_result
+            return prepend_issues(pymupdf_result, mineru_issues)
 
-        return self._parse_with_pypdf(file_path)
+        return prepend_issues(self._parse_with_pypdf(file_path), mineru_issues)
 
     def _parse_with_pymupdf(self, file_path: str | Path) -> ParserResult | None:
         try:

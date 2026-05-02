@@ -26,6 +26,7 @@ from server.ai.vision import (
     is_vision_model_unsupported_error,
 )
 from server.parsers.base import BaseParser, ParserIssue, ParserResult, clean_text, text_quality_issue
+from server.parsers.mineru import MineruClient, get_configured_mineru_client, prepend_issues, try_parse_with_mineru
 
 
 _CHINESE_HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int], ...] = (
@@ -40,16 +41,27 @@ _CHINESE_HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int], ...] = (
 class DocxParser(BaseParser):
     resource_type = "docx"
 
-    def __init__(self, *, ocr_client: OcrClient | None = None, vision_client: VisionClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        ocr_client: OcrClient | None = None,
+        vision_client: VisionClient | None = None,
+        mineru_client: MineruClient | None = None,
+    ) -> None:
         self._ocr_client = ocr_client if ocr_client is not None else get_configured_ocr_client()
         self._vision_client = vision_client if vision_client is not None else get_configured_vision_client()
+        self._mineru_client = mineru_client if mineru_client is not None else get_configured_mineru_client()
         self._vision_batch_size = get_configured_vision_batch_size()
 
     def parse(self, file_path: str | Path) -> ParserResult:
+        mineru_result, mineru_issues = try_parse_with_mineru(self._mineru_client, file_path, resource_type=self.resource_type)
+        if mineru_result is not None:
+            return mineru_result
+
         try:
             document = Document(str(file_path))
         except Exception as exc:
-            return self._read_failed(file_path, exc)
+            return prepend_issues(self._read_failed(file_path, exc), mineru_issues)
 
         section_path: list[str] = []
         items: list[_DocxSegmentItem | _DocxVisualItem] = []
@@ -191,17 +203,20 @@ class DocxParser(BaseParser):
         )
 
         if not segments:
-            return self._failed_with_issues(
-                issues
-                or [
-                    ParserIssue(
-                        code="docx.block_text_empty",
-                        message="DOCX has no extractable clean text, table, formula, or visual segment.",
-                    )
-                ]
+            return prepend_issues(
+                self._failed_with_issues(
+                    issues
+                    or [
+                        ParserIssue(
+                            code="docx.block_text_empty",
+                            message="DOCX has no extractable clean text, table, formula, or visual segment.",
+                        )
+                    ]
+                ),
+                mineru_issues,
             )
 
-        return self._succeeded(segments, issues)
+        return prepend_issues(self._succeeded(segments, issues), mineru_issues)
 
     def _recognize_assets(
         self,

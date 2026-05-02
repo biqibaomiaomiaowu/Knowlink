@@ -28,6 +28,7 @@ from server.ai.vision import (
 )
 from server.parsers import DocxParser, ParserResult, PdfParser, PptxParser, SrtParser, VideoParser, parse_resource
 from server.parsers.base import clean_text, text_quality_issue
+from server.parsers.mineru import mineru_archive_to_result
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -139,6 +140,20 @@ class FakeAsrClient:
         if self.error is not None:
             raise self.error
         return self.segments
+
+
+class FakeMineruClient:
+    def __init__(self, result: ParserResult | None = None, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[tuple[Path, str]] = []
+
+    def parse_file(self, file_path, *, resource_type):
+        self.calls.append((Path(file_path), resource_type))
+        if self.error is not None:
+            raise self.error
+        assert self.result is not None
+        return self.result
 
 
 class RaisingOcrClient:
@@ -268,6 +283,73 @@ def test_pdf_parser_extracts_page_text_and_validates_schema(tmp_path: Path):
             "pageNo": 1,
         }
     ]
+
+
+def test_mineru_archive_content_list_normalizes_pdf_schema():
+    buffer = BytesIO()
+    content_list = [
+        {"type": "text", "text": "集合的基本概念", "text_level": 1, "page_idx": 0},
+        {"type": "equation", "text": "$$A \\cup B$$", "page_idx": 1},
+        {"type": "image", "image_caption": ["文氏图展示 A 与 B 的交集区域。"], "page_idx": 1},
+        {"type": "table", "table_body": "| 集合 | 含义 |\n|---|---|\n| A | 元素范围 |", "page_idx": 2},
+    ]
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("full.md", "# 集合的基本概念")
+        archive.writestr("demo_content_list.json", json.dumps(content_list, ensure_ascii=False))
+
+    result = mineru_archive_to_result(resource_type="pdf", archive_bytes=buffer.getvalue())
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert [segment["segmentType"] for segment in document["segments"]] == [
+        "pdf_page_text",
+        "formula",
+        "image_caption",
+        "ocr_text",
+    ]
+    assert [segment["pageNo"] for segment in document["segments"]] == [1, 2, 2, 3]
+
+
+def test_pdf_parser_prefers_mineru_client_when_configured(tmp_path: Path):
+    pdf_path = tmp_path / "text.pdf"
+    create_text_pdf(pdf_path, "Local parser text")
+    mineru_result = ParserResult(
+        resource_type="pdf",
+        status="succeeded",
+        normalized_document={
+            "resourceType": "pdf",
+            "segments": [
+                {
+                    "segmentKey": "mineru-pdf-p1-text-1",
+                    "segmentType": "pdf_page_text",
+                    "orderNo": 1,
+                    "textContent": "MinerU parser text",
+                    "pageNo": 1,
+                }
+            ],
+        },
+    )
+    mineru_client = FakeMineruClient(result=mineru_result)
+
+    result = PdfParser(mineru_client=mineru_client).parse(pdf_path)
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert document["segments"][0]["textContent"] == "MinerU parser text"
+    assert mineru_client.calls == [(pdf_path, "pdf")]
+
+
+def test_pdf_parser_falls_back_when_mineru_fails(tmp_path: Path):
+    pdf_path = tmp_path / "text.pdf"
+    create_text_pdf(pdf_path, "Local fallback text")
+    mineru_client = FakeMineruClient(error=RuntimeError("temporary mineru outage"))
+
+    result = PdfParser(mineru_client=mineru_client).parse(pdf_path)
+
+    assert result.status == "succeeded"
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert document["segments"][0]["textContent"] == "Local fallback text"
+    assert issue_codes(result)[0] == "pdf.mineru_failed"
 
 
 def test_pdf_parser_reports_empty_text_page(tmp_path: Path):
