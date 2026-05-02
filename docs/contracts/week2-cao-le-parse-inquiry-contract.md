@@ -61,7 +61,11 @@
 | `KNOWLINK_VIVO_VISION_BATCH_SIZE` | 同一文件视觉资产批量请求大小，默认 `2`，大文件按批拆分。 |
 | `KNOWLINK_VIVO_OUTLINE_MODEL` | 视频目录生成模型，默认优先快模型 `Doubao-Seed-2.0-mini`。 |
 | `KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL` | 单段讲义生成候选模型，默认 `Doubao-Seed-2.0-pro`；可与 `Volc-DeepSeek-V3.2`、`qwen3.5-plus` 做质量 / 耗时对比。 |
-| `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` | 目录和单段讲义单次 LLM 调用超时，默认 `40` 秒；超时后该 block 标记 `failed` 或降级为短摘要。 |
+| `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` | 目录生成单次 LLM 调用超时，默认 `40` 秒；超时后回退为本地目录生成。 |
+| `KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC` | 单段讲义块生成单次 LLM 调用超时，默认 `120` 秒；超时后该 block 标记 `failed` 或降级为短摘要。 |
+| `KNOWLINK_ENABLE_VIVO_EMBEDDING` | 是否启用 vivo 文本向量，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才可创建 embedding client。 |
+| `KNOWLINK_VIVO_EMBEDDING_MODEL` | 文本向量模型，默认 `m3e-base`；请求体必须使用 `model_name` 与 `sentences`，查询参数必须带 `requestId`。 |
+| `KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC` | 文本向量请求超时时间，默认 `10` 秒。 |
 
 ## 1. 解析产物字段说明
 
@@ -193,7 +197,7 @@
 
 - 用户点击目录项时，可将对应 block 从 `pending` 置为 `generating` 并触发生成；播放进入当前目录段时可自动触发当前段；距离当前段结束 `15` 秒以内可预生成下一段。
 - 单段生成输入只允许包含当前时间段 ASR 文本、相邻上下文、用户偏好，以及与该段相关的 PDF/PPTX/DOCX 片段。
-- 单段生成默认控制在 `40` 秒内；超时后该 block 标记 `failed` 或保留短摘要，允许用户稍后重试。
+- 单段生成默认控制在 `120` 秒内；超时后该 block 标记 `failed` 或保留短摘要，允许用户稍后重试。
 - block 引用不得跨课程，不得引用未进入当前 active parse run 的 segment；视频引用必须落在该 outline item 的 `startSec/endSec` 范围内。
 
 ### 1.7 `vector_documents`

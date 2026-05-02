@@ -522,9 +522,11 @@ endpoints:
 auth_scheme: Authorization: Bearer AppKey
 required_headers:
   - Authorization: Bearer AppKey
-required_query_params: []
+required_query_params:
+  - requestId
 required_body_fields:
-  - text list
+  - model_name
+  - sentences
 optional_body_fields: []
 response_pattern: sync_json
 supports_stream: false

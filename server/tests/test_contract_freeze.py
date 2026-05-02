@@ -86,12 +86,28 @@ def test_week2_video_outline_lazy_handout_semantics_are_frozen():
         "KNOWLINK_VIVO_OUTLINE_MODEL",
         "KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL",
         "KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC",
+        "KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC",
+        "KNOWLINK_ENABLE_VIVO_EMBEDDING",
+        "KNOWLINK_VIVO_EMBEDDING_MODEL",
+        "KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC",
         "Doubao-Seed-2.0-mini",
         "Doubao-Seed-2.0-pro",
+        "120",
+        "m3e-base",
         "Volc-DeepSeek-V3.2",
         "qwen3.5-plus",
     ):
         assert token in week2_contract or token in api_contract or token in env_example
+
+    for token in (
+        "KNOWLINK_ENABLE_VIVO_EMBEDDING",
+        "KNOWLINK_VIVO_EMBEDDING_MODEL",
+        "KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC",
+        "model_name",
+        "sentences",
+        "requestId",
+    ):
+        assert token in week2_contract
 
     assert "不再表示解析阶段已经完成全量知识点抽取" in week2_contract
     assert "完整知识点随讲义 block 逐段补齐" in api_contract
