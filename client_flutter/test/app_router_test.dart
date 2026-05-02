@@ -1,7 +1,8 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/app/router/app_router.dart';
+import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/course_import/course_import_page.dart';
 import 'package:knowlink_client/features/course_recommend/course_recommend_page.dart';
 import 'package:knowlink_client/features/handout/handout_page.dart';
@@ -11,13 +12,25 @@ import 'package:knowlink_client/features/parse_progress/parse_progress_page.dart
 import 'package:knowlink_client/features/qa/qa_page.dart';
 import 'package:knowlink_client/features/quiz/quiz_page.dart';
 import 'package:knowlink_client/features/review/review_page.dart';
+import 'package:knowlink_client/shared/models/inquiry_models.dart';
+import 'package:knowlink_client/shared/models/pipeline_status.dart';
+import 'package:knowlink_client/shared/models/resource_upload_models.dart';
 import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
+import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
 void main() {
   testWidgets('frozen routes resolve to expected pages', (tester) async {
     final router = AppRouter.createRouter();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
+    addTearDown(container.dispose);
+
     await tester.pumpWidget(
-      ProviderScope(
+      UncontrolledProviderScope(
+        container: container,
         child: MaterialApp.router(
           routerConfig: router,
         ),
@@ -66,7 +79,11 @@ void main() {
   testWidgets('course routes sync URL courseId into course flow', (
     tester,
   ) async {
-    final container = ProviderContainer();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
     final router = AppRouter.createRouter();
     addTearDown(container.dispose);
 
@@ -101,4 +118,36 @@ void main() {
     expect(find.byType(QaPage), findsOneWidget);
     expect(container.read(courseFlowProvider).courseId, '306');
   });
+}
+
+class _RouterFakeApiClient extends ApiClient {
+  @override
+  Future<List<CourseResourceModel>> fetchCourseResources(
+      String courseId) async {
+    return const [];
+  }
+
+  @override
+  Future<PipelineStatusModel> fetchPipelineStatus(String courseId) async {
+    return PipelineStatusModel.fromJson({
+      'courseStatus': {
+        'lifecycleStatus': 'resource_ready',
+        'pipelineStage': 'parse',
+        'pipelineStatus': 'queued',
+      },
+      'progressPct': 0,
+      'steps': [],
+      'activeParseRunId': null,
+      'activeHandoutVersionId': null,
+      'nextAction': 'poll',
+    });
+  }
+
+  @override
+  Future<InquiryQuestionsModel> fetchInquiryQuestions(String courseId) async {
+    return InquiryQuestionsModel.fromJson({
+      'version': 1,
+      'questions': [],
+    });
+  }
 }
