@@ -122,6 +122,42 @@ def test_week2_video_outline_lazy_handout_semantics_are_frozen():
     assert '"outlineStatus": "ready"' in api_contract
 
 
+def test_latest_outline_read_model_requires_source_segment_keys():
+    api_contract = load_text("docs/contracts/api-contract.md")
+
+    outline_section = api_contract.split(
+        "### `GET /api/v1/courses/{courseId}/handouts/latest/outline`", 1
+    )[1].split("### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`", 1)[0]
+
+    assert '"sourceSegmentKeys": ["mp4-c1", "mp4-c2"]' in outline_section
+    assert "`items[*].sourceSegmentKeys` 是 API read model 必返字段" in outline_section
+    assert "前端可忽略展示" in outline_section
+
+
+def test_knowledge_point_block_ownership_contract_is_frozen():
+    architecture = load_text("ARCHITECTURE.md")
+    week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
+
+    knowledge_points_section = week2_contract.split("### 1.3 `knowledge_points`", 1)[1].split(
+        "### 1.4 `handout_block_knowledge_points`", 1
+    )[0]
+    handout_block_kp_section = week2_contract.split("### 1.4 `handout_block_knowledge_points`", 1)[1].split(
+        "### 1.5 `segment_knowledge_points`", 1
+    )[0]
+
+    assert "`handout_block_id`" not in knowledge_points_section
+    assert "不直接保存 block 归属" in knowledge_points_section
+    assert "`knowledge_points` 保留 `unique(course_id, parse_run_id, canonical_name)`" in knowledge_points_section
+    assert "复用同一 `knowledge_point_id`" in knowledge_points_section
+    assert "block 归属写入 `handout_block_knowledge_points`" in knowledge_points_section
+
+    for token in ("`handout_block_id`", "`knowledge_point_id`", "`sort_no`", "`importance_score`"):
+        assert token in handout_block_kp_section
+        assert token in architecture
+
+    assert "block 归属不写入 `knowledge_points` 主表" in architecture
+
+
 def test_week1_handout_blocks_schema_is_marked_as_legacy():
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
     legacy_schema = load_json("schemas/ai/handout_blocks.schema.json")
@@ -277,6 +313,39 @@ def test_async_entity_accepts_bilibili_import_run():
     entity = AsyncEntity(type="bilibili_import_run", id=9101)
     assert entity.type == "bilibili_import_run"
     assert entity.id == 9101
+
+
+def test_lazy_handout_block_async_and_status_contract_are_frozen():
+    architecture = load_text("ARCHITECTURE.md")
+    api_contract = load_text("docs/contracts/api-contract.md")
+
+    for text in (architecture, api_contract):
+        assert "`handout_block`" in text
+        assert "/api/v1/handout-blocks/{blockId}/generate" in text
+        assert "GET /api/v1/handout-blocks/{blockId}/status" in text
+        assert "Idempotency-Key" in text
+
+    assert "`POST /handout-blocks/{blockId}/generate` 返回 `entity.type = handout_block`" in architecture
+    assert "`handout_block`：`GET /api/v1/handout-blocks/{blockId}/status`" in architecture
+    assert "异步触发接口返回的 `entity.type` 白名单" in api_contract
+    assert "不得创建重复 block 或重复任务" in api_contract
+    assert "重复请求返回当前任务" in api_contract
+    assert "重复请求返回当前 block 状态，不重新生成" in api_contract
+
+
+def test_handout_version_status_semantics_are_frozen():
+    architecture = load_text("ARCHITECTURE.md")
+    api_contract = load_text("docs/contracts/api-contract.md")
+
+    for text in (architecture, api_contract):
+        assert "outline_ready" in text
+        assert "partial_success" in text
+        assert "目录可展示但 block 正文未全生成" in text
+        assert "必要 block 全 ready" in text
+        assert "目录可用但部分 block 失败或降级" in text
+
+    assert "`handout_versions.status`" in api_contract
+    assert "`draft` `generating` `outline_ready` `ready` `partial_success` `failed` `superseded`" in api_contract
 
 
 def test_freeze_doc_tracks_seed_titles_and_fixed_manual_course_title():

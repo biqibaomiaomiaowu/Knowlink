@@ -485,7 +485,7 @@ README.md
 
 | 字段 | 说明 |
 |---|---|
-| `status` | `draft` `generating` `ready` `failed` `superseded` |
+| `status` | `draft` `generating` `outline_ready` `ready` `partial_success` `failed` `superseded` |
 | `version_no` | 课程内递增 |
 | `source_parse_run_id` | 基于哪次解析结果生成 |
 | `generation_task_id` | 当前或最近一次讲义生成任务 |
@@ -495,6 +495,9 @@ README.md
 
 - 每次“重新生成讲义”都会创建新的 `handout_version`。
 - 讲义块、引用、预生成测验都归属到具体 `handout_version`。
+- `outline_ready` 表示目录可展示但 block 正文未全生成。
+- `ready` 表示必要 block 全 ready。
+- `partial_success` 表示目录可用但部分 block 失败或降级。
 
 ---
 
@@ -770,6 +773,12 @@ exports/{courseId}/handouts/v{versionNo}.md
 - `handout_block_id`
 - `knowledge_point_id`
 - `sort_no`
+- `importance_score`
+
+说明：
+
+- block 归属不写入 `knowledge_points` 主表。
+- 不同 block 抽到相同 `canonical_name` 时复用同一 `knowledge_point_id`，并通过 `handout_block_knowledge_points` 表记录 block 内排序和重要性。
 
 ### 10.5 引用、问答、测验、复习
 
@@ -996,6 +1005,7 @@ exports/{courseId}/handouts/v{versionNo}.md
   - 上传完成
   - 发起解析
   - 生成讲义
+  - 按需生成单个讲义块
   - 生成测验
   - 重算复习任务
 - 统一响应：
@@ -1126,12 +1136,14 @@ exports/{courseId}/handouts/v{versionNo}.md
 - `entity.type` 只允许以下取值：
   - `parse_run`
   - `handout_version`
+  - `handout_block`
   - `quiz`
   - `review_task_run`
   - `bilibili_import_run`
 - `entity.id` 固定为对应领域实体主键。
 - `POST /courses/{courseId}/parse/start` 返回 `entity.type = parse_run`。
 - `POST /courses/{courseId}/handouts/generate` 返回 `entity.type = handout_version`。
+- `POST /handout-blocks/{blockId}/generate` 返回 `entity.type = handout_block`。
 - `POST /courses/{courseId}/quizzes/generate` 返回 `entity.type = quiz`。
 - `POST /courses/{courseId}/review-tasks/regenerate` 返回 `entity.type = review_task_run`。
 - `POST /courses/{courseId}/resources/imports/bilibili` 未来接通后返回 `entity.type = bilibili_import_run`；当前阶段统一返回 `501`。
@@ -1142,6 +1154,7 @@ exports/{courseId}/handouts/v{versionNo}.md
 - 版本化或生成型实体统一通过实体级状态接口轮询：
   - `parse_run`：`GET /api/v1/parse-runs/{parseRunId}`
   - `handout_version`：`GET /api/v1/handout-versions/{handoutVersionId}/status`
+  - `handout_block`：`GET /api/v1/handout-blocks/{blockId}/status`
   - `quiz`：`GET /api/v1/quizzes/{quizId}/status`
   - `review_task_run`：`GET /api/v1/review-task-runs/{reviewTaskRunId}/status`
   - `bilibili_import_run`：`GET /api/v1/bilibili-import-runs/{importRunId}/status`

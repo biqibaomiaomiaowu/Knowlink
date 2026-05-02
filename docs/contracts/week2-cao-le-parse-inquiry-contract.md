@@ -123,13 +123,12 @@
 
 ### 1.3 `knowledge_points`
 
-`knowledge_points` 是讲义 block 级生成产物，不再表示解析阶段已经完成全量知识点抽取。它表达“某个目录段落中有哪些概念/技能/考点”，不直接保存证据文本。
+`knowledge_points` 是讲义 block 级生成产物，不再表示解析阶段已经完成全量知识点抽取。它表达“课程在某次 parse run 下有哪些概念/技能/考点”，不直接保存证据文本，也不直接保存 block 归属。
 
 | 字段 | 语义 |
 |---|---|
 | `course_id` | 所属课程。 |
 | `parse_run_id` | 所属解析版本。 |
-| `handout_block_id` | 所属讲义 block。解析阶段未生成 block 正文时为空；block 生成完成后必填。 |
 | `parent_id` | 父知识点；为空表示一级知识点。MVP 只要求最多两层。 |
 | `display_name` | 面向用户展示的名称。 |
 | `canonical_name` | 归一化名称，用于去重；同一 `course_id + parse_run_id` 内唯一。 |
@@ -142,12 +141,31 @@
 抽取约束：
 
 - 解析完成后的最低可用条件是 `video_caption` segments + `handout_outline` ready，不要求全量 `knowledge_points` ready。
-- 单段讲义生成时，只针对当前 outline 时间段生成该 block 的 `knowledge_points`、关联和 evidence。
+- `knowledge_points` 保留 `unique(course_id, parse_run_id, canonical_name)`。
+- 单段讲义生成时，只针对当前 outline 时间段生成该 block 需要的 `knowledge_points`、关联和 evidence。
+- 不同 block 抽到相同 `canonical_name` 时复用同一 `knowledge_point_id`，不得为了 block 归属复制主表知识点。
+- block 归属写入 `handout_block_knowledge_points`，不写入 `knowledge_points` 主表。
 - `canonical_name` 应去除无意义空白、统一大小写和常见符号，但不要把语义不同的知识点强行合并。
 - `importance_score` 综合出现频率、标题层级、教师强调语句、考试关键词和用户目标。
 - `parent_id` 只表达目录层级，不表达先修、相似或依赖关系；MVP 不冻结复杂知识图谱边类型。
 
-### 1.4 `segment_knowledge_points`
+### 1.4 `handout_block_knowledge_points`
+
+`handout_block_knowledge_points` 是讲义 block 与知识点的多对多归属表。
+
+| 字段 | 语义 |
+|---|---|
+| `handout_block_id` | 所属讲义 block。 |
+| `knowledge_point_id` | 复用的知识点主表 id。 |
+| `sort_no` | 该知识点在当前 block 内的展示顺序。 |
+| `importance_score` | 该知识点对当前 block 的重要性评分，0 到 100。 |
+
+约束：
+
+- 一个 block 可关联多个知识点，一个知识点可被多个 block 复用。
+- block 内排序、局部重要性和归属关系只写在本表。
+
+### 1.5 `segment_knowledge_points`
 
 `segment_knowledge_points` 是 segment 与知识点的多对多关联。
 
@@ -162,7 +180,7 @@
 - 一个 segment 可关联多个知识点，一个知识点必须至少有一条强相关 segment 才能置为 active。
 - 关联只表示“该片段能支持该知识点”，不表示掌握度、推荐顺序或讲义块归属。
 
-### 1.5 `knowledge_point_evidences`
+### 1.6 `knowledge_point_evidences`
 
 `knowledge_point_evidences` 是知识点的可展示证据清单，用于解释“为什么抽取出这个知识点”。
 
@@ -179,7 +197,7 @@
 - 同一知识点至少保留 1 条 evidence，最多优先展示 5 条。
 - `teacher_emphasis` 只可来自视频字幕、SRT 或带明确强调语句的文档片段。
 
-### 1.6 `handout_blocks`
+### 1.7 `handout_blocks`
 
 `handout_blocks` 是 outline item 对应的完整讲义正文。它按需生成，不作为进入讲义页的前置条件。
 `schemas/ai/handout_block.schema.json` 只描述 `ready` block 的 AI 生成结果；API 读模型里的 `pending`、`generating`、`failed` block 可以没有正文、知识点和引用。
@@ -200,7 +218,7 @@
 - 单段生成默认控制在 `120` 秒内；超时后该 block 标记 `failed` 或保留短摘要，允许用户稍后重试。
 - block 引用不得跨课程，不得引用未进入当前 active parse run 的 segment；视频引用必须落在该 outline item 的 `startSec/endSec` 范围内。
 
-### 1.7 `vector_documents`
+### 1.8 `vector_documents`
 
 `vector_documents` 是 RAG 的统一向量读模型，不是业务真相源。它从 segment、知识点或讲义块投影生成，可重建。
 

@@ -22,6 +22,7 @@
   - `POST /api/v1/courses/{courseId}/resources/upload-complete`
   - `POST /api/v1/courses/{courseId}/parse/start`
   - `POST /api/v1/courses/{courseId}/handouts/generate`
+  - `POST /api/v1/handout-blocks/{blockId}/generate`
   - `POST /api/v1/courses/{courseId}/quizzes/generate`
   - `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
 - 带路径参数的课程接口一律以 path 中的 `courseId` 为准；请求体不再重复传同义 `courseId`，`POST /api/v1/qa/messages` 是唯一例外。
@@ -43,6 +44,14 @@
 - `pipelineStage`: `idle` `upload` `parse` `inquiry` `handout`
 - `pipelineStatus`: `idle` `queued` `running` `partial_success` `succeeded` `failed`
 - `async_tasks.status`: `queued` `running` `succeeded` `failed` `retrying` `canceled` `skipped`
+- `handout_versions.status`: `draft` `generating` `outline_ready` `ready` `partial_success` `failed` `superseded`
+- 异步触发接口返回的 `entity.type` 白名单：`parse_run` `handout_version` `handout_block` `quiz` `review_task_run` `bilibili_import_run`
+
+讲义版本状态语义：
+
+- `outline_ready`：目录可展示但 block 正文未全生成。
+- `ready`：必要 block 全 ready。
+- `partial_success`：目录可用但部分 block 失败或降级。
 
 ## 2. 统一成功响应
 
@@ -814,7 +823,8 @@ stub 阶段约束：
       "startSec": 0,
       "endSec": 180,
       "sortNo": 1,
-      "generationStatus": "pending"
+      "generationStatus": "pending",
+      "sourceSegmentKeys": ["mp4-c1", "mp4-c2"]
     }
   ]
 }
@@ -823,6 +833,7 @@ stub 阶段约束：
 说明：
 
 - 这是视频优先讲义页的首屏读取接口方向；接口实现 owner 仍按 `TEAM_DIVISION.md` 执行。
+- `items[*].sourceSegmentKeys` 是 API read model 必返字段，用于后续 block 生成和引用校验；前端可忽略展示。
 - 点击目录项时，播放器跳转到 `startSec`；播放时间落在 `[startSec, endSec)` 时高亮对应目录项，最后一段允许命中 `endSec`。
 
 ### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`
@@ -891,6 +902,9 @@ stub 阶段约束：
 说明：
 
 - 这是单个目录项懒生成的接口方向；幂等、任务入队和 DTO 由后端 owner 落地。
+- 必须支持 `Idempotency-Key`；相同用户、相同 `blockId`、相同 `Idempotency-Key` 的重复请求不得创建重复 block 或重复任务。
+- 当 block 已处于 `generating` 时，重复请求返回当前任务，`entity.type = handout_block`，不得重复入队。
+- 当 block 已处于 `ready` 时，重复请求返回当前 block 状态，不重新生成。
 - 触发时只生成该 block 的 `contentMd`、block 级 `knowledgePoints` 和引用。
 
 ### `GET /api/v1/handout-blocks/{blockId}/status`
