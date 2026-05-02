@@ -87,6 +87,28 @@ class CourseFlowController extends Notifier<CourseFlowState> {
     state = state.copyWith(nextAction: nextAction);
   }
 
+  void syncPipelineStatus({
+    required String lifecycleStatus,
+    required String pipelineStage,
+    required String pipelineStatus,
+    required int progressPct,
+    int? activeParseRunId,
+    int? activeHandoutVersionId,
+    required String nextAction,
+  }) {
+    state = state.copyWith(
+      lifecycleStatus: lifecycleStatus,
+      pipelineStage: pipelineStage,
+      pipelineStatus: pipelineStatus,
+      progressPct: progressPct,
+      activeParseRunId: activeParseRunId,
+      clearActiveParseRunId: activeParseRunId == null,
+      activeHandoutVersionId: activeHandoutVersionId,
+      clearActiveHandoutVersionId: activeHandoutVersionId == null,
+      nextAction: nextAction,
+    );
+  }
+
   void setSession(int? sessionId) {
     state = sessionId == null
         ? state.copyWith(clearSessionId: true)
