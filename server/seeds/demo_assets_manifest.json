@@ -38,12 +38,12 @@
     },
     {
       "resourceType": "docx",
-      "normalizedName": "knowlink-demo-notes.docx",
-      "originalName": "集合的初见.docx",
-      "relativePath": "knowlink-demo-notes.docx",
+      "normalizedName": "knowlink-demo-docx.docx",
+      "originalName": "集合论基础_讲义.docx",
+      "relativePath": "knowlink-demo-docx.docx",
       "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "sizeBytes": 40485,
-      "checksum": "sha256:0b29a64b87c88bbe2597af046ef754ad1010d24f467f9a13e0ad397725555326",
+      "sizeBytes": 62255,
+      "checksum": "sha256:ab9985c054b9170a118fc19ffef31f93082ea176bf48dbbae6e40705dd8c0d8a",
       "trackedInGit": false,
       "sourceKind": "original"
     }

@@ -9,7 +9,7 @@
 | `mp4` | 必须 | `knowlink-demo-main.mp4` | `video/mp4` | 主课程视频 |
 | `pdf` | 必须 | `knowlink-demo-handout.pdf` | `application/pdf` | 主讲义 PDF |
 | `pptx` | 必须 | `knowlink-demo-slides.pptx` | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | 覆盖 `slideNo` 引用 |
-| `docx` | 必须 | `knowlink-demo-notes.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | 覆盖 `anchorKey` 引用 |
+| `docx` | 必须 | `knowlink-demo-docx.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | 覆盖 `anchorKey` 引用 |
 | `srt` | 可选 | `knowlink-demo-subtitle.srt` | `application/x-subrip` | 辅助字幕输入，不单独构成验收通过条件 |
 
 ## 2. 命名与校验规则

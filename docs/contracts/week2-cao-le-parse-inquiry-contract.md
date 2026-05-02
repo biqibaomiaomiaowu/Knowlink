@@ -3,7 +3,7 @@
 本文件冻结曹乐 Week 2 负责的解析产物、解析步骤、`pipeline-status` 语义和问询题到 `learning_preferences` 的映射。它只定义业务 contract，不要求同步完成 FastAPI、worker、仓储或 Flutter 实现。
 
 - 适用时间：2026-04-27 至 2026-05-03
-- 适用范围：`course_segments`、`knowledge_points`、`segment_knowledge_points`、`knowledge_point_evidences`、`vector_documents` 的产物语义；解析步骤映射；解析聚合状态；问询答案落入 `learning_preferences` 的字段规则
+- 适用范围：`course_segments`、`handout_outline`、`handout_blocks`、`knowledge_points`、`segment_knowledge_points`、`knowledge_point_evidences`、`vector_documents` 的产物语义；解析步骤映射；解析聚合状态；问询答案落入 `learning_preferences` 的字段规则
 - 不包含：表迁移、API DTO 实现、worker provider 接入、Flutter 页面改动
 - owner 口径：字段业务含义和解析输出结构由曹乐冻结；接口、任务和落库实现仍按 [TEAM_DIVISION.md](../../TEAM_DIVISION.md) 执行
 
@@ -12,13 +12,60 @@
 冻结的 schema 文件：
 
 - [schemas/parse/normalized_document.schema.json](../../schemas/parse/normalized_document.schema.json)
+- [schemas/ai/handout_outline.schema.json](../../schemas/ai/handout_outline.schema.json)
+- [schemas/ai/handout_block.schema.json](../../schemas/ai/handout_block.schema.json)
 - [schemas/ai/knowledge_point_extraction.schema.json](../../schemas/ai/knowledge_point_extraction.schema.json)
+
+`schemas/ai/handout_blocks.schema.json` 作为 Week 1 整包讲义 legacy schema 保留，只用于历史 citation contract 和混合定位校验；Week 2 起视频优先讲义目录和单块懒生成以 `handout_outline` / `handout_block` 两个 schema 为权威。
 
 命名约定：
 
 - 本文件描述落库字段时使用 snake_case，例如 `segment_type`、`page_no`、`section_path`。
 - `schemas/parse/normalized_document.schema.json` 描述 parser 产物时使用 camelCase，例如 `segmentType`、`pageNo`、`sectionPath`。
 - `normalized_document.segments[].segmentType` 与 `course_segments.segment_type` 使用同一组业务枚举。
+
+解析质量门禁：
+
+- 所有 parser 输出 normalized document 前必须统一清洗 `textContent`，成功 segment 不得包含 `U+FFFF`、`U+FFFD`、NUL、C0/C1 控制字符、异常脚本噪声等乱码。
+- 纯点线、纯符号噪声行和清洗后空行必须过滤；清洗后无有效文本的 segment 不得进入成功产物。
+- 解析分三层执行：先用本地 parser 抽文本层、表格和原生公式，再对候选页面 / 图片调用 vivo OCR（`pos=2`，bbox 仅内部使用），最后用多模态视觉模型精准兜底图示、公式、复杂版面和低质 OCR。
+- PDF 文本层缺失或出现强乱码时，优先收集页级渲染图走 OCR；OCR 失败或低质且无干净文本时再走视觉增强，若所有页均不可用则解析失败。
+- PDF / PPTX 若存在可用文本层但页面或 slide 仍包含大图、截图题目或截图图表，可保留原生文本 segment 并追加非重复 OCR / 视觉 segment；低质 OCR 不得污染成功产物，同一页 / slide 内不得重复输出已有文本层内容。
+- PPTX / DOCX 原生文本、表格和 OMML 公式优先结构化抽取；PPTX 内嵌 DOCX / OLE package 优先直接抽取源文本；内嵌图片、截图型公式或截图图表优先 OCR，OCR 不足时走视觉增强，输出仍必须保留原资源定位；PPTX 的 EMF/WMF 等对象可在本机具备 LibreOffice 时通过整 slide 渲染补齐。
+- Venn 图、流程图、坐标图、集合关系图等教学图示必须由多模态视觉模型生成 `image_caption`；OCR 只读出 `ANB`、`AUB`、`A/B/U` 等短标签时不得视为完整图示解析。
+- 数学 OCR 若出现 `AUB`、`ANB`、`ABe`、`CuA/CuB`、`2”`、`card(AB)` 等损坏模式，必须触发视觉兜底或过滤，不得直接进入最终知识点抽取输入。
+- 候选视觉资产未返回干净 segment 时，parser 必须记录明确 issue，例如 `pdf.visual_empty`、`pptx.visual_empty` 或 `pptx.slide_render_unavailable`。
+- OCR 和视觉增强是两个独立开关，默认均关闭；仅在显式配置对应启用环境变量和 `KNOWLINK_VIVO_APP_KEY` 后启用，未配置 key 时不得访问网络；`KNOWLINK_VIVO_APP_KEY` 被 ASR、OCR 或 outline 复用时不得自动启用视觉 LLM；`ocr_text` 表示图片中可读文字，不限定来源于 OCR API。
+- 若视觉模型明确返回 `code=1010` / `Model do not support image input`，parser 必须记录资源专属 issue（例如 `pdf.vision_model_unsupported`、`pptx.vision_model_unsupported`、`docx.vision_model_unsupported`），不得泛化为 `*.vision_failed`。
+
+视觉增强环境变量：
+
+| 变量 | 语义 |
+|---|---|
+| `KNOWLINK_ENABLE_MARKITDOWN_OCR` | 是否启用 MarkItDown 作为 PDF 页级 OCR fallback，默认关闭。 |
+| `KNOWLINK_ENABLE_VIVO_OCR` | 是否启用 vivo 通用 OCR，默认关闭。 |
+| `KNOWLINK_VIVO_APP_ID` | 蓝心 / vivo 应用 id，保留为赛方能力配置字段。 |
+| `KNOWLINK_VIVO_APP_KEY` | 蓝心 / vivo 视觉能力调用 key；为空时不发起网络请求。 |
+| `KNOWLINK_VIVO_BASE_URL` | 蓝心 / vivo 视觉能力基础地址。 |
+| `KNOWLINK_VIVO_OCR_TIMEOUT_SEC` | vivo OCR 请求超时时间，默认 `10` 秒。 |
+| `KNOWLINK_VIVO_OCR_BUSINESS_ID` | vivo OCR `businessid`；为空时使用 `aigc{KNOWLINK_VIVO_APP_ID}`。 |
+| `KNOWLINK_ENABLE_VIVO_ASR` | 是否启用 vivo 长语音转写，默认关闭；未开启时 MP4 parser 返回 `mp4.asr_not_configured`。 |
+| `KNOWLINK_VIVO_ASR_ENGINE_ID` | vivo ASR 能力 id，默认 `fileasrrecorder`。 |
+| `KNOWLINK_VIVO_ASR_USER_ID` | vivo ASR 公参 user id，需为 32 位小写字母或数字；为空时由 app id 派生。 |
+| `KNOWLINK_VIVO_ASR_TIMEOUT_SEC` | vivo ASR 单次 HTTP 请求超时时间，默认 `30` 秒。 |
+| `KNOWLINK_VIVO_ASR_POLL_INTERVAL_SEC` | ASR 任务进度轮询间隔，默认 `3` 秒。 |
+| `KNOWLINK_VIVO_ASR_MAX_WAIT_SEC` | ASR 任务最长等待时间，默认 `600` 秒。 |
+| `KNOWLINK_ENABLE_VIVO_VISION` | 是否启用 vivo 多模态视觉 LLM，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才可创建视觉 client。 |
+| `KNOWLINK_VIVO_VISION_MODEL` | 多模态视觉模型标识，默认 `Doubao-Seed-2.0-mini`；仅在 `KNOWLINK_ENABLE_VIVO_VISION=true` 时生效，用于图片文字、公式和图表说明。 |
+| `KNOWLINK_VIVO_VISION_TIMEOUT_SEC` | 多模态视觉请求超时时间，默认 `20` 秒。 |
+| `KNOWLINK_VIVO_VISION_BATCH_SIZE` | 同一文件视觉资产批量请求大小，默认 `2`，大文件按批拆分。 |
+| `KNOWLINK_VIVO_OUTLINE_MODEL` | 视频目录生成模型，默认优先快模型 `Doubao-Seed-2.0-mini`。 |
+| `KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL` | 单段讲义生成候选模型，默认 `Doubao-Seed-2.0-pro`；可与 `Volc-DeepSeek-V3.2`、`qwen3.5-plus` 做质量 / 耗时对比。 |
+| `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` | 目录生成单次 LLM 调用超时，默认 `40` 秒；超时后回退为本地目录生成。 |
+| `KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC` | 单段讲义块生成单次 LLM 调用超时，默认 `120` 秒；超时后该 block 标记 `failed` 或降级为短摘要。 |
+| `KNOWLINK_ENABLE_VIVO_EMBEDDING` | 是否启用 vivo 文本向量，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才可创建 embedding client。 |
+| `KNOWLINK_VIVO_EMBEDDING_MODEL` | 文本向量模型，默认 `m3e-base`；请求体必须使用 `model_name` 与 `sentences`，查询参数必须带 `requestId`。 |
+| `KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC` | 文本向量请求超时时间，默认 `10` 秒。 |
 
 ## 1. 解析产物字段说明
 
@@ -51,15 +98,38 @@
 - 每条 segment 必须且只能使用与 `resourceType` 匹配的一组定位字段。
 - `mp4` / `srt` 使用 `start_sec + end_sec`；`pdf` 使用 `page_no`；`pptx` 使用 `slide_no`；`docx` 在 segment 层使用 `section_path + order_no`，对外 citation 使用 `anchorKey`。
 - 不得为 DOCX 伪造页码，不得把 PDF 页码和视频时间写入同一条 segment。
+- DOCX 的 `docx_block_text`、`ocr_text`、`formula`、`image_caption` 均只能使用 `section_path + order_no` 定位，不得使用 `page_no`、`slide_no`、`start_sec` 或 `end_sec`。
 
-### 1.2 `knowledge_points`
+### 1.2 `handout_outline`
 
-`knowledge_points` 是解析版本内的知识点目录。它表达“课程中有哪些概念/技能/考点”，不直接保存证据文本。
+`handout_outline` 是视频驱动讲义页的左侧时间轴目录。解析完成后优先产出 outline，让用户可以先进入讲义页，点击目录跳转视频；完整讲义正文和知识点按 block 懒生成。
+
+| 字段 | 语义 |
+|---|---|
+| `course_id` | 所属课程。 |
+| `parse_run_id` | 来源解析版本。 |
+| `title` | 当前讲义目录标题，可来自课程标题或模型生成短标题。 |
+| `summary` | 1 到 3 句整体摘要，只用于进入讲义页前的轻量预览。 |
+| `items` | 时间轴目录项数组，结构见 `schemas/ai/handout_outline.schema.json`。 |
+
+目录项约束：
+
+- 每个 item 必须包含 `outlineKey`、`title`、`summary`、`startSec`、`endSec`、`sortNo`、`generationStatus`、`sourceSegmentKeys`。
+- `startSec` / `endSec` 必须来自 `video_caption` segment 的时间范围；目录项时间区间按 `sortNo` 严格递增且不得重叠。
+- `handout_outline.schema.json` 只校验结构；跨 item 的时间线规则必须再通过 `server.ai.handout_lazy.outline_timeline_issues` 或等价服务端校验，不得把 schema valid 当成 timeline valid。
+- `generationStatus` 固定为 `pending`、`generating`、`ready`、`failed`；解析阶段创建 outline 时 block 默认是 `pending`。
+- `sourceSegmentKeys` 只能引用当前 active parse run 下的 `video_caption` segment；后续单段讲义生成只允许以该时间段 ASR 文本为主输入。
+- outline 生成优先使用快模型，默认 `Doubao-Seed-2.0-mini`；调用超过 `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` 时必须记录失败原因，不阻塞已成功的字幕 segment。
+
+### 1.3 `knowledge_points`
+
+`knowledge_points` 是讲义 block 级生成产物，不再表示解析阶段已经完成全量知识点抽取。它表达“某个目录段落中有哪些概念/技能/考点”，不直接保存证据文本。
 
 | 字段 | 语义 |
 |---|---|
 | `course_id` | 所属课程。 |
 | `parse_run_id` | 所属解析版本。 |
+| `handout_block_id` | 所属讲义 block。解析阶段未生成 block 正文时为空；block 生成完成后必填。 |
 | `parent_id` | 父知识点；为空表示一级知识点。MVP 只要求最多两层。 |
 | `display_name` | 面向用户展示的名称。 |
 | `canonical_name` | 归一化名称，用于去重；同一 `course_id + parse_run_id` 内唯一。 |
@@ -71,11 +141,13 @@
 
 抽取约束：
 
+- 解析完成后的最低可用条件是 `video_caption` segments + `handout_outline` ready，不要求全量 `knowledge_points` ready。
+- 单段讲义生成时，只针对当前 outline 时间段生成该 block 的 `knowledge_points`、关联和 evidence。
 - `canonical_name` 应去除无意义空白、统一大小写和常见符号，但不要把语义不同的知识点强行合并。
 - `importance_score` 综合出现频率、标题层级、教师强调语句、考试关键词和用户目标。
 - `parent_id` 只表达目录层级，不表达先修、相似或依赖关系；MVP 不冻结复杂知识图谱边类型。
 
-### 1.3 `segment_knowledge_points`
+### 1.4 `segment_knowledge_points`
 
 `segment_knowledge_points` 是 segment 与知识点的多对多关联。
 
@@ -90,7 +162,7 @@
 - 一个 segment 可关联多个知识点，一个知识点必须至少有一条强相关 segment 才能置为 active。
 - 关联只表示“该片段能支持该知识点”，不表示掌握度、推荐顺序或讲义块归属。
 
-### 1.4 `knowledge_point_evidences`
+### 1.5 `knowledge_point_evidences`
 
 `knowledge_point_evidences` 是知识点的可展示证据清单，用于解释“为什么抽取出这个知识点”。
 
@@ -107,7 +179,28 @@
 - 同一知识点至少保留 1 条 evidence，最多优先展示 5 条。
 - `teacher_emphasis` 只可来自视频字幕、SRT 或带明确强调语句的文档片段。
 
-### 1.5 `vector_documents`
+### 1.6 `handout_blocks`
+
+`handout_blocks` 是 outline item 对应的完整讲义正文。它按需生成，不作为进入讲义页的前置条件。
+`schemas/ai/handout_block.schema.json` 只描述 `ready` block 的 AI 生成结果；API 读模型里的 `pending`、`generating`、`failed` block 可以没有正文、知识点和引用。
+
+| 字段 | 语义 |
+|---|---|
+| `handout_version_id` | 所属讲义版本。 |
+| `outline_key` | 对应 `handout_outline.items[].outlineKey`。 |
+| `status` | `pending`、`generating`、`ready`、`failed`。 |
+| `content_md` | 完整讲义 Markdown；只有 `ready` 时必填。 |
+| `knowledge_points` | 当前 block 生成出的知识点列表，结构见 `schemas/ai/handout_block.schema.json`。 |
+| `citations` | 当前 block 引用，必须回到本段视频 segment 或相关 PDF/PPTX/DOCX segment。 |
+
+生成约束：
+
+- 用户点击目录项时，可将对应 block 从 `pending` 置为 `generating` 并触发生成；播放进入当前目录段时可自动触发当前段；距离当前段结束 `15` 秒以内可预生成下一段。
+- 单段生成输入只允许包含当前时间段 ASR 文本、相邻上下文、用户偏好，以及与该段相关的 PDF/PPTX/DOCX 片段。
+- 单段生成默认控制在 `120` 秒内；超时后该 block 标记 `failed` 或保留短摘要，允许用户稍后重试。
+- block 引用不得跨课程，不得引用未进入当前 active parse run 的 segment；视频引用必须落在该 outline item 的 `startSec/endSec` 范围内。
+
+### 1.7 `vector_documents`
 
 `vector_documents` 是 RAG 的统一向量读模型，不是业务真相源。它从 segment、知识点或讲义块投影生成，可重建。
 
@@ -126,8 +219,8 @@
 投影规则：
 
 - `owner_type = segment`：`content_text` 来自 `plain_text`，metadata 必须带来源定位。
-- `owner_type = knowledge_point`：`content_text` 由 `display_name + description + aliases` 组成，metadata 记录强相关 segment id 列表。
-- `owner_type = handout_block`：只在讲义生成后创建，metadata 记录 `handoutVersionId` 和引用的 segment / knowledge point。
+- `owner_type = knowledge_point`：只在对应 block 生成后创建，`content_text` 由 `display_name + description + aliases` 组成，metadata 记录强相关 segment id 列表。
+- `owner_type = handout_block`：只在讲义 block 生成后创建，metadata 记录 `handoutVersionId`、`outlineKey` 和引用的 segment / knowledge point。
 - 查询必须限制在当前 `course_id`，并默认只使用当前 `active_parse_run_id` 与当前 active handout version。
 
 ## 2. 解析步骤映射
@@ -139,15 +232,15 @@
 | `resource_validate` | 资源校验 | `course_resources`、对象存储元数据、MIME、checksum | 可解析资源清单、不可解析原因 | `resource_validate` |
 | `caption_extract` | 字幕提取 | `mp4`、可选 `srt` | 视频 caption segment、视频时间轴 | `subtitle_extract`、`asr` |
 | `document_parse` | 文档解析 | `pdf`、`pptx`、`docx` | 文档文本 segment、页面/slide/docx anchor、OCR 衍生产物 | `doc_parse`、`ocr` |
-| `knowledge_extract` | 知识抽取 | active segments | `knowledge_points`、`segment_knowledge_points`、`knowledge_point_evidences` | `knowledge_extract` |
-| `vectorize` | 向量化 | active segments、active knowledge points、必要时 handout blocks | `vector_documents` | `embed` |
+| `knowledge_extract` | 目录抽取 | active `video_caption` segments，必要时补充文档摘要 | `handout_outline`、轻量 topic tags、outline 与视频时间轴映射 | `outline_generate`、`knowledge_extract` |
+| `vectorize` | 向量化 | active segments、ready handout blocks、block 级 knowledge points | `vector_documents` | `embed` |
 
 顺序约束：
 
 1. `resource_validate` 必须最先完成。
 2. `caption_extract` 与 `document_parse` 可并行；课程没有视频时 `caption_extract` 为 `skipped`，没有文档时 `document_parse` 为 `skipped`。
-3. `knowledge_extract` 依赖至少一个 active segment。
-4. `vectorize` 依赖 active segment 和 active knowledge point；若 embedding provider 失败但结构化解析已完成，可触发 `partial_success`。
+3. `knowledge_extract` 在视频课程中依赖至少一个 active `video_caption` segment，并优先生成 `handout_outline`；没有视频但文档解析成功时可降级为文档目录，但不能伪造视频时间轴。
+4. `vectorize` 依赖 active segment；block 级 knowledge point 和 handout block 仅在对应 block ready 后增量投影。若 embedding provider 失败但结构化解析和 outline 已完成，可触发 `partial_success`。
 
 ## 3. `pipeline-status` 语义
 
@@ -192,21 +285,21 @@
 
 - `resource_validate` 无任何可解析资源。
 - `caption_extract` 和 `document_parse` 都没有产出 active segment。
-- `knowledge_extract` 未产出任何 active knowledge point。
+- 视频课程的 `caption_extract` 已成功但 `knowledge_extract` 未产出可用 `handout_outline`。
 - 数据库写入、对象存储读取或根任务异常导致产物不可确认。
 
 `partial_success` 的判定：
 
 - 至少有一个资源成功解析并产出 active segment。
-- 至少有一个 active knowledge point 和 evidence。
+- 视频课程至少有一个 active `video_caption` segment 和可用 `handout_outline`；文档兜底课程至少有一个 active 文档 segment 和可用文档目录。
 - 失败项不阻断问询、讲义和检索的最低可用链路。
 - 典型场景：视频 ASR 失败但 PDF/PPTX/DOCX 成功；某个 PDF 页 OCR 失败但文本层成功；embedding 部分失败但仍有可检索的 segment 投影。
 
 `partial_success` 下游语义：
 
-- `lifecycleStatus` 可进入 `inquiry_ready`。
-- `nextAction` 返回 `enter_inquiry`。
-- `sourceOverview`、`knowledgeMap` 和 `highlightSummary` 必须明确可用数量和失败提示。
+- `lifecycleStatus` 可进入 `inquiry_ready`，视频课程也可直接进入讲义页查看 outline。
+- `nextAction` 可返回 `enter_inquiry` 或 `enter_handout_outline`，由前端当前链路决定。
+- `sourceOverview`、`knowledgeMap`、`handoutOutline` 和 `highlightSummary` 必须明确可用数量和失败提示。
 - 后端可允许重试失败子任务，但不得阻塞用户进入问询。
 
 ### 3.4 `pipeline-status` 字段要求

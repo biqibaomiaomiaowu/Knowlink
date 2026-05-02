@@ -179,7 +179,11 @@
 | `HandoutPage` `courseFlowProvider` | `POST /api/v1/courses/{courseId}/handouts/generate` | 杨彩艺 |
 | `HandoutPage` `courseFlowProvider` | `GET /api/v1/handout-versions/{handoutVersionId}/status` | 杨彩艺 |
 | `HandoutPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/handouts/latest` | 杨彩艺 |
+| `HandoutPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/handouts/latest/outline` | 杨彩艺 |
 | `HandoutPage` `courseFlowProvider` | `GET /api/v1/courses/{courseId}/handouts/latest/blocks` | 杨彩艺 |
+| `HandoutPage` `activeBlockProvider` | `POST /api/v1/handout-blocks/{blockId}/generate` | 杨彩艺 |
+| `HandoutPage` `activeBlockProvider` | `GET /api/v1/handout-blocks/{blockId}/status` | 杨彩艺 |
+| `HandoutPage` `activeBlockProvider` | `GET /api/v1/courses/{courseId}/handouts/current-block` | 杨彩艺 |
 | `HandoutPage` `activeBlockProvider` | `GET /api/v1/handout-blocks/{blockId}/jump-target` | 杨彩艺 |
 | `QaPage` `courseFlowProvider` | `POST /api/v1/qa/messages` | 杨彩艺 |
 | `QaPage` `courseFlowProvider` | `GET /api/v1/qa/sessions/{sessionId}/messages` | 杨彩艺 |

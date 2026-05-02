@@ -6,6 +6,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
+from server.ai.handout_lazy import outline_timeline_issues
 from server.schemas.common import AsyncEntity
 
 
@@ -42,11 +43,15 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
     week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
 
     assert "week2-cao-le-parse-inquiry-contract.md" in api_contract
+    assert "schemas/ai/handout_outline.schema.json" in week2_contract
+    assert "schemas/ai/handout_block.schema.json" in week2_contract
     assert "schemas/ai/knowledge_point_extraction.schema.json" in week2_contract
     assert "schemas/parse/normalized_document.schema.json" in week2_contract
 
     for token in (
         "`course_segments`",
+        "`handout_outline`",
+        "`handout_blocks`",
         "`knowledge_points`",
         "`segment_knowledge_points`",
         "`knowledge_point_evidences`",
@@ -58,6 +63,74 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
     for step_code in ("resource_validate", "caption_extract", "document_parse", "knowledge_extract", "vectorize"):
         assert step_code in api_contract
         assert step_code in week2_contract
+
+
+def test_week2_video_outline_lazy_handout_semantics_are_frozen():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
+    weekly_plan = load_text("WEEKLY_PLAN.md")
+    env_example = load_text(".env.example")
+
+    for token in (
+        "handout_outline",
+        "outlineKey",
+        "generationStatus",
+        "sourceSegmentKeys",
+        "pending",
+        "generating",
+        "ready",
+        "failed",
+        "enter_handout_outline",
+        "outline_ready",
+        "currentSec",
+        "KNOWLINK_VIVO_OUTLINE_MODEL",
+        "KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL",
+        "KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC",
+        "KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC",
+        "KNOWLINK_ENABLE_VIVO_EMBEDDING",
+        "KNOWLINK_VIVO_EMBEDDING_MODEL",
+        "KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC",
+        "Doubao-Seed-2.0-mini",
+        "Doubao-Seed-2.0-pro",
+        "120",
+        "m3e-base",
+        "Volc-DeepSeek-V3.2",
+        "qwen3.5-plus",
+    ):
+        assert token in week2_contract or token in api_contract or token in env_example
+
+    for token in (
+        "KNOWLINK_ENABLE_VIVO_EMBEDDING",
+        "KNOWLINK_VIVO_EMBEDDING_MODEL",
+        "KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC",
+        "model_name",
+        "sentences",
+        "requestId",
+    ):
+        assert token in week2_contract
+
+    assert "不再表示解析阶段已经完成全量知识点抽取" in week2_contract
+    assert "完整知识点随讲义 block 逐段补齐" in api_contract
+    assert "完整 `knowledge_points` 不再作为进入问询页或讲义 outline 页的前置条件" in weekly_plan
+    assert "视频链路需能保存 `handout_outline`" in weekly_plan
+    assert "`knowledge_extract` 在视频优先链路中表示目录抽取 ready" in weekly_plan
+    assert "schema valid 当成 timeline valid" in week2_contract
+    assert "只描述 `ready` block 的 AI 生成结果" in week2_contract
+    assert "视频引用必须落在该 outline item 的 `startSec/endSec` 范围内" in week2_contract
+    assert '"outlineReady": true' in api_contract
+    assert '"generatedKnowledgePointCount": 0' in api_contract
+    assert '"outlineStatus": "ready"' in api_contract
+
+
+def test_week1_handout_blocks_schema_is_marked_as_legacy():
+    freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
+    legacy_schema = load_json("schemas/ai/handout_blocks.schema.json")
+
+    assert "Week 1 整包讲义 legacy schema" in freeze_doc
+    assert "schemas/ai/handout_outline.schema.json" in freeze_doc
+    assert "schemas/ai/handout_block.schema.json" in freeze_doc
+    assert "Legacy Week 1 whole-handout schema" in legacy_schema["description"]
+    assert "authoritative handout generation schemas" in legacy_schema["description"]
 
 
 def test_normalized_document_segment_types_match_week2_contract():
@@ -78,6 +151,32 @@ def test_normalized_document_segment_types_match_week2_contract():
 
     for segment_type in expected_segment_types:
         assert f"`{segment_type}`" in week2_contract
+
+
+def test_parse_contract_documents_quality_gate_and_vision_env_vars():
+    week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
+
+    for token in (
+        "U+FFFF",
+        "U+FFFD",
+        "KNOWLINK_ENABLE_MARKITDOWN_OCR",
+        "KNOWLINK_ENABLE_VIVO_OCR",
+        "KNOWLINK_VIVO_APP_ID",
+        "KNOWLINK_VIVO_APP_KEY",
+        "KNOWLINK_VIVO_BASE_URL",
+        "KNOWLINK_VIVO_OCR_TIMEOUT_SEC",
+        "KNOWLINK_VIVO_OCR_BUSINESS_ID",
+        "KNOWLINK_ENABLE_VIVO_VISION",
+        "KNOWLINK_VIVO_VISION_MODEL",
+        "KNOWLINK_VIVO_VISION_TIMEOUT_SEC",
+        "KNOWLINK_VIVO_VISION_BATCH_SIZE",
+        "vision_model_unsupported",
+        "Doubao-Seed-2.0-mini",
+        "Venn 图",
+        "低质 OCR",
+        "AUB",
+    ):
+        assert token in week2_contract
 
 
 def test_bilibili_reserved_contract_is_aligned_across_docs():
@@ -418,6 +517,251 @@ def test_citation_schemas_reject_missing_required_or_unknown_fields(schema_path:
 def test_citation_schemas_reject_missing_or_mixed_locator_fields(schema_path: str, payload: dict):
     with pytest.raises(ValidationError):
         build_validator(schema_path).validate(payload)
+
+
+def test_handout_outline_schema_accepts_valid_payload():
+    payload = {
+        "title": "集合的初见",
+        "summary": "按视频时间线组织的讲义目录",
+        "items": [
+            {
+                "outlineKey": "outline-1",
+                "title": "集合的基本概念",
+                "summary": "介绍集合、元素和属于关系",
+                "startSec": 0,
+                "endSec": 180,
+                "sortNo": 1,
+                "generationStatus": "pending",
+                "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                "topicTags": ["集合"],
+            },
+            {
+                "outlineKey": "outline-2",
+                "title": "集合的表示方法",
+                "summary": "从列举法过渡到描述法",
+                "startSec": 180,
+                "endSec": 360,
+                "sortNo": 2,
+                "generationStatus": "ready",
+                "sourceSegmentKeys": ["mp4-c3"],
+                "topicTags": [],
+            },
+        ],
+    }
+
+    build_validator("schemas/ai/handout_outline.schema.json").validate(payload)
+
+
+def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
+    schema = load_json("schemas/ai/handout_outline.schema.json")
+    payload = {
+        "title": "集合的初见",
+        "summary": "结构合法但时间线非法",
+        "items": [
+            {
+                "outlineKey": "outline-1",
+                "title": "第一段",
+                "summary": "第一段",
+                "startSec": 0,
+                "endSec": 100,
+                "sortNo": 1,
+                "generationStatus": "pending",
+                "sourceSegmentKeys": ["mp4-c1"],
+            },
+            {
+                "outlineKey": "outline-1",
+                "title": "第二段",
+                "summary": "第二段",
+                "startSec": 90,
+                "endSec": 120,
+                "sortNo": 1,
+                "generationStatus": "pending",
+                "sourceSegmentKeys": ["mp4-c2"],
+            },
+        ],
+    }
+
+    assert "outline_timeline_issues" in schema["description"]
+    build_validator("schemas/ai/handout_outline.schema.json").validate(payload)
+    assert outline_timeline_issues(payload["items"]) == [
+        "outline.key_duplicate",
+        "outline.sort_not_increasing",
+        "outline.time_overlap",
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "title": "bad",
+            "summary": "bad",
+            "items": [
+                {
+                    "outlineKey": "outline-1",
+                    "title": "bad",
+                    "summary": "bad",
+                    "startSec": 0,
+                    "endSec": 180,
+                    "sortNo": 1,
+                    "generationStatus": "pending",
+                }
+            ],
+        },
+        {
+            "title": "bad",
+            "summary": "bad",
+            "items": [
+                {
+                    "outlineKey": "outline-1",
+                    "title": "bad",
+                    "summary": "bad",
+                    "startSec": 0,
+                    "endSec": 180,
+                    "sortNo": 1,
+                    "generationStatus": "done",
+                    "sourceSegmentKeys": ["mp4-c1"],
+                }
+            ],
+        },
+        {
+            "title": "bad",
+            "summary": "bad",
+            "items": [
+                {
+                    "outlineKey": "outline-1",
+                    "title": "bad",
+                    "summary": "bad",
+                    "startSec": 0,
+                    "endSec": 180,
+                    "sortNo": 1,
+                    "generationStatus": "pending",
+                    "sourceSegmentKeys": ["mp4-c1"],
+                    "unexpected": True,
+                }
+            ],
+        },
+    ],
+)
+def test_handout_outline_schema_rejects_invalid_payloads(payload: dict):
+    with pytest.raises(ValidationError):
+        build_validator("schemas/ai/handout_outline.schema.json").validate(payload)
+
+
+def test_handout_block_schema_accepts_valid_lazy_block_payload():
+    schema = load_json("schemas/ai/handout_block.schema.json")
+    payload = {
+        "outlineKey": "outline-1",
+        "title": "集合的基本概念",
+        "summary": "介绍集合、元素和属于关系",
+        "contentMd": "### 集合的基本概念\n集合由确定对象组成。",
+        "estimatedMinutes": 6,
+        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": "kp-set-basic",
+                "displayName": "集合",
+                "description": "集合是确定对象组成的整体。",
+                "difficultyLevel": "beginner",
+                "importanceScore": 90,
+                "sortNo": 1,
+            }
+        ],
+        "citations": [
+            {
+                "resourceId": 501,
+                "segmentKey": "mp4-c1",
+                "refLabel": "视频 00:00-03:00",
+                "startSec": 0,
+                "endSec": 180,
+            },
+            {
+                "resourceId": 502,
+                "segmentKey": "pdf-p1",
+                "refLabel": "PDF 第 1 页",
+                "pageNo": 1,
+            },
+        ],
+    }
+
+    assert "ready handout block" in schema["description"]
+    build_validator("schemas/ai/handout_block.schema.json").validate(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "title": "bad",
+            "summary": "bad",
+            "contentMd": "bad",
+            "estimatedMinutes": 3,
+            "sourceSegmentKeys": ["mp4-c1"],
+            "knowledgePoints": [],
+            "citations": [{"resourceId": 1, "refLabel": "视频", "startSec": 0, "endSec": 10}],
+        },
+        {
+            "outlineKey": "outline-1",
+            "title": "bad",
+            "summary": "bad",
+            "contentMd": "bad",
+            "estimatedMinutes": 3,
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-1",
+                    "displayName": "bad",
+                    "description": "bad",
+                    "difficultyLevel": "beginner",
+                    "importanceScore": 1,
+                    "sortNo": 1,
+                }
+            ],
+            "citations": [{"resourceId": 1, "refLabel": "视频", "startSec": 0, "endSec": 10}],
+        },
+        {
+            "outlineKey": "outline-1",
+            "title": "bad",
+            "summary": "bad",
+            "contentMd": "bad",
+            "estimatedMinutes": 3,
+            "sourceSegmentKeys": ["mp4-c1"],
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-1",
+                    "displayName": "bad",
+                    "description": "bad",
+                    "difficultyLevel": "expert",
+                    "importanceScore": 1,
+                    "sortNo": 1,
+                }
+            ],
+            "citations": [{"resourceId": 1, "refLabel": "视频", "startSec": 0, "endSec": 10}],
+        },
+        {
+            "outlineKey": "outline-1",
+            "title": "bad",
+            "summary": "bad",
+            "contentMd": "bad",
+            "estimatedMinutes": 3,
+            "sourceSegmentKeys": ["mp4-c1"],
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-1",
+                    "displayName": "bad",
+                    "description": "bad",
+                    "difficultyLevel": "beginner",
+                    "importanceScore": 1,
+                    "sortNo": 1,
+                }
+            ],
+            "citations": [{"resourceId": 1, "refLabel": "混合定位", "pageNo": 1, "startSec": 0, "endSec": 10}],
+        },
+    ],
+)
+def test_handout_block_schema_rejects_invalid_lazy_block_payloads(payload: dict):
+    with pytest.raises(ValidationError):
+        build_validator("schemas/ai/handout_block.schema.json").validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -968,10 +1312,76 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             validator.validate(payload)
 
 
+@pytest.mark.parametrize("segment_type", ["docx_block_text", "ocr_text", "formula", "image_caption"])
+def test_normalized_document_schema_accepts_docx_visual_segments_with_section_path(segment_type: str):
+    validator = build_validator("schemas/parse/normalized_document.schema.json")
+
+    validator.validate(
+        {
+            "resourceType": "docx",
+            "segments": [
+                {
+                    "segmentKey": f"seg-docx-{segment_type.replace('_', '-')}",
+                    "segmentType": segment_type,
+                    "orderNo": 1,
+                    "textContent": "clean text",
+                    "sectionPath": ["第 1 章"],
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("bad_location", ["pageNo", "slideNo", "startSec", "endSec"])
+def test_normalized_document_schema_rejects_docx_non_section_locations(bad_location: str):
+    validator = build_validator("schemas/parse/normalized_document.schema.json")
+    payload = {
+        "resourceType": "docx",
+        "segments": [
+            {
+                "segmentKey": f"seg-docx-bad-{bad_location}",
+                "segmentType": "image_caption",
+                "orderNo": 1,
+                "textContent": "clean text",
+                "sectionPath": ["第 1 章"],
+                bad_location: 1,
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        validator.validate(payload)
+
+
+@pytest.mark.parametrize("bad_text", ["bad\ufffftext", "bad\ufffdtext", "bad\x00text", "bad\x01text", "bad\x19text"])
+def test_normalized_document_schema_rejects_garbled_text_content(bad_text: str):
+    validator = build_validator("schemas/parse/normalized_document.schema.json")
+    payload = {
+        "resourceType": "pdf",
+        "segments": [
+            {
+                "segmentKey": "seg-pdf-garbled",
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": bad_text,
+                "pageNo": 1,
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        validator.validate(payload)
+
+
 def test_demo_asset_baseline_covers_fixed_joint_test_set():
     baseline_doc = load_text("docs/demo-assets-baseline.md")
 
-    for token in ("knowlink-demo-main.mp4", "knowlink-demo-handout.pdf", "knowlink-demo-slides.pptx", "knowlink-demo-notes.docx"):
+    for token in (
+        "knowlink-demo-main.mp4",
+        "knowlink-demo-handout.pdf",
+        "knowlink-demo-slides.pptx",
+        "knowlink-demo-docx.docx",
+    ):
         assert token in baseline_doc
 
     assert "sha256:<hex>" in baseline_doc
@@ -997,10 +1407,10 @@ def test_first_edition_manifest_matches_first_edition_doc():
             88576,
         ),
         "docx": (
-            "knowlink-demo-notes.docx",
-            "集合的初见.docx",
+            "knowlink-demo-docx.docx",
+            "集合论基础_讲义.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            40485,
+            62255,
         ),
     }
 

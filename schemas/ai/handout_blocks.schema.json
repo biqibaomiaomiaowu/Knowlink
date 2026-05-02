@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "KnowLinkHandoutBlocks",
+  "description": "Legacy Week 1 whole-handout schema kept for historical citation contract tests. Week 2+ video-first lazy generation uses schemas/ai/handout_outline.schema.json and schemas/ai/handout_block.schema.json as the authoritative handout generation schemas.",
   "$defs": {
     "citationLocator": {
       "oneOf": [

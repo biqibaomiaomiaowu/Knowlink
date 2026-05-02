@@ -130,6 +130,8 @@
 
 - 输出解析结果字段说明：
   - `course_segments`
+  - `handout_outline`
+  - `handout_blocks`
   - `knowledge_points`
   - `segment_knowledge_points`
   - `knowledge_point_evidences`
@@ -138,10 +140,11 @@
   - 资源校验
   - 字幕提取 / ASR
   - 文档解析
-  - 知识点抽取
+  - 目录抽取 / 知识点懒生成
   - 向量化
 - 负责 `server/ai/**` 与 `server/parsers/**` 中赛方 AI 能力的业务适配与产物策略，包括 OCR、ASR、LLM、Embedding 等与解析 / 生成产物直接相关的业务输入输出映射、prompt、AI 输出 JSON Schema / parse schema、结果校验、错误降级和产物归一化；不包含 `server/schemas/**` API DTO。
-- 实现 PDF / PPTX / DOCX / MP4 / SRT 的解析策略，输出 normalized document、segments、knowledge point extraction 产物和 vector document 输入内容策略；资源读取、worker 编排、DB 写入和状态流转由杨彩艺负责。
+- 实现 PDF / PPTX / DOCX / MP4 / SRT 的解析策略，输出 normalized document、segments、视频优先 `handout_outline`、block 级 knowledge point extraction 产物和 vector document 输入内容策略；资源读取、worker 编排、DB 写入和状态流转由杨彩艺负责。
+- 视频课程解析完成后的最低可用标准调整为 `video_caption` segments + `handout_outline` ready；完整 `knowledge_points` 不再作为进入问询页或讲义 outline 页的前置条件，随 `handout_blocks` 按需生成后逐步补齐。
 - 定义解析侧 `failed` / `partial_success` / `succeeded` 判定业务语义。
 - 定义问询题模板和 `learning_preferences` 字段语义。
 - 与杨彩艺确认 `parse_run` 聚合状态和 `pipeline-status` 返回结构；杨彩艺负责聚合计算、API DTO、错误返回和落库实现。
@@ -194,14 +197,14 @@
   - `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
   - `GET /api/v1/bilibili/auth/session`
   - `DELETE /api/v1/bilibili/auth/session`
-- 消费曹乐提供的 parser / AI adapter 产物并落库基础解析结果，至少能写入 `course_segments` 和 `knowledge_points`。
+- 消费曹乐提供的 parser / AI adapter 产物并落库基础解析结果，至少能写入 `course_segments`，视频链路需能保存 `handout_outline` 或等价目录读模型；`knowledge_points` 随讲义 block 懒生成后再增量写入。
 
 ### 4.5 本周交付物
 
 - 能创建一门课程并上传资料。
 - 能看到真实解析进度。
-- 解析完成后能进入问询页并保存答案。
-- 数据库中能看到真实 `parse_run`、`async_task`、`segment`、`knowledge_point` 数据，且 `async_task` 状态能反映解析任务推进。
+- 解析完成后能进入问询页并保存答案；视频课程也可先进入讲义 outline 页查看目录和跳转时间。
+- 数据库中能看到真实 `parse_run`、`async_task`、`segment` 数据；视频链路能看到 `handout_outline`，`knowledge_point` 数据可在讲义 block 生成后增量出现，且 `async_task` 状态能反映解析任务推进。
 - B 站单视频导入与扫码登录接口预留已可访问，并明确当前统一返回 `501`。
 
 ### 4.6 本周验收
@@ -209,7 +212,7 @@
 - 固定资料集可稳定跑通上传和解析。
 - 解析失败时前端能看到明确错误，不会卡死在 loading。
 - `pipeline-status` 能反映解析任务的进度、最终状态和失败信息。
-- 问询字段和后续讲义生成字段完全对齐。
+- 问询字段和后续讲义生成字段完全对齐；`knowledge_extract` 在视频优先链路中表示目录抽取 ready，不表示全量知识点已经生成。
 - B 站接口的路径、错误码和 `bilibili_import_run` 命名在架构文档、分工文档和 API contract 中完全一致，且接口当前能返回统一未实现错误。
 
 ## 5. 第 3 周：讲义、联动、问答链路

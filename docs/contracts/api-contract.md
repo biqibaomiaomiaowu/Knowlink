@@ -552,22 +552,29 @@ stub 阶段约束：
   ],
   "activeParseRunId": 9001,
   "activeHandoutVersionId": null,
-  "nextAction": "enter_inquiry",
+  "nextAction": "enter_handout_outline",
   "sourceOverview": {
     "videoReady": true,
+    "outlineReady": true,
+    "outlineItemCount": 3,
     "docTypes": ["pdf", "pptx", "docx"],
     "organizedSourceCount": 3
   },
   "knowledgeMap": {
-    "status": "ready",
-    "knowledgePointCount": 5,
+    "status": "deferred",
+    "knowledgePointCount": 0,
     "segmentCount": 12
+  },
+  "handoutOutline": {
+    "status": "ready",
+    "outlineItemCount": 3,
+    "generatedBlockCount": 0
   },
   "highlightSummary": {
     "status": "ready",
     "items": [
-      "重点公式与高频题型已抽取",
-      "已生成下一步 AI 个性化问询入口"
+      "视频目录已生成，可进入讲义页",
+      "完整讲义与知识点将在点击目录后按段生成"
     ]
   }
 }
@@ -576,7 +583,8 @@ stub 阶段约束：
 说明：
 
 - `steps[].code` 固定聚合为 `resource_validate`、`caption_extract`、`document_parse`、`knowledge_extract`、`vectorize`。
-- `pipelineStatus = partial_success` 表示解析产物已满足进入问询的最低条件，但存在非关键资源或非关键步骤失败；此时 `nextAction` 仍可为 `enter_inquiry`。
+- `knowledge_extract` 在视频优先链路中表示生成 `handoutOutline`，不表示全量 `knowledge_points` 已生成；完整知识点随讲义 block 逐段补齐。
+- `pipelineStatus = partial_success` 表示解析产物已满足进入问询或讲义 outline 的最低条件，但存在非关键资源或非关键步骤失败；此时 `nextAction` 仍可为 `enter_inquiry` 或 `enter_handout_outline`。
 - `progressPct`、步骤权重、失败条件和 `partial_success` 细则以 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md) 第 3 节为准。
 
 ### `GET /api/v1/courses/{courseId}/parse/summary`
@@ -588,7 +596,10 @@ stub 阶段约束：
   "courseId": 101,
   "activeParseRunId": 9001,
   "segmentCount": 12,
-  "knowledgePointCount": 5
+  "knowledgePointCount": 0,
+  "generatedKnowledgePointCount": 0,
+  "handoutOutlineStatus": "ready",
+  "outlineItemCount": 3
 }
 ```
 
@@ -757,8 +768,11 @@ stub 阶段约束：
 ```json
 {
   "handoutVersionId": 3001,
-  "status": "ready",
+  "status": "outline_ready",
+  "outlineStatus": "ready",
   "totalBlocks": 3,
+  "readyBlocks": 0,
+  "pendingBlocks": 3,
   "sourceParseRunId": 9001
 }
 ```
@@ -773,9 +787,43 @@ stub 阶段约束：
   "title": "高数期末冲刺讲义",
   "summary": "按考试优先级整理的知识块",
   "totalBlocks": 3,
-  "status": "ready"
+  "status": "outline_ready"
 }
 ```
+
+说明：
+
+- `status = outline_ready` 表示目录已可展示，但并不要求所有 block 正文已生成。
+- block 正文生成完成后，可进入 `ready`；部分失败时返回 `partial_success` 并在 block 级暴露失败状态。
+
+### `GET /api/v1/courses/{courseId}/handouts/latest/outline`
+
+响应 `data`：
+
+```json
+{
+  "handoutVersionId": 3001,
+  "title": "集合的初见",
+  "summary": "按视频时间线组织的讲义目录",
+  "items": [
+    {
+      "outlineKey": "outline-1",
+      "blockId": 4001,
+      "title": "集合的基本概念",
+      "summary": "介绍集合、元素和属于关系",
+      "startSec": 0,
+      "endSec": 180,
+      "sortNo": 1,
+      "generationStatus": "pending"
+    }
+  ]
+}
+```
+
+说明：
+
+- 这是视频优先讲义页的首屏读取接口方向；接口实现 owner 仍按 `TEAM_DIVISION.md` 执行。
+- 点击目录项时，播放器跳转到 `startSec`；播放时间落在 `[startSec, endSec)` 时高亮对应目录项，最后一段允许命中 `endSec`。
 
 ### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`
 
@@ -784,8 +832,10 @@ stub 阶段约束：
 ```json
 {
   "blockId": 4001,
+  "outlineKey": "outline-1",
   "title": "极限与连续",
   "summary": "先抓必考定义和题型",
+  "status": "ready",
   "contentMd": "### 极限与连续",
   "startSec": 120,
   "endSec": 360,
@@ -805,6 +855,72 @@ stub 阶段约束：
 
 - `slideNo`：PPTX slide 引用
 - `anchorKey`：DOCX heading / anchor 引用
+
+未生成 block 可返回：
+
+```json
+{
+  "blockId": 4002,
+  "outlineKey": "outline-2",
+  "title": "集合的表示方法",
+  "summary": "从列举法过渡到描述法",
+  "status": "pending",
+  "contentMd": null,
+  "startSec": 180,
+  "endSec": 360,
+  "citations": []
+}
+```
+
+### `POST /api/v1/handout-blocks/{blockId}/generate`
+
+响应 `data`：
+
+```json
+{
+  "taskId": 7102,
+  "status": "queued",
+  "nextAction": "poll",
+  "entity": {
+    "type": "handout_block",
+    "id": 4002
+  }
+}
+```
+
+说明：
+
+- 这是单个目录项懒生成的接口方向；幂等、任务入队和 DTO 由后端 owner 落地。
+- 触发时只生成该 block 的 `contentMd`、block 级 `knowledgePoints` 和引用。
+
+### `GET /api/v1/handout-blocks/{blockId}/status`
+
+响应 `data`：
+
+```json
+{
+  "blockId": 4002,
+  "outlineKey": "outline-2",
+  "status": "generating",
+  "startSec": 180,
+  "endSec": 360
+}
+```
+
+### `GET /api/v1/courses/{courseId}/handouts/current-block?currentSec=205`
+
+响应 `data`：
+
+```json
+{
+  "blockId": 4002,
+  "outlineKey": "outline-2",
+  "startSec": 180,
+  "endSec": 360,
+  "generationStatus": "pending",
+  "prefetchBlockId": 4003
+}
+```
 
 ### `GET /api/v1/handout-blocks/{blockId}/jump-target`
 
