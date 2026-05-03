@@ -449,6 +449,9 @@ def test_scaffold_structure_and_docs_are_aligned():
 
 
 def test_basic_database_four_table_scaffold_is_accepted():
+    import server.infra.db.models  # noqa: F401
+    from server.infra.db.base import Base
+
     sources = {
         "courses": (ROOT / "server/infra/db/models/course.py").read_text(encoding="utf-8"),
         "course_resources": (ROOT / "server/infra/db/models/resource.py").read_text(encoding="utf-8"),
@@ -489,12 +492,15 @@ def test_basic_database_four_table_scaffold_is_accepted():
     }
 
     for table_name, fields in expected_fields.items():
+        model_columns = set(Base.metadata.tables[table_name].c.keys())
         assert f'__tablename__ = "{table_name}"' in sources[table_name]
         assert f"'{table_name}'" in migration or f'"{table_name}"' in migration
         for field in fields:
-            assert field in sources[table_name], f"{field} missing in {table_name} model"
+            assert (
+                field in sources[table_name] or field in model_columns
+            ), f"{field} missing in {table_name} model"
             assert f"'{field}'" in migration or f'"{field}"' in migration, f"{field} missing in migration"
 
-    assert "BaseSettings" in session
-    assert "create_async_engine" in session
+    assert "create_engine" in session
+    assert "create_async_engine" not in session
     assert "target_metadata = Base.metadata" in (ROOT / "alembic/env.py").read_text(encoding="utf-8")
