@@ -23,3 +23,40 @@
 - 仓库只跟踪文档与 `server/seeds/demo_assets_manifest.json`，不跟踪 `local_assets/**` 下的二进制文件。
 - 如果文件内容更新，必须同步更新本文件和 manifest 中的 `sizeBytes` 与 `checksum`。
 - 演示时统一使用规范文件名，避免不同设备上出现命名分叉。
+
+## 4. 手动 smoke preflight
+
+脚本：`scripts/demo_assets_smoke.py`
+
+仅校验本地资料是否齐全：
+
+```bash
+python scripts/demo_assets_smoke.py --asset-check-only
+```
+
+完整手动 smoke 前置检查：
+
+```bash
+python scripts/demo_assets_smoke.py --api-base-url http://127.0.0.1:8000
+```
+
+完整检查要求：
+
+- API 已启动且 `GET /health` 返回成功：`python -m uvicorn server.app:app --reload`
+- MinIO 可连接，并设置 `KNOWLINK_MINIO_ENDPOINT`、`KNOWLINK_MINIO_ACCESS_KEY`、`KNOWLINK_MINIO_SECRET_KEY`
+- Vivo 联网解析配置齐全：`KNOWLINK_ENABLE_VIVO_OCR=true`、`KNOWLINK_ENABLE_VIVO_VISION=true`、`KNOWLINK_ENABLE_VIVO_ASR=true`、`KNOWLINK_VIVO_APP_ID`、`KNOWLINK_VIVO_APP_KEY`
+- `local_assets/first-edition/what-is-set/` 下四个文件存在，且 size/checksum 与 `server/seeds/demo_assets_manifest.json` 一致
+
+脚本 exit code：
+
+- `0`：manifest、本地资料通过；默认完整模式下还表示手动 smoke 前置条件均通过，脚本会打印后续手动上传、解析、轮询路径
+- `1`：manifest 缺失、JSON 非法或字段结构非法
+- `2`：本地资料缺失、size 不一致或 checksum 不一致
+- `3`：本地资料可用，但 API、MinIO 或 Vivo key/开关等运行前置缺失
+
+如果本轮最终验收不跑完整 smoke，需要在汇报中明确写出：
+
+- 未运行命令或只运行了 `--asset-check-only`
+- 阻塞原因，例如缺 Vivo key、API/MinIO 未启动，或固定资料目录不存在
+- 已经验证到哪一层，例如 manifest + 本地 size/checksum 已通过
+- 未覆盖的风险，例如未验证真实上传、MinIO PUT、Vivo OCR/Vision/ASR 和 parse pipeline 轮询结果

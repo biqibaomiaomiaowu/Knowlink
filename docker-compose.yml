@@ -1,4 +1,32 @@
 services:
+  db-migrate:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    command: alembic upgrade head
+    env_file:
+      - .env
+    volumes:
+       - .:/workspace
+    working_dir: /workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  minio-init:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    command: python scripts/init_minio_bucket.py
+    env_file:
+      - .env
+    volumes:
+       - .:/workspace
+    working_dir: /workspace
+    depends_on:
+      minio:
+        condition: service_started
+
   api:
     build:
       context: .
@@ -6,30 +34,44 @@ services:
     command: uvicorn server.app:app --host 0.0.0.0 --port 8000
     env_file:
       - .env
+    environment:
+      KNOWLINK_TASK_QUEUE: dramatiq
+      KNOWLINK_DRAMATIQ_QUEUE: parse_pipeline
+      KNOWLINK_PARSE_PIPELINE_ACTOR: server.tasks.worker:parse_pipeline
     ports:
       - "8000:8000"
     volumes:
        - .:/workspace
     working_dir: /workspace
     depends_on:
-      - postgres
-      - redis
-      - minio
+      db-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   worker:
     build:
       context: .
       dockerfile: server/Dockerfile
-    command: python -m server.tasks.worker
+    command: dramatiq --processes 1 --threads 4 server.tasks.broker:broker server.tasks.worker
     env_file:
       - .env
+    environment:
+      KNOWLINK_TASK_QUEUE: dramatiq
+      KNOWLINK_DRAMATIQ_QUEUE: parse_pipeline
+      KNOWLINK_PARSE_PIPELINE_ACTOR: server.tasks.worker:parse_pipeline
     volumes:
        - .:/workspace
     working_dir: /workspace
     depends_on:
-      - postgres
-      - redis
-      - minio
+      db-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   scheduler:
     build:
@@ -42,8 +84,10 @@ services:
        - .:/workspace
     working_dir: /workspace
     depends_on:
-      - postgres
-      - redis
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -55,6 +99,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knowlink -d knowlink"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -65,8 +114,8 @@ services:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${KNOWLINK_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${KNOWLINK_MINIO_SECRET_KEY:-minioadmin}
     ports:
       - "9000:9000"
       - "9001:9001"

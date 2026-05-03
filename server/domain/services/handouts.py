@@ -46,7 +46,10 @@ class HandoutService:
         return {
             "handoutVersionId": handout["handoutVersionId"],
             "status": handout["status"],
+            "outlineStatus": handout.get("outlineStatus", "ready"),
             "totalBlocks": handout["totalBlocks"],
+            "readyBlocks": handout.get("readyBlocks", 0),
+            "pendingBlocks": handout.get("pendingBlocks", 0),
             "sourceParseRunId": handout["sourceParseRunId"],
         }
 
@@ -66,6 +69,17 @@ class HandoutService:
             "totalBlocks": handout["totalBlocks"],
             "status": handout["status"],
         }
+
+    def get_latest_outline(self, *, course_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        outline = self.handouts.get_latest_outline(course_id)
+        if outline is None:
+            raise ServiceError(
+                message="The course has no active handout outline.",
+                error_code="handout.no_active_version",
+                status_code=404,
+            )
+        return outline
 
     def get_latest_blocks(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)

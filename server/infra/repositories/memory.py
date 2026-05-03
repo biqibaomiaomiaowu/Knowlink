@@ -61,6 +61,9 @@ class MemoryScaffoldRepository:
     def get_latest_parse_run(self, course_id: int) -> dict[str, Any] | None:
         return self.store.get_latest_parse_run(course_id)
 
+    def mark_parse_run_succeeded(self, parse_run_id: int) -> dict[str, Any] | None:
+        return self.store.mark_parse_run_succeeded(parse_run_id)
+
     def save_inquiry_answers(
         self,
         course_id: int,
@@ -79,6 +82,9 @@ class MemoryScaffoldRepository:
 
     def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
         return self.store.get_latest_handout(course_id)
+
+    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
+        return self.store.get_latest_outline(course_id)
 
     def get_block_jump_target(self, block_id: int) -> dict[str, Any] | None:
         for handout in self.store.handouts.values():
