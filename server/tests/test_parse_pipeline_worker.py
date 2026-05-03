@@ -27,6 +27,16 @@ class _FakeEmbeddingClient:
         return [[float(index), float(len(sentence))] for index, sentence in enumerate(sentences, start=1)]
 
 
+class _FakeObjectStorage:
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        self.objects = objects
+        self.read_calls: list[str] = []
+
+    def read_object_bytes(self, object_key: str) -> bytes:
+        self.read_calls.append(object_key)
+        return self.objects[object_key]
+
+
 def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Path):
     session_factory = _session_factory()
     session = session_factory()
@@ -159,6 +169,62 @@ def test_parse_pipeline_runner_resolves_relative_object_key_from_local_storage_r
     )
 
     assert result["status"] == "succeeded"
+    assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 1
+
+
+def test_parse_pipeline_runner_downloads_raw_object_key_from_object_storage(
+    monkeypatch,
+    tmp_path: Path,
+):
+    object_key = "raw/1/101/temp/pdf/lecture.pdf"
+    missing_local_path = tmp_path / "local-missing" / "lecture.pdf"
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(
+        session,
+        missing_local_path,
+        resource_type="pdf",
+        object_key=object_key,
+    )
+    missing_local_path.unlink()
+    storage = _FakeObjectStorage({object_key: b"%PDF-1.4 minio object"})
+    monkeypatch.setenv("KNOWLINK_WORKER_CACHE_DIR", str(tmp_path / "worker-cache"))
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        resolved_path = Path(file_path)
+        assert resource_type == "pdf"
+        assert resolved_path != missing_local_path
+        assert resolved_path.is_file()
+        assert resolved_path.suffix == ".pdf"
+        assert resolved_path.read_bytes() == b"%PDF-1.4 minio object"
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-p1",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "MinIO 对象会先落到 worker 本地缓存再解析。",
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=lambda: _FakeEmbeddingClient(),
+        object_storage=storage,
+        base_dir=tmp_path,
+    )
+
+    assert result["status"] == "succeeded"
+    assert storage.read_calls == [object_key]
     assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 1
 
 

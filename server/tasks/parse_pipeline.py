@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ from server.ai.vector_projection import build_vector_document_inputs
 from server.infra.db.base import utcnow
 from server.infra.db.models import AsyncTask, Course, CourseResource, CourseSegment, ParseRun, VectorDocument
 from server.infra.db.session import create_session
+from server.infra.storage import ObjectStorage, ObjectStorageError
 from server.parsers import parse_resource
 
 
@@ -37,6 +40,7 @@ def run_parse_pipeline(
     session_factory: Callable[[], Session] = create_session,
     parse_resource_func: Callable[[str, str | Path], Any] = parse_resource,
     embedding_client_factory: Callable[[], Any] = get_configured_embedding_client,
+    object_storage: ObjectStorage | None = None,
     base_dir: Path | None = None,
 ) -> dict[str, Any]:
     task_id = _required_int(message, "taskId", "task_id")
@@ -52,6 +56,7 @@ def run_parse_pipeline(
             parse_run_id=parse_run_id,
             parse_resource_func=parse_resource_func,
             embedding_client_factory=embedding_client_factory,
+            object_storage=object_storage,
             base_dir=base_dir or Path.cwd(),
         )
     finally:
@@ -66,6 +71,7 @@ def _run_with_session(
     parse_run_id: int,
     parse_resource_func: Callable[[str, str | Path], Any],
     embedding_client_factory: Callable[[], Any],
+    object_storage: ObjectStorage | None,
     base_dir: Path,
 ) -> dict[str, Any]:
     root_task = _require_model(session, AsyncTask, task_id, "async_task.not_found")
@@ -91,7 +97,7 @@ def _run_with_session(
     session.commit()
 
     summary: dict[str, Any] = {"resourceCount": len(resources), "segmentCount": 0, "vectorDocumentCount": 0, "issues": []}
-    valid_resources = _validate_resources(resources=resources, base_dir=base_dir)
+    valid_resources = _validate_resources(resources=resources, base_dir=base_dir, object_storage=object_storage)
     invalid_count = len(resources) - len(valid_resources)
     if not valid_resources:
         _finish_step(
@@ -417,14 +423,19 @@ def _finish_pipeline(
     return {"taskId": root_task.id, "courseId": course.id, "parseRunId": parse_run.id, "status": status, **summary}
 
 
-def _validate_resources(*, resources: list[CourseResource], base_dir: Path) -> list[tuple[CourseResource, Path]]:
+def _validate_resources(
+    *,
+    resources: list[CourseResource],
+    base_dir: Path,
+    object_storage: ObjectStorage | None,
+) -> list[tuple[CourseResource, Path]]:
     valid: list[tuple[CourseResource, Path]] = []
     for resource in resources:
         if resource.resource_type not in DOCUMENT_RESOURCE_TYPES | VIDEO_RESOURCE_TYPES:
             resource.validation_status = "failed"
             resource.last_error = f"Unsupported resource type: {resource.resource_type}"
             continue
-        path = _resolve_object_key(resource.object_key, base_dir=base_dir)
+        path = _resolve_object_key(resource.object_key, base_dir=base_dir, object_storage=object_storage)
         if path is None:
             resource.validation_status = "failed"
             resource.last_error = f"Resource file not found: {resource.object_key}"
@@ -435,7 +446,7 @@ def _validate_resources(*, resources: list[CourseResource], base_dir: Path) -> l
     return valid
 
 
-def _resolve_object_key(object_key: str, *, base_dir: Path) -> Path | None:
+def _resolve_object_key(object_key: str, *, base_dir: Path, object_storage: ObjectStorage | None) -> Path | None:
     raw = object_key.removeprefix("file://")
     path = Path(raw)
     candidates = [path] if path.is_absolute() else []
@@ -447,7 +458,35 @@ def _resolve_object_key(object_key: str, *, base_dir: Path) -> Path | None:
     for candidate in candidates:
         if candidate.is_file():
             return candidate
+    if object_storage is not None and _is_downloadable_raw_object_key(object_key):
+        return _download_object_to_worker_cache(object_key, object_storage=object_storage)
     return None
+
+
+def _download_object_to_worker_cache(object_key: str, *, object_storage: ObjectStorage) -> Path | None:
+    try:
+        content = object_storage.read_object_bytes(object_key)
+    except ObjectStorageError:
+        return None
+
+    cache_path = _worker_cache_path(object_key)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(content)
+    return cache_path
+
+
+def _worker_cache_path(object_key: str) -> Path:
+    configured_dir = os.getenv("KNOWLINK_WORKER_CACHE_DIR", "").strip()
+    cache_dir = Path(configured_dir) if configured_dir else Path(tempfile.gettempdir()) / "knowlink-worker-cache"
+    suffix = Path(object_key.rsplit("/", 1)[-1]).suffix
+    digest = hashlib.sha256(object_key.encode("utf-8")).hexdigest()
+    return cache_dir / f"{digest}{suffix}"
+
+
+def _is_downloadable_raw_object_key(object_key: str) -> bool:
+    if not object_key.startswith("raw/") or object_key.startswith("/") or "\\" in object_key:
+        return False
+    return not any(segment in {"", ".", ".."} for segment in object_key.split("/"))
 
 
 def _step_tasks(
