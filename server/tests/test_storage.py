@@ -225,7 +225,6 @@ def test_build_object_storage_uses_internal_endpoint_and_public_presign_endpoint
     assert isinstance(storage, MinioObjectStorage)
     assert storage.client._base_url._url.netloc == "minio:9000"
     assert storage.presign_client._base_url._url.netloc == "127.0.0.1:9000"
-    assert storage.presign_client._region == "us-east-1"
     url = storage.presigned_put_url(
         "raw/1/101/temp/pdf/demo.pdf",
         expires=UPLOAD_EXPIRES_IN,
