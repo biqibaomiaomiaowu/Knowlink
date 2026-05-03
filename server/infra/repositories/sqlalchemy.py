@@ -14,6 +14,9 @@ from server.infra.db.models import (
     Course,
     CourseResource,
     CourseSegment,
+    HandoutBlock,
+    HandoutOutline,
+    HandoutVersion,
     IdempotencyRecord,
     LearningPreference,
     ParseRun,
@@ -426,6 +429,190 @@ class SqlAlchemyRuntimeRepository:
         rows = self.session.scalars(stmt.order_by(CourseSegment.order_no.asc(), CourseSegment.id.asc())).all()
         return [_course_segment_dict(row) for row in rows]
 
+    def create_handout(
+        self,
+        course_id: int,
+    ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+        course = self._get_course_model(course_id)
+        if course is None:
+            raise ValueError(f"Course {course_id} was not found.")
+
+        source_parse_run_id = course.active_parse_run_id
+        outline_payload: dict[str, Any] | None = None
+        if source_parse_run_id is not None:
+            outline_payload = _build_outline_from_caption_segments(
+                course=course,
+                captions=self._list_active_video_caption_segments(
+                    course_id=course_id,
+                    parse_run_id=source_parse_run_id,
+                ),
+            )
+
+        if outline_payload is None:
+            status = "failed"
+            outline_status = "failed"
+            title = course.title
+            summary = "没有可用的视频字幕片段，未生成视频时间轴目录。"
+            error_code = "handout_outline.no_video_caption"
+            error_message = "Active parse run has no usable video_caption segments."
+            outline_items: list[dict[str, Any]] = []
+        else:
+            status = "outline_ready"
+            outline_status = "ready"
+            title = str(outline_payload["title"])
+            summary = str(outline_payload["summary"])
+            error_code = None
+            error_message = None
+            outline_items = list(outline_payload["items"])
+
+        version = HandoutVersion(
+            course_id=course_id,
+            source_parse_run_id=source_parse_run_id,
+            title=title,
+            summary=summary,
+            status=status,
+            outline_status=outline_status,
+            total_blocks=len(outline_items),
+            ready_blocks=0,
+            pending_blocks=len(outline_items),
+            error_code=error_code,
+            error_message=error_message,
+            meta_json=None,
+        )
+        self.session.add(version)
+        self.session.flush()
+
+        blocks: list[HandoutBlock] = []
+        if outline_payload is not None:
+            self.session.add(
+                HandoutOutline(
+                    handout_version_id=version.id,
+                    course_id=course_id,
+                    source_parse_run_id=source_parse_run_id,
+                    status="ready",
+                    title=title,
+                    summary=summary,
+                    item_count=len(outline_items),
+                    outline_json=_json_ready(outline_payload),
+                )
+            )
+            for item in outline_items:
+                block = HandoutBlock(
+                    handout_version_id=version.id,
+                    outline_key=str(item["outlineKey"]),
+                    title=str(item["title"]),
+                    summary=str(item["summary"]),
+                    status=str(item.get("generationStatus") or "pending"),
+                    content_md=None,
+                    start_sec=int(item["startSec"]),
+                    end_sec=int(item["endSec"]),
+                    sort_no=int(item["sortNo"]),
+                    source_segment_keys_json=list(item["sourceSegmentKeys"]),
+                    knowledge_points_json=None,
+                    citations_json=[],
+                )
+                self.session.add(block)
+                blocks.append(block)
+
+        now = utcnow()
+        task_status = "queued" if status == "outline_ready" else "failed"
+        task = AsyncTask(
+            course_id=course_id,
+            parse_run_id=source_parse_run_id,
+            task_type="handout_generate",
+            status=task_status,
+            target_type="handout_version",
+            target_id=version.id,
+            progress_pct=0 if task_status == "queued" else 100,
+            payload_json={
+                "courseId": course_id,
+                "handoutVersionId": version.id,
+                "sourceParseRunId": source_parse_run_id,
+            },
+            error_code=error_code,
+            error_message=error_message,
+            finished_at=now if task_status == "failed" else None,
+        )
+        self.session.add(task)
+
+        course.active_handout_version_id = version.id
+        course.pipeline_stage = "handout"
+        course.pipeline_status = "succeeded" if status == "outline_ready" else "failed"
+        if status == "outline_ready":
+            course.lifecycle_status = "learning_ready"
+            course.last_error = None
+        else:
+            course.last_error = error_message
+        course.updated_at = now
+
+        self._commit_or_flush()
+        block_dicts = [_handout_block_dict(block) for block in blocks]
+        return (
+            _handout_version_dict(version, blocks=block_dicts),
+            _async_trigger_dict(task, "handout_version", version.id),
+            block_dicts,
+        )
+
+    def get_handout(self, handout_version_id: int) -> dict[str, Any] | None:
+        version = self._get_handout_version_model(handout_version_id)
+        if version is None:
+            return None
+        return _handout_version_dict(version, blocks=self._list_handout_blocks(version.id))
+
+    def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
+        version = self._get_latest_handout_version_model(course_id)
+        if version is None:
+            return None
+        return _handout_version_dict(version, blocks=self._list_handout_blocks(version.id))
+
+    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
+        version = self._get_latest_handout_version_model(course_id)
+        if version is None:
+            return None
+        outline = self.session.scalar(
+            select(HandoutOutline).where(HandoutOutline.handout_version_id == version.id)
+        )
+        if outline is None:
+            return None
+        blocks = self.session.scalars(
+            select(HandoutBlock)
+            .where(HandoutBlock.handout_version_id == version.id)
+            .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
+        ).all()
+        return _handout_outline_dict(version, outline, blocks)
+
+    def get_block_jump_target(self, block_id: int) -> dict[str, Any] | None:
+        block = self.session.scalar(
+            select(HandoutBlock)
+            .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
+            .join(Course, Course.id == HandoutVersion.course_id)
+            .where(HandoutBlock.id == block_id, Course.user_id == self.user_id)
+        )
+        if block is None:
+            return None
+
+        video_resource_id = None
+        for source_key in block.source_segment_keys_json or []:
+            segment_id = _segment_id_from_source_key(str(source_key))
+            if segment_id is None:
+                continue
+            segment = self.session.get(CourseSegment, segment_id)
+            if segment is not None:
+                video_resource_id = segment.resource_id
+                break
+
+        return {
+            "blockId": block.id,
+            "outlineKey": block.outline_key,
+            "videoResourceId": video_resource_id,
+            "startSec": block.start_sec,
+            "endSec": block.end_sec,
+            "docResourceId": None,
+            "pageNo": None,
+            "slideNo": None,
+            "anchorKey": None,
+        }
+
     def create_vector_document(
         self,
         *,
@@ -458,6 +645,58 @@ class SqlAlchemyRuntimeRepository:
         return self.session.scalar(
             select(Course).where(Course.id == course_id, Course.user_id == self.user_id)
         )
+
+    def _get_handout_version_model(self, handout_version_id: int) -> HandoutVersion | None:
+        return self.session.scalar(
+            select(HandoutVersion)
+            .join(Course, Course.id == HandoutVersion.course_id)
+            .where(HandoutVersion.id == handout_version_id, Course.user_id == self.user_id)
+        )
+
+    def _get_latest_handout_version_model(self, course_id: int) -> HandoutVersion | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        if course.active_handout_version_id is not None:
+            active = self._get_handout_version_model(course.active_handout_version_id)
+            if active is not None:
+                return active
+        return self.session.scalars(
+            select(HandoutVersion)
+            .where(HandoutVersion.course_id == course_id)
+            .order_by(HandoutVersion.created_at.desc(), HandoutVersion.id.desc())
+        ).first()
+
+    def _list_active_video_caption_segments(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int,
+    ) -> list[CourseSegment]:
+        return list(
+            self.session.scalars(
+                select(CourseSegment)
+                .where(
+                    CourseSegment.course_id == course_id,
+                    CourseSegment.parse_run_id == parse_run_id,
+                    CourseSegment.segment_type == "video_caption",
+                    CourseSegment.is_active.is_(True),
+                )
+                .order_by(
+                    CourseSegment.start_sec.asc(),
+                    CourseSegment.order_no.asc(),
+                    CourseSegment.id.asc(),
+                )
+            ).all()
+        )
+
+    def _list_handout_blocks(self, handout_version_id: int) -> list[dict[str, Any]]:
+        blocks = self.session.scalars(
+            select(HandoutBlock)
+            .where(HandoutBlock.handout_version_id == handout_version_id)
+            .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
+        ).all()
+        return [_handout_block_dict(block) for block in blocks]
 
     def _commit_or_flush(self) -> None:
         try:
@@ -527,7 +766,7 @@ def _async_trigger_dict(task: AsyncTask, entity_type: str, entity_id: int) -> di
     return {
         "taskId": task.id,
         "status": task.status,
-        "nextAction": "poll",
+        "nextAction": "poll" if task.status in {"queued", "running"} else "none",
         "entity": {"type": entity_type, "id": entity_id},
     }
 
@@ -560,6 +799,7 @@ def _async_task_dict(task: AsyncTask) -> dict[str, Any]:
 def _course_segment_dict(segment: CourseSegment) -> dict[str, Any]:
     return {
         "segmentId": segment.id,
+        "segmentKey": _segment_source_key(segment),
         "courseId": segment.course_id,
         "resourceId": segment.resource_id,
         "parseRunId": segment.parse_run_id,
@@ -578,6 +818,75 @@ def _course_segment_dict(segment: CourseSegment) -> dict[str, Any]:
         "orderNo": segment.order_no,
         "tokenCount": segment.token_count,
         "isActive": segment.is_active,
+    }
+
+
+def _handout_version_dict(
+    version: HandoutVersion,
+    *,
+    blocks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "handoutVersionId": version.id,
+        "courseId": version.course_id,
+        "title": version.title,
+        "summary": version.summary,
+        "status": version.status,
+        "outlineStatus": version.outline_status,
+        "totalBlocks": version.total_blocks,
+        "readyBlocks": version.ready_blocks,
+        "pendingBlocks": version.pending_blocks,
+        "sourceParseRunId": version.source_parse_run_id,
+        "errorCode": version.error_code,
+        "errorMessage": version.error_message,
+        "blocks": blocks,
+    }
+
+
+def _handout_outline_dict(
+    version: HandoutVersion,
+    outline: HandoutOutline,
+    blocks: Sequence[HandoutBlock],
+) -> dict[str, Any]:
+    blocks_by_key = {block.outline_key: block for block in blocks}
+    payload = dict(outline.outline_json or {})
+    items = []
+    for raw_item in payload.get("items", []):
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        block = blocks_by_key.get(str(item.get("outlineKey") or ""))
+        if block is not None:
+            item["blockId"] = block.id
+            item["generationStatus"] = block.status
+            item["sourceSegmentKeys"] = list(
+                block.source_segment_keys_json or item.get("sourceSegmentKeys") or []
+            )
+        else:
+            item.setdefault("sourceSegmentKeys", [])
+        items.append(item)
+
+    return {
+        "handoutVersionId": version.id,
+        "title": outline.title,
+        "summary": outline.summary,
+        "items": items,
+    }
+
+
+def _handout_block_dict(block: HandoutBlock) -> dict[str, Any]:
+    return {
+        "blockId": block.id,
+        "outlineKey": block.outline_key,
+        "title": block.title,
+        "summary": block.summary,
+        "status": block.status,
+        "contentMd": block.content_md,
+        "startSec": block.start_sec,
+        "endSec": block.end_sec,
+        "sourceSegmentKeys": list(block.source_segment_keys_json or []),
+        "knowledgePoints": block.knowledge_points_json or [],
+        "citations": block.citations_json or [],
     }
 
 
@@ -643,6 +952,157 @@ def _payload_value(payload: dict[str, Any], *keys: str, default: Any = None) -> 
         if key in payload:
             return payload[key]
     return default
+
+
+def _build_outline_from_caption_segments(
+    *,
+    course: Course,
+    captions: Sequence[CourseSegment],
+    max_block_duration_sec: int = 180,
+) -> dict[str, Any] | None:
+    clean_captions = [_caption_payload(segment) for segment in captions]
+    clean_captions = [item for item in clean_captions if item is not None]
+    clean_captions = _repair_caption_timeline(clean_captions)
+    if not clean_captions:
+        return None
+
+    groups: list[list[dict[str, Any]]] = []
+    current_group: list[dict[str, Any]] = []
+    current_start: int | None = None
+    for caption in clean_captions:
+        if not current_group:
+            current_group = [caption]
+            current_start = caption["startSec"]
+            continue
+        if caption["endSec"] - int(current_start) > max_block_duration_sec:
+            groups.append(current_group)
+            current_group = [caption]
+            current_start = caption["startSec"]
+        else:
+            current_group.append(caption)
+    if current_group:
+        groups.append(current_group)
+
+    items = [_outline_item_from_caption_group(group, index) for index, group in enumerate(groups, start=1)]
+    items = _repair_outline_timeline(items)
+    if not items:
+        return None
+
+    return {
+        "title": course.title or "视频时间轴目录",
+        "summary": "按视频时间线组织的讲义目录",
+        "items": items,
+    }
+
+
+def _repair_caption_timeline(captions: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    repaired: list[dict[str, Any]] = []
+    previous_end: int | None = None
+    for caption in captions:
+        item = dict(caption)
+        if previous_end is not None and int(item["startSec"]) < previous_end:
+            item["startSec"] = previous_end
+        if int(item["endSec"]) <= int(item["startSec"]):
+            continue
+        repaired.append(item)
+        previous_end = int(item["endSec"])
+    return repaired
+
+
+def _repair_outline_timeline(items: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    repaired: list[dict[str, Any]] = []
+    previous_end: int | None = None
+    for item in items:
+        next_item = dict(item)
+        start_sec = int(next_item["startSec"])
+        end_sec = int(next_item["endSec"])
+        if previous_end is not None and start_sec < previous_end:
+            start_sec = previous_end
+        if end_sec <= start_sec:
+            continue
+        sort_no = len(repaired) + 1
+        next_item["outlineKey"] = f"outline-{sort_no}"
+        next_item["sortNo"] = sort_no
+        next_item["startSec"] = start_sec
+        next_item["endSec"] = end_sec
+        repaired.append(next_item)
+        previous_end = end_sec
+    return repaired
+
+
+def _caption_payload(segment: CourseSegment) -> dict[str, Any] | None:
+    start_sec = _as_outline_int(segment.start_sec)
+    end_sec = _as_outline_int(segment.end_sec)
+    text = _compact_text(segment.text_content or segment.plain_text)
+    if start_sec is None or end_sec is None or end_sec <= start_sec or not text:
+        return None
+    return {
+        "segmentKey": _segment_source_key(segment),
+        "title": _compact_text(segment.title),
+        "textContent": text,
+        "startSec": start_sec,
+        "endSec": end_sec,
+        "orderNo": segment.order_no,
+    }
+
+
+def _outline_item_from_caption_group(group: list[dict[str, Any]], index: int) -> dict[str, Any]:
+    text = _compact_text(" ".join(str(item["textContent"]) for item in group))
+    title = group[0].get("title") or _short_title(text, fallback=f"第 {index} 段")
+    return {
+        "outlineKey": f"outline-{index}",
+        "title": title,
+        "summary": _truncate_text(text, 72) or "本段围绕视频字幕展开。",
+        "startSec": group[0]["startSec"],
+        "endSec": group[-1]["endSec"],
+        "sortNo": index,
+        "generationStatus": "pending",
+        "sourceSegmentKeys": [str(item["segmentKey"]) for item in group],
+    }
+
+
+def _segment_source_key(segment: CourseSegment) -> str:
+    return f"segment-{segment.id}"
+
+
+def _segment_id_from_source_key(value: str) -> int | None:
+    prefix = "segment-"
+    if not value.startswith(prefix):
+        return None
+    raw_id = value[len(prefix):]
+    if not raw_id.isdigit():
+        return None
+    return int(raw_id)
+
+
+def _as_outline_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _compact_text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _short_title(text: str, *, fallback: str) -> str:
+    clean = _compact_text(text)
+    if not clean:
+        return fallback
+    return _truncate_text(clean, 24)
+
+
+def _truncate_text(text: str, limit: int) -> str:
+    clean = _compact_text(text)
+    if len(clean) <= limit:
+        return clean
+    return f"{clean[:limit].rstrip()}..."
 
 
 def _json_ready(value: Any) -> Any:

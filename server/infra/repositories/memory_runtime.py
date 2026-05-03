@@ -181,6 +181,7 @@ class RuntimeStore:
         ]
         for index, (block_title, location) in enumerate(materials):
             block_id = self.next_id("handout_block")
+            outline_key = f"outline-{index + 1}"
             start_sec = 120 + index * 300
             end_sec = 300 + index * 300
             citation = {
@@ -191,11 +192,14 @@ class RuntimeStore:
             blocks.append(
                 {
                     "blockId": block_id,
+                    "outlineKey": outline_key,
                     "title": block_title,
                     "summary": "按考试优先级整理的知识块",
+                    "status": "ready",
                     "contentMd": f"### {block_title}\n- 重点：定义、题型、常见陷阱",
                     "startSec": start_sec,
                     "endSec": end_sec,
+                    "sourceSegmentKeys": [f"memory-{outline_key}-source"],
                     "pageFrom": location.get("pageNo"),
                     "pageTo": (location.get("pageNo") or 0) + 1 if "pageNo" in location else None,
                     "slideNo": location.get("slideNo"),
@@ -204,13 +208,36 @@ class RuntimeStore:
                 }
             )
 
+        outline = {
+            "handoutVersionId": handout_version_id,
+            "title": "高数期末冲刺讲义",
+            "summary": "按演示讲义块组织的目录",
+            "items": [
+                {
+                    "outlineKey": block["outlineKey"],
+                    "blockId": block["blockId"],
+                    "title": block["title"],
+                    "summary": block["summary"],
+                    "startSec": block["startSec"],
+                    "endSec": block["endSec"],
+                    "sortNo": index + 1,
+                    "generationStatus": "ready",
+                    "sourceSegmentKeys": block["sourceSegmentKeys"],
+                }
+                for index, block in enumerate(blocks)
+            ],
+        }
         handout = {
             "handoutVersionId": handout_version_id,
             "title": "高数期末冲刺讲义",
             "summary": "按考试优先级整理的知识块",
             "totalBlocks": len(blocks),
             "status": "ready",
+            "outlineStatus": "ready",
+            "readyBlocks": len(blocks),
+            "pendingBlocks": 0,
             "sourceParseRunId": parse_run["parseRunId"] if parse_run else None,
+            "outline": outline,
             "blocks": blocks,
         }
         self.handouts[handout_version_id] = handout
@@ -233,6 +260,15 @@ class RuntimeStore:
         if handout_version_id is None:
             return None
         return self.handouts.get(handout_version_id)
+
+    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
+        handout = self.get_latest_handout(course_id)
+        if handout is None:
+            return None
+        outline = handout.get("outline")
+        if isinstance(outline, dict):
+            return outline
+        return None
 
     def create_qa_message(self, course_id: int, handout_block_id: int) -> dict[str, Any]:
         session_id = self.next_id("qa_session")

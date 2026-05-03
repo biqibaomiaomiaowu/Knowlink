@@ -154,6 +154,43 @@ print(json.dumps({
     }
 
 
+def test_storage_backend_minio_wires_from_settings_without_connecting():
+    script = """
+import json
+
+from server.api.deps import _get_object_storage
+
+storage = _get_object_storage()
+print(json.dumps({
+    "storage_class": storage.__class__.__name__,
+    "bucket_name": storage.bucket_name,
+    "scheme": storage.client._base_url._url.scheme,
+}))
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_STORAGE_BACKEND"] = "minio"
+    env["KNOWLINK_MINIO_ENDPOINT"] = "minio.internal:9443"
+    env["KNOWLINK_MINIO_ACCESS_KEY"] = "access"
+    env["KNOWLINK_MINIO_SECRET_KEY"] = "secret"
+    env["KNOWLINK_MINIO_BUCKET"] = "runtime-assets"
+    env["KNOWLINK_MINIO_SECURE"] = "true"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload == {
+        "storage_class": "MinioObjectStorage",
+        "bucket_name": "runtime-assets",
+        "scheme": "https",
+    }
+
+
 def test_runtime_repository_backend_sql_mode_keeps_week2_api_flow_on_sqlite(tmp_path):
     script = """
 import asyncio
@@ -233,6 +270,7 @@ asyncio.run(main())
     env = os.environ.copy()
     env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
     env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'runtime.sqlite3'}"
+    env["KNOWLINK_STORAGE_BACKEND"] = "demo"
     env.pop("KNOWLINK_REPOSITORY_BACKEND", None)
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -253,6 +291,110 @@ asyncio.run(main())
     assert payload["pipeline_status"] == 200
     assert payload["pipeline_course_status"] in PIPELINE_STATUS_VALUES
     assert payload["step_codes"] == WEEK2_PIPELINE_STEPS
+
+
+def test_handout_service_uses_sql_runtime_repository_for_api_wiring(tmp_path):
+    script = """
+import asyncio
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tests.test_api import AUTH_HEADERS, request
+
+Base.metadata.create_all(get_engine())
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL handout API course",
+        entry_type="manual_import",
+        goal_text="verify SQL handout API wiring",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "mp4",
+            "objectKey": f"raw/1/{course_id}/outline.mp4",
+            "originalName": "outline.mp4",
+            "mimeType": "video/mp4",
+            "sizeBytes": 2048,
+            "checksum": "sha256:outline-video",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run["parseRunId"],
+        segments=[
+            {
+                "segmentType": "video_caption",
+                "orderNo": 1,
+                "textContent": "第一段介绍集合的基本概念。",
+                "startSec": 0,
+                "endSec": 60,
+            },
+            {
+                "segmentType": "video_caption",
+                "orderNo": 2,
+                "textContent": "第二段说明元素和属于关系。",
+                "startSec": 60,
+                "endSec": 120,
+            },
+        ],
+    )
+finally:
+    session.close()
+
+async def main():
+    handout_status, handout_body = await request(
+        "POST",
+        f"/api/v1/courses/{course_id}/handouts/generate",
+        headers=AUTH_HEADERS | {"idempotency-key": "sql-api-handout"},
+    )
+    outline_status, outline_body = await request(
+        "GET",
+        f"/api/v1/courses/{course_id}/handouts/latest/outline",
+        headers=AUTH_HEADERS,
+    )
+    print(json.dumps({
+        "handout_status": handout_status,
+        "entity_type": handout_body["data"]["entity"]["type"],
+        "outline_status": outline_status,
+        "outline_item_count": len(outline_body["data"]["items"]),
+        "outline_generation_status": outline_body["data"]["items"][0]["generationStatus"],
+    }))
+
+asyncio.run(main())
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'handout.sqlite3'}"
+    env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload == {
+        "handout_status": 200,
+        "entity_type": "handout_version",
+        "outline_status": 200,
+        "outline_item_count": 1,
+        "outline_generation_status": "pending",
+    }
 
 
 def test_domain_services_do_not_import_worker_or_dramatiq_directly():

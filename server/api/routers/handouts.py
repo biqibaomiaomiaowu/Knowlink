@@ -38,6 +38,15 @@ async def get_latest_handout(
     return api_ok(request, service.get_latest_handout(course_id=courseId))
 
 
+@router.get("/courses/{courseId}/handouts/latest/outline")
+async def get_latest_handout_outline(
+    courseId: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(request, service.get_latest_outline(course_id=courseId))
+
+
 @router.get("/courses/{courseId}/handouts/latest/blocks")
 async def get_latest_handout_blocks(
     courseId: int,

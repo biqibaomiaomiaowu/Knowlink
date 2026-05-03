@@ -83,6 +83,9 @@ class MemoryScaffoldRepository:
     def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
         return self.store.get_latest_handout(course_id)
 
+    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
+        return self.store.get_latest_outline(course_id)
+
     def get_block_jump_target(self, block_id: int) -> dict[str, Any] | None:
         for handout in self.store.handouts.values():
             for block in handout["blocks"]:
