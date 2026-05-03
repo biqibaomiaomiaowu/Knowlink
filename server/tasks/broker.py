@@ -1,16 +1,12 @@
-"""Task registry scaffold for the MVP build."""
+import dramatiq
+from dramatiq.brokers.redis import RedisBroker
+from server.config.settings import get_settings
 
-from server.tasks.payloads import TASK_PAYLOAD_MODELS
+settings = get_settings()
 
-
-TASK_REGISTRY = {
-    name: {
-        "payload_model": payload_model,
-        "status": "placeholder",
-    }
-    for name, payload_model in TASK_PAYLOAD_MODELS.items()
-}
+redis_broker = RedisBroker(url=settings.redis_url)
+dramatiq.set_broker(redis_broker)
 
 
 def list_registered_tasks() -> list[str]:
-    return sorted(TASK_REGISTRY)
+    return sorted(dramatiq.get_broker().actors.keys())

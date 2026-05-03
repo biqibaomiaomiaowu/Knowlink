@@ -22,6 +22,8 @@ class InquiryService:
                     "options": [
                         {"label": "期末复习", "value": "final_review"},
                         {"label": "考研冲刺", "value": "exam_sprint"},
+                        {"label": "日常学习", "value": "daily_learning"},
+                        {"label": "查漏补缺", "value": "knowledge_gap_fix"},
                     ],
                 },
                 {

@@ -13,10 +13,10 @@ class CourseService:
         self.courses = courses
         self.idempotency = idempotency
 
-    def create_course(self, *, payload, idempotency_key: str | None) -> dict[str, object]:
-        def factory() -> dict[str, object]:
+    async def create_course(self, *, payload, idempotency_key: str | None) -> dict[str, object]:
+        async def factory() -> dict[str, object]:
             return {
-                "course": self.courses.create_course(
+                "course": await self.courses.create_course(
                     title=payload.title,
                     entry_type=payload.entry_type,
                     goal_text=payload.goal_text,
@@ -24,7 +24,7 @@ class CourseService:
                 )
             }
 
-        return self.idempotency.run_idempotent("courses.create", idempotency_key, factory)
+        return await self.idempotency.run_idempotent("courses.create", idempotency_key, factory)
 
-    def list_recent_courses(self) -> dict[str, object]:
-        return {"items": self.courses.list_recent_courses()}
+    async def list_recent_courses(self) -> dict[str, object]:
+        return {"items": await self.courses.list_recent_courses()}

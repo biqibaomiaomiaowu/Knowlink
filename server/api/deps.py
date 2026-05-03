@@ -1,4 +1,9 @@
 from __future__ import annotations
+from sqlalchemy.orm import Session
+from server.infra.db.dependencies import get_db
+from server.infra.repositories.sqlalchemy import SqlAlchemyRepository
+
+from server.infra.repositories.course_repo import SqlAlchemyCourseRepository
 
 from functools import lru_cache
 
@@ -26,6 +31,12 @@ from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import runtime_store
 
 security = HTTPBearer(auto_error=False)
+
+async def get_course_repository(
+    db: Session = Depends(get_db),
+) -> SqlAlchemyCourseRepository:
+    """提供具体的实现类实例"""
+    return SqlAlchemyCourseRepository(db)
 
 
 async def get_app_settings() -> Settings:
@@ -58,6 +69,8 @@ async def get_current_user(
     return user
 
 
+
+
 @lru_cache
 def _get_memory_repository() -> MemoryScaffoldRepository:
     return MemoryScaffoldRepository(runtime_store)
@@ -78,10 +91,10 @@ async def get_catalog_service() -> RecommendationService:
 
 
 async def get_course_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    # 注入具体的实现类，但在构造函数中它会被视为接口
+    repo: SqlAlchemyCourseRepository = Depends(get_course_repository),
 ) -> CourseService:
     return CourseService(courses=repo, idempotency=repo)
-
 
 async def get_bilibili_service() -> BilibiliService:
     return BilibiliService()
@@ -101,22 +114,24 @@ async def get_recommendation_flow_service(
 
 
 async def get_resource_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+     repo: SqlAlchemyCourseRepository = Depends(get_course_repository),
 ) -> ResourceService:
     return ResourceService(courses=repo, resources=repo, idempotency=repo)
 
-
 async def get_pipeline_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    repo: SqlAlchemyRepository = Depends(get_course_repository),
 ) -> PipelineService:
-    return PipelineService(courses=repo, parse_runs=repo, resources=repo, idempotency=repo)
-
+    return PipelineService(
+        courses=repo,
+        parse_runs=repo,
+        resources=repo,
+        idempotency=repo,
+    )
 
 async def get_inquiry_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+     repo: SqlAlchemyCourseRepository = Depends(get_course_repository),
 ) -> InquiryService:
     return InquiryService(courses=repo, inquiry=repo)
-
 
 async def get_handout_service(
     repo: MemoryScaffoldRepository = Depends(get_memory_repository),

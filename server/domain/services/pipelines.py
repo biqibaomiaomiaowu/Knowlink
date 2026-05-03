@@ -8,6 +8,7 @@ from server.domain.repositories import (
 )
 from server.domain.services.errors import ServiceError
 
+from server.tasks.worker import parse_pipeline_task
 
 class PipelineService:
     def __init__(
@@ -25,6 +26,7 @@ class PipelineService:
 
     def start_parse(self, *, course_id: int, idempotency_key: str | None) -> dict[str, object]:
         course = self._ensure_course(course_id)
+
         if not self.resources.list_resources(course_id):
             raise ServiceError(
                 message="Course is not ready for parsing.",
@@ -33,15 +35,26 @@ class PipelineService:
             )
 
         def factory() -> dict[str, object]:
-            _, trigger = self.parse_runs.create_parse_run(course_id)
-            return trigger
+            parse_run, task = self.parse_runs.create_parse_run(course_id)
 
-        _ = course
+            # 关键：真正触发 worker
+            parse_pipeline_task.send(parse_run["parseRunId"])
+
+            return {
+                "taskId": task["taskId"],
+                "status": task["status"],
+                "nextAction": "poll",
+                "entity": {
+                    "type": "parse_run",
+                    "id": parse_run["parseRunId"],
+                },
+            }
+
         return self.idempotency.run_idempotent(
             "pipelines.parse_start",
             idempotency_key,
             factory,
-        )
+    )
 
     def get_parse_run(self, *, parse_run_id: int) -> dict[str, object]:
         parse_run = self.parse_runs.get_parse_run(parse_run_id)
