@@ -55,4 +55,5 @@ coverage/
 
 # Local Codex workspace data
 .codex
+.agents/
 AGENTS.md
