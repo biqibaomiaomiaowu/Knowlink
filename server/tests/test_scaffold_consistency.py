@@ -58,7 +58,7 @@ def test_dashboard_and_pipeline_status_cover_competition_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "dashboard-upload-1"},
             json_body={
                 "resourceType": "pdf",
-                "objectKey": "raw/1/high-math.pdf",
+                "objectKey": f"raw/1/{course_id}/high-math.pdf",
                 "originalName": "high-math.pdf",
                 "mimeType": "application/pdf",
                 "sizeBytes": 1024,
@@ -182,7 +182,7 @@ def test_handout_qa_and_jump_target_keep_single_locator_per_citation():
             headers=AUTH_HEADERS | {"idempotency-key": "mixed-citation-upload"},
             json_body={
                 "resourceType": "pdf",
-                "objectKey": "raw/1/demo.pdf",
+                "objectKey": f"raw/1/{course_id}/demo.pdf",
                 "originalName": "demo.pdf",
                 "mimeType": "application/pdf",
                 "sizeBytes": 1024,
@@ -300,7 +300,7 @@ def test_inquiry_quiz_and_review_cover_planning_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "planning-display-upload"},
             json_body={
                 "resourceType": "pdf",
-                "objectKey": "raw/1/planning-display.pdf",
+                "objectKey": f"raw/1/{course_id}/planning-display.pdf",
                 "originalName": "planning-display.pdf",
                 "mimeType": "application/pdf",
                 "sizeBytes": 1024,

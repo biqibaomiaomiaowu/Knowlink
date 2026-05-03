@@ -26,6 +26,7 @@ from server.infra.db.session import create_session
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import runtime_store
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.infra.storage import ObjectStorage, build_object_storage
 from server.tasks import InMemoryAsyncTaskRepository, InMemoryTaskDispatcher, build_task_dispatcher
 
 security = HTTPBearer(auto_error=False)
@@ -77,6 +78,11 @@ def _get_task_dispatcher():
 
 
 @lru_cache
+def _get_object_storage() -> ObjectStorage | None:
+    return _build_object_storage(get_settings())
+
+
+@lru_cache
 def _get_catalog_service() -> RecommendationService:
     settings = get_settings()
     return RecommendationService(settings.course_catalog_path)
@@ -90,8 +96,8 @@ async def get_week2_runtime_repository(
     current_user: DemoUser = Depends(get_current_user),
     settings: Settings = Depends(get_app_settings),
 ):
-    # This backend switch only covers the Week 2 course/resource/parse/inquiry
-    # runtime flow. Home, handout, QA, quiz, review, and progress stay on the
+    # This backend switch covers the Week 2 course/resource/parse/inquiry and
+    # handout runtime flow. Home, QA, quiz, review, and progress stay on the
     # scaffold memory repository until their own SQL repositories exist.
     if settings.runtime_repository_backend.lower() != "sql":
         yield _get_memory_repository()
@@ -163,7 +169,12 @@ async def get_recommendation_flow_service(
 async def get_resource_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> ResourceService:
-    return ResourceService(courses=repo, resources=repo, idempotency=repo)
+    return ResourceService(
+        courses=repo,
+        resources=repo,
+        idempotency=repo,
+        storage=_get_object_storage(),
+    )
 
 
 async def get_pipeline_service(
@@ -188,7 +199,7 @@ async def get_inquiry_service(
 
 
 async def get_handout_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    repo=Depends(get_week2_runtime_repository),
 ) -> HandoutService:
     return HandoutService(courses=repo, handouts=repo, idempotency=repo)
 
@@ -215,3 +226,7 @@ async def get_progress_service(
     repo: MemoryScaffoldRepository = Depends(get_memory_repository),
 ) -> ProgressService:
     return ProgressService(courses=repo, progress=repo)
+
+
+def _build_object_storage(settings: Settings) -> ObjectStorage | None:
+    return build_object_storage(settings)
