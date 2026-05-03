@@ -21,6 +21,7 @@ class Settings:
     minio_access_key: str
     minio_secret_key: str
     course_catalog_path: Path
+    runtime_repository_backend: str
 
 
 @lru_cache
@@ -43,4 +44,5 @@ def get_settings() -> Settings:
         minio_access_key=os.getenv("KNOWLINK_MINIO_ACCESS_KEY", "minioadmin"),
         minio_secret_key=os.getenv("KNOWLINK_MINIO_SECRET_KEY", "minioadmin"),
         course_catalog_path=base_dir / "seeds" / "course_catalog.json",
+        runtime_repository_backend=os.getenv("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "memory"),
     )

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
-from server.infra.db.base import Base
 
-import server.infra.db.models.course
-import server.infra.db.models.async_task
-import server.infra.db.models.resource
-import server.infra.db.models.parse_run
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from server.config.settings import get_settings
+from server.infra.db.base import Base
+from server.infra.db.session import make_sync_database_url
+import server.infra.db.models
 
 config = context.config
 
@@ -17,6 +22,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+config.set_main_option("sqlalchemy.url", make_sync_database_url(get_settings().database_url))
 
 
 def run_migrations_offline() -> None:
@@ -47,4 +54,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-
