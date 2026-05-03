@@ -145,6 +145,23 @@ class RuntimeStore:
             return None
         return self.parse_runs.get(parse_run_id)
 
+    def mark_parse_run_succeeded(self, parse_run_id: int) -> dict[str, Any] | None:
+        run = self.parse_runs.get(parse_run_id)
+        if run is None:
+            return None
+        finished_at = utcnow()
+        run["status"] = "succeeded"
+        run["progressPct"] = 100
+        run["finishedAt"] = finished_at
+        course = self.courses.get(run["courseId"])
+        if course is not None:
+            course["lifecycleStatus"] = "inquiry_ready"
+            course["pipelineStage"] = "parse"
+            course["pipelineStatus"] = "succeeded"
+            course["activeParseRunId"] = parse_run_id
+            course["updatedAt"] = finished_at
+        return run
+
     def save_inquiry_answers(self, course_id: int, answers: list[dict[str, Any]]) -> dict[str, Any]:
         self.inquiry_answers[course_id] = answers
         return {"saved": True, "answerCount": len(answers)}

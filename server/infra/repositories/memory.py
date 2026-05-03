@@ -61,6 +61,9 @@ class MemoryScaffoldRepository:
     def get_latest_parse_run(self, course_id: int) -> dict[str, Any] | None:
         return self.store.get_latest_parse_run(course_id)
 
+    def mark_parse_run_succeeded(self, parse_run_id: int) -> dict[str, Any] | None:
+        return self.store.mark_parse_run_succeeded(parse_run_id)
+
     def save_inquiry_answers(
         self,
         course_id: int,

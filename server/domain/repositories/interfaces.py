@@ -43,6 +43,46 @@ class ParseRunRepository(Protocol):
     def get_latest_parse_run(self, course_id: int) -> dict[str, Any] | None: ...
 
 
+class AsyncTaskRepository(Protocol):
+    def create_async_task(
+        self,
+        *,
+        course_id: int,
+        task_type: str,
+        status: str = "queued",
+        progress_pct: int = 0,
+        payload_json: dict[str, Any] | None = None,
+        parse_run_id: int | None = None,
+        parent_task_id: int | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
+        step_code: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    def get_async_task(self, task_id: int) -> dict[str, Any] | None: ...
+
+    def list_async_tasks(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def update_async_task(
+        self,
+        task_id: int,
+        *,
+        status: str | None = None,
+        progress_pct: int | None = None,
+        payload_json: dict[str, Any] | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any] | None: ...
+
+
+class TaskDispatcher(Protocol):
+    def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
+
+
 class InquiryRepository(Protocol):
     def save_inquiry_answers(
         self,
