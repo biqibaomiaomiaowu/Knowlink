@@ -1,29 +1,44 @@
+from __future__ import annotations
+
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from pydantic_settings import BaseSettings
-import os
 
-class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://knowlink:knowlink@postgres:5432/knowlink"
+from server.config.settings import get_settings
 
-    class Config:
-        env_file = ".env"
-        env_prefix = "KNOWLINK_"
 
-settings = Settings()
+settings = get_settings()
 
-# 创建异步数据库引擎
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,  # 不想看SQL日志改成 False
-    future=True
+ASYNC_DATABASE_URL = settings.database_url
+
+SYNC_DATABASE_URL = ASYNC_DATABASE_URL.replace(
+    "postgresql+asyncpg://",
+    "postgresql+psycopg2://",
 )
 
-# 创建会话
+engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    echo=False,
+    future=True,
+)
+
 AsyncSessionLocal = sessionmaker(
     bind=engine,
     class_=AsyncSession,
     autoflush=False,
     autocommit=False,
-    expire_on_commit=False
+    expire_on_commit=False,
+)
+
+sync_engine = create_engine(
+    SYNC_DATABASE_URL,
+    echo=False,
+    future=True,
+)
+
+SessionLocal = sessionmaker(
+    bind=sync_engine,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
 )

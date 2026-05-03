@@ -26,6 +26,7 @@ class Settings:
 @lru_cache
 def get_settings() -> Settings:
     base_dir = Path(__file__).resolve().parents[1]
+
     return Settings(
         app_name=os.getenv("KNOWLINK_APP_NAME", "KnowLink API"),
         env=os.getenv("KNOWLINK_ENV", "development"),
@@ -36,10 +37,10 @@ def get_settings() -> Settings:
         demo_user_name=os.getenv("KNOWLINK_DEMO_USER_NAME", "KnowLink Demo"),
         database_url=os.getenv(
             "KNOWLINK_DATABASE_URL",
-            "postgresql://knowlink:knowlink@localhost:5432/knowlink",
+            "postgresql+asyncpg://knowlink:knowlink@postgres:5432/knowlink",
         ),
-        redis_url=os.getenv("KNOWLINK_REDIS_URL", "redis://localhost:6379/0"),
-        minio_endpoint=os.getenv("KNOWLINK_MINIO_ENDPOINT", "localhost:9000"),
+        redis_url=os.getenv("KNOWLINK_REDIS_URL", "redis://redis:6379/0"),
+        minio_endpoint=os.getenv("KNOWLINK_MINIO_ENDPOINT", "minio:9000"),
         minio_access_key=os.getenv("KNOWLINK_MINIO_ACCESS_KEY", "minioadmin"),
         minio_secret_key=os.getenv("KNOWLINK_MINIO_SECRET_KEY", "minioadmin"),
         course_catalog_path=base_dir / "seeds" / "course_catalog.json",

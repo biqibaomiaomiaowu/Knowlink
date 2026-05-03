@@ -20,7 +20,7 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
-    command: python -m server.tasks.worker
+    command: dramatiq server.tasks.worker
     env_file:
       - .env
     volumes:
