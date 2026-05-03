@@ -66,6 +66,8 @@ class MinioObjectStorage:
         bucket_name: str = "knowlink",
         secure: bool = False,
         client: Minio | None = None,
+        public_endpoint: str | None = None,
+        presign_client: Minio | None = None,
     ) -> None:
         if client is None:
             if endpoint is None or access_key is None or secret_key is None:
@@ -76,7 +78,18 @@ class MinioObjectStorage:
                 secret_key=secret_key,
                 secure=secure,
             )
+        if presign_client is None and public_endpoint:
+            if access_key is None or secret_key is None:
+                raise ValueError("access_key and secret_key are required with public_endpoint")
+            presign_client = Minio(
+                public_endpoint,
+                access_key=access_key,
+                secret_key=secret_key,
+                secure=secure,
+                region="us-east-1",
+            )
         self.client = client
+        self.presign_client = presign_client or client
         self.bucket_name = bucket_name
 
     def presigned_put_url(
@@ -91,14 +104,14 @@ class MinioObjectStorage:
         try:
             if signed_headers:
                 return _get_presigned_url_with_headers(
-                    client=self.client,
+                    client=self.presign_client,
                     method="PUT",
                     bucket_name=self.bucket_name,
                     object_name=object_key,
                     expires=expires,
                     headers=signed_headers,
                 )
-            return self.client.presigned_put_object(
+            return self.presign_client.presigned_put_object(
                 self.bucket_name,
                 object_key,
                 expires=expires,
@@ -284,7 +297,8 @@ def build_object_storage(settings) -> ObjectStorage | None:
         return DemoObjectStorage()
     if backend == "minio":
         return MinioObjectStorage(
-            endpoint=settings.minio_endpoint,
+            endpoint=getattr(settings, "minio_internal_endpoint", None) or settings.minio_endpoint,
+            public_endpoint=getattr(settings, "minio_public_endpoint", None) or None,
             access_key=settings.minio_access_key,
             secret_key=settings.minio_secret_key,
             bucket_name=settings.minio_bucket,

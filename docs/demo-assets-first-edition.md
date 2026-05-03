@@ -43,7 +43,9 @@ python scripts/demo_assets_smoke.py --api-base-url http://127.0.0.1:8000
 完整检查要求：
 
 - API 已启动且 `GET /health` 返回成功：`python -m uvicorn server.app:app --reload`
-- MinIO 可连接，并设置 `KNOWLINK_MINIO_ENDPOINT`、`KNOWLINK_MINIO_ACCESS_KEY`、`KNOWLINK_MINIO_SECRET_KEY`
+- MinIO 可连接，并设置 `KNOWLINK_MINIO_INTERNAL_ENDPOINT`、`KNOWLINK_MINIO_PUBLIC_ENDPOINT`、`KNOWLINK_MINIO_ACCESS_KEY`、`KNOWLINK_MINIO_SECRET_KEY`
+- Docker Compose 本地联调建议使用 `KNOWLINK_MINIO_INTERNAL_ENDPOINT=minio:9000` 和 `KNOWLINK_MINIO_PUBLIC_ENDPOINT=127.0.0.1:9000`；不要手动替换 `uploadUrl` 的 host，预签名会绑定 host。
+- `KNOWLINK_MINIO_ENDPOINT` 仅作为旧配置 fallback 保留；smoke 和 bucket 初始化检查以 `KNOWLINK_MINIO_INTERNAL_ENDPOINT` 作为服务端可达地址。
 - Vivo 联网解析配置齐全：`KNOWLINK_ENABLE_VIVO_OCR=true`、`KNOWLINK_ENABLE_VIVO_VISION=true`、`KNOWLINK_ENABLE_VIVO_ASR=true`、`KNOWLINK_VIVO_APP_ID`、`KNOWLINK_VIVO_APP_KEY`
 - `local_assets/first-edition/what-is-set/` 下四个文件存在，且 size/checksum 与 `server/seeds/demo_assets_manifest.json` 一致
 

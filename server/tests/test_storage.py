@@ -12,7 +12,7 @@ from server.domain.services.errors import ServiceError
 from server.domain.services.resources import UPLOAD_EXPIRES_IN
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
-from server.infra.storage import MinioObjectStorage, ObjectNotFoundError, ObjectStat
+from server.infra.storage import MinioObjectStorage, ObjectNotFoundError, ObjectStat, build_object_storage
 from server.schemas.requests import UploadCompleteRequest, UploadInitRequest
 
 
@@ -178,6 +178,78 @@ def test_minio_storage_presigned_url_signs_content_type_and_metadata():
     assert "Content-Type" not in query
     assert "x-amz-meta-course-id" not in query
     assert "x-amz-meta-checksum" not in query
+
+
+def test_minio_storage_uses_public_endpoint_for_presign_and_internal_client_for_stat():
+    internal_client = RecordingMinioClient()
+    public_client = Minio(
+        "127.0.0.1:9000",
+        access_key="minio-access",
+        secret_key="minio-secret",
+        secure=False,
+        region="us-east-1",
+    )
+    storage = MinioObjectStorage(
+        client=internal_client,
+        presign_client=public_client,
+        bucket_name="knowlink",
+    )
+
+    url = storage.presigned_put_url(
+        "raw/1/101/temp/pdf/demo.pdf",
+        expires=UPLOAD_EXPIRES_IN,
+        content_type="application/pdf",
+        metadata={"x-amz-meta-course-id": "101"},
+    )
+    stat = storage.stat_object("raw/1/101/temp/pdf/demo.pdf")
+
+    assert urlsplit(url).netloc == "127.0.0.1:9000"
+    assert internal_client.presigned_call is None
+    assert stat.size_bytes == 1024
+
+
+def test_build_object_storage_uses_internal_endpoint_and_public_presign_endpoint():
+    settings = SimpleNamespace(
+        storage_backend="minio",
+        minio_endpoint="legacy-minio:9000",
+        minio_internal_endpoint="minio:9000",
+        minio_public_endpoint="127.0.0.1:9000",
+        minio_access_key="minio-access",
+        minio_secret_key="minio-secret",
+        minio_bucket="knowlink",
+        minio_secure=False,
+    )
+
+    storage = build_object_storage(settings)
+
+    assert isinstance(storage, MinioObjectStorage)
+    assert storage.client._base_url._url.netloc == "minio:9000"
+    assert storage.presign_client._base_url._url.netloc == "127.0.0.1:9000"
+    assert storage.presign_client._region == "us-east-1"
+    url = storage.presigned_put_url(
+        "raw/1/101/temp/pdf/demo.pdf",
+        expires=UPLOAD_EXPIRES_IN,
+        content_type="application/pdf",
+        metadata={"x-amz-meta-course-id": "101"},
+    )
+    assert urlsplit(url).netloc == "127.0.0.1:9000"
+
+
+def test_build_object_storage_falls_back_to_legacy_minio_endpoint():
+    settings = SimpleNamespace(
+        storage_backend="minio",
+        minio_endpoint="legacy-minio:9000",
+        minio_access_key="minio-access",
+        minio_secret_key="minio-secret",
+        minio_bucket="knowlink",
+        minio_secure=False,
+    )
+
+    storage = build_object_storage(settings)
+
+    assert isinstance(storage, MinioObjectStorage)
+    assert storage.client._base_url._url.netloc == "legacy-minio:9000"
+    assert storage.presign_client._base_url._url.netloc == "legacy-minio:9000"
 
 
 def test_minio_storage_reads_full_checksum_metadata_from_stat():

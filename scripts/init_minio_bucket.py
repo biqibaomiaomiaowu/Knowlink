@@ -10,7 +10,7 @@ from server.config.settings import get_settings
 def main() -> None:
     settings = get_settings()
     client = Minio(
-        settings.minio_endpoint,
+        settings.minio_internal_endpoint,
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
         secure=settings.minio_secure,

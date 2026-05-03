@@ -271,7 +271,10 @@ def check_runtime_prerequisites(
             )
         )
 
-        minio_endpoint = env.get("KNOWLINK_MINIO_ENDPOINT", "").strip()
+        minio_endpoint = (
+            env.get("KNOWLINK_MINIO_INTERNAL_ENDPOINT", "").strip()
+            or env.get("KNOWLINK_MINIO_ENDPOINT", "").strip()
+        )
         minio_access_key = env.get("KNOWLINK_MINIO_ACCESS_KEY", "").strip()
         minio_secret_key = env.get("KNOWLINK_MINIO_SECRET_KEY", "").strip()
         if not minio_endpoint or not minio_access_key or not minio_secret_key:
@@ -279,7 +282,7 @@ def check_runtime_prerequisites(
                 Diagnostic(
                     "blocked",
                     "minio.env_missing",
-                    "MinIO env is incomplete: KNOWLINK_MINIO_ENDPOINT, KNOWLINK_MINIO_ACCESS_KEY, KNOWLINK_MINIO_SECRET_KEY are required",
+                    "MinIO env is incomplete: KNOWLINK_MINIO_INTERNAL_ENDPOINT, KNOWLINK_MINIO_ACCESS_KEY, KNOWLINK_MINIO_SECRET_KEY are required",
                     "Copy .env.example values for local Docker smoke or export the real MinIO values.",
                 )
             )
@@ -292,7 +295,7 @@ def check_runtime_prerequisites(
                     "pass" if minio_ok else "blocked",
                     "minio.tcp_ok" if minio_ok else "minio.unreachable",
                     minio_message,
-                    None if minio_ok else "Start MinIO through docker compose or point KNOWLINK_MINIO_ENDPOINT at a reachable service.",
+                    None if minio_ok else "Start MinIO through docker compose or point KNOWLINK_MINIO_INTERNAL_ENDPOINT at a reachable service.",
                 )
             )
 

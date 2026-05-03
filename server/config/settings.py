@@ -19,6 +19,8 @@ class Settings:
     redis_url: str
     storage_backend: str
     minio_endpoint: str
+    minio_internal_endpoint: str
+    minio_public_endpoint: str
     minio_access_key: str
     minio_secret_key: str
     minio_bucket: str
@@ -45,6 +47,14 @@ def get_settings() -> Settings:
         redis_url=os.getenv("KNOWLINK_REDIS_URL", "redis://localhost:6379/0"),
         storage_backend=os.getenv("KNOWLINK_STORAGE_BACKEND", "demo"),
         minio_endpoint=os.getenv("KNOWLINK_MINIO_ENDPOINT", "localhost:9000"),
+        minio_internal_endpoint=os.getenv(
+            "KNOWLINK_MINIO_INTERNAL_ENDPOINT",
+            os.getenv("KNOWLINK_MINIO_ENDPOINT", "localhost:9000"),
+        ),
+        minio_public_endpoint=os.getenv(
+            "KNOWLINK_MINIO_PUBLIC_ENDPOINT",
+            os.getenv("KNOWLINK_MINIO_ENDPOINT", "localhost:9000"),
+        ),
         minio_access_key=os.getenv("KNOWLINK_MINIO_ACCESS_KEY", "minioadmin"),
         minio_secret_key=os.getenv("KNOWLINK_MINIO_SECRET_KEY", "minioadmin"),
         minio_bucket=os.getenv("KNOWLINK_MINIO_BUCKET", "knowlink"),
