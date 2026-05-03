@@ -215,6 +215,15 @@
 - 问询字段和后续讲义生成字段完全对齐；`knowledge_extract` 在视频优先链路中表示目录抽取 ready，不表示全量知识点已经生成。
 - B 站接口的路径、错误码和 `bilibili_import_run` 命名在架构文档、分工文档和 API contract 中完全一致，且接口当前能返回统一未实现错误。
 
+### 4.7 2026-05-03 验收记录
+
+- 前后端本地真实联调已跑通第二周主链路：Flutter Web 可创建固定联调课，上传 `MP4 + PDF + PPTX + DOCX` 四类资料，后端完成 MinIO 直传、上传完成回调、解析启动和 `pipeline-status` 轮询。
+- 数据库验收结果：`course_resources` 写入 4 条记录，状态均为 `ready / passed / succeeded`；`parse_runs` 写入 `succeeded` 记录，`progress_pct=100`；`async_tasks` 中 `parse_pipeline`、`resource_validate`、`subtitle_extract`、`doc_parse`、`knowledge_extract`、`embed` 均为 `succeeded`。
+- MinIO 验收结果：bucket `knowlink` 下存在 4 个 `raw/1/<courseId>/temp/...` 对象，文件大小和 `x-amz-meta-checksum` 与固定资料 manifest 匹配。
+- 解析产物验收结果：`course_segments=178`，包含 `video_caption`、`pdf_page_text`、`ppt_slide_text`、`docx_block_text` 和 `image_caption`；`vector_documents=178`。
+- API 验收结果：`GET /api/v1/courses/<courseId>/pipeline-status` 返回 `lifecycleStatus=inquiry_ready`、`pipelineStatus=succeeded`、`progressPct=100`、`nextAction=enter_inquiry`，五个解析步骤均为 `succeeded`。
+- 边界说明：本次 Week 2 验收确认上传、解析、向量化和问询入口已跑通；讲义生成、QA、测验和复习仍按第 3、4 周计划继续接入。
+
 ## 5. 第 3 周：讲义、联动、问答链路
 
 ### 5.1 本周目标
