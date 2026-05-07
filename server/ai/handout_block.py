@@ -32,11 +32,12 @@ JSON 格式固定为：
 @dataclass(frozen=True)
 class HandoutBlockContext:
     source_segments: list[dict[str, Any]]
+    adjacent_segments: list[dict[str, Any]]
     supplemental_segments: list[dict[str, Any]]
 
     @property
     def all_segments(self) -> list[dict[str, Any]]:
-        return [*self.source_segments, *self.supplemental_segments]
+        return [*self.source_segments, *self.adjacent_segments, *self.supplemental_segments]
 
 
 class HandoutBlockClient(Protocol):
@@ -99,6 +100,7 @@ def build_handout_block_context(
     outline_item: Mapping[str, Any],
     segments: Sequence[Mapping[str, Any]],
     *,
+    max_adjacent_segments: int = 2,
     max_supplemental_segments: int = 6,
 ) -> HandoutBlockContext:
     known_segments = [_normalize_segment(segment, index) for index, segment in enumerate(segments, start=1)]
@@ -128,6 +130,13 @@ def build_handout_block_context(
     if not source_segments:
         raise ValueError("at least one known video_caption segment is required for handout block generation")
 
+    source_key_set = {segment["segmentKey"] for segment in source_segments}
+    adjacent_segments = _adjacent_video_segments(
+        known_segments,
+        source_segments=source_segments,
+        source_key_set=source_key_set,
+        max_adjacent_segments=max_adjacent_segments,
+    )
     source_text = "\n".join(str(segment["textContent"]) for segment in source_segments)
     query_text = " ".join(
         clean_text(
@@ -145,7 +154,11 @@ def build_handout_block_context(
         query_text=query_text,
     )[:max_supplemental_segments]
 
-    return HandoutBlockContext(source_segments=source_segments, supplemental_segments=supplemental)
+    return HandoutBlockContext(
+        source_segments=source_segments,
+        adjacent_segments=adjacent_segments,
+        supplemental_segments=supplemental,
+    )
 
 
 class VivoHandoutBlockClient:
@@ -322,6 +335,26 @@ def citation_segment_keys(block: Mapping[str, Any]) -> list[str]:
     return keys
 
 
+def handout_block_ref_identity(citation: Mapping[str, Any]) -> tuple[int, str, tuple[tuple[str, Any], ...]] | None:
+    resource_id = _as_positive_int(citation.get("resourceId") or citation.get("resource_id"))
+    if resource_id is None:
+        return None
+
+    segment_id = _as_positive_int(citation.get("segmentId") or citation.get("segment_id"))
+    if segment_id is not None:
+        segment_identity = f"id:{segment_id}"
+    else:
+        segment_key = citation.get("segmentKey") or citation.get("segment_key")
+        if not isinstance(segment_key, str) or not segment_key.strip():
+            return None
+        segment_identity = f"key:{_stable_key(segment_key)}"
+
+    locator = _citation_locator_tuple(citation)
+    if not locator:
+        return None
+    return (resource_id, segment_identity, locator)
+
+
 def _normalize_segment(segment: Mapping[str, Any], index: int) -> dict[str, Any]:
     segment_key = str(segment.get("segmentKey") or segment.get("segment_key") or f"segment-{index}")
     clean_segment = dict(segment)
@@ -361,6 +394,49 @@ def _rank_supplemental_segments(segments: Sequence[Mapping[str, Any]], *, query_
             score = 1
         scored.append((-score, int(segment.get("orderNo") or index + 1), dict(segment)))
     return [item[2] for item in sorted(scored, key=lambda item: (item[0], item[1], item[2]["segmentKey"]))]
+
+
+def _adjacent_video_segments(
+    segments: Sequence[Mapping[str, Any]],
+    *,
+    source_segments: Sequence[Mapping[str, Any]],
+    source_key_set: set[str],
+    max_adjacent_segments: int,
+) -> list[dict[str, Any]]:
+    if max_adjacent_segments <= 0:
+        return []
+
+    ordered_video = [
+        dict(segment)
+        for segment in sorted(segments, key=lambda item: (int(item.get("orderNo") or 0), str(item.get("segmentKey") or "")))
+        if segment.get("segmentType") == "video_caption"
+    ]
+    if not ordered_video:
+        return []
+
+    source_indexes = [
+        index
+        for index, segment in enumerate(ordered_video)
+        if segment.get("segmentKey") in source_key_set
+    ]
+    if not source_indexes:
+        return []
+
+    source_resource_ids = {
+        _as_positive_int(segment.get("resourceId"))
+        for segment in source_segments
+        if _as_positive_int(segment.get("resourceId")) is not None
+    }
+    before_limit = max(0, min(source_indexes) - max_adjacent_segments)
+    after_limit = min(len(ordered_video), max(source_indexes) + max_adjacent_segments + 1)
+    adjacent: list[dict[str, Any]] = []
+    for segment in [*ordered_video[before_limit : min(source_indexes)], *ordered_video[max(source_indexes) + 1 : after_limit]]:
+        resource_id = _as_positive_int(segment.get("resourceId"))
+        if source_resource_ids and resource_id not in source_resource_ids:
+            continue
+        if segment["segmentKey"] not in source_key_set:
+            adjacent.append(segment)
+    return adjacent
 
 
 def _keywords(text: str) -> set[str]:
@@ -522,10 +598,23 @@ def _append_unique_citation(
 
 
 def _citation_identity(citation: Mapping[str, Any]) -> tuple[str, tuple[tuple[str, Any], ...]]:
-    return (
-        str(citation["segmentKey"]),
-        tuple((key, citation[key]) for key in ("pageNo", "slideNo", "anchorKey", "startSec", "endSec") if key in citation),
-    )
+    identity = handout_block_ref_identity(citation)
+    if identity is None:
+        return ("", ())
+    resource_id, segment_identity, locator = identity
+    return (f"{resource_id}:{segment_identity}", locator)
+
+
+def _citation_locator_tuple(citation: Mapping[str, Any]) -> tuple[tuple[str, Any], ...]:
+    locators = _raw_locator(citation)
+    if len(locators) != 1:
+        return ()
+    key, value = next(iter(locators.items()))
+    if key == "timeRange":
+        return (("startSec", value[0]), ("endSec", value[1]))
+    if value is None:
+        return ()
+    return ((key, value),)
 
 
 def _expand_video_time_range_citations(
@@ -583,9 +672,14 @@ def _expand_video_time_range_citations(
         if end_sec <= start_sec:
             continue
 
+        split_raw_item = {
+            key: value
+            for key, value in raw_item.items()
+            if key not in {"segmentKey", "segment_key", "segmentId", "segment_id"}
+        }
         citation = _citation_from_segment(
             segment,
-            raw_item={**raw_item, "startSec": start_sec, "endSec": end_sec},
+            raw_item={**split_raw_item, "startSec": start_sec, "endSec": end_sec},
             outline_start=outline_start,
             outline_end=outline_end,
         )
@@ -606,6 +700,11 @@ def _seed_video_segment(
         segment = by_key.get(_stable_key(key))
         if segment is None or segment.get("segmentType") != "video_caption":
             return _INVALID_VIDEO_SEED
+        segment_id = _as_int(raw_item.get("segmentId") or raw_item.get("segment_id"))
+        if segment_id is not None:
+            by_id_segment = by_id.get(segment_id)
+            if by_id_segment is None or by_id_segment.get("segmentKey") != segment.get("segmentKey"):
+                return _INVALID_VIDEO_SEED
         return segment
 
     segment_id = _as_int(raw_item.get("segmentId") or raw_item.get("segment_id"))
@@ -715,6 +814,16 @@ def _citation_from_segment(
     if not segment_locator:
         return None
 
+    raw_resource_id = _as_positive_int(raw_item.get("resourceId") or raw_item.get("resource_id"))
+    segment_resource_id = _as_positive_int(segment.get("resourceId"))
+    if raw_resource_id is not None and segment_resource_id is not None and raw_resource_id != segment_resource_id:
+        return None
+
+    raw_segment_id = _as_positive_int(raw_item.get("segmentId") or raw_item.get("segment_id"))
+    segment_id = _as_positive_int(segment.get("segmentId"))
+    if raw_segment_id is not None and segment_id is not None and raw_segment_id != segment_id:
+        return None
+
     raw_locator = _raw_locator(raw_item)
     if len(raw_locator) > 1:
         return None
@@ -724,8 +833,6 @@ def _citation_from_segment(
             if "startSec" not in segment_locator or "endSec" not in segment_locator:
                 return None
         elif raw_key not in segment_locator:
-            return None
-        if raw_key != "timeRange" and segment_locator.get(raw_key) != raw_value:
             return None
 
     if segment.get("segmentType") == "video_caption":
@@ -750,7 +857,7 @@ def _citation_from_segment(
     else:
         locator = segment_locator
 
-    resource_id = _as_positive_int(segment.get("resourceId") or raw_item.get("resourceId") or raw_item.get("resource_id"))
+    resource_id = segment_resource_id or raw_resource_id
     if resource_id is None:
         return None
 
@@ -759,7 +866,6 @@ def _citation_from_segment(
         "segmentKey": segment["segmentKey"],
         "refLabel": clean_text(str(raw_item.get("refLabel") or raw_item.get("ref_label") or "")) or segment_label(segment),
     }
-    segment_id = _as_positive_int(segment.get("segmentId") or raw_item.get("segmentId") or raw_item.get("segment_id"))
     if segment_id is not None:
         citation["segmentId"] = segment_id
     citation.update(locator)

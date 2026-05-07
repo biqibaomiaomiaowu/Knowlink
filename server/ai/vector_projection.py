@@ -7,6 +7,11 @@ from server.parsers.base import clean_text
 
 
 OwnerType = Literal["segment", "knowledge_point", "handout_block"]
+OWNER_TYPE_PRIORITY: dict[OwnerType, int] = {
+    "handout_block": 0,
+    "knowledge_point": 1,
+    "segment": 2,
+}
 
 
 @dataclass(frozen=True)
@@ -19,6 +24,70 @@ class VectorDocumentInput:
     parse_run_id: int | None = None
     handout_version_id: int | None = None
     resource_id: int | None = None
+
+
+@dataclass(frozen=True)
+class VectorRetrievalScope:
+    course_id: int
+    active_parse_run_id: int
+    active_handout_version_id: int
+
+
+def vector_document_matches_scope(document: Mapping[str, Any] | VectorDocumentInput, scope: VectorRetrievalScope) -> bool:
+    owner_type = _owner_type(document)
+    if owner_type not in OWNER_TYPE_PRIORITY:
+        return False
+    if _document_positive_int(document, "course_id", "courseId") != scope.course_id:
+        return False
+    if _document_positive_int(document, "parse_run_id", "parseRunId") != scope.active_parse_run_id:
+        return False
+
+    handout_version_id = _document_positive_int(document, "handout_version_id", "handoutVersionId")
+    if owner_type == "handout_block":
+        return handout_version_id == scope.active_handout_version_id
+    return handout_version_id is None
+
+
+def filter_vector_document_candidates(
+    documents: Sequence[Mapping[str, Any] | VectorDocumentInput],
+    *,
+    scope: VectorRetrievalScope,
+    allowed_owner_types: set[OwnerType] | None = None,
+) -> list[Mapping[str, Any] | VectorDocumentInput]:
+    allowed = set(OWNER_TYPE_PRIORITY) if allowed_owner_types is None else allowed_owner_types
+    return [
+        document
+        for document in documents
+        if _owner_type(document) in allowed and vector_document_matches_scope(document, scope)
+    ]
+
+
+def order_vector_document_candidates(
+    documents: Sequence[Mapping[str, Any] | VectorDocumentInput],
+) -> list[Mapping[str, Any] | VectorDocumentInput]:
+    return sorted(
+        documents,
+        key=lambda document: (
+            OWNER_TYPE_PRIORITY.get(_owner_type(document), 99),
+            _document_rank(document),
+            str(_document_value(document, "owner_id", "ownerId") or ""),
+        ),
+    )
+
+
+def select_vector_retrieval_candidates(
+    documents: Sequence[Mapping[str, Any] | VectorDocumentInput],
+    *,
+    scope: VectorRetrievalScope,
+    allowed_owner_types: set[OwnerType] | None = None,
+) -> list[Mapping[str, Any] | VectorDocumentInput]:
+    return order_vector_document_candidates(
+        filter_vector_document_candidates(
+            documents,
+            scope=scope,
+            allowed_owner_types=allowed_owner_types,
+        )
+    )
 
 
 def segment_to_vector_document(segment: Mapping[str, Any]) -> VectorDocumentInput | None:
@@ -322,3 +391,26 @@ def _camel_to_snake(value: str) -> str:
             output.append("_")
         output.append(char.lower())
     return "".join(output)
+
+
+def _owner_type(document: Mapping[str, Any] | VectorDocumentInput) -> OwnerType | str:
+    value = _document_value(document, "owner_type", "ownerType")
+    return str(value or "")
+
+
+def _document_value(document: Mapping[str, Any] | VectorDocumentInput, *keys: str) -> Any:
+    if isinstance(document, VectorDocumentInput):
+        for key in keys:
+            if hasattr(document, key):
+                return getattr(document, key)
+        return None
+    return _field_value(document, *keys)
+
+
+def _document_positive_int(document: Mapping[str, Any] | VectorDocumentInput, *keys: str) -> int | None:
+    return _as_positive_int(_document_value(document, *keys))
+
+
+def _document_rank(document: Mapping[str, Any] | VectorDocumentInput) -> int:
+    rank = _document_positive_int(document, "rank", "sortNo", "sort_no")
+    return rank if rank is not None else 0
