@@ -98,6 +98,68 @@ def test_parse_pipeline_actor_invokes_runner_without_broker_send(monkeypatch):
     assert calls == [{"taskId": 7, "courseId": 11, "parseRunId": 13}]
 
 
+def test_handout_generate_actor_invokes_runner_without_broker_send(monkeypatch):
+    from server.tasks import worker
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run_handout_generate(message):
+        calls.append(dict(message))
+
+    monkeypatch.setattr(worker, "run_handout_generate", fake_run_handout_generate)
+
+    result = worker.handout_generate.fn(
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "handoutVersionId": 17,
+            "sourceParseRunId": 13,
+        }
+    )
+
+    assert result is None
+    assert calls == [
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "handoutVersionId": 17,
+            "sourceParseRunId": 13,
+        }
+    ]
+
+
+def test_handout_block_generate_actor_invokes_runner_without_broker_send(monkeypatch):
+    from server.tasks import worker
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run_handout_block_generate(message):
+        calls.append(dict(message))
+
+    monkeypatch.setattr(worker, "run_handout_block_generate", fake_run_handout_block_generate)
+
+    result = worker.handout_block_generate.fn(
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "handoutVersionId": 17,
+            "handoutBlockId": 19,
+            "sourceParseRunId": 13,
+        }
+    )
+
+    assert result is None
+    assert calls == [
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "handoutVersionId": 17,
+            "handoutBlockId": 19,
+            "sourceParseRunId": 13,
+        }
+    ]
+
+
 def test_dramatiq_dispatcher_sends_to_lazy_actor_path_without_redis():
     payload = _run_script(
         """
@@ -133,6 +195,96 @@ print(json.dumps({
 
     assert payload == {
         "sent": [{"taskId": 23, "courseId": 29, "parseRunId": 31, "resourceTypes": ["pdf"]}],
+        "worker_imported": False,
+        "broker_imported": False,
+        "dramatiq_imported": False,
+    }
+
+
+def test_dramatiq_dispatcher_sends_handout_generate_to_lazy_actor_path_without_redis():
+    payload = _run_script(
+        """
+import json
+import sys
+import types
+
+sent = []
+
+class FakeActor:
+    def send(self, message):
+        sent.append(message)
+
+module = types.ModuleType("fake_worker_actor")
+module.handout_generate = FakeActor()
+sys.modules[module.__name__] = module
+
+from server.tasks.dispatcher import DramatiqTaskDispatcher
+
+dispatcher = DramatiqTaskDispatcher(handout_generate_actor_path="fake_worker_actor:handout_generate")
+dispatcher.enqueue_handout_generate(
+    task_id=23,
+    payload={"courseId": 29, "handoutVersionId": 37, "sourceParseRunId": 31},
+)
+print(json.dumps({
+    "sent": sent,
+    "worker_imported": "server.tasks.worker" in sys.modules,
+    "broker_imported": "server.tasks.broker" in sys.modules,
+    "dramatiq_imported": "dramatiq" in sys.modules,
+}))
+"""
+    )
+
+    assert payload == {
+        "sent": [{"taskId": 23, "courseId": 29, "handoutVersionId": 37, "sourceParseRunId": 31}],
+        "worker_imported": False,
+        "broker_imported": False,
+        "dramatiq_imported": False,
+    }
+
+
+def test_dramatiq_dispatcher_sends_handout_block_generate_to_lazy_actor_path_without_redis():
+    payload = _run_script(
+        """
+import json
+import sys
+import types
+
+sent = []
+
+class FakeActor:
+    def send(self, message):
+        sent.append(message)
+
+module = types.ModuleType("fake_worker_actor")
+module.handout_block_generate = FakeActor()
+sys.modules[module.__name__] = module
+
+from server.tasks.dispatcher import DramatiqTaskDispatcher
+
+dispatcher = DramatiqTaskDispatcher(handout_block_generate_actor_path="fake_worker_actor:handout_block_generate")
+dispatcher.enqueue_handout_block_generate(
+    task_id=23,
+    payload={"courseId": 29, "handoutVersionId": 37, "handoutBlockId": 41, "sourceParseRunId": 31},
+)
+print(json.dumps({
+    "sent": sent,
+    "worker_imported": "server.tasks.worker" in sys.modules,
+    "broker_imported": "server.tasks.broker" in sys.modules,
+    "dramatiq_imported": "dramatiq" in sys.modules,
+}))
+"""
+    )
+
+    assert payload == {
+        "sent": [
+            {
+                "taskId": 23,
+                "courseId": 29,
+                "handoutVersionId": 37,
+                "handoutBlockId": 41,
+                "sourceParseRunId": 31,
+            }
+        ],
         "worker_imported": False,
         "broker_imported": False,
         "dramatiq_imported": False,
