@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/shared/models/confirm_recommendation_request.dart';
 import 'package:knowlink_client/shared/models/course_create_request.dart';
+import 'package:knowlink_client/shared/models/handout_models.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
 import 'package:knowlink_client/shared/models/recommendation_enums.dart';
 import 'package:knowlink_client/shared/models/recommendation_request.dart';
@@ -456,6 +457,348 @@ void main() {
     expect(
       _headerValue(adapter.requests.first.headers, 'idempotency-key'),
       'parse-start-1',
+    );
+  });
+
+  test('handout and QA methods use Week 3 paths and parse citations', () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        if (options.path.endsWith('/handouts/generate')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'taskId': 7101,
+                'status': 'queued',
+                'nextAction': 'poll',
+                'entity': {'type': 'handout_version', 'id': 3001},
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/handout-versions/3001/status')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'handoutVersionId': 3001,
+                'status': 'outline_ready',
+                'outlineStatus': 'ready',
+                'totalBlocks': 3,
+                'readyBlocks': 0,
+                'pendingBlocks': 3,
+                'sourceParseRunId': 9001,
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/handouts/latest')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'handoutVersionId': 3001,
+                'title': '高数期末冲刺讲义',
+                'summary': '按考试优先级整理的知识块',
+                'totalBlocks': 3,
+                'status': 'outline_ready',
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/handouts/latest/outline')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'handoutVersionId': 3001,
+                'title': '集合的初见',
+                'summary': '按视频时间线组织的讲义目录',
+                'items': [
+                  {
+                    'outlineKey': 'outline-1',
+                    'blockId': 4001,
+                    'title': '集合的基本概念',
+                    'summary': '介绍集合、元素和属于关系',
+                    'startSec': 0,
+                    'endSec': 180,
+                    'sortNo': 1,
+                    'generationStatus': 'pending',
+                    'sourceSegmentKeys': ['mp4-c1'],
+                  },
+                ],
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/handouts/latest/blocks')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'items': [
+                  {
+                    'blockId': 4001,
+                    'outlineKey': 'outline-1',
+                    'title': '极限与连续',
+                    'summary': '先抓必考定义和题型',
+                    'status': 'ready',
+                    'contentMd': '### 极限与连续',
+                    'startSec': 120,
+                    'endSec': 360,
+                    'pageFrom': 2,
+                    'pageTo': 5,
+                    'citations': [
+                      {
+                        'resourceId': 501,
+                        'refLabel': 'PDF 第 2 页',
+                        'pageNo': 2,
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/handout-blocks/4002/generate')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'taskId': 7102,
+                'status': 'queued',
+                'nextAction': 'poll',
+                'entity': {'type': 'handout_block', 'id': 4002},
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/handout-blocks/4002/status')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'blockId': 4002,
+                'outlineKey': 'outline-2',
+                'status': 'generating',
+                'startSec': 180,
+                'endSec': 360,
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/handouts/current-block')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'blockId': 4002,
+                'outlineKey': 'outline-2',
+                'startSec': 180,
+                'endSec': 360,
+                'generationStatus': 'pending',
+                'prefetchBlockId': 4003,
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/jump-target')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'blockId': 4001,
+                'videoResourceId': 501,
+                'startSec': 120,
+                'endSec': 360,
+                'docResourceId': 502,
+                'pageNo': 2,
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        if (options.path.endsWith('/qa/messages')) {
+          return ResponseBody.fromString(
+            jsonEncode({
+              'data': {
+                'sessionId': 6001,
+                'messageId': 6002,
+                'answerMd': '定义控制了题型的判断边界。',
+                'citations': [
+                  {
+                    'resourceId': 501,
+                    'refLabel': 'PDF 第 2 页',
+                    'pageNo': 2,
+                  },
+                ],
+              },
+            }),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json'],
+            },
+          );
+        }
+        return ResponseBody.fromString(
+          jsonEncode({
+            'data': {
+              'items': [
+                {
+                  'sessionId': 6001,
+                  'messageId': 6002,
+                  'answerMd': '定义控制了题型的判断边界。',
+                  'citations': [],
+                },
+              ],
+            },
+          }),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'week-three-token',
+    );
+
+    final generated = await client.generateHandout(
+      courseId: '101',
+      idempotencyKey: 'handout-generate-1',
+    );
+    final status = await client.fetchHandoutVersionStatus(3001);
+    final latest = await client.fetchLatestHandout('101');
+    final outline = await client.fetchLatestHandoutOutline('101');
+    final blocks = await client.fetchLatestHandoutBlocks('101');
+    final blockGenerated = await client.generateHandoutBlock(
+      blockId: 4002,
+      idempotencyKey: 'handout-block-generate-1',
+    );
+    final blockStatus = await client.fetchHandoutBlockStatus(4002);
+    final currentBlock = await client.fetchCurrentHandoutBlock(
+      courseId: '101',
+      currentSec: 205,
+    );
+    final jumpTarget = await client.fetchHandoutJumpTarget(4001);
+    final answer = await client.createQaMessage(
+      request: const QaMessageRequestModel(
+        courseId: 101,
+        handoutBlockId: 4001,
+        question: '这个定义和题型有什么联系？',
+      ),
+    );
+    final session = await client.fetchQaSessionMessages(6001);
+
+    expect(generated.entity.id, 3001);
+    expect(status.status, 'outline_ready');
+    expect(latest.totalBlocks, 3);
+    expect(outline.items.single.sourceSegmentKeys, ['mp4-c1']);
+    expect(blocks.items.single.citations.single.pageNo, 2);
+    expect(blockGenerated.entity?.type, 'handout_block');
+    expect(blockStatus.status, 'generating');
+    expect(currentBlock.prefetchBlockId, 4003);
+    expect(jumpTarget.displayText, '视频 501 2:00 · 文档 502 第 2 页');
+    expect(answer.sessionId, 6001);
+    expect(answer.citations.single.refLabel, 'PDF 第 2 页');
+    expect(session.items.single.messageId, 6002);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/courses/101/handouts/generate',
+      '/api/v1/handout-versions/3001/status',
+      '/api/v1/courses/101/handouts/latest',
+      '/api/v1/courses/101/handouts/latest/outline',
+      '/api/v1/courses/101/handouts/latest/blocks',
+      '/api/v1/handout-blocks/4002/generate',
+      '/api/v1/handout-blocks/4002/status',
+      '/api/v1/courses/101/handouts/current-block',
+      '/api/v1/handout-blocks/4001/jump-target',
+      '/api/v1/qa/messages',
+      '/api/v1/qa/sessions/6001/messages',
+    ]);
+    expect(
+      _headerValue(adapter.requests.first.headers, 'idempotency-key'),
+      'handout-generate-1',
+    );
+    expect(
+      _headerValue(adapter.requests[5].headers, 'idempotency-key'),
+      'handout-block-generate-1',
+    );
+    expect(adapter.requests[7].queryParameters, {'currentSec': 205});
+    expect(adapter.requests[9].data, {
+      'courseId': 101,
+      'handoutBlockId': 4001,
+      'question': '这个定义和题型有什么联系？',
+    });
+  });
+
+  test('handout block generate accepts ready block status response', () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        return ResponseBody.fromString(
+          jsonEncode({
+            'data': {
+              'blockId': 4003,
+              'outlineKey': 'outline-3',
+              'status': 'ready',
+              'startSec': 360,
+              'endSec': 540,
+            },
+          }),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'week-three-token',
+    );
+
+    final result = await client.generateHandoutBlock(
+      blockId: 4003,
+      idempotencyKey: 'handout-block-ready-1',
+    );
+
+    expect(result.entity, isNull);
+    expect(result.blockStatus?.status, 'ready');
+    expect(
+        adapter.requests.single.path, '/api/v1/handout-blocks/4003/generate');
+    expect(
+      _headerValue(adapter.requests.single.headers, 'idempotency-key'),
+      'handout-block-ready-1',
     );
   });
 }
