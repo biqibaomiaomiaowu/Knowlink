@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 import server.infra.db.models
 from server.infra.db.base import Base
-from server.infra.db.models import AsyncTask, Course, CourseResource, ParseRun, VectorDocument
+from server.infra.db.models import AsyncTask, Course, CourseResource, HandoutVersion, ParseRun, VectorDocument
 from server.tasks.parse_pipeline import run_parse_pipeline
 
 
@@ -81,6 +81,57 @@ def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Pa
     assert session.get(ParseRun, message["parseRunId"]).status == "succeeded"
     assert session.get(AsyncTask, message["taskId"]).status == "succeeded"
     assert _step_statuses(session, message["parseRunId"])["vectorize"] == "succeeded"
+
+
+def test_parse_pipeline_success_clears_stale_active_handout_version(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "lecture.pdf", resource_type="pdf")
+    stale_version = HandoutVersion(
+        course_id=message["courseId"],
+        source_parse_run_id=message["parseRunId"] + 100,
+        title="旧讲义",
+        summary="旧解析来源",
+        status="ready",
+        outline_status="ready",
+        total_blocks=0,
+        ready_blocks=0,
+        pending_blocks=0,
+    )
+    session.add(stale_version)
+    session.flush()
+    course = session.get(Course, message["courseId"])
+    course.active_handout_version_id = stale_version.id
+    session.commit()
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-p1",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "新解析版本。",
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=lambda: None,
+        base_dir=tmp_path,
+    )
+
+    session.expire_all()
+    assert session.get(Course, message["courseId"]).active_handout_version_id is None
 
 
 def test_parse_pipeline_runner_does_not_fake_vectors_without_embedding_client(tmp_path: Path):

@@ -103,8 +103,88 @@ class MemoryScaffoldRepository:
                     }
         return None
 
-    def create_qa_message(self, course_id: int, handout_block_id: int) -> dict[str, Any]:
-        return self.store.create_qa_message(course_id, handout_block_id)
+    def prepare_handout_block_generation(
+        self,
+        block_id: int,
+    ) -> tuple[dict[str, Any], tuple[int, dict[str, Any]] | None] | None:
+        for handout in self.store.handouts.values():
+            for block in handout["blocks"]:
+                if block["blockId"] != block_id:
+                    continue
+                if block["status"] == "ready":
+                    return self.get_handout_block_status(block_id), None
+                if block["status"] == "generating" and block.get("taskId") is not None:
+                    task_id = int(block["taskId"])
+                    return {
+                        "taskId": task_id,
+                        "status": "queued",
+                        "nextAction": "poll",
+                        "entity": {"type": "handout_block", "id": block_id},
+                    }, None
+                task_id = self.store.next_id("task")
+                block["status"] = "generating"
+                block["taskId"] = task_id
+                payload = {
+                    "courseId": next(
+                        course_id
+                        for course_id, handout_version_id in self.store.handout_by_course.items()
+                        if handout_version_id == handout["handoutVersionId"]
+                    ),
+                    "handoutVersionId": handout["handoutVersionId"],
+                    "handoutBlockId": block_id,
+                    "sourceParseRunId": handout.get("sourceParseRunId"),
+                }
+                return {
+                    "taskId": task_id,
+                    "status": "queued",
+                    "nextAction": "poll",
+                    "entity": {"type": "handout_block", "id": block_id},
+                }, (task_id, payload)
+        return None
+
+    def get_handout_block_status(self, block_id: int) -> dict[str, Any] | None:
+        for handout in self.store.handouts.values():
+            for block in handout["blocks"]:
+                if block["blockId"] == block_id:
+                    return {
+                        "blockId": block_id,
+                        "outlineKey": block["outlineKey"],
+                        "status": block["status"],
+                        "startSec": block.get("startSec"),
+                        "endSec": block.get("endSec"),
+                    }
+        return None
+
+    def get_current_handout_block(self, course_id: int, current_sec: int) -> dict[str, Any] | None:
+        handout = self.store.get_latest_handout(course_id)
+        if handout is None:
+            return None
+        blocks = sorted(handout["blocks"], key=lambda block: block.get("startSec") or 0)
+        for index, block in enumerate(blocks):
+            start_sec = block.get("startSec")
+            end_sec = block.get("endSec")
+            if start_sec is None or end_sec is None:
+                continue
+            is_last = index == len(blocks) - 1
+            if start_sec <= current_sec < end_sec or (is_last and current_sec == end_sec):
+                prefetch_block_id = None
+                if end_sec - current_sec <= 15:
+                    for next_block in blocks[index + 1:]:
+                        if next_block["status"] == "pending":
+                            prefetch_block_id = next_block["blockId"]
+                            break
+                return {
+                    "blockId": block["blockId"],
+                    "outlineKey": block["outlineKey"],
+                    "startSec": start_sec,
+                    "endSec": end_sec,
+                    "generationStatus": block["status"],
+                    "prefetchBlockId": prefetch_block_id,
+                }
+        return None
+
+    def create_qa_message(self, course_id: int, handout_block_id: int, question: str) -> dict[str, Any] | None:
+        return self.store.create_qa_message(course_id, handout_block_id, question)
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         return self.store.get_qa_session_messages(session_id)

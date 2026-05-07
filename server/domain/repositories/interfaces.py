@@ -82,6 +82,10 @@ class AsyncTaskRepository(Protocol):
 class TaskDispatcher(Protocol):
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
 
+    def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
+
+    def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
+
 
 class InquiryRepository(Protocol):
     def save_inquiry_answers(
@@ -105,9 +109,24 @@ class HandoutRepository(Protocol):
 
     def get_block_jump_target(self, block_id: int) -> dict[str, Any] | None: ...
 
+    def save_handout_block_result(
+        self,
+        block_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None: ...
+
+    def prepare_handout_block_generation(
+        self,
+        block_id: int,
+    ) -> tuple[dict[str, Any], tuple[int, dict[str, Any]] | None] | None: ...
+
+    def get_handout_block_status(self, block_id: int) -> dict[str, Any] | None: ...
+
+    def get_current_handout_block(self, course_id: int, current_sec: int) -> dict[str, Any] | None: ...
+
 
 class QaRepository(Protocol):
-    def create_qa_message(self, course_id: int, handout_block_id: int) -> dict[str, Any]: ...
+    def create_qa_message(self, course_id: int, handout_block_id: int, question: str) -> dict[str, Any] | None: ...
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None: ...
 

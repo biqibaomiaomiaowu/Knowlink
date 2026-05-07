@@ -16,7 +16,18 @@ class QaService:
                 error_code="course.not_found",
                 status_code=404,
             )
-        return self.qa.create_qa_message(payload.course_id, payload.handout_block_id)
+        result = self.qa.create_qa_message(
+            payload.course_id,
+            payload.handout_block_id,
+            payload.question,
+        )
+        if result is None:
+            raise ServiceError(
+                message="Handout block was not found.",
+                error_code="qa.block_not_found",
+                status_code=404,
+            )
+        return result
 
     def get_session_messages(self, *, session_id: int) -> dict[str, object]:
         messages = self.qa.get_session_messages(session_id)
