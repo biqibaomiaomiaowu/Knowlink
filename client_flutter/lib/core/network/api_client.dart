@@ -6,6 +6,7 @@ import '../../shared/models/confirm_recommendation_request.dart';
 import '../../shared/models/confirm_recommendation_result.dart';
 import '../../shared/models/course_create_request.dart';
 import '../../shared/models/course_summary.dart';
+import '../../shared/models/handout_models.dart';
 import '../../shared/models/inquiry_models.dart';
 import '../../shared/models/pipeline_status.dart';
 import '../../shared/models/recommendation_card.dart';
@@ -224,5 +225,141 @@ class ApiClient {
 
     final data = response.data?['data'] as Map<String, dynamic>;
     return SaveInquiryAnswersResultModel.fromJson(data);
+  }
+
+  Future<HandoutGenerateResultModel> generateHandout({
+    required String courseId,
+    required String idempotencyKey,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/handouts/generate',
+      options: Options(
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      ),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutGenerateResultModel.fromJson(data);
+  }
+
+  Future<HandoutVersionStatusModel> fetchHandoutVersionStatus(
+    int handoutVersionId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/handout-versions/$handoutVersionId/status',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutVersionStatusModel.fromJson(data);
+  }
+
+  Future<HandoutBlockGenerateResultModel> generateHandoutBlock({
+    required int blockId,
+    required String idempotencyKey,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/handout-blocks/$blockId/generate',
+      options: Options(
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      ),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutBlockGenerateResultModel.fromJson(data);
+  }
+
+  Future<HandoutBlockStatusModel> fetchHandoutBlockStatus(
+    int blockId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/handout-blocks/$blockId/status',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutBlockStatusModel.fromJson(data);
+  }
+
+  Future<HandoutLatestModel> fetchLatestHandout(String courseId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/handouts/latest',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutLatestModel.fromJson(data);
+  }
+
+  Future<HandoutOutlineModel> fetchLatestHandoutOutline(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/handouts/latest/outline',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutOutlineModel.fromJson(data);
+  }
+
+  Future<HandoutBlocksModel> fetchLatestHandoutBlocks(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/handouts/latest/blocks',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutBlocksModel.fromJson(data);
+  }
+
+  Future<CurrentHandoutBlockModel> fetchCurrentHandoutBlock({
+    required String courseId,
+    required int currentSec,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/handouts/current-block',
+      queryParameters: {
+        'currentSec': currentSec,
+      },
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CurrentHandoutBlockModel.fromJson(data);
+  }
+
+  Future<HandoutJumpTargetModel> fetchHandoutJumpTarget(
+    int blockId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/handout-blocks/$blockId/jump-target',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HandoutJumpTargetModel.fromJson(data);
+  }
+
+  Future<QaMessageModel> createQaMessage({
+    required QaMessageRequestModel request,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/qa/messages',
+      data: request.toJson(),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return QaMessageModel.fromJson(data);
+  }
+
+  Future<QaSessionMessagesModel> fetchQaSessionMessages(
+    int sessionId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/qa/sessions/$sessionId/messages',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return QaSessionMessagesModel.fromJson(data);
   }
 }
