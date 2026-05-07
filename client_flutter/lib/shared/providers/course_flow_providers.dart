@@ -46,6 +46,7 @@ class CourseFlowController extends Notifier<CourseFlowState> {
       clearQuizAttemptId: true,
       clearReviewTaskRunId: true,
     );
+    _resetCourseInteractionState();
   }
 
   void startCourse(String courseId) {
@@ -53,6 +54,7 @@ class CourseFlowController extends Notifier<CourseFlowState> {
       return;
     }
     state = CourseFlowState(courseId: courseId);
+    _resetCourseInteractionState();
   }
 
   void setLifecycleStatus(String status) {
@@ -131,6 +133,11 @@ class CourseFlowController extends Notifier<CourseFlowState> {
     state = reviewTaskRunId == null
         ? state.copyWith(clearReviewTaskRunId: true)
         : state.copyWith(reviewTaskRunId: reviewTaskRunId);
+  }
+
+  void _resetCourseInteractionState() {
+    ref.read(activeBlockProvider.notifier).state = null;
+    ref.read(playerStateProvider.notifier).state = const PlayerState();
   }
 }
 
