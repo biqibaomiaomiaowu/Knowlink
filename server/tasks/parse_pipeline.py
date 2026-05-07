@@ -13,7 +13,15 @@ from sqlalchemy.orm import Session
 from server.ai.embedding import get_configured_embedding_client
 from server.ai.vector_projection import build_vector_document_inputs
 from server.infra.db.base import utcnow
-from server.infra.db.models import AsyncTask, Course, CourseResource, CourseSegment, ParseRun, VectorDocument
+from server.infra.db.models import (
+    AsyncTask,
+    Course,
+    CourseResource,
+    CourseSegment,
+    HandoutVersion,
+    ParseRun,
+    VectorDocument,
+)
 from server.infra.db.session import create_session
 from server.infra.storage import ObjectStorage, ObjectStorageError
 from server.parsers import parse_resource
@@ -418,6 +426,13 @@ def _finish_pipeline(
     if status in {"succeeded", "partial_success"}:
         course.lifecycle_status = "inquiry_ready"
         course.active_parse_run_id = parse_run.id
+        active_handout = (
+            session.get(HandoutVersion, course.active_handout_version_id)
+            if course.active_handout_version_id is not None
+            else None
+        )
+        if active_handout is not None and active_handout.source_parse_run_id != parse_run.id:
+            course.active_handout_version_id = None
     course.updated_at = now
     session.commit()
     return {"taskId": root_task.id, "courseId": course.id, "parseRunId": parse_run.id, "status": status, **summary}

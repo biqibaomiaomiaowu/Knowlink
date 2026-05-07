@@ -71,3 +71,29 @@ class HandoutBlock(Base, TimestampMixin):
     source_segment_keys_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False)
     knowledge_points_json: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True)
     citations_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False)
+
+
+class HandoutBlockRef(Base, TimestampMixin):
+    __tablename__ = "handout_block_refs"
+    __table_args__ = (
+        UniqueConstraint("handout_block_id", "sort_no", name="uq_handout_block_refs_block_sort"),
+        Index("ix_handout_block_refs_block_sort", "handout_block_id", "sort_no"),
+        Index("ix_handout_block_refs_segment", "segment_id"),
+        Index("ix_handout_block_refs_resource", "resource_id"),
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    handout_block_id: Mapped[int] = mapped_column(ForeignKey("handout_blocks.id"), nullable=False)
+    resource_id: Mapped[int] = mapped_column(ForeignKey("course_resources.id"), nullable=False)
+    segment_id: Mapped[int | None] = mapped_column(ForeignKey("course_segments.id"), nullable=True)
+
+    ref_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    quote_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    slide_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    anchor_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    start_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bbox_json: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
+    ref_label: Mapped[str] = mapped_column(String(255), nullable=False)
+    sort_no: Mapped[int] = mapped_column(Integer, nullable=False)

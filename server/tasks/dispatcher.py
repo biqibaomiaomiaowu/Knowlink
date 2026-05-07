@@ -22,6 +22,26 @@ class NoopTaskDispatcher:
             }
         )
 
+    def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "handout_generate",
+                "payload": payload,
+                "adapter": "noop",
+            }
+        )
+
+    def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "handout_block_generate",
+                "payload": payload,
+                "adapter": "noop",
+            }
+        )
+
 
 class InMemoryTaskDispatcher:
     def __init__(self, *, parse_runs: Any, async_tasks: Any) -> None:
@@ -61,6 +81,38 @@ class InMemoryTaskDispatcher:
         if callable(mark_succeeded):
             _call_with_supported_kwargs(mark_succeeded, parse_run_id=parse_run_id)
 
+    def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "handout_generate",
+                "payload": payload,
+                "adapter": "in_memory",
+            }
+        )
+        _call_with_supported_kwargs(
+            self.async_tasks.update_async_task,
+            task_id=task_id,
+            status="succeeded",
+            progress_pct=100,
+        )
+
+    def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "handout_block_generate",
+                "payload": payload,
+                "adapter": "in_memory",
+            }
+        )
+        _call_with_supported_kwargs(
+            self.async_tasks.update_async_task,
+            task_id=task_id,
+            status="succeeded",
+            progress_pct=100,
+        )
+
 
 @dataclass
 class DramatiqTaskDispatcher:
@@ -70,9 +122,29 @@ class DramatiqTaskDispatcher:
             "server.tasks.worker:parse_pipeline",
         )
     )
+    handout_generate_actor_path: str = field(
+        default_factory=lambda: os.getenv(
+            "KNOWLINK_HANDOUT_GENERATE_ACTOR",
+            "server.tasks.worker:handout_generate",
+        )
+    )
+    handout_block_generate_actor_path: str = field(
+        default_factory=lambda: os.getenv(
+            "KNOWLINK_HANDOUT_BLOCK_GENERATE_ACTOR",
+            "server.tasks.worker:handout_block_generate",
+        )
+    )
 
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None:
         actor = self._load_actor(self.parse_pipeline_actor_path)
+        actor.send({"taskId": task_id, **payload})
+
+    def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        actor = self._load_actor(self.handout_generate_actor_path)
+        actor.send({"taskId": task_id, **payload})
+
+    def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        actor = self._load_actor(self.handout_block_generate_actor_path)
         actor.send({"taskId": task_id, **payload})
 
     def _load_actor(self, actor_path: str) -> Any:

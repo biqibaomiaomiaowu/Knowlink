@@ -7,12 +7,23 @@ import dramatiq
 from server.config.settings import get_settings
 from server.infra.storage import build_object_storage
 from server.tasks.broker import get_dramatiq_queue_name, list_registered_tasks
+from server.tasks.handouts import run_handout_block_generate, run_handout_generate
 from server.tasks.parse_pipeline import run_parse_pipeline
 
 
 @dramatiq.actor(queue_name=get_dramatiq_queue_name())
 def parse_pipeline(message: dict[str, Any]) -> None:
     run_parse_pipeline(message, object_storage=build_object_storage(get_settings()))
+
+
+@dramatiq.actor(queue_name=get_dramatiq_queue_name())
+def handout_generate(message: dict[str, Any]) -> None:
+    run_handout_generate(message)
+
+
+@dramatiq.actor(queue_name=get_dramatiq_queue_name())
+def handout_block_generate(message: dict[str, Any]) -> None:
+    run_handout_block_generate(message)
 
 
 def main() -> None:

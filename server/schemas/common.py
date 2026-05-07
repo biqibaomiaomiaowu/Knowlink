@@ -12,7 +12,14 @@ class ResourceManifestItem(CamelModel):
 
 
 class AsyncEntity(CamelModel):
-    type: Literal["parse_run", "handout_version", "quiz", "review_task_run", "bilibili_import_run"]
+    type: Literal[
+        "parse_run",
+        "handout_version",
+        "handout_block",
+        "quiz",
+        "review_task_run",
+        "bilibili_import_run",
+    ]
     id: int
 
 
