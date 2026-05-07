@@ -200,12 +200,18 @@ async def get_inquiry_service(
 
 async def get_handout_service(
     repo=Depends(get_week2_runtime_repository),
+    task_dispatcher=Depends(get_task_dispatcher),
 ) -> HandoutService:
-    return HandoutService(courses=repo, handouts=repo, idempotency=repo)
+    return HandoutService(
+        courses=repo,
+        handouts=repo,
+        idempotency=repo,
+        task_dispatcher=task_dispatcher,
+    )
 
 
 async def get_qa_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    repo=Depends(get_week2_runtime_repository),
 ) -> QaService:
     return QaService(courses=repo, qa=repo)
 

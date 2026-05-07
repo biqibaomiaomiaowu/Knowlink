@@ -195,8 +195,8 @@ class RuntimeStore:
                     "outlineKey": outline_key,
                     "title": block_title,
                     "summary": "按考试优先级整理的知识块",
-                    "status": "ready",
-                    "contentMd": f"### {block_title}\n- 重点：定义、题型、常见陷阱",
+                    "status": "pending",
+                    "contentMd": None,
                     "startSec": start_sec,
                     "endSec": end_sec,
                     "sourceSegmentKeys": [f"memory-{outline_key}-source"],
@@ -221,7 +221,7 @@ class RuntimeStore:
                     "startSec": block["startSec"],
                     "endSec": block["endSec"],
                     "sortNo": index + 1,
-                    "generationStatus": "ready",
+                    "generationStatus": block["status"],
                     "sourceSegmentKeys": block["sourceSegmentKeys"],
                 }
                 for index, block in enumerate(blocks)
@@ -232,10 +232,10 @@ class RuntimeStore:
             "title": "高数期末冲刺讲义",
             "summary": "按考试优先级整理的知识块",
             "totalBlocks": len(blocks),
-            "status": "ready",
+            "status": "outline_ready",
             "outlineStatus": "ready",
-            "readyBlocks": len(blocks),
-            "pendingBlocks": 0,
+            "readyBlocks": 0,
+            "pendingBlocks": len(blocks),
             "sourceParseRunId": parse_run["parseRunId"] if parse_run else None,
             "outline": outline,
             "blocks": blocks,
@@ -270,10 +270,13 @@ class RuntimeStore:
             return outline
         return None
 
-    def create_qa_message(self, course_id: int, handout_block_id: int) -> dict[str, Any]:
+    def create_qa_message(self, course_id: int, handout_block_id: int, question: str = "") -> dict[str, Any] | None:
         session_id = self.next_id("qa_session")
-        message_id = self.next_id("qa_message")
+        user_message_id = self.next_id("qa_message")
+        assistant_message_id = self.next_id("qa_message")
         handout = self.get_latest_handout(course_id)
+        if handout is None:
+            return None
         block = next(
             (item for item in handout["blocks"] if item["blockId"] == handout_block_id),
             None,
@@ -285,11 +288,21 @@ class RuntimeStore:
         )
         payload = {
             "sessionId": session_id,
-            "messageId": message_id,
+            "messageId": assistant_message_id,
             "answerMd": "定义决定了题型判断的边界，先记判定条件，再看典型题型转换。",
             "citations": [citation],
         }
-        self.qa_sessions[session_id] = [payload]
+        self.qa_sessions[session_id] = [
+            {
+                "sessionId": session_id,
+                "messageId": user_message_id,
+                "role": "user",
+                "contentMd": question,
+                "answerMd": None,
+                "citations": [],
+            },
+            {"role": "assistant", **payload},
+        ]
         return payload
 
     def get_qa_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
