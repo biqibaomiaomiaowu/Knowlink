@@ -3,18 +3,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/app/theme/app_theme.dart';
 
 void main() {
-  test('AppTheme.light exposes the frozen week 1 visual defaults', () {
+  test('AppTheme.light exposes the KnowLink prototype visual defaults', () {
     final theme = AppTheme.light();
 
     expect(theme.useMaterial3, isTrue);
-    expect(theme.scaffoldBackgroundColor, const Color(0xFFF6F8F7));
+    expect(theme.scaffoldBackgroundColor, AppTheme.page);
     expect(theme.appBarTheme.centerTitle, isFalse);
     expect(
       theme.cardTheme.shape,
       isA<RoundedRectangleBorder>().having(
         (shape) => shape.borderRadius,
         'borderRadius',
-        BorderRadius.circular(20),
+        BorderRadius.circular(8),
       ),
     );
   });
