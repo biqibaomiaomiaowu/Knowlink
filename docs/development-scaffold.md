@@ -44,6 +44,8 @@
 | `async_tasks` 任务骨架 | Week 1 scaffold 已完成 | 已有表模型、任务 payload、worker / scheduler 占位和内存态异步返回结构；真实状态流转进入 Week 2 |
 | PostgreSQL / Redis / MinIO / Worker 真实运行时 | Week 1 scaffold 已完成，真实接入进入 Week 2 | 数据库 model 与初始迁移已接纳；完整 SQLAlchemy 持久化仓储、Redis、MinIO、Dramatiq Worker 仍未接通 |
 
+FastAPI 与 MinIO bucket CORS 当前默认允许本地 Flutter Web origin；生产环境可通过 `KNOWLINK_CORS_ALLOW_ORIGINS` 显式收紧。
+
 ## 5. 当前未接通的部分
 
 - 以下内容不作为 Week 1 验收缺口，统一进入 Week 2 起的真实接入范围。
@@ -54,7 +56,6 @@
 - `async_tasks` 真实状态流转与子任务消费
 - OCR / ASR / LLM provider 接入
 - 推荐页之外的 Flutter 页面真实数据接线和交互打磨
-- FastAPI 当前未配置 CORS；Flutter Web 本地验收可用独立 Chrome 临时绕过浏览器 CORS 限制，正式是否加 CORS 由后端 owner 后续决定
 
 ## 6. Schema / Contract 变更流
 

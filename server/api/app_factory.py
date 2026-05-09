@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 
 from server.api.response import api_error
 from server.api.router import build_router
@@ -34,6 +36,15 @@ def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title=settings.app_name, version="0.1.0")
     app.add_middleware(RequestIdMiddleware)
+    cors_allow_origins, cors_allow_origin_regex = _build_cors_origin_rules(settings.cors_allow_origins)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_allow_origins,
+        allow_origin_regex=cors_allow_origin_regex,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.exception_handler(HTTPException)
     async def on_http_exception(request: Request, exc: HTTPException):
@@ -65,3 +76,16 @@ def create_app() -> FastAPI:
 
     app.include_router(build_router())
     return app
+
+
+def _build_cors_origin_rules(origins: tuple[str, ...]) -> tuple[list[str], str | None]:
+    exact_origins: list[str] = []
+    regex_parts: list[str] = []
+    for origin in origins:
+        if origin.endswith(":*"):
+            regex_parts.append(re.escape(origin[:-2]) + r":\d+")
+        else:
+            exact_origins.append(origin)
+    if not regex_parts:
+        return exact_origins, None
+    return exact_origins, r"^(?:" + "|".join(regex_parts) + r")$"

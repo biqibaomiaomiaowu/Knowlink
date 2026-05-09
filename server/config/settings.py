@@ -25,6 +25,7 @@ class Settings:
     minio_secret_key: str
     minio_bucket: str
     minio_secure: bool
+    cors_allow_origins: tuple[str, ...]
     course_catalog_path: Path
     runtime_repository_backend: str
 
@@ -59,6 +60,10 @@ def get_settings() -> Settings:
         minio_secret_key=os.getenv("KNOWLINK_MINIO_SECRET_KEY", "minioadmin"),
         minio_bucket=os.getenv("KNOWLINK_MINIO_BUCKET", "knowlink"),
         minio_secure=_env_bool("KNOWLINK_MINIO_SECURE", False),
+        cors_allow_origins=_env_csv(
+            "KNOWLINK_CORS_ALLOW_ORIGINS",
+            ("http://localhost:*", "http://127.0.0.1:*"),
+        ),
         course_catalog_path=base_dir / "seeds" / "course_catalog.json",
         runtime_repository_backend=os.getenv("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "memory"),
     )
@@ -69,3 +74,10 @@ def _env_bool(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return tuple(item.strip() for item in value.split(",") if item.strip())
