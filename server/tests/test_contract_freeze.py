@@ -116,7 +116,7 @@ def test_week2_video_outline_lazy_handout_semantics_are_frozen():
     assert "`knowledge_extract` 在视频优先链路中表示目录抽取 ready" in weekly_plan
     assert "schema valid 当成 timeline valid" in week2_contract
     assert "只描述 `ready` block 的 AI 生成结果" in week2_contract
-    assert "视频引用必须落在该 outline item 的 `startSec/endSec` 范围内" in week2_contract
+    assert "视频引用必须落在该 outline child item 的 `startSec/endSec` 范围内" in week2_contract
     assert '"outlineReady": true' in api_contract
     assert '"generatedKnowledgePointCount": 0' in api_contract
     assert '"outlineStatus": "ready"' in api_contract
@@ -129,8 +129,10 @@ def test_latest_outline_read_model_requires_source_segment_keys():
         "### `GET /api/v1/courses/{courseId}/handouts/latest/outline`", 1
     )[1].split("### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`", 1)[0]
 
+    assert '"children": [' in outline_section
     assert '"sourceSegmentKeys": ["mp4-c1", "mp4-c2"]' in outline_section
-    assert "`items[*].sourceSegmentKeys` 是 API read model 必返字段" in outline_section
+    assert "`items[*].children[*].sourceSegmentKeys` 是 API read model 必返字段" in outline_section
+    assert "大标题没有 `blockId`" in outline_section
     assert "前端可忽略展示" in outline_section
 
 
@@ -594,26 +596,36 @@ def test_handout_outline_schema_accepts_valid_payload():
         "summary": "按视频时间线组织的讲义目录",
         "items": [
             {
-                "outlineKey": "outline-1",
-                "title": "集合的基本概念",
-                "summary": "介绍集合、元素和属于关系",
+                "outlineKey": "section-1",
+                "title": "集合的概念与表示",
+                "summary": "从集合定义过渡到集合表示方法",
                 "startSec": 0,
-                "endSec": 180,
-                "sortNo": 1,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
-                "topicTags": ["集合"],
-            },
-            {
-                "outlineKey": "outline-2",
-                "title": "集合的表示方法",
-                "summary": "从列举法过渡到描述法",
-                "startSec": 180,
                 "endSec": 360,
-                "sortNo": 2,
-                "generationStatus": "ready",
-                "sourceSegmentKeys": ["mp4-c3"],
-                "topicTags": [],
+                "sortNo": 1,
+                "children": [
+                    {
+                        "outlineKey": "outline-1",
+                        "title": "集合的基本概念",
+                        "summary": "介绍集合、元素和属于关系",
+                        "startSec": 0,
+                        "endSec": 180,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                        "topicTags": ["集合"],
+                    },
+                    {
+                        "outlineKey": "outline-2",
+                        "title": "集合的表示方法",
+                        "summary": "从列举法过渡到描述法",
+                        "startSec": 180,
+                        "endSec": 360,
+                        "sortNo": 2,
+                        "generationStatus": "ready",
+                        "sourceSegmentKeys": ["mp4-c3"],
+                        "topicTags": [],
+                    },
+                ],
             },
         ],
     }
@@ -628,24 +640,34 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
         "summary": "结构合法但时间线非法",
         "items": [
             {
-                "outlineKey": "outline-1",
-                "title": "第一段",
-                "summary": "第一段",
+                "outlineKey": "section-1",
+                "title": "非法父级",
+                "summary": "非法父级",
                 "startSec": 0,
-                "endSec": 100,
-                "sortNo": 1,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c1"],
-            },
-            {
-                "outlineKey": "outline-1",
-                "title": "第二段",
-                "summary": "第二段",
-                "startSec": 90,
                 "endSec": 120,
                 "sortNo": 1,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c2"],
+                "children": [
+                    {
+                        "outlineKey": "outline-1",
+                        "title": "第一段",
+                        "summary": "第一段",
+                        "startSec": 0,
+                        "endSec": 100,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c1"],
+                    },
+                    {
+                        "outlineKey": "outline-1",
+                        "title": "第二段",
+                        "summary": "第二段",
+                        "startSec": 90,
+                        "endSec": 120,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c2"],
+                    },
+                ],
             },
         ],
     }
@@ -673,7 +695,7 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
                     "startSec": 0,
                     "endSec": 180,
                     "sortNo": 1,
-                    "generationStatus": "pending",
+                    "children": [],
                 }
             ],
         },
@@ -688,8 +710,18 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
                     "startSec": 0,
                     "endSec": 180,
                     "sortNo": 1,
-                    "generationStatus": "done",
-                    "sourceSegmentKeys": ["mp4-c1"],
+                    "children": [
+                        {
+                            "outlineKey": "outline-1",
+                            "title": "bad",
+                            "summary": "bad",
+                            "startSec": 0,
+                            "endSec": 180,
+                            "sortNo": 1,
+                            "generationStatus": "done",
+                            "sourceSegmentKeys": ["mp4-c1"],
+                        }
+                    ],
                 }
             ],
         },
@@ -698,15 +730,25 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
             "summary": "bad",
             "items": [
                 {
-                    "outlineKey": "outline-1",
+                    "outlineKey": "section-1",
                     "title": "bad",
                     "summary": "bad",
                     "startSec": 0,
                     "endSec": 180,
                     "sortNo": 1,
-                    "generationStatus": "pending",
+                    "children": [
+                        {
+                            "outlineKey": "outline-1",
+                            "title": "bad",
+                            "summary": "bad",
+                            "startSec": 0,
+                            "endSec": 180,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": ["mp4-c1"],
+                        }
+                    ],
                     "sourceSegmentKeys": ["mp4-c1"],
-                    "unexpected": True,
                 }
             ],
         },

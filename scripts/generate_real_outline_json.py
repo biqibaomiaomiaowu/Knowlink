@@ -117,6 +117,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(outline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        sections = outline.get("items") if isinstance(outline.get("items"), list) else []
+        child_item_count = sum(
+            len(section.get("children") or [])
+            for section in sections
+            if isinstance(section, dict)
+        )
         print(
             json.dumps(
                 {
@@ -125,7 +131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "courseId": course_id,
                     "parseRunId": parse_run["parseRunId"],
                     "handoutVersionId": outline.get("handoutVersionId"),
-                    "outlineItemCount": len(outline.get("items") or []),
+                    "sectionCount": len(sections),
+                    "childItemCount": child_item_count,
                     "videoSegmentCount": len(video_segments),
                     "outlineUsedFallback": bool(outline_meta.get("outlineUsedFallback")),
                     "outlineIssues": outline_meta.get("outlineIssues") or [],
