@@ -399,6 +399,1256 @@ asyncio.run(main())
     }
 
 
+def test_quiz_service_uses_sql_runtime_repository_and_worker_for_api_wiring(tmp_path):
+    script = """
+import asyncio
+import json
+
+import sqlalchemy as sa
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.quizzes import run_quiz_generate
+from server.tasks.reviews import run_review_refresh
+from server.tests.test_api import AUTH_HEADERS, request
+
+Base.metadata.create_all(get_engine())
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL quiz API course",
+        entry_type="manual_import",
+        goal_text="verify SQL quiz API wiring",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/quiz.pdf",
+            "originalName": "quiz.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 2048,
+            "checksum": "sha256:quiz-pdf",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run["parseRunId"],
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "plainText": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "pageNo": 2,
+            },
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    handout, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "极限复习目录",
+            "summary": "围绕极限定义组织复习。",
+            "items": [
+                {
+                    "outlineKey": "section-limit",
+                    "title": "极限",
+                    "summary": "极限定义",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-limit",
+                            "title": "极限定义",
+                            "summary": "理解极限定义的条件。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                            "topicTags": ["极限"],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "极限定义",
+            "summary": "理解极限定义的条件。",
+            "contentMd": "极限定义需要同时关注自变量趋近和函数值趋近。",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit",
+                    "displayName": "极限定义",
+                    "description": "同时关注自变量趋近和函数值趋近。",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": segment_key,
+                    "pageNo": 2,
+                    "refLabel": "PDF 第 2 页",
+                }
+            ],
+        },
+    )
+finally:
+    session.close()
+
+async def main():
+    generate_status, generate_body = await request(
+        "POST",
+        f"/api/v1/courses/{course_id}/quizzes/generate",
+        headers=AUTH_HEADERS | {"idempotency-key": "sql-api-quiz"},
+    )
+    task_id = generate_body["data"]["taskId"]
+    quiz_id = generate_body["data"]["entity"]["id"]
+    run_quiz_generate({"taskId": task_id, "courseId": course_id, "quizId": quiz_id})
+    quiz_status, quiz_body = await request(
+        "GET",
+        f"/api/v1/quizzes/{quiz_id}",
+        headers=AUTH_HEADERS,
+    )
+    first_question_id = quiz_body["data"]["questions"][0]["questionId"]
+    submit_status, submit_body = await request(
+        "POST",
+        f"/api/v1/quizzes/{quiz_id}/attempts",
+        headers=AUTH_HEADERS,
+        json_body={"answers": [{"questionId": first_question_id, "selectedOption": "A"}]},
+    )
+    review_task_run_id = submit_body["data"]["reviewTaskRunId"]
+
+    sync_session = create_session()
+    try:
+        tables = Base.metadata.tables
+        review_refresh_task_id = sync_session.execute(
+            sa.select(tables["async_tasks"].c.id).where(
+                tables["async_tasks"].c.task_type == "review_refresh",
+                tables["async_tasks"].c.target_id == review_task_run_id,
+            )
+        ).scalar_one()
+    finally:
+        sync_session.close()
+
+    run_review_refresh(
+        {
+            "taskId": review_refresh_task_id,
+            "courseId": course_id,
+            "reviewTaskRunId": review_task_run_id,
+        }
+    )
+    review_status, review_body = await request(
+        "GET",
+        f"/api/v1/courses/{course_id}/review-tasks",
+        headers=AUTH_HEADERS,
+    )
+    initial_review_task_id = review_body["data"]["items"][0]["reviewTaskId"]
+    run_status, run_body = await request(
+        "GET",
+        f"/api/v1/review-task-runs/{review_task_run_id}/status",
+        headers=AUTH_HEADERS,
+    )
+    regenerate_status, regenerate_body = await request(
+        "POST",
+        f"/api/v1/courses/{course_id}/review-tasks/regenerate",
+        headers=AUTH_HEADERS | {"idempotency-key": "sql-api-review-regenerate"},
+    )
+    regenerated_run_id = regenerate_body["data"]["entity"]["id"]
+    queued_review_status, queued_review_body = await request(
+        "GET",
+        f"/api/v1/courses/{course_id}/review-tasks",
+        headers=AUTH_HEADERS,
+    )
+    queued_old_complete_status, queued_old_complete_body = await request(
+        "POST",
+        f"/api/v1/review-tasks/{initial_review_task_id}/complete",
+        headers=AUTH_HEADERS,
+    )
+
+    sync_session = create_session()
+    try:
+        tables = Base.metadata.tables
+        regenerated_task_id = sync_session.execute(
+            sa.select(tables["async_tasks"].c.id).where(
+                tables["async_tasks"].c.task_type == "review_refresh",
+                tables["async_tasks"].c.target_id == regenerated_run_id,
+            )
+        ).scalar_one()
+    finally:
+        sync_session.close()
+
+    run_review_refresh(
+        {
+            "taskId": regenerated_task_id,
+            "courseId": course_id,
+            "reviewTaskRunId": regenerated_run_id,
+        }
+    )
+    regenerated_status, regenerated_body = await request(
+        "GET",
+        f"/api/v1/review-task-runs/{regenerated_run_id}/status",
+        headers=AUTH_HEADERS,
+    )
+    regenerated_review_status, regenerated_review_body = await request(
+        "GET",
+        f"/api/v1/courses/{course_id}/review-tasks",
+        headers=AUTH_HEADERS,
+    )
+    stale_complete_status, stale_complete_body = await request(
+        "POST",
+        f"/api/v1/review-tasks/{initial_review_task_id}/complete",
+        headers=AUTH_HEADERS,
+    )
+
+    sync_session = create_session()
+    try:
+        tables = Base.metadata.tables
+        question_ref_count = sync_session.execute(sa.select(sa.func.count()).select_from(tables["quiz_question_refs"])).scalar_one()
+        attempt_count = sync_session.execute(sa.select(sa.func.count()).select_from(tables["quiz_attempts"])).scalar_one()
+        attempt_item_count = sync_session.execute(sa.select(sa.func.count()).select_from(tables["quiz_attempt_items"])).scalar_one()
+        mastery_count = sync_session.execute(sa.select(sa.func.count()).select_from(tables["mastery_records"])).scalar_one()
+        review_task_count = sync_session.execute(sa.select(sa.func.count()).select_from(tables["review_tasks"])).scalar_one()
+        pending_review_task_count = sync_session.execute(
+            sa.select(sa.func.count()).select_from(tables["review_tasks"]).where(
+                tables["review_tasks"].c.status == "pending",
+            )
+        ).scalar_one()
+        superseded_review_task_count = sync_session.execute(
+            sa.select(sa.func.count()).select_from(tables["review_tasks"]).where(
+                tables["review_tasks"].c.status == "superseded",
+            )
+        ).scalar_one()
+        review_ref_count = sync_session.execute(sa.select(sa.func.count()).select_from(tables["review_task_refs"])).scalar_one()
+    finally:
+        sync_session.close()
+
+    complete_status, complete_body = await request(
+        "POST",
+        f"/api/v1/review-tasks/{regenerated_review_body['data']['items'][0]['reviewTaskId']}/complete",
+        headers=AUTH_HEADERS,
+    )
+
+    sync_session = create_session()
+    try:
+        repo = SqlAlchemyRuntimeRepository(sync_session)
+        new_parse_run, _ = repo.create_parse_run(course_id)
+        repo.mark_parse_run_succeeded(new_parse_run["parseRunId"])
+    finally:
+        sync_session.close()
+    stale_review_status, stale_review_body = await request(
+        "GET",
+        f"/api/v1/courses/{course_id}/review-tasks",
+        headers=AUTH_HEADERS,
+    )
+
+    print(json.dumps({
+        "generate_status": generate_status,
+        "entity_type": generate_body["data"]["entity"]["type"],
+        "quiz_status": quiz_status,
+        "quiz_ready_status": quiz_body["data"]["status"],
+        "question_count": quiz_body["data"]["questionCount"],
+        "submit_status": submit_status,
+        "attempt_id": submit_body["data"]["attemptId"],
+        "review_task_run_id": review_task_run_id,
+        "mastery_delta_count": len(submit_body["data"]["masteryDelta"]),
+        "review_status": review_status,
+        "review_count": len(review_body["data"]["items"]),
+        "review_first_has_segment": review_body["data"]["items"][0]["recommendedSegment"] is not None,
+        "review_first_has_practice": review_body["data"]["items"][0]["practiceEntry"] is not None,
+        "run_status": run_status,
+        "run_ready_status": run_body["data"]["status"],
+        "complete_status": complete_status,
+        "complete_body": complete_body["data"],
+        "regenerate_status": regenerate_status,
+        "regenerate_entity_type": regenerate_body["data"]["entity"]["type"],
+        "queued_review_status": queued_review_status,
+        "queued_review_count": len(queued_review_body["data"]["items"]),
+        "queued_old_complete_status": queued_old_complete_status,
+        "queued_old_complete_body": queued_old_complete_body["data"],
+        "regenerated_status": regenerated_status,
+        "regenerated_ready_status": regenerated_body["data"]["status"],
+        "regenerated_review_status": regenerated_review_status,
+        "regenerated_review_count": len(regenerated_review_body["data"]["items"]),
+        "stale_complete_status": stale_complete_status,
+        "stale_complete_body": stale_complete_body["data"],
+        "stale_review_status": stale_review_status,
+        "stale_review_count": len(stale_review_body["data"]["items"]),
+        "question_ref_count": question_ref_count,
+        "attempt_count": attempt_count,
+        "attempt_item_count": attempt_item_count,
+        "mastery_count": mastery_count,
+        "review_task_count": review_task_count,
+        "pending_review_task_count": pending_review_task_count,
+        "superseded_review_task_count": superseded_review_task_count,
+        "review_ref_count": review_ref_count,
+    }))
+
+asyncio.run(main())
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'quiz.sqlite3'}"
+    env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["generate_status"] == 200
+    assert payload["entity_type"] == "quiz"
+    assert payload["quiz_status"] == 200
+    assert payload["quiz_ready_status"] == "ready"
+    assert payload["question_count"] >= 3
+    assert payload["submit_status"] == 200
+    assert payload["attempt_id"] > 0
+    assert payload["review_task_run_id"] > 0
+    assert payload["mastery_delta_count"] >= 1
+    assert payload["review_status"] == 200
+    assert 1 <= payload["review_count"] <= 3
+    assert payload["review_first_has_segment"] is True
+    assert payload["review_first_has_practice"] is True
+    assert payload["run_status"] == 200
+    assert payload["run_ready_status"] == "ready"
+    assert payload["complete_status"] == 200
+    assert payload["complete_body"]["completed"] is True
+    assert payload["regenerate_status"] == 200
+    assert payload["regenerate_entity_type"] == "review_task_run"
+    assert payload["queued_review_status"] == 200
+    assert payload["queued_review_count"] == 0
+    assert payload["queued_old_complete_status"] == 200
+    assert payload["queued_old_complete_body"]["completed"] is False
+    assert payload["regenerated_status"] == 200
+    assert payload["regenerated_ready_status"] == "ready"
+    assert payload["regenerated_review_status"] == 200
+    assert 1 <= payload["regenerated_review_count"] <= 3
+    assert payload["stale_complete_status"] == 200
+    assert payload["stale_complete_body"]["completed"] is False
+    assert payload["stale_review_status"] == 200
+    assert payload["stale_review_count"] == 0
+    assert payload["question_ref_count"] >= 1
+    assert payload["attempt_count"] == 1
+    assert payload["attempt_item_count"] == payload["question_count"]
+    assert payload["mastery_count"] >= 1
+    assert payload["review_task_count"] >= payload["pending_review_task_count"]
+    assert 1 <= payload["pending_review_task_count"] <= 3
+    assert payload["superseded_review_task_count"] >= 1
+    assert payload["review_ref_count"] >= 1
+
+
+def test_stale_quiz_generate_task_does_not_update_current_course_after_reparse(tmp_path):
+    script = """
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.models import AsyncTask, Course, Quiz
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.quizzes import run_quiz_generate
+
+Base.metadata.create_all(get_engine())
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL stale quiz course",
+        entry_type="manual_import",
+        goal_text="verify stale quiz worker isolation",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/stale-quiz.pdf",
+            "originalName": "stale-quiz.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:stale-quiz",
+        },
+    )
+    old_parse, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(old_parse["parseRunId"])
+    old_segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=old_parse["parseRunId"],
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": "旧解析片段。",
+                "plainText": "旧解析片段。",
+                "pageNo": 1,
+            }
+        ],
+    )
+    _, _, old_blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "旧目录",
+            "summary": "旧讲义。",
+            "items": [
+                {
+                    "outlineKey": "old-section",
+                    "title": "旧章节",
+                    "summary": "旧章节。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "old-block",
+                            "title": "旧讲义块",
+                            "summary": "旧讲义块。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [old_segments[0]["segmentKey"]],
+                            "topicTags": [],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        old_blocks[0]["blockId"],
+        {
+            "title": "旧讲义块",
+            "summary": "旧讲义块。",
+            "contentMd": "旧解析片段。",
+            "knowledgePoints": [{"knowledgePointKey": "old-kp", "displayName": "旧知识点"}],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": old_segments[0]["segmentKey"],
+                    "pageNo": 1,
+                    "refLabel": "PDF 第 1 页",
+                }
+            ],
+        },
+    )
+    _, trigger = repo.create_quiz(course_id)
+    task_id = trigger["taskId"]
+    quiz_id = trigger["entity"]["id"]
+
+    new_parse, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(new_parse["parseRunId"])
+finally:
+    session.close()
+
+result = run_quiz_generate({"taskId": task_id, "courseId": course_id, "quizId": quiz_id})
+
+session = create_session()
+try:
+    course_row = session.get(Course, course_id)
+    task_row = session.get(AsyncTask, task_id)
+    quiz_row = session.get(Quiz, quiz_id)
+    print(json.dumps({
+        "result_status": result["status"],
+        "course_pipeline_stage": course_row.pipeline_stage,
+        "course_pipeline_status": course_row.pipeline_status,
+        "course_last_error": course_row.last_error,
+        "active_parse_run_id": course_row.active_parse_run_id,
+        "active_handout_version_id": course_row.active_handout_version_id,
+        "task_status": task_row.status,
+        "quiz_status": quiz_row.status,
+    }))
+finally:
+    session.close()
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'stale-quiz.sqlite3'}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["result_status"] == "failed"
+    assert payload["task_status"] == "failed"
+    assert payload["quiz_status"] == "failed"
+    assert payload["course_pipeline_stage"] == "parse"
+    assert payload["course_pipeline_status"] == "succeeded"
+    assert payload["course_last_error"] is None
+    assert payload["active_handout_version_id"] is None
+
+
+def test_home_and_progress_use_sql_runtime_repository_for_api_wiring(tmp_path):
+    script = """
+import asyncio
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tests.test_api import AUTH_HEADERS, request
+
+Base.metadata.create_all(get_engine())
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL dashboard course",
+        entry_type="manual_import",
+        goal_text="verify SQL dashboard and progress wiring",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/dashboard.pdf",
+            "originalName": "dashboard.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:dashboard",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run["parseRunId"],
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "plainText": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "pageNo": 2,
+            }
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    _, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "首页聚合目录",
+            "summary": "用于首页聚合验证。",
+            "items": [
+                {
+                    "outlineKey": "section-dashboard",
+                    "title": "极限",
+                    "summary": "极限定义。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-dashboard",
+                            "title": "极限定义",
+                            "summary": "理解极限定义的条件。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                            "topicTags": ["极限"],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "极限定义",
+            "summary": "理解极限定义的条件。",
+            "contentMd": "极限定义需要同时关注自变量趋近和函数值趋近。",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit-dashboard",
+                    "displayName": "极限定义",
+                    "description": "同时关注自变量趋近和函数值趋近。",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": segment_key,
+                    "pageNo": 2,
+                    "refLabel": "PDF 第 2 页",
+                }
+            ],
+        },
+    )
+    quiz, _ = repo.create_quiz(course_id)
+    quiz_payload = {
+        "quizType": "chapter_review",
+        "questions": [
+            {
+                "questionKey": "q1-dashboard",
+                "questionType": "single_choice",
+                "stemMd": "极限定义关注什么？",
+                "options": ["自变量趋近与函数值趋近", "只关注图像", "只关注常数", "只关注面积"],
+                "correctAnswer": "B",
+                "explanationMd": "这里故意提交错选项以生成复习优先级。",
+                "difficultyLevel": "medium",
+                "knowledgePointKey": "kp-limit-dashboard",
+                "knowledgePointName": "极限定义",
+                "sourceBlockKey": str(blocks[0]["blockId"]),
+                "sourceSegmentKeys": [segment_key],
+            }
+        ],
+    }
+    repo.save_quiz_generation_result(
+        quiz["quizId"],
+        quiz_payload,
+        [
+            {
+                "questionKey": "q1-dashboard",
+                "resourceId": resource["resourceId"],
+                "segmentId": segments[0]["segmentId"],
+                "segmentKey": segment_key,
+                "refType": "pdf_page",
+                "quoteText": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "pageNo": 2,
+                "refLabel": "PDF 第 2 页",
+                "sortNo": 1,
+            }
+        ],
+    )
+    attempt = repo.submit_quiz(quiz["quizId"], [{"questionKey": "q1-dashboard", "selectedOption": "A"}])
+    review_run_id = attempt["reviewTaskRunId"]
+    repo.save_review_task_run_result(
+        review_run_id,
+        {
+            "tasks": [
+                {
+                    "taskKey": "review-dashboard",
+                    "taskType": "revisit_block",
+                    "priorityScore": 96,
+                    "reasonText": "错题知识点建议优先回看。",
+                    "recommendedMinutes": 12,
+                    "knowledgePointKey": "kp-limit-dashboard",
+                    "sourceQuestionKeys": ["q1-dashboard"],
+                    "sourceBlockKey": str(blocks[0]["blockId"]),
+                    "sourceSegmentKeys": [segment_key],
+                    "reviewOrder": 1,
+                    "recommendedAction": {"type": "revisit_block", "targetBlockKey": str(blocks[0]["blockId"])},
+                }
+            ]
+        },
+        [
+            {
+                "taskKey": "review-dashboard",
+                "resourceId": resource["resourceId"],
+                "segmentId": segments[0]["segmentId"],
+                "segmentKey": segment_key,
+                "refType": "pdf_page",
+                "quoteText": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "pageNo": 2,
+                "refLabel": "PDF 第 2 页",
+                "sortNo": 1,
+            }
+        ],
+    )
+finally:
+    session.close()
+
+async def main():
+    progress_status, progress_body = await request(
+        "POST",
+        f"/api/v1/courses/{course_id}/progress",
+        headers=AUTH_HEADERS,
+        json_body={
+            "lastPositionSec": 240,
+            "lastAnchorKey": "dashboard-anchor",
+            "lastActivityAt": "2000-01-01T00:00:00+00:00",
+        },
+    )
+    read_progress_status, read_progress_body = await request(
+        "GET",
+        f"/api/v1/courses/{course_id}/progress",
+        headers=AUTH_HEADERS,
+    )
+    dashboard_status, dashboard_body = await request(
+        "GET",
+        "/api/v1/home/dashboard",
+        headers=AUTH_HEADERS,
+    )
+    dashboard = dashboard_body["data"]
+    print(json.dumps({
+        "progress_status": progress_status,
+        "progress": progress_body["data"],
+        "read_progress_status": read_progress_status,
+        "read_progress": read_progress_body["data"],
+        "dashboard_status": dashboard_status,
+        "recent_title": dashboard["recentCourses"][0]["title"],
+        "top_review_count": len(dashboard["topReviewTasks"]),
+        "top_review_priority": dashboard["topReviewTasks"][0]["priorityScore"],
+        "daily_points": dashboard["dailyRecommendedKnowledgePoints"],
+        "learning_stats": dashboard["learningStats"],
+    }))
+
+asyncio.run(main())
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'dashboard.sqlite3'}"
+    env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["progress_status"] == 200
+    assert payload["progress"]["courseId"] > 0
+    assert payload["progress"]["lastPositionSec"] == 240
+    assert payload["progress"]["lastAnchorKey"] == "dashboard-anchor"
+    assert not payload["progress"]["lastActivityAt"].startswith("2000-01-01")
+    assert payload["read_progress_status"] == 200
+    assert payload["read_progress"] == payload["progress"]
+    assert payload["dashboard_status"] == 200
+    assert payload["recent_title"] == "SQL dashboard course"
+    assert payload["top_review_count"] == 1
+    assert payload["top_review_priority"] == 96
+    assert payload["daily_points"][0]["knowledgePoint"] == "极限定义"
+    assert payload["daily_points"][0]["targetCourseId"] == payload["progress"]["courseId"]
+    assert payload["learning_stats"]["streakDays"] >= 1
+    assert payload["learning_stats"]["completedCourses"] == 1
+    assert payload["learning_stats"]["reviewTasksCompleted"] == 0
+    assert payload["learning_stats"]["totalLearningMinutes"] >= 4
+
+
+def test_progress_rejects_cross_course_and_cross_user_references(tmp_path):
+    script = """
+import asyncio
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tests.test_api import AUTH_HEADERS, request
+
+Base.metadata.create_all(get_engine())
+
+def create_course_context(repo, *, title, checksum):
+    course = repo.create_course(
+        title=title,
+        entry_type="manual_import",
+        goal_text="verify progress ownership",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/{checksum}.pdf",
+            "originalName": f"{checksum}.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": f"sha256:{checksum}",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    handout, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": f"{title} 目录",
+            "summary": "用于 progress ownership 验证。",
+            "items": [
+                {
+                    "outlineKey": f"section-{checksum}",
+                    "title": "章节",
+                    "summary": "章节。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": f"block-{checksum}",
+                            "title": "讲义块",
+                            "summary": "讲义块。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [],
+                            "topicTags": [],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    return {
+        "courseId": course_id,
+        "resourceId": resource["resourceId"],
+        "handoutVersionId": handout["handoutVersionId"],
+        "blockId": blocks[0]["blockId"],
+    }
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    owner_course = create_course_context(repo, title="Owner progress course", checksum="owner-progress")
+    foreign_course = create_course_context(repo, title="Foreign progress course", checksum="foreign-progress")
+    other_user_repo = SqlAlchemyRuntimeRepository(session, user_id=2)
+    other_user_course = create_course_context(
+        other_user_repo,
+        title="Other user progress course",
+        checksum="other-user-progress",
+    )
+    cross_user_rejected = False
+    try:
+        repo.update_progress(
+            owner_course["courseId"],
+            {"lastVideoResourceId": other_user_course["resourceId"]},
+        )
+    except ValueError:
+        cross_user_rejected = True
+finally:
+    session.close()
+
+async def main():
+    valid_status, valid_body = await request(
+        "POST",
+        f"/api/v1/courses/{owner_course['courseId']}/progress",
+        headers=AUTH_HEADERS,
+        json_body={
+            "handoutVersionId": owner_course["handoutVersionId"],
+            "lastHandoutBlockId": owner_course["blockId"],
+            "lastDocResourceId": owner_course["resourceId"],
+            "lastPageNo": 2,
+        },
+    )
+    sync_session = create_session()
+    try:
+        repo = SqlAlchemyRuntimeRepository(sync_session)
+        new_parse_run, _ = repo.create_parse_run(owner_course["courseId"])
+        repo.mark_parse_run_succeeded(new_parse_run["parseRunId"])
+    finally:
+        sync_session.close()
+
+    stale_status, stale_body = await request(
+        "POST",
+        f"/api/v1/courses/{owner_course['courseId']}/progress",
+        headers=AUTH_HEADERS,
+        json_body={
+            "handoutVersionId": owner_course["handoutVersionId"],
+            "lastHandoutBlockId": owner_course["blockId"],
+            "lastDocResourceId": owner_course["resourceId"],
+            "lastPageNo": 3,
+        },
+    )
+    invalid_status, invalid_body = await request(
+        "POST",
+        f"/api/v1/courses/{owner_course['courseId']}/progress",
+        headers=AUTH_HEADERS,
+        json_body={
+            "handoutVersionId": foreign_course["handoutVersionId"],
+            "lastHandoutBlockId": foreign_course["blockId"],
+            "lastVideoResourceId": foreign_course["resourceId"],
+            "lastDocResourceId": foreign_course["resourceId"],
+        },
+    )
+    read_status, read_body = await request(
+        "GET",
+        f"/api/v1/courses/{owner_course['courseId']}/progress",
+        headers=AUTH_HEADERS,
+    )
+    print(json.dumps({
+        "valid_status": valid_status,
+        "valid_progress": valid_body["data"],
+        "stale_status": stale_status,
+        "stale_error_code": stale_body.get("errorCode"),
+        "invalid_status": invalid_status,
+        "invalid_error_code": invalid_body.get("errorCode"),
+        "read_status": read_status,
+        "read_progress": read_body["data"],
+        "cross_user_rejected": cross_user_rejected,
+    }))
+
+asyncio.run(main())
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'progress-ownership.sqlite3'}"
+    env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["valid_status"] == 200
+    assert payload["stale_status"] == 400
+    assert payload["stale_error_code"] == "progress.invalid_reference"
+    assert payload["invalid_status"] == 400
+    assert payload["invalid_error_code"] == "progress.invalid_reference"
+    assert payload["read_status"] == 200
+    assert payload["read_progress"]["handoutVersionId"] is None
+    assert payload["read_progress"]["lastHandoutBlockId"] is None
+    assert payload["read_progress"]["lastAnchorKey"] is None
+    assert payload["read_progress"]["lastDocResourceId"] == payload["valid_progress"]["lastDocResourceId"]
+    assert payload["read_progress"]["lastPageNo"] == payload["valid_progress"]["lastPageNo"]
+    assert payload["cross_user_rejected"] is True
+
+
+def test_stale_review_refresh_cannot_supersede_newer_active_run(tmp_path):
+    script = """
+import json
+
+import sqlalchemy as sa
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.reviews import run_review_refresh
+
+Base.metadata.create_all(get_engine())
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL stale review course",
+        entry_type="manual_import",
+        goal_text="verify stale review publish isolation",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/review.pdf",
+            "originalName": "review.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:review",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run["parseRunId"],
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": "复习任务来源片段。",
+                "plainText": "复习任务来源片段。",
+                "pageNo": 3,
+            }
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    _, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "复习目录",
+            "summary": "复习目录。",
+            "items": [
+                {
+                    "outlineKey": "section-review",
+                    "title": "复习章节",
+                    "summary": "复习章节。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-review",
+                            "title": "复习块",
+                            "summary": "复习块。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                            "topicTags": [],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "复习块",
+            "summary": "复习块。",
+            "contentMd": "复习任务来源片段。",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-review",
+                    "displayName": "复习知识点",
+                    "description": "复习任务来源片段。",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": segment_key,
+                    "pageNo": 3,
+                    "refLabel": "PDF 第 3 页",
+                }
+            ],
+        },
+    )
+    quiz, _ = repo.create_quiz(course_id)
+    quiz_payload = {
+        "quizType": "chapter_review",
+        "questions": [
+            {
+                "questionKey": "q1-review",
+                "questionType": "single_choice",
+                "stemMd": "哪项正确？",
+                "options": ["A", "B", "C", "D"],
+                "correctAnswer": "A",
+                "explanationMd": "依据复习块。",
+                "difficultyLevel": "medium",
+                "knowledgePointKey": "kp-review",
+                "knowledgePointName": "复习知识点",
+                "sourceBlockKey": str(blocks[0]["blockId"]),
+                "sourceSegmentKeys": [segment_key],
+            }
+        ],
+    }
+    repo.save_quiz_generation_result(
+        quiz["quizId"],
+        quiz_payload,
+        [
+            {
+                "questionKey": "q1-review",
+                "resourceId": resource["resourceId"],
+                "segmentId": segments[0]["segmentId"],
+                "segmentKey": segment_key,
+                "refType": "pdf_page",
+                "quoteText": "复习任务来源片段。",
+                "pageNo": 3,
+                "refLabel": "PDF 第 3 页",
+                "sortNo": 1,
+            }
+        ],
+    )
+    attempt = repo.submit_quiz(quiz["quizId"], [{"questionKey": "q1-review", "selectedOption": "A"}])
+    old_run_id = attempt["reviewTaskRunId"]
+    tables = Base.metadata.tables
+    old_task_id = session.execute(
+        sa.select(tables["async_tasks"].c.id).where(
+            tables["async_tasks"].c.task_type == "review_refresh",
+            tables["async_tasks"].c.target_id == old_run_id,
+        )
+    ).scalar_one()
+    new_run = repo.create_review_run(course_id)
+    new_run_id = new_run["reviewTaskRunId"]
+
+    current_payload = {
+        "tasks": [
+            {
+                "taskKey": "review-current",
+                "taskType": "redo_quiz",
+                "priorityScore": 90,
+                "reasonText": "当前复习任务。",
+                "recommendedMinutes": 10,
+                "knowledgePointKey": "kp-review",
+                "sourceQuestionKeys": ["q1-review"],
+                "sourceBlockKey": str(blocks[0]["blockId"]),
+                "sourceSegmentKeys": [segment_key],
+                "reviewOrder": 1,
+                "recommendedAction": {"type": "redo_quiz", "targetBlockKey": str(blocks[0]["blockId"])},
+            }
+        ]
+    }
+    stale_payload = {
+        "tasks": [
+            {
+                "taskKey": "review-stale",
+                "taskType": "revisit_block",
+                "priorityScore": 80,
+                "reasonText": "旧复习任务。",
+                "recommendedMinutes": 10,
+                "knowledgePointKey": "kp-review",
+                "sourceQuestionKeys": ["q1-review"],
+                "sourceBlockKey": str(blocks[0]["blockId"]),
+                "sourceSegmentKeys": [segment_key],
+                "reviewOrder": 1,
+                "recommendedAction": {"type": "revisit_block", "targetBlockKey": str(blocks[0]["blockId"])},
+            }
+        ]
+    }
+    refs = [
+        {
+            "taskKey": "review-current",
+            "resourceId": resource["resourceId"],
+            "segmentId": segments[0]["segmentId"],
+            "segmentKey": segment_key,
+            "refType": "pdf_page",
+            "quoteText": "复习任务来源片段。",
+            "pageNo": 3,
+            "refLabel": "PDF 第 3 页",
+            "sortNo": 1,
+        }
+    ]
+    repo.save_review_task_run_result(new_run_id, current_payload, refs)
+    _ = stale_payload
+    stale_result = run_review_refresh(
+        {
+            "taskId": old_task_id,
+            "courseId": course_id,
+            "reviewTaskRunId": old_run_id,
+        },
+    )
+    listed = repo.list_review_tasks(course_id)
+
+    statuses = [
+        dict(row)
+        for row in session.execute(
+            sa.select(
+                tables["review_tasks"].c.task_key,
+                tables["review_tasks"].c.status,
+                tables["review_tasks"].c.review_task_run_id,
+            ).order_by(tables["review_tasks"].c.id)
+        ).mappings().all()
+    ]
+    old_status = session.execute(
+        sa.select(tables["review_task_runs"].c.status).where(tables["review_task_runs"].c.id == old_run_id)
+    ).scalar_one()
+    old_task_status = session.execute(
+        sa.select(tables["async_tasks"].c.status).where(tables["async_tasks"].c.id == old_task_id)
+    ).scalar_one()
+
+    failed_old_run = repo.create_review_run(course_id)
+    failed_old_run_id = failed_old_run["reviewTaskRunId"]
+    failed_old_task_id = session.execute(
+        sa.select(tables["async_tasks"].c.id).where(
+            tables["async_tasks"].c.task_type == "review_refresh",
+            tables["async_tasks"].c.target_id == failed_old_run_id,
+        )
+    ).scalar_one()
+    failed_new_run = repo.create_review_run(course_id)
+    failed_new_run_id = failed_new_run["reviewTaskRunId"]
+    session.execute(
+        sa.update(tables["review_task_runs"]).where(tables["review_task_runs"].c.id == failed_new_run_id).values(
+            status="failed",
+            error_code="review.refresh_failed",
+            error_message="forced failure for late-save test",
+        )
+    )
+    session.commit()
+    failed_newer_result = run_review_refresh(
+        {
+            "taskId": failed_old_task_id,
+            "courseId": course_id,
+            "reviewTaskRunId": failed_old_run_id,
+        },
+    )
+    failed_old_status = session.execute(
+        sa.select(tables["review_task_runs"].c.status).where(tables["review_task_runs"].c.id == failed_old_run_id)
+    ).scalar_one()
+    failed_old_task_status = session.execute(
+        sa.select(tables["async_tasks"].c.status).where(tables["async_tasks"].c.id == failed_old_task_id)
+    ).scalar_one()
+    failed_old_task_count = session.execute(
+        sa.select(sa.func.count()).select_from(tables["review_tasks"]).where(
+            tables["review_tasks"].c.review_task_run_id == failed_old_run_id,
+        )
+    ).scalar_one()
+    print(json.dumps({
+        "stale_result": stale_result,
+        "listed_keys": [item["reviewTaskId"] for item in listed],
+        "listed_count": len(listed),
+        "statuses": statuses,
+        "old_status": old_status,
+        "old_task_status": old_task_status,
+        "new_run_id": new_run_id,
+        "failed_newer_result": failed_newer_result,
+        "failed_old_status": failed_old_status,
+        "failed_old_task_status": failed_old_task_status,
+        "failed_old_task_count": failed_old_task_count,
+    }))
+finally:
+    session.close()
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'stale-review.sqlite3'}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["stale_result"]["status"] == "skipped"
+    assert payload["listed_count"] == 1
+    assert payload["old_status"] == "skipped"
+    assert payload["old_task_status"] == "skipped"
+    assert payload["failed_newer_result"]["status"] == "skipped"
+    assert payload["failed_old_status"] == "skipped"
+    assert payload["failed_old_task_status"] == "skipped"
+    assert payload["failed_old_task_count"] == 0
+    assert payload["statuses"] == [
+        {
+            "task_key": "review-current",
+            "status": "pending",
+            "review_task_run_id": payload["new_run_id"],
+        }
+    ]
+
+
 def test_domain_services_do_not_import_worker_or_dramatiq_directly():
     service_dir = ROOT / "server/domain/services"
     forbidden_tokens = ("server.tasks", "dramatiq")

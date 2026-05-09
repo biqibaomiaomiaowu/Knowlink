@@ -160,6 +160,62 @@ def test_handout_block_generate_actor_invokes_runner_without_broker_send(monkeyp
     ]
 
 
+def test_quiz_generate_actor_invokes_runner_without_broker_send(monkeypatch):
+    from server.tasks import worker
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run_quiz_generate(message):
+        calls.append(dict(message))
+
+    monkeypatch.setattr(worker, "run_quiz_generate", fake_run_quiz_generate)
+
+    result = worker.quiz_generate.fn(
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "quizId": 23,
+        }
+    )
+
+    assert result is None
+    assert calls == [
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "quizId": 23,
+        }
+    ]
+
+
+def test_review_refresh_actor_invokes_runner_without_broker_send(monkeypatch):
+    from server.tasks import worker
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run_review_refresh(message):
+        calls.append(dict(message))
+
+    monkeypatch.setattr(worker, "run_review_refresh", fake_run_review_refresh)
+
+    result = worker.review_refresh.fn(
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "reviewTaskRunId": 29,
+        }
+    )
+
+    assert result is None
+    assert calls == [
+        {
+            "taskId": 7,
+            "courseId": 11,
+            "reviewTaskRunId": 29,
+        }
+    ]
+
+
 def test_dramatiq_dispatcher_sends_to_lazy_actor_path_without_redis():
     payload = _run_script(
         """
@@ -285,6 +341,88 @@ print(json.dumps({
                 "sourceParseRunId": 31,
             }
         ],
+        "worker_imported": False,
+        "broker_imported": False,
+        "dramatiq_imported": False,
+    }
+
+
+def test_dramatiq_dispatcher_sends_quiz_generate_to_lazy_actor_path_without_redis():
+    payload = _run_script(
+        """
+import json
+import sys
+import types
+
+sent = []
+
+class FakeActor:
+    def send(self, message):
+        sent.append(message)
+
+module = types.ModuleType("fake_worker_actor")
+module.quiz_generate = FakeActor()
+sys.modules[module.__name__] = module
+
+from server.tasks.dispatcher import DramatiqTaskDispatcher
+
+dispatcher = DramatiqTaskDispatcher(quiz_generate_actor_path="fake_worker_actor:quiz_generate")
+dispatcher.enqueue_quiz_generate(
+    task_id=23,
+    payload={"courseId": 29, "quizId": 43},
+)
+print(json.dumps({
+    "sent": sent,
+    "worker_imported": "server.tasks.worker" in sys.modules,
+    "broker_imported": "server.tasks.broker" in sys.modules,
+    "dramatiq_imported": "dramatiq" in sys.modules,
+}))
+"""
+    )
+
+    assert payload == {
+        "sent": [{"taskId": 23, "courseId": 29, "quizId": 43}],
+        "worker_imported": False,
+        "broker_imported": False,
+        "dramatiq_imported": False,
+    }
+
+
+def test_dramatiq_dispatcher_sends_review_refresh_to_lazy_actor_path_without_redis():
+    payload = _run_script(
+        """
+import json
+import sys
+import types
+
+sent = []
+
+class FakeActor:
+    def send(self, message):
+        sent.append(message)
+
+module = types.ModuleType("fake_worker_actor")
+module.review_refresh = FakeActor()
+sys.modules[module.__name__] = module
+
+from server.tasks.dispatcher import DramatiqTaskDispatcher
+
+dispatcher = DramatiqTaskDispatcher(review_refresh_actor_path="fake_worker_actor:review_refresh")
+dispatcher.enqueue_review_refresh(
+    task_id=23,
+    payload={"courseId": 29, "reviewTaskRunId": 47},
+)
+print(json.dumps({
+    "sent": sent,
+    "worker_imported": "server.tasks.worker" in sys.modules,
+    "broker_imported": "server.tasks.broker" in sys.modules,
+    "dramatiq_imported": "dramatiq" in sys.modules,
+}))
+"""
+    )
+
+    assert payload == {
+        "sent": [{"taskId": 23, "courseId": 29, "reviewTaskRunId": 47}],
         "worker_imported": False,
         "broker_imported": False,
         "dramatiq_imported": False,
