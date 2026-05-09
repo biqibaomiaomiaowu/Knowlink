@@ -194,7 +194,7 @@ class RuntimeStore:
                     "blockId": block_id,
                     "outlineKey": outline_key,
                     "title": block_title,
-                    "summary": "按考试优先级整理的知识块",
+                    "summary": "按定义、题型和考试应用整理的知识块",
                     "status": "pending",
                     "contentMd": None,
                     "startSec": start_sec,
@@ -230,7 +230,7 @@ class RuntimeStore:
         handout = {
             "handoutVersionId": handout_version_id,
             "title": "高数期末冲刺讲义",
-            "summary": "按考试优先级整理的知识块",
+            "summary": "按定义、题型和考试应用整理的知识块",
             "totalBlocks": len(blocks),
             "status": "outline_ready",
             "outlineStatus": "ready",
