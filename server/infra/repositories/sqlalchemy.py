@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 import re
 from typing import Any, TypeVar
 
@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server.parsers.base import clean_text
+from server.ai.quiz_strategy import grade_quiz_attempt
+from server.ai.review_strategy import build_mastery_record_updates
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
     AsyncTask,
@@ -26,6 +28,16 @@ from server.infra.db.models import (
     QaMessage,
     QaMessageRef,
     QaSession,
+    Quiz,
+    QuizAttempt,
+    QuizAttemptItem,
+    QuizQuestion,
+    QuizQuestionRef,
+    MasteryRecord,
+    ReviewTask,
+    ReviewTaskRef,
+    ReviewTaskRun,
+    UserCourseProgress,
     VectorDocument,
 )
 
@@ -348,6 +360,7 @@ class SqlAlchemyRuntimeRepository:
             )
             if active_handout is not None and active_handout.source_parse_run_id != parse_run.id:
                 course.active_handout_version_id = None
+                self._clear_course_progress_handout_refs(course.id)
             course.updated_at = now
 
         self._commit_or_flush()
@@ -1017,12 +1030,833 @@ class SqlAlchemyRuntimeRepository:
         ).all()
         return [self._qa_message_dict(message) for message in messages]
 
+    def create_quiz(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        course = self._get_course_model(course_id)
+        version = self._get_latest_handout_version_model(course_id)
+        if course is None:
+            raise ValueError(f"Course {course_id} was not found.")
+        if version is None:
+            raise ValueError("Course has no active handout version for quiz generation.")
+
+        quiz = Quiz(
+            course_id=course_id,
+            handout_version_id=version.id,
+            source_parse_run_id=version.source_parse_run_id,
+            quiz_type="chapter_review",
+            status="queued",
+            question_count=0,
+            payload_json=None,
+        )
+        self.session.add(quiz)
+        self.session.flush()
+
+        payload = {
+            "courseId": course_id,
+            "quizId": quiz.id,
+            "handoutVersionId": version.id,
+            "sourceParseRunId": version.source_parse_run_id,
+        }
+        task = AsyncTask(
+            course_id=course_id,
+            parse_run_id=version.source_parse_run_id,
+            task_type="quiz_generate",
+            status="queued",
+            target_type="quiz",
+            target_id=quiz.id,
+            progress_pct=0,
+            payload_json=payload,
+        )
+        self.session.add(task)
+
+        course.pipeline_stage = "quiz"
+        course.pipeline_status = "queued"
+        course.updated_at = utcnow()
+
+        self._commit_or_flush()
+        return _quiz_dict(quiz, questions=[]), _async_trigger_dict(task, "quiz", quiz.id)
+
+    def get_quiz(self, quiz_id: int) -> dict[str, Any] | None:
+        quiz = self._get_active_quiz_model(quiz_id)
+        if quiz is None:
+            return None
+        questions = self.session.scalars(
+            select(QuizQuestion)
+            .where(QuizQuestion.quiz_id == quiz.id)
+            .order_by(QuizQuestion.sort_no.asc(), QuizQuestion.id.asc())
+        ).all()
+        return _quiz_dict(quiz, questions=[_quiz_question_public_dict(question) for question in questions])
+
+    def save_quiz_generation_result(
+        self,
+        quiz_id: int,
+        payload: dict[str, Any],
+        refs: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        quiz = self._get_active_quiz_model(quiz_id)
+        if quiz is None:
+            return None
+
+        existing_question_ids = [
+            row_id
+            for row_id in self.session.scalars(
+                select(QuizQuestion.id).where(QuizQuestion.quiz_id == quiz.id)
+            ).all()
+        ]
+        if existing_question_ids:
+            self.session.execute(
+                delete(QuizQuestionRef).where(QuizQuestionRef.quiz_question_id.in_(existing_question_ids))
+            )
+            self.session.execute(delete(QuizQuestion).where(QuizQuestion.id.in_(existing_question_ids)))
+            self.session.flush()
+
+        question_rows: dict[str, QuizQuestion] = {}
+        for index, question in enumerate(_mapping_list(payload.get("questions")), start=1):
+            question_key = _stable_key(_payload_value(question, "questionKey", "question_key")) or f"q{index}"
+            row = QuizQuestion(
+                quiz_id=quiz.id,
+                question_key=question_key,
+                question_type=str(_payload_value(question, "questionType", "question_type", default="single_choice")),
+                stem_md=str(_payload_value(question, "stemMd", "stem_md", default="")),
+                options_json=list(_payload_value(question, "options", default=[]) or []),
+                correct_answer=str(_payload_value(question, "correctAnswer", "correct_answer", default="A")),
+                explanation_md=str(_payload_value(question, "explanationMd", "explanation_md", default="")),
+                difficulty_level=str(_payload_value(question, "difficultyLevel", "difficulty_level", default="medium")),
+                knowledge_point_key=str(
+                    _payload_value(question, "knowledgePointKey", "knowledge_point_key", default=question_key)
+                ),
+                knowledge_point_name=str(
+                    _payload_value(question, "knowledgePointName", "knowledge_point_name", default=question_key)
+                ),
+                source_block_key=str(_payload_value(question, "sourceBlockKey", "source_block_key", default="")),
+                source_segment_keys_json=list(
+                    _payload_value(question, "sourceSegmentKeys", "source_segment_keys", default=[]) or []
+                ),
+                sort_no=index,
+            )
+            self.session.add(row)
+            question_rows[question_key] = row
+        self.session.flush()
+
+        for ref in refs:
+            question_key = _stable_key(_payload_value(ref, "questionKey", "question_key"))
+            question = question_rows.get(question_key)
+            if question is None:
+                continue
+            self.session.add(
+                QuizQuestionRef(
+                    quiz_question_id=question.id,
+                    resource_id=int(ref["resourceId"]),
+                    segment_id=ref.get("segmentId"),
+                    ref_type=str(ref["refType"]),
+                    quote_text=ref.get("quoteText"),
+                    page_no=ref.get("pageNo"),
+                    slide_no=ref.get("slideNo"),
+                    anchor_key=ref.get("anchorKey"),
+                    start_sec=ref.get("startSec"),
+                    end_sec=ref.get("endSec"),
+                    bbox_json=ref.get("bboxJson"),
+                    ref_label=str(ref.get("refLabel") or ref.get("segmentKey") or "来源片段"),
+                    sort_no=int(ref["sortNo"]),
+                )
+            )
+
+        quiz.quiz_type = str(_payload_value(payload, "quizType", "quiz_type", default=quiz.quiz_type))
+        quiz.status = "ready"
+        quiz.question_count = len(question_rows)
+        quiz.payload_json = _json_ready(payload)
+        quiz.error_code = None
+        quiz.error_message = None
+
+        course = self._get_course_model(quiz.course_id)
+        if course is not None:
+            course.pipeline_stage = "quiz"
+            course.pipeline_status = "succeeded"
+            course.last_error = None
+            course.updated_at = utcnow()
+
+        self._commit_or_flush()
+        return self.get_quiz(quiz.id)
+
+    def submit_quiz(self, quiz_id: int, answers: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        quiz = self._get_active_quiz_model(quiz_id)
+        if quiz is None:
+            raise ValueError(f"Quiz {quiz_id} was not found.")
+        questions = self.session.scalars(
+            select(QuizQuestion)
+            .where(QuizQuestion.quiz_id == quiz.id)
+            .order_by(QuizQuestion.sort_no.asc(), QuizQuestion.id.asc())
+        ).all()
+        quiz_payload = {
+            "quizType": quiz.quiz_type,
+            "questions": [_quiz_question_private_dict(question) for question in questions],
+        }
+        result = grade_quiz_attempt(quiz_payload, answers)
+        mastery_updates = build_mastery_record_updates(
+            result,
+            existing_records=self._list_mastery_record_dicts(course_id=quiz.course_id),
+        )
+
+        attempt = QuizAttempt(
+            user_id=self.user_id,
+            course_id=quiz.course_id,
+            quiz_id=quiz.id,
+            review_task_run_id=None,
+            score=int(result["score"]),
+            total_score=int(result["totalScore"]),
+            accuracy=float(result["accuracy"]),
+            result_json=_json_ready(result | {"masteryUpdates": mastery_updates}),
+        )
+        self.session.add(attempt)
+        self.session.flush()
+
+        questions_by_key = {question.question_key: question for question in questions}
+        for index, item in enumerate(_mapping_list(result.get("items")), start=1):
+            question_key = str(_payload_value(item, "questionKey", "question_key", default=f"q{index}"))
+            question = questions_by_key.get(question_key)
+            self.session.add(
+                QuizAttemptItem(
+                    attempt_id=attempt.id,
+                    quiz_question_id=question.id if question is not None else None,
+                    question_key=question_key,
+                    selected_option=str(_payload_value(item, "selectedOption", "selected_option", default="")),
+                    correct_answer=str(_payload_value(item, "correctAnswer", "correct_answer", default="")),
+                    is_correct=bool(_payload_value(item, "isCorrect", "is_correct", default=False)),
+                    obtained_score=int(_payload_value(item, "obtainedScore", "obtained_score", default=0)),
+                    explanation_md=str(_payload_value(item, "explanationMd", "explanation_md", default="")),
+                    knowledge_point_key=str(
+                        _payload_value(item, "knowledgePointKey", "knowledge_point_key", default="")
+                    ),
+                    source_block_key=str(_payload_value(item, "sourceBlockKey", "source_block_key", default="")),
+                    sort_no=index,
+                )
+            )
+
+        self._upsert_mastery_records(
+            course_id=quiz.course_id,
+            attempt_id=attempt.id,
+            updates=mastery_updates,
+            result_items=_mapping_list(result.get("items")),
+        )
+        review_run = ReviewTaskRun(
+            user_id=self.user_id,
+            course_id=quiz.course_id,
+            source_quiz_attempt_id=attempt.id,
+            status="queued",
+            generated_count=0,
+            payload_json={
+                "quizId": quiz.id,
+                "quizAttemptId": attempt.id,
+            },
+        )
+        self.session.add(review_run)
+        self.session.flush()
+        attempt.review_task_run_id = review_run.id
+        payload = {
+            "courseId": quiz.course_id,
+            "reviewTaskRunId": review_run.id,
+        }
+        task = AsyncTask(
+            course_id=quiz.course_id,
+            parse_run_id=quiz.source_parse_run_id,
+            task_type="review_refresh",
+            status="queued",
+            target_type="review_task_run",
+            target_id=review_run.id,
+            progress_pct=0,
+            payload_json=payload,
+        )
+        self.session.add(task)
+
+        self._commit_or_flush()
+        return {
+            "attemptId": attempt.id,
+            "score": attempt.score,
+            "totalScore": attempt.total_score,
+            "accuracy": attempt.accuracy,
+            "reviewTaskRunId": review_run.id,
+            "masteryDelta": result.get("masteryDelta", []),
+            "recommendedReviewAction": result.get("recommendedReviewAction"),
+            "_reviewRefreshTask": {
+                "taskId": task.id,
+                "payload": payload,
+            },
+        }
+
+    def next_task_id(self) -> int:
+        return self.session.scalar(select(func.coalesce(func.max(AsyncTask.id), 0))) + 1
+
+    def create_review_run(self, course_id: int) -> dict[str, Any]:
+        course = self._get_course_model(course_id)
+        if course is None:
+            raise ValueError(f"Course {course_id} was not found.")
+        latest_attempt = self.session.scalars(
+            select(QuizAttempt)
+            .where(
+                QuizAttempt.user_id == self.user_id,
+                QuizAttempt.course_id == course_id,
+            )
+            .order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc())
+        ).first()
+        review_run = ReviewTaskRun(
+            user_id=self.user_id,
+            course_id=course_id,
+            source_quiz_attempt_id=latest_attempt.id if latest_attempt is not None else None,
+            status="queued",
+            generated_count=0,
+            payload_json={
+                "quizAttemptId": latest_attempt.id if latest_attempt is not None else None,
+            },
+        )
+        self.session.add(review_run)
+        self.session.flush()
+        self._supersede_pending_review_tasks_before(run_id=review_run.id, course_id=course_id)
+        payload = {
+            "courseId": course_id,
+            "reviewTaskRunId": review_run.id,
+        }
+        task = AsyncTask(
+            course_id=course_id,
+            parse_run_id=course.active_parse_run_id,
+            task_type="review_refresh",
+            status="queued",
+            target_type="review_task_run",
+            target_id=review_run.id,
+            progress_pct=0,
+            payload_json=payload,
+        )
+        self.session.add(task)
+        self._commit_or_flush()
+        return _review_run_dict(review_run) | {
+            "_reviewRefreshTask": {
+                "taskId": task.id,
+                "payload": payload,
+            }
+        }
+
+    def list_review_tasks(self, course_id: int) -> list[dict[str, Any]]:
+        latest_run_id = self._latest_active_review_run_id(course_id, statuses=("queued", "running", "ready"))
+        if latest_run_id is None:
+            return []
+        run = self._latest_active_review_run(course_id)
+        if run is None or run.id != latest_run_id:
+            return []
+        rows = self.session.scalars(
+            select(ReviewTask)
+            .where(
+                ReviewTask.review_task_run_id == run.id,
+                ReviewTask.status == "pending",
+            )
+            .order_by(ReviewTask.review_order.asc(), ReviewTask.priority_score.desc(), ReviewTask.id.asc())
+        ).all()
+        return [_review_task_dict(row) for row in rows]
+
+    def get_review_run(self, review_task_run_id: int) -> dict[str, Any] | None:
+        run = self.session.scalar(
+            select(ReviewTaskRun)
+            .join(Course, Course.id == ReviewTaskRun.course_id)
+            .where(
+                ReviewTaskRun.id == review_task_run_id,
+                ReviewTaskRun.user_id == self.user_id,
+                Course.user_id == self.user_id,
+            )
+        )
+        if run is None:
+            return None
+        return _review_run_dict(run)
+
+    def complete_review_task(self, review_task_id: int) -> dict[str, Any]:
+        task = self.session.scalar(
+            select(ReviewTask)
+            .join(Course, Course.id == ReviewTask.course_id)
+            .join(ReviewTaskRun, ReviewTaskRun.id == ReviewTask.review_task_run_id)
+            .join(QuizAttempt, QuizAttempt.id == ReviewTaskRun.source_quiz_attempt_id)
+            .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
+            .where(
+                ReviewTask.id == review_task_id,
+                ReviewTask.status == "pending",
+                ReviewTaskRun.status == "ready",
+                Course.user_id == self.user_id,
+                Course.active_parse_run_id == Quiz.source_parse_run_id,
+                Course.active_handout_version_id == Quiz.handout_version_id,
+            )
+        )
+        latest_run_id = (
+            self._latest_active_review_run_id(task.course_id, statuses=("queued", "running", "ready"))
+            if task is not None
+            else None
+        )
+        if task is None or task.review_task_run_id != latest_run_id:
+            return {"reviewTaskId": review_task_id, "completed": False}
+        task.status = "completed"
+        task.completed_at = utcnow()
+        self._commit_or_flush()
+        return {"reviewTaskId": review_task_id, "completed": True}
+
+    def save_review_task_run_result(
+        self,
+        review_task_run_id: int,
+        payload: dict[str, Any],
+        refs: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        run = self.session.scalar(
+            select(ReviewTaskRun)
+            .join(Course, Course.id == ReviewTaskRun.course_id)
+            .where(
+                ReviewTaskRun.id == review_task_run_id,
+                ReviewTaskRun.user_id == self.user_id,
+                Course.user_id == self.user_id,
+            )
+        )
+        if run is None:
+            return None
+        if not self._review_run_can_publish(run):
+            run.status = "skipped"
+            run.error_code = "review.run_stale"
+            run.error_message = "Review run no longer matches the active course context."
+            run.finished_at = utcnow()
+            self._commit_or_flush()
+            return _review_run_dict(run)
+
+        old_task_ids = [
+            row_id
+            for row_id in self.session.scalars(
+                select(ReviewTask.id).where(ReviewTask.review_task_run_id == run.id)
+            ).all()
+        ]
+        if old_task_ids:
+            self.session.execute(delete(ReviewTaskRef).where(ReviewTaskRef.review_task_id.in_(old_task_ids)))
+            self.session.execute(delete(ReviewTask).where(ReviewTask.id.in_(old_task_ids)))
+            self.session.flush()
+
+        self._supersede_pending_review_tasks_before(run_id=run.id, course_id=run.course_id)
+
+        active_blocks = self._active_handout_blocks_for_course(run.course_id)
+        blocks_by_key = _blocks_by_strategy_key(active_blocks)
+        task_rows: dict[str, ReviewTask] = {}
+        for item in _mapping_list(payload.get("tasks")):
+            task_key = _stable_key(_payload_value(item, "taskKey", "task_key"))
+            if not task_key:
+                continue
+            source_block_key = _stable_key(_payload_value(item, "sourceBlockKey", "source_block_key"))
+            block = blocks_by_key.get(source_block_key)
+            row = ReviewTask(
+                review_task_run_id=run.id,
+                course_id=run.course_id,
+                task_key=task_key,
+                task_type=str(_payload_value(item, "taskType", "task_type", default="revisit_block")),
+                priority_score=int(_payload_value(item, "priorityScore", "priority_score", default=0)),
+                reason_text=str(_payload_value(item, "reasonText", "reason_text", default="建议复习该知识点。")),
+                recommended_minutes=int(_payload_value(item, "recommendedMinutes", "recommended_minutes", default=10)),
+                knowledge_point_key=_stable_key(_payload_value(item, "knowledgePointKey", "knowledge_point_key")) or None,
+                source_block_key=source_block_key or None,
+                source_question_keys_json=list(
+                    _payload_value(item, "sourceQuestionKeys", "source_question_keys", default=[]) or []
+                ),
+                source_segment_keys_json=list(
+                    _payload_value(item, "sourceSegmentKeys", "source_segment_keys", default=[]) or []
+                ),
+                recommended_action_json=_payload_value(item, "recommendedAction", "recommended_action"),
+                recommended_segment_json=_recommended_segment(block),
+                practice_entry_json=self._practice_entry_for_review_run(run),
+                review_order=int(_payload_value(item, "reviewOrder", "review_order", default=len(task_rows) + 1)),
+                intensity=_intensity(int(_payload_value(item, "priorityScore", "priority_score", default=0))),
+                status="pending",
+            )
+            self.session.add(row)
+            task_rows[task_key] = row
+        self.session.flush()
+
+        for ref in refs:
+            task_key = _stable_key(_payload_value(ref, "taskKey", "task_key"))
+            task = task_rows.get(task_key)
+            if task is None:
+                continue
+            self.session.add(
+                ReviewTaskRef(
+                    review_task_id=task.id,
+                    resource_id=int(ref["resourceId"]),
+                    segment_id=ref.get("segmentId"),
+                    ref_type=str(ref["refType"]),
+                    quote_text=ref.get("quoteText"),
+                    page_no=ref.get("pageNo"),
+                    slide_no=ref.get("slideNo"),
+                    anchor_key=ref.get("anchorKey"),
+                    start_sec=ref.get("startSec"),
+                    end_sec=ref.get("endSec"),
+                    bbox_json=ref.get("bboxJson"),
+                    ref_label=str(ref.get("refLabel") or ref.get("segmentKey") or "来源片段"),
+                    sort_no=int(ref["sortNo"]),
+                )
+            )
+
+        run.status = "ready"
+        run.generated_count = len(task_rows)
+        run.payload_json = _json_ready(payload)
+        run.error_code = None
+        run.error_message = None
+        run.finished_at = utcnow()
+        self._commit_or_flush()
+        return _review_run_dict(run)
+
+    def list_daily_recommended_knowledge_points(self, *, limit: int = 3) -> list[dict[str, Any]]:
+        rows = self.session.scalars(
+            select(MasteryRecord)
+            .join(Course, Course.id == MasteryRecord.course_id)
+            .where(MasteryRecord.user_id == self.user_id, Course.user_id == self.user_id)
+            .order_by(MasteryRecord.review_priority.desc(), MasteryRecord.updated_at.desc(), MasteryRecord.id.desc())
+            .limit(limit)
+        ).all()
+        return [
+            {
+                "knowledgePoint": row.knowledge_point,
+                "reason": _mastery_recommendation_reason(row),
+                "targetCourseId": row.course_id,
+            }
+            for row in rows
+        ]
+
+    def get_learning_stats(self) -> dict[str, Any]:
+        completed_courses = self.session.scalar(
+            select(func.count(Course.id)).where(
+                Course.user_id == self.user_id,
+                Course.lifecycle_status.in_(("learning_ready", "completed")),
+            )
+        ) or 0
+        review_tasks_completed = self.session.scalar(
+            select(func.count(ReviewTask.id))
+            .join(Course, Course.id == ReviewTask.course_id)
+            .where(Course.user_id == self.user_id, ReviewTask.status == "completed")
+        ) or 0
+        completed_review_minutes = self.session.scalar(
+            select(func.coalesce(func.sum(ReviewTask.recommended_minutes), 0))
+            .join(Course, Course.id == ReviewTask.course_id)
+            .where(Course.user_id == self.user_id, ReviewTask.status == "completed")
+        ) or 0
+        progress_positions_sec = self.session.scalar(
+            select(func.coalesce(func.sum(UserCourseProgress.last_position_sec), 0))
+            .join(Course, Course.id == UserCourseProgress.course_id)
+            .where(UserCourseProgress.user_id == self.user_id, Course.user_id == self.user_id)
+        ) or 0
+        activity_times = self.session.scalars(
+            select(UserCourseProgress.last_activity_at)
+            .join(Course, Course.id == UserCourseProgress.course_id)
+            .where(UserCourseProgress.user_id == self.user_id, Course.user_id == self.user_id)
+            .order_by(UserCourseProgress.last_activity_at.desc())
+        ).all()
+        return {
+            "streakDays": _learning_streak(activity_times),
+            "completedCourses": int(completed_courses),
+            "reviewTasksCompleted": int(review_tasks_completed),
+            "totalLearningMinutes": int(completed_review_minutes) + int(progress_positions_sec // 60),
+        }
+
+    def get_progress(self, course_id: int) -> dict[str, Any]:
+        progress = self.session.scalar(
+            select(UserCourseProgress)
+            .join(Course, Course.id == UserCourseProgress.course_id)
+            .where(
+                UserCourseProgress.user_id == self.user_id,
+                UserCourseProgress.course_id == course_id,
+                Course.user_id == self.user_id,
+            )
+        )
+        if progress is None:
+            return {"courseId": course_id, "lastActivityAt": utcnow()}
+        return _progress_dict(progress)
+
+    def update_progress(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        course = self._get_course_model(course_id)
+        if course is None:
+            raise ValueError(f"Course {course_id} was not found.")
+        progress = self.session.scalar(
+            select(UserCourseProgress).where(
+                UserCourseProgress.user_id == self.user_id,
+                UserCourseProgress.course_id == course_id,
+            )
+        )
+        now = utcnow()
+        changes = _progress_changes(payload)
+        self._validate_progress_references(course_id=course_id, changes=changes)
+        if progress is None:
+            progress = UserCourseProgress(
+                user_id=self.user_id,
+                course_id=course_id,
+                last_activity_at=now,
+                **changes,
+            )
+            self.session.add(progress)
+        else:
+            for attr, value in changes.items():
+                setattr(progress, attr, value)
+            progress.last_activity_at = now
+        course.updated_at = now
+        self._commit_or_flush()
+        return _progress_dict(progress)
+
+    def _validate_progress_references(self, *, course_id: int, changes: dict[str, Any]) -> None:
+        checks = (
+            ("handout_version_id", self._progress_handout_version_belongs_to_course, "handout version"),
+            ("last_handout_block_id", self._progress_handout_block_belongs_to_course, "handout block"),
+            ("last_video_resource_id", self._progress_resource_belongs_to_course, "video resource"),
+            ("last_doc_resource_id", self._progress_resource_belongs_to_course, "document resource"),
+        )
+        for attr, belongs_to_course, label in checks:
+            if attr not in changes or changes[attr] is None:
+                continue
+            reference_id = _as_positive_int(changes[attr])
+            if reference_id is None or not belongs_to_course(course_id, reference_id):
+                raise ValueError(f"Progress {label} does not belong to the course.")
+            changes[attr] = reference_id
+
+        version_id = changes.get("handout_version_id")
+        block_id = changes.get("last_handout_block_id")
+        if version_id is not None and block_id is not None and not self._progress_block_belongs_to_version(
+            int(block_id),
+            int(version_id),
+        ):
+            raise ValueError("Progress handout block does not belong to the handout version.")
+
+    def _progress_handout_version_belongs_to_course(self, course_id: int, handout_version_id: int) -> bool:
+        return (
+            self.session.scalar(
+                select(HandoutVersion.id)
+                .join(Course, Course.id == HandoutVersion.course_id)
+                .where(
+                    HandoutVersion.id == handout_version_id,
+                    HandoutVersion.course_id == course_id,
+                    Course.id == course_id,
+                    Course.user_id == self.user_id,
+                    Course.active_handout_version_id == HandoutVersion.id,
+                    Course.active_parse_run_id == HandoutVersion.source_parse_run_id,
+                )
+            )
+            is not None
+        )
+
+    def _progress_handout_block_belongs_to_course(self, course_id: int, handout_block_id: int) -> bool:
+        return (
+            self.session.scalar(
+                select(HandoutBlock.id)
+                .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
+                .join(Course, Course.id == HandoutVersion.course_id)
+                .where(
+                    HandoutBlock.id == handout_block_id,
+                    HandoutVersion.course_id == course_id,
+                    Course.id == course_id,
+                    Course.user_id == self.user_id,
+                    Course.active_handout_version_id == HandoutBlock.handout_version_id,
+                    Course.active_parse_run_id == HandoutVersion.source_parse_run_id,
+                )
+            )
+            is not None
+        )
+
+    def _progress_block_belongs_to_version(self, handout_block_id: int, handout_version_id: int) -> bool:
+        return (
+            self.session.scalar(
+                select(HandoutBlock.id)
+                .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
+                .join(Course, Course.id == HandoutVersion.course_id)
+                .where(
+                    HandoutBlock.id == handout_block_id,
+                    HandoutBlock.handout_version_id == handout_version_id,
+                    Course.user_id == self.user_id,
+                )
+            )
+            is not None
+        )
+
+    def _progress_resource_belongs_to_course(self, course_id: int, resource_id: int) -> bool:
+        return (
+            self.session.scalar(
+                select(CourseResource.id)
+                .join(Course, Course.id == CourseResource.course_id)
+                .where(
+                    CourseResource.id == resource_id,
+                    CourseResource.course_id == course_id,
+                    Course.user_id == self.user_id,
+                )
+            )
+            is not None
+        )
+
+    def _clear_course_progress_handout_refs(self, course_id: int) -> None:
+        rows = self.session.scalars(
+            select(UserCourseProgress).where(UserCourseProgress.course_id == course_id)
+        ).all()
+        for row in rows:
+            row.handout_version_id = None
+            row.last_handout_block_id = None
+            row.last_anchor_key = None
+
+    def _latest_active_review_run(self, course_id: int) -> ReviewTaskRun | None:
+        latest_run_id = self._latest_active_review_run_id(course_id, statuses=("ready",))
+        if latest_run_id is None:
+            return None
+        return self.session.get(ReviewTaskRun, latest_run_id)
+
+    def _latest_active_review_run_id(self, course_id: int, *, statuses: tuple[str, ...]) -> int | None:
+        if not statuses:
+            return None
+        return self.session.scalar(
+            select(func.max(ReviewTaskRun.id))
+            .join(Course, Course.id == ReviewTaskRun.course_id)
+            .join(QuizAttempt, QuizAttempt.id == ReviewTaskRun.source_quiz_attempt_id)
+            .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
+            .where(
+                ReviewTaskRun.user_id == self.user_id,
+                ReviewTaskRun.course_id == course_id,
+                ReviewTaskRun.status.in_(statuses),
+                Course.user_id == self.user_id,
+                Course.active_parse_run_id == Quiz.source_parse_run_id,
+                Course.active_handout_version_id == Quiz.handout_version_id,
+            )
+        )
+
+    def _supersede_pending_review_tasks_before(self, *, run_id: int, course_id: int) -> None:
+        previous_tasks = self.session.scalars(
+            select(ReviewTask).where(
+                ReviewTask.course_id == course_id,
+                ReviewTask.review_task_run_id < run_id,
+                ReviewTask.status == "pending",
+            )
+        ).all()
+        for previous_task in previous_tasks:
+            previous_task.status = "superseded"
+
+    def _review_run_can_publish(self, run: ReviewTaskRun) -> bool:
+        latest_run_id = self.session.scalar(
+            select(func.max(ReviewTaskRun.id))
+            .join(Course, Course.id == ReviewTaskRun.course_id)
+            .join(QuizAttempt, QuizAttempt.id == ReviewTaskRun.source_quiz_attempt_id)
+            .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
+            .where(
+                ReviewTaskRun.user_id == self.user_id,
+                ReviewTaskRun.course_id == run.course_id,
+                ReviewTaskRun.id >= run.id,
+                Course.user_id == self.user_id,
+                Course.active_parse_run_id == Quiz.source_parse_run_id,
+                Course.active_handout_version_id == Quiz.handout_version_id,
+            )
+        )
+        return latest_run_id == run.id
+
+    def _list_mastery_record_dicts(self, *, course_id: int) -> list[dict[str, Any]]:
+        rows = self.session.scalars(
+            select(MasteryRecord)
+            .where(MasteryRecord.user_id == self.user_id, MasteryRecord.course_id == course_id)
+            .order_by(MasteryRecord.id.asc())
+        ).all()
+        return [_mastery_record_dict(row) for row in rows]
+
+    def _upsert_mastery_records(
+        self,
+        *,
+        course_id: int,
+        attempt_id: int,
+        updates: Sequence[Mapping[str, Any]],
+        result_items: Sequence[Mapping[str, Any]],
+    ) -> None:
+        source_block_by_kp: dict[str, str] = {}
+        for item in result_items:
+            kp_key = _stable_key(_payload_value(item, "knowledgePointKey", "knowledge_point_key"))
+            block_key = _stable_key(_payload_value(item, "sourceBlockKey", "source_block_key"))
+            if kp_key and block_key:
+                source_block_by_kp.setdefault(kp_key, block_key)
+
+        existing = {
+            row.knowledge_point_key: row
+            for row in self.session.scalars(
+                select(MasteryRecord).where(
+                    MasteryRecord.user_id == self.user_id,
+                    MasteryRecord.course_id == course_id,
+                )
+            ).all()
+        }
+        for update in updates:
+            kp_key = _stable_key(_payload_value(dict(update), "knowledgePointKey", "knowledge_point_key"))
+            if not kp_key:
+                continue
+            current = existing.get(kp_key)
+            fields = {
+                "last_quiz_attempt_id": attempt_id,
+                "knowledge_point": str(_payload_value(dict(update), "knowledgePoint", "knowledge_point", default=kp_key)),
+                "mastery_score": float(_payload_value(dict(update), "nextMasteryScore", "next_mastery_score", default=0.5)),
+                "confidence_score": float(
+                    _payload_value(dict(update), "nextConfidenceScore", "next_confidence_score", default=0.3)
+                ),
+                "correct_count": int(_payload_value(dict(update), "correctCountDelta", "correct_count_delta", default=0)),
+                "wrong_count": int(_payload_value(dict(update), "wrongCountDelta", "wrong_count_delta", default=0)),
+                "review_priority": int(_payload_value(dict(update), "reviewPriority", "review_priority", default=0)),
+                "status": str(_payload_value(dict(update), "status", default="unchanged")),
+                "source_question_keys_json": list(
+                    _payload_value(dict(update), "sourceQuestionKeys", "source_question_keys", default=[]) or []
+                ),
+                "source_block_key": source_block_by_kp.get(kp_key),
+            }
+            if current is None:
+                self.session.add(
+                    MasteryRecord(
+                        user_id=self.user_id,
+                        course_id=course_id,
+                        knowledge_point_key=kp_key,
+                        **fields,
+                    )
+                )
+                continue
+            current.last_quiz_attempt_id = attempt_id
+            current.knowledge_point = fields["knowledge_point"]
+            current.mastery_score = fields["mastery_score"]
+            current.confidence_score = fields["confidence_score"]
+            current.correct_count += fields["correct_count"]
+            current.wrong_count += fields["wrong_count"]
+            current.review_priority = fields["review_priority"]
+            current.status = fields["status"]
+            current.source_question_keys_json = fields["source_question_keys_json"]
+            current.source_block_key = fields["source_block_key"] or current.source_block_key
+
+    def _active_handout_blocks_for_course(self, course_id: int) -> list[HandoutBlock]:
+        version = self._get_latest_handout_version_model(course_id)
+        if version is None:
+            return []
+        return list(
+            self.session.scalars(
+                select(HandoutBlock)
+                .where(HandoutBlock.handout_version_id == version.id, HandoutBlock.status == "ready")
+                .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
+            ).all()
+        )
+
+    def _practice_entry_for_review_run(self, run: ReviewTaskRun) -> dict[str, object] | None:
+        if run.source_quiz_attempt_id is None:
+            return None
+        attempt = self.session.get(QuizAttempt, run.source_quiz_attempt_id)
+        if attempt is None:
+            return None
+        return {
+            "type": "quiz",
+            "targetId": attempt.quiz_id,
+            "label": "再练 1 题",
+        }
+
     def _get_user_handout_block(self, block_id: int) -> HandoutBlock | None:
         return self.session.scalar(
             select(HandoutBlock)
             .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
             .join(Course, Course.id == HandoutVersion.course_id)
             .where(HandoutBlock.id == block_id, Course.user_id == self.user_id)
+        )
+
+    def _get_active_quiz_model(self, quiz_id: int) -> Quiz | None:
+        return self.session.scalar(
+            select(Quiz)
+            .join(Course, Course.id == Quiz.course_id)
+            .where(
+                Quiz.id == quiz_id,
+                Course.user_id == self.user_id,
+                Course.active_handout_version_id == Quiz.handout_version_id,
+                Course.active_parse_run_id == Quiz.source_parse_run_id,
+            )
         )
 
     def _get_active_handout_block(self, block_id: int) -> HandoutBlock | None:
@@ -1517,6 +2351,181 @@ def _async_task_dict(task: AsyncTask) -> dict[str, Any]:
     }
 
 
+def _quiz_dict(quiz: Quiz, *, questions: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "quizId": quiz.id,
+        "courseId": quiz.course_id,
+        "status": quiz.status,
+        "questionCount": quiz.question_count,
+        "questions": list(questions),
+    }
+
+
+def _quiz_question_public_dict(question: QuizQuestion) -> dict[str, Any]:
+    return {
+        "questionId": question.id,
+        "stemMd": question.stem_md,
+        "options": list(question.options_json or []),
+    }
+
+
+def _quiz_question_private_dict(question: QuizQuestion) -> dict[str, Any]:
+    return {
+        "questionId": question.id,
+        "questionKey": question.question_key,
+        "questionType": question.question_type,
+        "stemMd": question.stem_md,
+        "options": list(question.options_json or []),
+        "correctAnswer": question.correct_answer,
+        "explanationMd": question.explanation_md,
+        "difficultyLevel": question.difficulty_level,
+        "knowledgePointKey": question.knowledge_point_key,
+        "knowledgePointName": question.knowledge_point_name,
+        "sourceBlockKey": question.source_block_key,
+        "sourceSegmentKeys": list(question.source_segment_keys_json or []),
+    }
+
+
+def _mastery_record_dict(record: MasteryRecord) -> dict[str, Any]:
+    return {
+        "knowledgePointKey": record.knowledge_point_key,
+        "knowledgePoint": record.knowledge_point,
+        "masteryScore": record.mastery_score,
+        "confidenceScore": record.confidence_score,
+        "correctCount": record.correct_count,
+        "wrongCount": record.wrong_count,
+        "reviewPriority": record.review_priority,
+        "status": record.status,
+        "sourceQuestionKeys": list(record.source_question_keys_json or []),
+        "sourceBlockKey": record.source_block_key,
+    }
+
+
+def _review_run_dict(run: ReviewTaskRun) -> dict[str, Any]:
+    return {
+        "reviewTaskRunId": run.id,
+        "courseId": run.course_id,
+        "status": run.status,
+        "generatedCount": run.generated_count,
+    }
+
+
+def _review_task_dict(task: ReviewTask) -> dict[str, Any]:
+    return {
+        "reviewTaskId": task.id,
+        "taskType": task.task_type,
+        "priorityScore": task.priority_score,
+        "reasonText": task.reason_text,
+        "recommendedMinutes": task.recommended_minutes,
+        "recommendedSegment": task.recommended_segment_json,
+        "practiceEntry": task.practice_entry_json,
+        "reviewOrder": task.review_order,
+        "intensity": task.intensity,
+    }
+
+
+def _progress_dict(progress: UserCourseProgress) -> dict[str, Any]:
+    return {
+        "courseId": progress.course_id,
+        "handoutVersionId": progress.handout_version_id,
+        "lastHandoutBlockId": progress.last_handout_block_id,
+        "lastVideoResourceId": progress.last_video_resource_id,
+        "lastPositionSec": progress.last_position_sec,
+        "lastDocResourceId": progress.last_doc_resource_id,
+        "lastPageNo": progress.last_page_no,
+        "lastSlideNo": progress.last_slide_no,
+        "lastAnchorKey": progress.last_anchor_key,
+        "lastActivityAt": _aware_datetime(progress.last_activity_at),
+    }
+
+
+def _progress_changes(payload: dict[str, Any]) -> dict[str, Any]:
+    attr_map = {
+        "handoutVersionId": "handout_version_id",
+        "lastHandoutBlockId": "last_handout_block_id",
+        "lastVideoResourceId": "last_video_resource_id",
+        "lastPositionSec": "last_position_sec",
+        "lastDocResourceId": "last_doc_resource_id",
+        "lastPageNo": "last_page_no",
+        "lastSlideNo": "last_slide_no",
+        "lastAnchorKey": "last_anchor_key",
+    }
+    allowed = set(attr_map.values())
+    changes: dict[str, Any] = {}
+    for key, value in payload.items():
+        attr = attr_map.get(key, key)
+        if attr in allowed:
+            changes[attr] = value
+    return changes
+
+
+def _mastery_recommendation_reason(record: MasteryRecord) -> str:
+    percent = round(record.mastery_score * 100)
+    if record.status in {"needs_review", "weak", "declining"} or record.review_priority >= 80:
+        return f"掌握度约 {percent}%，建议今天优先回看。"
+    if record.wrong_count > record.correct_count:
+        return "最近测验错题较多，适合安排一次巩固练习。"
+    return "最近测验建议继续巩固，保持复习节奏。"
+
+
+def _learning_streak(activity_times: Sequence[datetime]) -> int:
+    activity_days = sorted(
+        {activity_day for value in activity_times if (activity_day := _activity_date(value)) is not None},
+        reverse=True,
+    )
+    if not activity_days:
+        return 0
+    expected = min(utcnow().date(), activity_days[0])
+    streak = 0
+    for activity_day in activity_days:
+        if activity_day == expected:
+            streak += 1
+            expected = expected - timedelta(days=1)
+        elif activity_day < expected:
+            break
+    return streak
+
+
+def _activity_date(value: datetime | None) -> date | None:
+    if value is None:
+        return None
+    return _aware_datetime(value).date()
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _blocks_by_strategy_key(blocks: Sequence[HandoutBlock]) -> dict[str, HandoutBlock]:
+    result: dict[str, HandoutBlock] = {}
+    for index, block in enumerate(blocks, start=1):
+        for key in (str(block.id), block.outline_key, f"block-{index}"):
+            if key:
+                result.setdefault(key, block)
+    return result
+
+
+def _recommended_segment(block: HandoutBlock | None) -> dict[str, object] | None:
+    if block is None:
+        return None
+    return {
+        "blockId": block.id,
+        "startSec": block.start_sec,
+        "endSec": block.end_sec,
+        "label": "建议优先回看片段",
+    }
+
+
+def _intensity(priority_score: int) -> str:
+    if priority_score >= 85:
+        return "high"
+    if priority_score >= 65:
+        return "medium"
+    return "low"
+
+
 def _course_segment_dict(segment: CourseSegment) -> dict[str, Any]:
     return {
         "segmentId": segment.id,
@@ -1718,6 +2727,16 @@ def _payload_value(payload: dict[str, Any], *keys: str, default: Any = None) -> 
         if key in payload:
             return payload[key]
     return default
+
+
+def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _stable_key(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _build_outline_from_caption_segments(

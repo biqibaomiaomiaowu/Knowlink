@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from inspect import Parameter, signature
 from typing import Any
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class NoopTaskDispatcher:
@@ -37,6 +41,28 @@ class NoopTaskDispatcher:
             {
                 "taskId": task_id,
                 "taskType": "handout_block_generate",
+                "payload": payload,
+                "adapter": "noop",
+            }
+        )
+
+    def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("quiz_generate", task_id=task_id, payload=payload, adapter="noop")
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "quiz_generate",
+                "payload": payload,
+                "adapter": "noop",
+            }
+        )
+
+    def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("review_refresh", task_id=task_id, payload=payload, adapter="noop")
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "review_refresh",
                 "payload": payload,
                 "adapter": "noop",
             }
@@ -113,6 +139,28 @@ class InMemoryTaskDispatcher:
             progress_pct=100,
         )
 
+    def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("quiz_generate", task_id=task_id, payload=payload, adapter="in_memory")
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "quiz_generate",
+                "payload": payload,
+                "adapter": "in_memory",
+            }
+        )
+
+    def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("review_refresh", task_id=task_id, payload=payload, adapter="in_memory")
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "review_refresh",
+                "payload": payload,
+                "adapter": "in_memory",
+            }
+        )
+
 
 @dataclass
 class DramatiqTaskDispatcher:
@@ -134,6 +182,18 @@ class DramatiqTaskDispatcher:
             "server.tasks.worker:handout_block_generate",
         )
     )
+    quiz_generate_actor_path: str = field(
+        default_factory=lambda: os.getenv(
+            "KNOWLINK_QUIZ_GENERATE_ACTOR",
+            "server.tasks.worker:quiz_generate",
+        )
+    )
+    review_refresh_actor_path: str = field(
+        default_factory=lambda: os.getenv(
+            "KNOWLINK_REVIEW_REFRESH_ACTOR",
+            "server.tasks.worker:review_refresh",
+        )
+    )
 
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None:
         actor = self._load_actor(self.parse_pipeline_actor_path)
@@ -145,6 +205,16 @@ class DramatiqTaskDispatcher:
 
     def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
         actor = self._load_actor(self.handout_block_generate_actor_path)
+        actor.send({"taskId": task_id, **payload})
+
+    def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("quiz_generate", task_id=task_id, payload=payload, adapter="dramatiq")
+        actor = self._load_actor(self.quiz_generate_actor_path)
+        actor.send({"taskId": task_id, **payload})
+
+    def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("review_refresh", task_id=task_id, payload=payload, adapter="dramatiq")
+        actor = self._load_actor(self.review_refresh_actor_path)
         actor.send({"taskId": task_id, **payload})
 
     def _load_actor(self, actor_path: str) -> Any:
@@ -160,6 +230,19 @@ def build_task_dispatcher() -> NoopTaskDispatcher | DramatiqTaskDispatcher:
     if queue_mode == "dramatiq":
         return DramatiqTaskDispatcher()
     return NoopTaskDispatcher()
+
+
+def _log_enqueue(task_type: str, *, task_id: int, payload: dict[str, Any], adapter: str) -> None:
+    LOGGER.info(
+        "task enqueued",
+        extra={
+            "task_id": task_id,
+            "task_type": task_type,
+            "course_id": _int_value(payload, "courseId", "course_id"),
+            "target_id": _int_value(payload, "quizId", "quiz_id", "reviewTaskRunId", "review_task_run_id"),
+            "adapter": adapter,
+        },
+    )
 
 
 def _call_with_supported_kwargs(method: Callable[..., Any], **kwargs: Any) -> Any:

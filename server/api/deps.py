@@ -97,9 +97,8 @@ async def get_week2_runtime_repository(
     current_user: DemoUser = Depends(get_current_user),
     settings: Settings = Depends(get_app_settings),
 ):
-    # This backend switch covers the Week 2 course/resource/parse/inquiry and
-    # handout runtime flow. Home, QA, quiz, review, and progress stay on the
-    # scaffold memory repository until their own SQL repositories exist.
+    # This backend switch covers the SQL-backed runtime flows as their
+    # repositories land. Services still on scaffold memory use get_memory_repository.
     if settings.runtime_repository_backend.lower() != "sql":
         yield _get_memory_repository()
         return
@@ -155,9 +154,9 @@ async def get_bilibili_service() -> BilibiliService:
 
 
 async def get_home_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    repo=Depends(get_week2_runtime_repository),
 ) -> HomeService:
-    return HomeService(courses=repo, reviews=repo)
+    return HomeService(courses=repo, reviews=repo, dashboard=repo)
 
 
 async def get_recommendation_flow_service(
@@ -218,19 +217,21 @@ async def get_qa_service(
 
 
 async def get_quiz_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    repo=Depends(get_week2_runtime_repository),
+    task_dispatcher=Depends(get_task_dispatcher),
 ) -> QuizService:
-    return QuizService(courses=repo, quizzes=repo, idempotency=repo)
+    return QuizService(courses=repo, quizzes=repo, idempotency=repo, task_dispatcher=task_dispatcher)
 
 
 async def get_review_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    repo=Depends(get_week2_runtime_repository),
+    task_dispatcher=Depends(get_task_dispatcher),
 ) -> ReviewService:
-    return ReviewService(courses=repo, reviews=repo, idempotency=repo)
+    return ReviewService(courses=repo, reviews=repo, idempotency=repo, task_dispatcher=task_dispatcher)
 
 
 async def get_progress_service(
-    repo: MemoryScaffoldRepository = Depends(get_memory_repository),
+    repo=Depends(get_week2_runtime_repository),
 ) -> ProgressService:
     return ProgressService(courses=repo, progress=repo)
 

@@ -1,6 +1,7 @@
 from server.domain.repositories.interfaces import (
     AsyncTaskRepository,
     CourseRepository,
+    DashboardRepository,
     HandoutRepository,
     IdempotencyRepository,
     InquiryRepository,
@@ -16,6 +17,7 @@ from server.domain.repositories.interfaces import (
 __all__ = [
     "AsyncTaskRepository",
     "CourseRepository",
+    "DashboardRepository",
     "HandoutRepository",
     "IdempotencyRepository",
     "InquiryRepository",
