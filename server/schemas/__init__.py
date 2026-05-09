@@ -22,6 +22,7 @@ from server.schemas.responses import (
     QaMessageData,
     QuizData,
     RecommendationCard,
+    ResourcePlaybackData,
     ReviewTask,
 )
 
@@ -45,6 +46,7 @@ __all__ = [
     "RecommendationCard",
     "RecommendationRequest",
     "ResourceManifestItem",
+    "ResourcePlaybackData",
     "ReviewTask",
     "SubmitQuizRequest",
     "UploadCompleteRequest",

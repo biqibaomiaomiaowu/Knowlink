@@ -341,6 +341,33 @@
 }
 ```
 
+### `GET /api/v1/course-resources/{resourceId}/playback`
+
+说明：
+
+- 讲义页通过 `GET /api/v1/handout-blocks/{blockId}/jump-target` 拿到 `videoResourceId` 后，使用该接口换取真实可播放地址。
+- `playbackUrl` 是对象存储预签名 GET 地址，默认 1 小时有效；本地 Docker 联调必须返回 `KNOWLINK_MINIO_PUBLIC_ENDPOINT` 对应的浏览器可访问 host，例如 `http://127.0.0.1:9000/...`，不能返回容器内 `minio:9000`。
+- `durationSec` 当前没有稳定字段时返回 `null`，不为播放接口新增数据库字段。
+
+响应 `data`：
+
+```json
+{
+  "resourceId": 501,
+  "resourceType": "mp4",
+  "playbackUrl": "http://127.0.0.1:9000/knowlink/raw/1/101/temp/video.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256",
+  "mimeType": "video/mp4",
+  "expiresAt": "2026-04-18T16:00:00+00:00",
+  "durationSec": null
+}
+```
+
+错误：
+
+- `404 resource.not_found`：资源不存在或不属于当前用户可访问课程
+- `409 resource.not_video`：资源存在但 `resourceType` 不是 `mp4`
+- `503 resource.playback_unavailable`：对象存储不可用或播放地址生成失败
+
 ### `DELETE /api/v1/courses/{courseId}/resources/{resourceId}`
 
 响应 `data`：
