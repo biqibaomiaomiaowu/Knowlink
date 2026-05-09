@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/shared/models/handout_models.dart';
+import 'package:knowlink_client/shared/models/resource_upload_models.dart';
 import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 import 'package:knowlink_client/shared/providers/handout_provider.dart';
@@ -434,10 +435,260 @@ void main() {
     expect(container.read(playerStateProvider).positionSec, 360);
     expect(container.read(activeBlockProvider), 4002);
     expect(fakeApiClient.jumpTargetBlockIds, [4002]);
+    expect(fakeApiClient.playbackResourceIds, [501]);
     expect(
       container.read(handoutProvider).jumpTarget.valueOrNull?.blockId,
       4002,
     );
+    expect(
+      container.read(handoutProvider).playback.valueOrNull?.playbackUrl,
+      'http://127.0.0.1:9000/video-501.mp4?X-Amz-Signature=demo',
+    );
+  });
+
+  test('jump target with video resource fetches playback URL', () async {
+    final fakeApiClient = _HandoutProviderFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final block = container.read(handoutProvider).blocks.valueOrNull!.items[0];
+
+    await container.read(handoutProvider.notifier).selectBlock(block);
+
+    expect(fakeApiClient.jumpTargetBlockIds, [4001]);
+    expect(fakeApiClient.playbackResourceIds, [501]);
+    expect(container.read(handoutProvider).playback.hasError, isFalse);
+    expect(
+      container.read(handoutProvider).playback.valueOrNull?.durationSec,
+      isNull,
+    );
+  });
+
+  test('jump target start time overrides outline child start time', () async {
+    final fakeApiClient = _JumpTargetOffsetFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final block = container.read(handoutProvider).blocks.valueOrNull!.items[0];
+
+    await container.read(handoutProvider.notifier).selectBlock(block);
+
+    expect(block.startSec, 120);
+    expect(
+        container.read(handoutProvider).jumpTarget.valueOrNull?.startSec, 135);
+    expect(container.read(playerStateProvider).positionSec, 135);
+    expect(fakeApiClient.playbackResourceIds, [501]);
+  });
+
+  test('jump target without video keeps playback empty without blocking QA',
+      () async {
+    final fakeApiClient = _NoVideoJumpTargetFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final block = container.read(handoutProvider).blocks.valueOrNull!.items[0];
+
+    await container.read(handoutProvider.notifier).selectBlock(block);
+    await container.read(handoutProvider.notifier).submitQuestion(
+          courseId: '101',
+          question: '没有视频也能问答吗？',
+        );
+
+    final state = container.read(handoutProvider);
+    expect(state.jumpTarget.valueOrNull?.videoResourceId, isNull);
+    expect(state.playback.valueOrNull, isNull);
+    expect(state.playback.hasError, isFalse);
+    expect(fakeApiClient.playbackResourceIds, isEmpty);
+    expect(fakeApiClient.qaRequests.single.handoutBlockId, 4001);
+  });
+
+  test('playback request errors stay scoped to playback state', () async {
+    final cases = [
+      (statusCode: 409, errorCode: 'resource.not_video'),
+      (statusCode: 503, errorCode: 'resource.playback_unavailable'),
+      (statusCode: null, errorCode: 'network.unavailable'),
+    ];
+
+    for (final item in cases) {
+      final fakeApiClient = _PlaybackFailingFakeApiClient(
+        statusCode: item.statusCode,
+        errorCode: item.errorCode,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+      );
+      addTearDown(container.dispose);
+      final subscription = container.listen(handoutProvider, (_, __) {});
+      addTearDown(subscription.close);
+
+      await container.read(handoutProvider.notifier).load(
+            '101',
+            pollInterval: Duration.zero,
+            maxAttempts: 1,
+          );
+      final block =
+          container.read(handoutProvider).blocks.valueOrNull!.items[0];
+      await container.read(handoutProvider.notifier).selectBlock(block);
+
+      final state = container.read(handoutProvider);
+      expect(state.jumpTarget.valueOrNull?.blockId, 4001);
+      expect(state.playback.hasError, isTrue);
+      expect(state.selectedBlock?.blockId, 4001);
+      expect(state.selectedBlockQaMessages, isEmpty);
+    }
+  });
+
+  test('retry playback refreshes the presigned URL without new jump target',
+      () async {
+    final fakeApiClient = _PlaybackRetryFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final block = container.read(handoutProvider).blocks.valueOrNull!.items[0];
+    await container.read(handoutProvider.notifier).selectBlock(block);
+
+    expect(container.read(handoutProvider).playback.hasError, isTrue);
+    expect(fakeApiClient.jumpTargetBlockIds, [4001]);
+    expect(fakeApiClient.playbackResourceIds, [501]);
+
+    await container.read(handoutProvider.notifier).retryPlayback();
+
+    expect(fakeApiClient.jumpTargetBlockIds, [4001]);
+    expect(fakeApiClient.playbackResourceIds, [501, 501]);
+    expect(
+      container.read(handoutProvider).playback.valueOrNull?.playbackUrl,
+      'http://127.0.0.1:9000/video-501-retry.mp4?X-Amz-Signature=retry',
+    );
+  });
+
+  test('stale playback response is ignored after switching selected block',
+      () async {
+    final fakeApiClient = _StalePlaybackFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final blocks = container.read(handoutProvider).blocks.valueOrNull!.items;
+    final staleSelection =
+        container.read(handoutProvider.notifier).selectBlock(blocks[0]);
+    await fakeApiClient.playbackRequested.future;
+
+    await container.read(handoutProvider.notifier).selectBlock(blocks[1]);
+    fakeApiClient.playback.complete(
+      CourseResourcePlaybackModel.fromJson({
+        'resourceId': 501,
+        'resourceType': 'mp4',
+        'playbackUrl': 'http://127.0.0.1:9000/stale.mp4',
+        'mimeType': 'video/mp4',
+        'expiresAt': '2026-04-18T16:00:00+00:00',
+        'durationSec': 120,
+      }),
+    );
+    await staleSelection;
+
+    final state = container.read(handoutProvider);
+    expect(state.selectedBlock?.blockId, 4002);
+    expect(state.jumpTarget.valueOrNull?.blockId, 4002);
+    expect(state.playback.valueOrNull, isNull);
+  });
+
+  test('course reload invalidates in-flight playback response', () async {
+    final fakeApiClient = _StalePlaybackSwitchCourseFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final staleSelection = container.read(handoutProvider.notifier).selectBlock(
+        container.read(handoutProvider).blocks.valueOrNull!.items[0]);
+    await fakeApiClient.playbackRequested.future;
+
+    await container.read(handoutProvider.notifier).load(
+          '202',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    fakeApiClient.playback.complete(
+      CourseResourcePlaybackModel.fromJson({
+        'resourceId': 501,
+        'resourceType': 'mp4',
+        'playbackUrl': 'http://127.0.0.1:9000/stale.mp4',
+        'mimeType': 'video/mp4',
+        'expiresAt': '2026-04-18T16:00:00+00:00',
+        'durationSec': 120,
+      }),
+    );
+    await staleSelection;
+
+    final state = container.read(handoutProvider);
+    expect(state.latest.valueOrNull?.handoutVersionId, 3002);
+    expect(state.selectedBlock?.blockId, 5001);
+    expect(state.playback.valueOrNull, isNull);
   });
 
   test('blocks outside the outline cannot drive selection or jump target',
@@ -950,6 +1201,7 @@ class _HandoutProviderFakeApiClient extends ApiClient {
   int fetchLatestCalls = 0;
   int generateHandoutCalls = 0;
   final List<int> jumpTargetBlockIds = [];
+  final List<int> playbackResourceIds = [];
   final List<QaMessageRequestModel> qaRequests = [];
 
   @override
@@ -1035,6 +1287,22 @@ class _HandoutProviderFakeApiClient extends ApiClient {
       docResourceId: 502,
       pageNo: 2,
     );
+  }
+
+  @override
+  Future<CourseResourcePlaybackModel> fetchCourseResourcePlayback(
+    int resourceId,
+  ) async {
+    playbackResourceIds.add(resourceId);
+    return CourseResourcePlaybackModel.fromJson({
+      'resourceId': resourceId,
+      'resourceType': 'mp4',
+      'playbackUrl':
+          'http://127.0.0.1:9000/video-$resourceId.mp4?X-Amz-Signature=demo',
+      'mimeType': 'video/mp4',
+      'expiresAt': '2026-04-18T16:00:00+00:00',
+      'durationSec': null,
+    });
   }
 
   @override
@@ -1303,6 +1571,162 @@ class _MismatchedJumpTargetFakeApiClient extends _HandoutProviderFakeApiClient {
       videoResourceId: 501,
       startSec: 120,
     );
+  }
+}
+
+class _NoVideoJumpTargetFakeApiClient extends _HandoutProviderFakeApiClient {
+  @override
+  Future<HandoutJumpTargetModel> fetchHandoutJumpTarget(int blockId) async {
+    jumpTargetBlockIds.add(blockId);
+    return HandoutJumpTargetModel(
+      blockId: blockId,
+      startSec: blockId == 4002 ? 360 : 120,
+      docResourceId: 502,
+      pageNo: 2,
+    );
+  }
+}
+
+class _JumpTargetOffsetFakeApiClient extends _HandoutProviderFakeApiClient {
+  @override
+  Future<HandoutJumpTargetModel> fetchHandoutJumpTarget(int blockId) async {
+    jumpTargetBlockIds.add(blockId);
+    return HandoutJumpTargetModel(
+      blockId: blockId,
+      videoResourceId: 501,
+      startSec: blockId == 4002 ? 375 : 135,
+      docResourceId: 502,
+      pageNo: 2,
+    );
+  }
+}
+
+class _PlaybackFailingFakeApiClient extends _HandoutProviderFakeApiClient {
+  _PlaybackFailingFakeApiClient({
+    required this.statusCode,
+    required this.errorCode,
+  });
+
+  final int? statusCode;
+  final String errorCode;
+
+  @override
+  Future<CourseResourcePlaybackModel> fetchCourseResourcePlayback(
+    int resourceId,
+  ) async {
+    playbackResourceIds.add(resourceId);
+    final requestOptions =
+        RequestOptions(path: '/api/v1/course-resources/$resourceId/playback');
+    throw DioException(
+      requestOptions: requestOptions,
+      response: statusCode == null
+          ? null
+          : Response<Map<String, dynamic>>(
+              requestOptions: requestOptions,
+              statusCode: statusCode,
+              data: {
+                'errorCode': errorCode,
+              },
+            ),
+    );
+  }
+}
+
+class _PlaybackRetryFakeApiClient extends _HandoutProviderFakeApiClient {
+  var _playbackCalls = 0;
+
+  @override
+  Future<CourseResourcePlaybackModel> fetchCourseResourcePlayback(
+    int resourceId,
+  ) async {
+    playbackResourceIds.add(resourceId);
+    _playbackCalls++;
+    if (_playbackCalls == 1) {
+      final requestOptions =
+          RequestOptions(path: '/api/v1/course-resources/$resourceId/playback');
+      throw DioException(
+        requestOptions: requestOptions,
+        response: Response<Map<String, dynamic>>(
+          requestOptions: requestOptions,
+          statusCode: 503,
+          data: {
+            'errorCode': 'resource.playback_unavailable',
+          },
+        ),
+      );
+    }
+    return CourseResourcePlaybackModel.fromJson({
+      'resourceId': resourceId,
+      'resourceType': 'mp4',
+      'playbackUrl':
+          'http://127.0.0.1:9000/video-$resourceId-retry.mp4?X-Amz-Signature=retry',
+      'mimeType': 'video/mp4',
+      'expiresAt': '2026-04-18T16:00:00+00:00',
+      'durationSec': null,
+    });
+  }
+}
+
+class _StalePlaybackFakeApiClient extends _NoVideoJumpTargetFakeApiClient {
+  final playbackRequested = Completer<void>();
+  final playback = Completer<CourseResourcePlaybackModel>();
+
+  @override
+  Future<HandoutJumpTargetModel> fetchHandoutJumpTarget(int blockId) async {
+    jumpTargetBlockIds.add(blockId);
+    if (blockId == 4001) {
+      return const HandoutJumpTargetModel(
+        blockId: 4001,
+        videoResourceId: 501,
+        startSec: 120,
+      );
+    }
+    return const HandoutJumpTargetModel(
+      blockId: 4002,
+      startSec: 360,
+    );
+  }
+
+  @override
+  Future<CourseResourcePlaybackModel> fetchCourseResourcePlayback(
+    int resourceId,
+  ) {
+    playbackResourceIds.add(resourceId);
+    playbackRequested.complete();
+    return playback.future;
+  }
+}
+
+class _StalePlaybackSwitchCourseFakeApiClient
+    extends _SwitchCourseFakeApiClient {
+  final playbackRequested = Completer<void>();
+  final playback = Completer<CourseResourcePlaybackModel>();
+
+  @override
+  Future<HandoutVersionStatusModel> fetchHandoutVersionStatus(
+    int handoutVersionId,
+  ) async {
+    if (handoutVersionId == 3001) {
+      return const HandoutVersionStatusModel(
+        handoutVersionId: 3001,
+        status: 'ready',
+        outlineStatus: 'ready',
+        totalBlocks: 2,
+        readyBlocks: 1,
+        pendingBlocks: 1,
+        sourceParseRunId: 9001,
+      );
+    }
+    return super.fetchHandoutVersionStatus(handoutVersionId);
+  }
+
+  @override
+  Future<CourseResourcePlaybackModel> fetchCourseResourcePlayback(
+    int resourceId,
+  ) {
+    playbackResourceIds.add(resourceId);
+    playbackRequested.complete();
+    return playback.future;
   }
 }
 

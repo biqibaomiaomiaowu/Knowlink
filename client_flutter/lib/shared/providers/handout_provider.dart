@@ -13,6 +13,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
   var _isDisposed = false;
   var _loadRequestId = 0;
   var _jumpTargetRequestId = 0;
+  var _playbackRequestId = 0;
   var _currentBlockRequestId = 0;
   var _qaRequestId = 0;
 
@@ -53,6 +54,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       blockGenerateRequest: const AsyncData(null),
       isPolling: false,
       jumpTarget: const AsyncData(null),
+      playback: const AsyncData(null),
       currentBlock: const AsyncData(null),
       qaSubmit: const AsyncData(null),
       clearQaMessages: true,
@@ -134,6 +136,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       outline: const AsyncLoading(),
       blocks: const AsyncLoading(),
       jumpTarget: const AsyncData(null),
+      playback: const AsyncData(null),
       currentBlock: const AsyncData(null),
       qaSubmit: const AsyncData(null),
       clearQaMessages: true,
@@ -308,6 +311,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       currentBlock:
           selectionChanged ? const AsyncData(null) : state.currentBlock,
       jumpTarget: const AsyncLoading(),
+      playback: const AsyncData(null),
       qaSubmit: selectionChanged ? const AsyncData(null) : state.qaSubmit,
       blockGenerateRequest:
           selectionChanged ? const AsyncData(null) : state.blockGenerateRequest,
@@ -370,6 +374,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     final requestCourseId = ref.read(courseFlowProvider).courseId;
     state = state.copyWith(
       jumpTarget: const AsyncLoading(),
+      playback: const AsyncData(null),
       selectedCitation: citation,
       clearSelectedCitation: citation == null,
     );
@@ -383,12 +388,71 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       if (target.blockId != blockId) {
         throw StateError('跳转信息返回了不匹配的 blockId：${target.blockId}');
       }
+      final targetStartSec = target.startSec;
+      if (targetStartSec != null) {
+        ref.read(playerStateProvider.notifier).state =
+            ref.read(playerStateProvider).copyWith(
+                  positionSec: targetStartSec,
+                );
+      }
       state = state.copyWith(jumpTarget: AsyncData(target));
+      final videoResourceId = target.videoResourceId;
+      if (videoResourceId == null) {
+        state = state.copyWith(playback: const AsyncData(null));
+        return;
+      }
+      await _loadPlaybackForJumpTarget(
+        resourceId: videoResourceId,
+        blockId: blockId,
+        courseId: requestCourseId,
+      );
     } catch (error, stackTrace) {
       if (!_shouldApplyJumpTarget(requestId, blockId, requestCourseId)) {
         return;
       }
-      state = state.copyWith(jumpTarget: AsyncError(error, stackTrace));
+      state = state.copyWith(
+        jumpTarget: AsyncError(error, stackTrace),
+        playback: const AsyncData(null),
+      );
+    }
+  }
+
+  Future<void> retryPlayback() async {
+    final target = state.jumpTarget.valueOrNull;
+    final blockId = state.selectedBlockId;
+    final resourceId = target?.videoResourceId;
+    if (target == null || blockId == null || resourceId == null) {
+      state = state.copyWith(playback: const AsyncData(null));
+      return;
+    }
+    await _loadPlaybackForJumpTarget(
+      resourceId: resourceId,
+      blockId: blockId,
+      courseId: ref.read(courseFlowProvider).courseId,
+    );
+  }
+
+  Future<void> _loadPlaybackForJumpTarget({
+    required int resourceId,
+    required int blockId,
+    required String? courseId,
+  }) async {
+    final requestId = ++_playbackRequestId;
+    state = state.copyWith(playback: const AsyncLoading());
+    try {
+      final playback =
+          await ref.read(apiClientProvider).fetchCourseResourcePlayback(
+                resourceId,
+              );
+      if (!_shouldApplyPlayback(requestId, blockId, courseId)) {
+        return;
+      }
+      state = state.copyWith(playback: AsyncData(playback));
+    } catch (error, stackTrace) {
+      if (!_shouldApplyPlayback(requestId, blockId, courseId)) {
+        return;
+      }
+      state = state.copyWith(playback: AsyncError(error, stackTrace));
     }
   }
 
@@ -644,6 +708,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
         currentBlock:
             selectionChanged ? const AsyncData(null) : state.currentBlock,
         jumpTarget: selectionChanged ? const AsyncData(null) : state.jumpTarget,
+        playback: selectionChanged ? const AsyncData(null) : state.playback,
         qaSubmit: selectionChanged ? const AsyncData(null) : state.qaSubmit,
         blockGenerateRequest: selectionChanged
             ? const AsyncData(null)
@@ -702,6 +767,17 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
         _isCurrentCourse(courseId);
   }
 
+  bool _shouldApplyPlayback(
+    int requestId,
+    int blockId,
+    String? courseId,
+  ) {
+    return !_isDisposed &&
+        requestId == _playbackRequestId &&
+        state.selectedBlockId == blockId &&
+        _isCurrentCourse(courseId);
+  }
+
   bool _shouldApplyQa(int requestId, int blockId, String courseId) {
     return !_isDisposed &&
         requestId == _qaRequestId &&
@@ -718,6 +794,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     bool includeCurrentBlock = true,
   }) {
     _jumpTargetRequestId++;
+    _playbackRequestId++;
     _qaRequestId++;
     if (includeCurrentBlock) {
       _currentBlockRequestId++;
