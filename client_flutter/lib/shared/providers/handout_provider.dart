@@ -689,7 +689,10 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       if (!_shouldApply(requestId, courseId)) {
         return;
       }
-      final selectedBlockId = _resolveSelectedBlockId(outline.children);
+      final selectedBlockId = _resolveSelectedBlockId(
+        outline.children,
+        courseId: courseId,
+      );
       final selectionChanged = state.selectedBlockId != selectedBlockId;
       if (selectionChanged) {
         _invalidateSelectionSideEffects();
@@ -730,9 +733,20 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     }
   }
 
-  int? _resolveSelectedBlockId(List<HandoutOutlineChildModel> children) {
+  int? _resolveSelectedBlockId(
+    List<HandoutOutlineChildModel> children, {
+    required String courseId,
+  }) {
     if (children.isEmpty) {
       return null;
+    }
+    final resumeTarget = ref.read(handoutResumeTargetProvider);
+    if (resumeTarget != null) {
+      ref.read(handoutResumeTargetProvider.notifier).state = null;
+      if (resumeTarget.courseId == courseId &&
+          children.any((child) => child.blockId == resumeTarget.blockId)) {
+        return resumeTarget.blockId;
+      }
     }
     final current = state.selectedBlockId;
     if (current != null && children.any((child) => child.blockId == current)) {

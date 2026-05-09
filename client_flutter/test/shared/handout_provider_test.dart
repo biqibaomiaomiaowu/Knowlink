@@ -62,6 +62,32 @@ void main() {
     expect(container.read(activeBlockProvider), 4001);
   });
 
+  test('load honors pending home resume target before default selection',
+      () async {
+    final fakeApiClient = _HandoutProviderFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+    container.read(handoutResumeTargetProvider.notifier).state =
+        const HandoutResumeTarget(courseId: '101', blockId: 4002);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+
+    final state = container.read(handoutProvider);
+    expect(state.selectedBlock?.blockId, 4002);
+    expect(container.read(activeBlockProvider), 4002);
+    expect(container.read(handoutResumeTargetProvider), isNull);
+  });
+
   test('load auto generates when latest handout is missing', () async {
     final fakeApiClient = _HandoutProviderFakeApiClient(noActiveFirst: true);
     final container = ProviderContainer(

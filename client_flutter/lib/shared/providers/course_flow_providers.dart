@@ -22,6 +22,16 @@ class PlayerState {
   }
 }
 
+class HandoutResumeTarget {
+  const HandoutResumeTarget({
+    required this.courseId,
+    required this.blockId,
+  });
+
+  final String courseId;
+  final int blockId;
+}
+
 class CourseFlowController extends Notifier<CourseFlowState> {
   @override
   CourseFlowState build() => const CourseFlowState();
@@ -154,4 +164,8 @@ final activeBlockProvider = StateProvider<int?>((ref) => null);
 
 final playerStateProvider = StateProvider<PlayerState>(
   (ref) => const PlayerState(),
+);
+
+final handoutResumeTargetProvider = StateProvider<HandoutResumeTarget?>(
+  (ref) => null,
 );
