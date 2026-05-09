@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'handout_models.dart';
+import 'resource_upload_models.dart';
 
 class HandoutState {
   const HandoutState({
@@ -13,6 +14,7 @@ class HandoutState {
         const AsyncData<HandoutBlockGenerateResultModel?>(null),
     this.currentBlock = const AsyncData<CurrentHandoutBlockModel?>(null),
     this.jumpTarget = const AsyncData<HandoutJumpTargetModel?>(null),
+    this.playback = const AsyncData<CourseResourcePlaybackModel?>(null),
     this.qaSubmit = const AsyncData<QaMessageModel?>(null),
     this.qaMessagesByBlockId = const {},
     this.selectedCitation,
@@ -28,6 +30,7 @@ class HandoutState {
   final AsyncValue<HandoutBlockGenerateResultModel?> blockGenerateRequest;
   final AsyncValue<CurrentHandoutBlockModel?> currentBlock;
   final AsyncValue<HandoutJumpTargetModel?> jumpTarget;
+  final AsyncValue<CourseResourcePlaybackModel?> playback;
   final AsyncValue<QaMessageModel?> qaSubmit;
   final Map<int, List<QaMessageModel>> qaMessagesByBlockId;
   final CitationModel? selectedCitation;
@@ -118,6 +121,7 @@ class HandoutState {
     AsyncValue<HandoutBlockGenerateResultModel?>? blockGenerateRequest,
     AsyncValue<CurrentHandoutBlockModel?>? currentBlock,
     AsyncValue<HandoutJumpTargetModel?>? jumpTarget,
+    AsyncValue<CourseResourcePlaybackModel?>? playback,
     AsyncValue<QaMessageModel?>? qaSubmit,
     Map<int, List<QaMessageModel>>? qaMessagesByBlockId,
     bool clearQaMessages = false,
@@ -136,6 +140,7 @@ class HandoutState {
       blockGenerateRequest: blockGenerateRequest ?? this.blockGenerateRequest,
       currentBlock: currentBlock ?? this.currentBlock,
       jumpTarget: jumpTarget ?? this.jumpTarget,
+      playback: playback ?? this.playback,
       qaSubmit: qaSubmit ?? this.qaSubmit,
       qaMessagesByBlockId: clearQaMessages
           ? const {}

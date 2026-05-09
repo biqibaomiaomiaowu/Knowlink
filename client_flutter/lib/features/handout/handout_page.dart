@@ -1,7 +1,11 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'handout_video_controller.dart';
 import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_error_view.dart';
 import '../../core/widgets/app_loading_view.dart';
@@ -97,6 +101,7 @@ class _HandoutPageState extends ConsumerState<HandoutPage> {
                   selectedChild.blockId,
                   courseId: widget.courseId,
                 ),
+        onRetryPlayback: notifier.retryPlayback,
         onCitationTap: selectedChild == null
             ? null
             : (citation) => notifier.requestJumpTarget(
@@ -153,6 +158,7 @@ class _HandoutWorkspace extends StatelessWidget {
     required this.onRefresh,
     required this.onGenerate,
     required this.onGenerateBlock,
+    required this.onRetryPlayback,
     required this.onCitationTap,
     required this.onSubmitQuestion,
   });
@@ -170,6 +176,7 @@ class _HandoutWorkspace extends StatelessWidget {
   final VoidCallback onRefresh;
   final VoidCallback onGenerate;
   final VoidCallback? onGenerateBlock;
+  final VoidCallback onRetryPlayback;
   final ValueChanged<CitationModel>? onCitationTap;
   final VoidCallback onSubmitQuestion;
 
@@ -199,6 +206,7 @@ class _HandoutWorkspace extends StatelessWidget {
                 onTogglePlay: onTogglePlay,
                 onSeek: onSeek,
                 onGenerateBlock: onGenerateBlock,
+                onRetryPlayback: onRetryPlayback,
                 onCitationTap: onCitationTap,
               ),
               const SizedBox(height: 16),
@@ -239,6 +247,7 @@ class _HandoutWorkspace extends StatelessWidget {
                 onTogglePlay: onTogglePlay,
                 onSeek: onSeek,
                 onGenerateBlock: onGenerateBlock,
+                onRetryPlayback: onRetryPlayback,
                 onCitationTap: onCitationTap,
               ),
             ),
@@ -719,6 +728,7 @@ class _LearningCenterPanel extends StatelessWidget {
     required this.onTogglePlay,
     required this.onSeek,
     required this.onGenerateBlock,
+    required this.onRetryPlayback,
     required this.onCitationTap,
   });
 
@@ -730,6 +740,7 @@ class _LearningCenterPanel extends StatelessWidget {
   final VoidCallback onTogglePlay;
   final ValueChanged<int> onSeek;
   final VoidCallback? onGenerateBlock;
+  final VoidCallback onRetryPlayback;
   final ValueChanged<CitationModel>? onCitationTap;
 
   @override
@@ -761,10 +772,12 @@ class _LearningCenterPanel extends StatelessWidget {
           const SizedBox(height: 18),
           _VideoStage(
             courseId: courseId,
+            state: state,
             block: highlightedBlock ?? block,
             player: player,
             onTogglePlay: onTogglePlay,
             onSeek: onSeek,
+            onRetryPlayback: onRetryPlayback,
           ),
           const SizedBox(height: 18),
           _ContentPanel(
@@ -792,27 +805,221 @@ class _LearningCenterPanel extends StatelessWidget {
   }
 }
 
-class _VideoStage extends StatelessWidget {
+class _VideoStage extends ConsumerStatefulWidget {
   const _VideoStage({
     required this.courseId,
+    required this.state,
     required this.block,
     required this.player,
     required this.onTogglePlay,
     required this.onSeek,
+    required this.onRetryPlayback,
   });
 
   final String courseId;
+  final HandoutState state;
   final HandoutBlockModel? block;
   final PlayerState player;
   final VoidCallback onTogglePlay;
   final ValueChanged<int> onSeek;
+  final VoidCallback onRetryPlayback;
+
+  @override
+  ConsumerState<_VideoStage> createState() => _VideoStageState();
+}
+
+class _VideoStageState extends ConsumerState<_VideoStage> {
+  HandoutVideoController? _controller;
+  String? _playbackUrl;
+  bool _isInitializing = false;
+  Object? _initializationError;
+  int? _pendingSeekTargetSec;
+  bool? _pendingPlayState;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncControllerWithPlayback();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoStage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncControllerWithPlayback();
+    _applyDesiredControllerState();
+  }
+
+  @override
+  void dispose() {
+    _disposeController();
+    super.dispose();
+  }
+
+  void _syncControllerWithPlayback() {
+    final nextUrl = widget.state.playback.valueOrNull?.playbackUrl;
+    if (nextUrl == _playbackUrl) {
+      return;
+    }
+    _disposeController();
+    _playbackUrl = nextUrl;
+    _controller = null;
+    _isInitializing = false;
+    _initializationError = null;
+    _pendingSeekTargetSec = null;
+    _pendingPlayState = null;
+
+    if (nextUrl == null) {
+      return;
+    }
+
+    final controller = ref.read(handoutVideoControllerFactoryProvider)(
+      Uri.parse(nextUrl),
+    );
+    _controller = controller;
+    _isInitializing = true;
+    controller.addListener(_handleControllerChanged);
+    unawaited(
+      controller.initialize().then((_) {
+        if (!mounted || _controller != controller) {
+          return;
+        }
+        setState(() {
+          _isInitializing = false;
+        });
+        _applyDesiredControllerState();
+      }).catchError((Object error) {
+        if (!mounted || _controller != controller) {
+          return;
+        }
+        setState(() {
+          _isInitializing = false;
+          _initializationError = error;
+        });
+      }),
+    );
+  }
+
+  void _disposeController() {
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+    controller.removeListener(_handleControllerChanged);
+    unawaited(controller.dispose());
+  }
+
+  void _handleControllerChanged() {
+    _scheduleControllerSync();
+  }
+
+  void _scheduleControllerSync() {
+    Future<void>.microtask(() {
+      if (!mounted) {
+        return;
+      }
+      _syncPlayerStateFromController();
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  void _applyDesiredControllerState() {
+    final controller = _controller;
+    if (controller == null || !controller.isInitialized) {
+      return;
+    }
+    final desiredSec = widget.player.positionSec;
+    final currentSec = controller.position.inSeconds;
+    if ((currentSec - desiredSec).abs() > 1 &&
+        _pendingSeekTargetSec != desiredSec) {
+      _pendingSeekTargetSec = desiredSec;
+      unawaited(
+        controller.seekTo(Duration(seconds: desiredSec)).then((_) {
+          if (!mounted ||
+              _controller != controller ||
+              _pendingSeekTargetSec != desiredSec) {
+            return;
+          }
+          _pendingSeekTargetSec = null;
+          _scheduleControllerSync();
+        }).catchError((Object error) {
+          if (!mounted || _controller != controller) {
+            return;
+          }
+          setState(() {
+            _pendingSeekTargetSec = null;
+            _initializationError = error;
+          });
+        }),
+      );
+    }
+
+    final desiredPlaying = widget.player.isPlaying;
+    if (controller.isPlaying != desiredPlaying &&
+        _pendingPlayState != desiredPlaying) {
+      _pendingPlayState = desiredPlaying;
+      final command = desiredPlaying ? controller.play() : controller.pause();
+      unawaited(
+        command.then((_) {
+          if (!mounted ||
+              _controller != controller ||
+              _pendingPlayState != desiredPlaying) {
+            return;
+          }
+          _pendingPlayState = null;
+          _scheduleControllerSync();
+        }).catchError((Object error) {
+          if (!mounted || _controller != controller) {
+            return;
+          }
+          setState(() {
+            _pendingPlayState = null;
+            _initializationError = error;
+          });
+        }),
+      );
+    }
+  }
+
+  void _syncPlayerStateFromController() {
+    final controller = _controller;
+    if (!mounted || controller == null || !controller.isInitialized) {
+      return;
+    }
+    final current = ref.read(playerStateProvider);
+    final controllerSec = controller.position.inSeconds;
+    final pendingSeek = _pendingSeekTargetSec;
+    var nextPositionSec = controllerSec;
+    if (pendingSeek != null) {
+      if ((controllerSec - pendingSeek).abs() <= 1) {
+        _pendingSeekTargetSec = null;
+      } else {
+        nextPositionSec = current.positionSec;
+      }
+    }
+    if (current.positionSec == nextPositionSec &&
+        current.isPlaying == controller.isPlaying) {
+      return;
+    }
+    ref.read(playerStateProvider.notifier).state = current.copyWith(
+      positionSec: nextPositionSec,
+      isPlaying: controller.isPlaying,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final block = this.block;
-    final positionLabel = _formatSec(player.positionSec);
-    final duration = block == null ? 12 * 60 + 48 : block.endSec;
-    final value = duration == 0 ? 0.0 : player.positionSec / duration;
+    final block = widget.block;
+    final positionLabel = _formatSec(widget.player.positionSec);
+    final duration = _durationSec();
+    final durationLabel = duration == null ? '--:--' : _formatSec(duration);
+    final value = duration == null || duration == 0
+        ? 0.0
+        : (widget.player.positionSec / duration).clamp(0.0, 1.0).toDouble();
+    final showContextBoard = !widget.state.playback.isLoading &&
+        !widget.state.playback.hasError &&
+        _initializationError == null;
 
     return Container(
       height: 472,
@@ -823,55 +1030,36 @@ class _VideoStage extends StatelessWidget {
       child: Stack(
         children: [
           Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                gradient: const RadialGradient(
-                  center: Alignment.topRight,
-                  radius: 1.2,
-                  colors: [Color(0xFF1E293B), Color(0xFF020617)],
-                ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: DecoratedBox(
+                decoration: const BoxDecoration(color: Color(0xFF020617)),
+                child: _buildVideoSurface(context),
               ),
             ),
           ),
           Positioned(
-            left: 22,
-            top: 22,
-            right: 22,
-            child: Text(
-              block == null ? '等待讲义块同步播放位置' : block.title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-              ),
+            left: 18,
+            top: 18,
+            right: 18,
+            child: _VideoTitleOverlay(
+              title: block == null ? '等待讲义块同步播放位置' : block.title,
+              subtitle: block?.summary ?? '选择讲义块后同步播放定位、来源引用与追问上下文。',
             ),
           ),
-          Positioned(
-            left: 22,
-            top: 76,
-            width: 280,
-            child: Text(
-              block?.summary ?? 'AI 将根据当前视频片段同步讲义 block、来源引用与追问上下文。',
-              style: const TextStyle(
-                color: Colors.white,
-                height: 1.8,
-                fontSize: 16,
-              ),
+          if (showContextBoard)
+            Positioned(
+              right: 22,
+              bottom: 78,
+              width: 280,
+              height: 172,
+              child: _VideoContextBoard(block: block),
             ),
-          ),
-          Positioned(
-            right: 22,
-            top: 70,
-            width: 360,
-            bottom: 70,
-            child: _VideoContextBoard(block: block),
-          ),
           Positioned(
             left: 22,
             bottom: 68,
             child: Text(
-              '课程 $courseId · $positionLabel',
+              '课程 ${widget.courseId} · $positionLabel',
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
@@ -888,16 +1076,18 @@ class _VideoStage extends StatelessWidget {
                 return Row(
                   children: [
                     IconButton(
-                      tooltip: player.isPlaying ? '暂停' : '播放',
-                      onPressed: onTogglePlay,
+                      tooltip: widget.player.isPlaying ? '暂停' : '播放',
+                      onPressed: widget.onTogglePlay,
                       color: Colors.white,
                       icon: Icon(
-                        player.isPlaying ? Icons.pause : Icons.play_arrow,
+                        widget.player.isPlaying
+                            ? Icons.pause
+                            : Icons.play_arrow,
                       ),
                     ),
                     Flexible(
                       child: Text(
-                        '$positionLabel / ${_formatSec(duration)}',
+                        '$positionLabel / $durationLabel',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(color: Colors.white),
@@ -911,18 +1101,16 @@ class _VideoStage extends StatelessWidget {
                         color: AppTheme.brandBlue,
                       ),
                     ),
-                    if (!compact) ...[
-                      const SizedBox(width: 10),
-                      TextButton(
-                        onPressed: () => onSeek(-30),
-                        child: const Text(
-                          '-30s',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    ],
+                    const SizedBox(width: 10),
                     TextButton(
-                      onPressed: () => onSeek(30),
+                      onPressed: () => widget.onSeek(-30),
+                      child: Text(
+                        compact ? '-30' : '-30s',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => widget.onSeek(30),
                       child: Text(
                         compact ? '+30' : '+30s',
                         style: const TextStyle(color: Colors.white),
@@ -939,6 +1127,240 @@ class _VideoStage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildVideoSurface(BuildContext context) {
+    if (widget.state.playback.isLoading) {
+      return const _VideoStatusOverlay(
+        icon: Icons.hourglass_top,
+        title: '正在获取视频播放地址',
+        subtitle: '已保留讲义正文和问答上下文。',
+        showProgress: true,
+      );
+    }
+    if (widget.state.playback.hasError) {
+      final message = _playbackErrorMessage(widget.state.playback.error);
+      return _VideoStatusOverlay(
+        icon: Icons.error_outline,
+        title: message.title,
+        subtitle: message.subtitle,
+        actionLabel: '重新加载视频',
+        onAction: widget.onRetryPlayback,
+      );
+    }
+    final playback = widget.state.playback.valueOrNull;
+    if (playback == null) {
+      return const _VideoStatusOverlay(
+        icon: Icons.videocam_off_outlined,
+        title: '当前讲义块暂无视频定位',
+        subtitle: '可以继续阅读正文或使用当前块问答。',
+      );
+    }
+    final controller = _controller;
+    if (_initializationError != null) {
+      return _VideoStatusOverlay(
+        icon: Icons.error_outline,
+        title: '视频加载失败',
+        subtitle: '播放地址可能已过期或当前平台暂不可播放。',
+        actionLabel: '重新加载视频',
+        onAction: widget.onRetryPlayback,
+      );
+    }
+    if (_isInitializing || controller == null || !controller.isInitialized) {
+      return const _VideoStatusOverlay(
+        icon: Icons.play_circle_outline,
+        title: '正在加载视频',
+        subtitle: '视频地址由后端预签名接口提供。',
+        showProgress: true,
+      );
+    }
+    final aspectRatio =
+        controller.aspectRatio <= 0 ? 16 / 9 : controller.aspectRatio;
+    return Center(
+      child: AspectRatio(
+        aspectRatio: aspectRatio,
+        child: controller.buildPlayer(),
+      ),
+    );
+  }
+
+  int? _durationSec() {
+    final controllerDuration = _controller?.duration.inSeconds ?? 0;
+    if (controllerDuration > 0) {
+      return controllerDuration;
+    }
+    final playbackDuration = widget.state.playback.valueOrNull?.durationSec;
+    if (playbackDuration != null && playbackDuration > 0) {
+      return playbackDuration;
+    }
+    return null;
+  }
+
+  _PlaybackErrorMessage _playbackErrorMessage(Object? error) {
+    if (error is DioException) {
+      final code = _errorCode(error.response?.data);
+      if (code == 'resource.not_video') {
+        return const _PlaybackErrorMessage(
+          title: '当前定位资源不是视频',
+          subtitle: '该讲义块返回的资源不能播放，可以继续阅读正文或使用当前块问答。',
+        );
+      }
+      if (code == 'resource.playback_unavailable') {
+        return const _PlaybackErrorMessage(
+          title: '播放地址暂不可用',
+          subtitle: '对象存储暂时无法生成播放地址，请重新加载视频。',
+        );
+      }
+      return const _PlaybackErrorMessage(
+        title: '视频网络请求失败',
+        subtitle: '暂时无法连接播放地址接口，请重新加载视频。',
+      );
+    }
+    return const _PlaybackErrorMessage(
+      title: '视频播放地址暂不可用',
+      subtitle: '暂时无法获取当前讲义块的视频地址，请重新加载视频。',
+    );
+  }
+
+  String? _errorCode(Object? data) {
+    if (data is Map) {
+      return data['errorCode'] as String?;
+    }
+    return null;
+  }
+}
+
+class _PlaybackErrorMessage {
+  const _PlaybackErrorMessage({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+}
+
+class _VideoTitleOverlay extends StatelessWidget {
+  const _VideoTitleOverlay({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.48),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white70,
+                height: 1.3,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoStatusOverlay extends StatelessWidget {
+  const _VideoStatusOverlay({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.showProgress = false,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool showProgress;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: RadialGradient(
+          center: Alignment.topRight,
+          radius: 1.2,
+          colors: [Color(0xFF1E293B), Color(0xFF020617)],
+        ),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white70, size: 40),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  height: 1.4,
+                ),
+              ),
+              if (showProgress) ...[
+                const SizedBox(height: 16),
+                const LinearProgressIndicator(),
+              ],
+              if (actionLabel != null && onAction != null) ...[
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: onAction,
+                  icon: const Icon(Icons.refresh),
+                  label: Text(actionLabel!),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

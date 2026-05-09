@@ -167,6 +167,17 @@ class ApiClient {
         .toList();
   }
 
+  Future<CourseResourcePlaybackModel> fetchCourseResourcePlayback(
+    int resourceId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/course-resources/$resourceId/playback',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseResourcePlaybackModel.fromJson(data);
+  }
+
   Future<DeleteCourseResourceResultModel> deleteCourseResource({
     required String courseId,
     required int resourceId,
