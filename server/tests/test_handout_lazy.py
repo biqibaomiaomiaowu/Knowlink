@@ -8,6 +8,7 @@ from server.ai.handout_lazy import (
     get_configured_handout_outline_client,
     jump_target_for_outline_item,
     next_prefetch_outline_item,
+    outline_source_issues,
     outline_timeline_issues,
 )
 
@@ -86,6 +87,28 @@ def test_outline_timeline_issues_detects_nested_overlaps():
         "outline.time_overlap",
         "outline.time_overlap",
     ]
+
+
+def test_outline_source_issues_rejects_unknown_sources_and_time_drift():
+    captions = _caption_segments()
+
+    assert outline_source_issues(
+        [
+            {
+                "outlineKey": "bad-source",
+                "startSec": 0,
+                "endSec": 30,
+                "sourceSegmentKeys": ["not-a-real-segment"],
+            },
+            {
+                "outlineKey": "bad-time",
+                "startSec": 1,
+                "endSec": 30,
+                "sourceSegmentKeys": ["mp4-c1"],
+            },
+        ],
+        captions,
+    ) == ["outline.source_segment_unknown", "outline.source_time_mismatch"]
 
 
 def test_current_outline_item_returns_active_item_and_includes_last_end_boundary():
@@ -271,8 +294,14 @@ def test_generate_handout_outline_falls_back_when_llm_timeline_is_invalid():
                 "title": "bad",
                 "summary": "bad",
                 "items": [
-                    _outline_item("outline-1", start_sec=0, end_sec=40, sort_no=1),
-                    _outline_item("outline-2", start_sec=35, end_sec=70, sort_no=2),
+                    {
+                        **_outline_item("outline-1", start_sec=0, end_sec=70, sort_no=1),
+                        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                    },
+                    {
+                        **_outline_item("outline-2", start_sec=30, end_sec=70, sort_no=2),
+                        "sourceSegmentKeys": ["mp4-c2"],
+                    },
                 ],
             }
 

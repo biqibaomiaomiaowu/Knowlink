@@ -110,6 +110,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         outline = repo.get_latest_outline(course_id)
         if outline is None:
             raise OutlineGenerationBlocked("latest outline read model was not produced")
+        latest_handout = repo.get_latest_handout(course_id) or {}
+        outline_meta = latest_handout.get("metaJson") if isinstance(latest_handout, dict) else {}
+        if not isinstance(outline_meta, dict):
+            outline_meta = {}
 
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(outline, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -123,6 +127,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "handoutVersionId": outline.get("handoutVersionId"),
                     "outlineItemCount": len(outline.get("items") or []),
                     "videoSegmentCount": len(video_segments),
+                    "outlineUsedFallback": bool(outline_meta.get("outlineUsedFallback")),
+                    "outlineIssues": outline_meta.get("outlineIssues") or [],
                 },
                 ensure_ascii=False,
             )

@@ -63,6 +63,90 @@ def test_sql_handout_generate_persists_latest_outline_and_api_read_model():
         engine.dispose()
 
 
+def test_sql_handout_generate_uses_semantic_outline_client_and_document_context():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_active_video_segments(repo)
+        parse_run_id = int(repo.get_course(course_id)["activeParseRunId"])
+        pdf_resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pdf",
+                "objectKey": f"raw/1/{course_id}/set.pdf",
+                "originalName": "set.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 1024,
+                "checksum": "sha256:set-pdf",
+            },
+        )
+        repo.create_course_segments(
+            course_id=course_id,
+            resource_id=pdf_resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "pdf_page_text",
+                    "title": "ZF 公理化集合论",
+                    "orderNo": 10,
+                    "textContent": "补充资料说明 ZF 公理化集合论和文氏图表示。",
+                    "pageNo": 3,
+                }
+            ],
+        )
+        outline_client = _SemanticOutlineClient()
+        service = HandoutService(
+            courses=repo,
+            handouts=repo,
+            idempotency=repo,
+            outline_client=outline_client,
+        )
+
+        trigger = service.generate_handout(course_id=course_id, idempotency_key=None)
+        handout_version_id = trigger["entity"]["id"]
+
+        assert outline_client.document_context is not None
+        assert "ZF 公理化集合论" in outline_client.document_context
+        assert "文氏图" in outline_client.document_context
+
+        latest = repo.get_latest_handout(course_id)
+        assert latest["handoutVersionId"] == handout_version_id
+        assert latest["metaJson"] == {"outlineUsedFallback": False, "outlineIssues": []}
+
+        outline = repo.get_latest_outline(course_id)
+        assert outline["items"][0]["title"] == "集合论基础"
+        assert outline["items"][0]["summary"] == "理解集合、元素和属于关系的核心定义。"
+        assert outline["items"][0]["sourceSegmentKeys"] == segment_keys
+        assert isinstance(outline["items"][0]["blockId"], int)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_handout_generate_falls_back_and_records_invalid_outline_issues():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_active_video_segments(repo)
+        service = HandoutService(
+            courses=repo,
+            handouts=repo,
+            idempotency=repo,
+            outline_client=_InvalidTimelineOutlineClient(),
+        )
+
+        service.generate_handout(course_id=course_id, idempotency_key=None)
+
+        latest = repo.get_latest_handout(course_id)
+        assert latest["metaJson"]["outlineUsedFallback"] is True
+        assert "outline.time_overlap" in latest["metaJson"]["outlineIssues"]
+
+        outline = repo.get_latest_outline(course_id)
+        assert outline["items"][0]["sourceSegmentKeys"] == segment_keys
+        assert outline["items"][0]["generationStatus"] == "pending"
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_sql_handout_generate_enqueues_root_task_with_contract_payload_only():
     repo, session, engine = _build_sqlite_repository()
     try:
@@ -1068,6 +1152,66 @@ def _override_handout_service(service: HandoutService) -> Iterator[None]:
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous_overrides)
+
+
+class _SemanticOutlineClient:
+    def __init__(self) -> None:
+        self.document_context: str | None = None
+
+    def generate_outline(self, caption_segments, *, title, summary, document_context=None):
+        self.document_context = document_context
+        source_keys = [str(segment["segmentKey"]) for segment in caption_segments]
+        return {
+            "title": "集合论语义目录",
+            "summary": "按集合论概念组织的视频讲义目录。",
+            "items": [
+                {
+                    "outlineKey": "set-basics",
+                    "title": "集合论基础",
+                    "summary": "理解集合、元素和属于关系的核心定义。",
+                    "startSec": min(int(segment["startSec"]) for segment in caption_segments),
+                    "endSec": max(int(segment["endSec"]) for segment in caption_segments),
+                    "sortNo": 1,
+                    "generationStatus": "pending",
+                    "sourceSegmentKeys": source_keys,
+                    "topicTags": ["集合", "元素"],
+                }
+            ],
+        }
+
+
+class _InvalidTimelineOutlineClient:
+    def generate_outline(self, caption_segments, *, title, summary, document_context=None):
+        first = caption_segments[0]
+        second = caption_segments[-1]
+        return {
+            "title": "非法目录",
+            "summary": "非法时间线。",
+            "items": [
+                {
+                    "outlineKey": "bad-1",
+                    "title": "集合定义",
+                    "summary": "第一段。",
+                    "startSec": int(first["startSec"]),
+                    "endSec": int(second["endSec"]),
+                    "sortNo": 1,
+                    "generationStatus": "pending",
+                    "sourceSegmentKeys": [str(first["segmentKey"]), str(second["segmentKey"])],
+                    "topicTags": [],
+                },
+                {
+                    "outlineKey": "bad-2",
+                    "title": "属于关系",
+                    "summary": "第二段。",
+                    "startSec": int(second["startSec"]),
+                    "endSec": int(second["endSec"]),
+                    "sortNo": 2,
+                    "generationStatus": "pending",
+                    "sourceSegmentKeys": [str(second["segmentKey"])],
+                    "topicTags": [],
+                },
+            ],
+        }
 
 
 class _RecordingHandoutDispatcher:
