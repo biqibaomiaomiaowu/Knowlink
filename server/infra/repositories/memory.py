@@ -216,8 +216,8 @@ class MemoryScaffoldRepository:
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None:
         return self.store.quizzes.get(quiz_id)
 
-    def submit_quiz(self, quiz_id: int) -> dict[str, Any]:
-        return self.store.submit_quiz(quiz_id)
+    def submit_quiz(self, quiz_id: int, answers: Sequence[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return self.store.submit_quiz(quiz_id, answers or [])
 
     def next_task_id(self) -> int:
         return self.store.next_id("task")
@@ -233,6 +233,12 @@ class MemoryScaffoldRepository:
 
     def complete_review_task(self, review_task_id: int) -> dict[str, Any]:
         return {"reviewTaskId": review_task_id, "completed": True}
+
+    def list_daily_recommended_knowledge_points(self, *, limit: int = 3) -> list[dict[str, Any]]:
+        return self.store.list_daily_recommended_knowledge_points(limit=limit)
+
+    def get_learning_stats(self) -> dict[str, Any]:
+        return self.store.get_learning_stats()
 
     def get_progress(self, course_id: int) -> dict[str, Any]:
         return self.store.get_progress(course_id)

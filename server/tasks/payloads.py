@@ -26,7 +26,9 @@ class HandoutBlockGeneratePayload(CamelModel):
 
 class QuizGeneratePayload(CamelModel):
     course_id: int
-    handout_version_id: int
+    quiz_id: int
+    handout_version_id: int | None = None
+    source_parse_run_id: int | None = None
 
 
 class ReviewRefreshPayload(CamelModel):

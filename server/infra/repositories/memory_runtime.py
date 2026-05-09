@@ -520,7 +520,8 @@ class RuntimeStore:
             "entity": {"type": "quiz", "id": quiz_id},
         }
 
-    def submit_quiz(self, quiz_id: int) -> dict[str, Any]:
+    def submit_quiz(self, quiz_id: int, answers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        _ = answers
         attempt_id = self.next_id("attempt")
         review_run = self.create_review_run(self.quizzes[quiz_id]["courseId"])
         return {
@@ -588,6 +589,37 @@ class RuntimeStore:
 
     def get_review_run(self, review_run_id: int) -> dict[str, Any] | None:
         return self.review_runs.get(review_run_id)
+
+    def list_daily_recommended_knowledge_points(self, *, limit: int = 3) -> list[dict[str, Any]]:
+        recent_courses = self.list_recent_courses()
+        target_course_id = recent_courses[0]["courseId"] if recent_courses else None
+        recommendations = [
+            {
+                "knowledgePoint": "极限定义",
+                "reason": "高频考点，且最近一次学习停留在该模块。",
+                "targetCourseId": target_course_id,
+            },
+            {
+                "knowledgePoint": "导数几何意义",
+                "reason": "讲义块完成后适合立即回看并练习。",
+                "targetCourseId": target_course_id,
+            },
+        ]
+        return recommendations[:limit]
+
+    def get_learning_stats(self) -> dict[str, Any]:
+        completed_tasks = sum(
+            1
+            for tasks in self.review_tasks.values()
+            for task in tasks
+            if task.get("status") == "completed"
+        )
+        return {
+            "streakDays": 3 if self.progress else 0,
+            "completedCourses": len(self.courses),
+            "reviewTasksCompleted": completed_tasks,
+            "totalLearningMinutes": 95 if self.courses else 0,
+        }
 
     def update_progress(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.progress.get(course_id, {"courseId": course_id})
