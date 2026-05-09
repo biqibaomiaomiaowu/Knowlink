@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import timedelta
 from typing import Any
 
 import sqlalchemy as sa
@@ -11,11 +12,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import server.infra.db.models  # noqa: F401
-from server.api.deps import get_handout_service
+from server.api.deps import get_handout_service, get_resource_service
 from server.app import app
-from server.domain.services import HandoutService
+from server.domain.services import HandoutService, ResourceService
 from server.infra.db.base import Base
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.infra.storage import ObjectStat
 from server.tasks.handouts import run_handout_block_generate, run_handout_generate
 from server.tests.test_api import AUTH_HEADERS, request
 
@@ -653,6 +655,66 @@ def test_jump_target_prefers_handout_block_ref_doc_locator_and_keeps_video_time(
         engine.dispose()
 
 
+def test_ready_handout_jump_target_video_resource_can_resolve_playback_url():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _ = _create_course_with_active_video_segments(repo)
+        handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        handout_service.generate_handout(course_id=course_id, idempotency_key=None)
+        block = repo.get_latest_handout(course_id)["blocks"][0]
+        saved = repo.save_handout_block_result(
+            block["blockId"],
+            {
+                "title": "集合定义",
+                "summary": "理解集合定义。",
+                "contentMd": "## 集合定义",
+                "sourceSegmentKeys": block["sourceSegmentKeys"],
+                "knowledgePoints": [],
+                "citations": [],
+            },
+        )
+        assert saved is not None
+        assert saved["status"] == "ready"
+        resource_service = ResourceService(
+            courses=repo,
+            resources=repo,
+            idempotency=repo,
+            storage=_PlaybackObjectStorage(),
+        )
+
+        with _override_handout_service(handout_service), _override_resource_service(resource_service):
+            jump_status, jump_body = asyncio.run(
+                request(
+                    "GET",
+                    f"/api/v1/handout-blocks/{block['blockId']}/jump-target",
+                    headers=AUTH_HEADERS,
+                )
+            )
+            video_resource_id = jump_body["data"]["videoResourceId"]
+            playback_status, playback_body = asyncio.run(
+                request(
+                    "GET",
+                    f"/api/v1/course-resources/{video_resource_id}/playback",
+                    headers=AUTH_HEADERS,
+                )
+            )
+
+        assert jump_status == 200
+        assert video_resource_id is not None
+        assert playback_status == 200
+        assert playback_body["data"]["resourceId"] == video_resource_id
+        assert playback_body["data"]["resourceType"] == "mp4"
+        assert playback_body["data"]["playbackUrl"].startswith("http://127.0.0.1:9000/knowlink/")
+        assert f"raw/1/{course_id}/outline.mp4" in playback_body["data"]["playbackUrl"]
+        assert "method=get" in playback_body["data"]["playbackUrl"]
+        assert "minio:9000" not in playback_body["data"]["playbackUrl"]
+        assert playback_body["data"]["mimeType"] == "video/mp4"
+        assert playback_body["data"]["durationSec"] is None
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_handout_block_worker_generates_one_block_refs_and_vector_document():
     repo, session, engine = _build_sqlite_repository()
     try:
@@ -1166,6 +1228,42 @@ def _override_handout_service(service: HandoutService) -> Iterator[None]:
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous_overrides)
+
+
+@contextmanager
+def _override_resource_service(service: ResourceService) -> Iterator[None]:
+    previous_overrides: dict[Any, Any] = dict(app.dependency_overrides)
+
+    async def _service_override() -> ResourceService:
+        return service
+
+    app.dependency_overrides[get_resource_service] = _service_override
+    try:
+        yield
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous_overrides)
+
+
+class _PlaybackObjectStorage:
+    def presigned_put_url(
+        self,
+        object_key: str,
+        *,
+        expires: timedelta,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        return f"http://127.0.0.1:9000/knowlink/{object_key}?method=put"
+
+    def presigned_get_url(self, object_key: str, *, expires: timedelta) -> str:
+        return f"http://127.0.0.1:9000/knowlink/{object_key}?method=get"
+
+    def stat_object(self, object_key: str) -> ObjectStat:
+        return ObjectStat(size_bytes=None, checksum_required=False)
+
+    def read_object_bytes(self, object_key: str) -> bytes:
+        return b""
 
 
 class _SemanticOutlineClient:
