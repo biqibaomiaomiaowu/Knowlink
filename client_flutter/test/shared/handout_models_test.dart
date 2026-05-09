@@ -9,17 +9,42 @@ void main() {
       'summary': '按视频时间线组织的讲义目录',
       'items': [
         {
-          'outlineKey': 'outline-1',
-          'blockId': 4001,
-          'title': '集合的基本概念',
-          'summary': '介绍集合、元素和属于关系',
+          'outlineKey': 'section-1',
+          'title': '集合的概念与表示',
+          'summary': '从集合定义过渡到集合表示方法',
           'startSec': 0,
-          'endSec': 180,
+          'endSec': 360,
           'sortNo': 1,
-          'generationStatus': 'pending',
-          'sourceSegmentKeys': ['mp4-c1', 'mp4-c2'],
+          'children': [
+            {
+              'outlineKey': 'outline-1',
+              'blockId': 4001,
+              'title': '集合的基本概念',
+              'summary': '介绍集合、元素和属于关系',
+              'startSec': 0,
+              'endSec': 180,
+              'sortNo': 1,
+              'generationStatus': 'pending',
+              'sourceSegmentKeys': ['mp4-c1', 'mp4-c2'],
+              'topicTags': ['集合'],
+            },
+            {
+              'outlineKey': 'outline-2',
+              'blockId': 4002,
+              'title': '集合的表示方法',
+              'summary': '从列举法过渡到描述法',
+              'startSec': 180,
+              'endSec': 360,
+              'sortNo': 2,
+              'generationStatus': 'pending',
+              'sourceSegmentKeys': ['mp4-c3'],
+              'topicTags': [],
+            },
+          ],
         },
       ],
+      'outlineUsedFallback': true,
+      'outlineIssues': ['缺少章节标题，已按时间线降级分组'],
     });
     final blocks = HandoutBlocksModel.fromJson({
       'items': [
@@ -76,7 +101,16 @@ void main() {
       'prefetchBlockId': 4003,
     });
 
-    expect(outline.items.single.sourceSegmentKeys, ['mp4-c1', 'mp4-c2']);
+    final section = outline.items.single;
+    final firstChild = section.children.first;
+    expect(section.outlineKey, 'section-1');
+    expect(section.children, hasLength(2));
+    expect(outline.children.map((child) => child.blockId), [4001, 4002]);
+    expect(outline.childForBlockId(4002)?.title, '集合的表示方法');
+    expect(firstChild.sourceSegmentKeys, ['mp4-c1', 'mp4-c2']);
+    expect(firstChild.topicTags, ['集合']);
+    expect(outline.outlineUsedFallback, isTrue);
+    expect(outline.outlineIssues.single, contains('降级分组'));
     expect(blocks.items.single.citations.single.locatorText, 'PDF 第 2 页');
     expect(blocks.items.single.containsPosition(120, isLast: false), isTrue);
     expect(blocks.items.single.containsPosition(360, isLast: false), isFalse);

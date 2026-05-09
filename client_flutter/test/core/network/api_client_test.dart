@@ -524,17 +524,30 @@ void main() {
                 'summary': '按视频时间线组织的讲义目录',
                 'items': [
                   {
-                    'outlineKey': 'outline-1',
-                    'blockId': 4001,
-                    'title': '集合的基本概念',
-                    'summary': '介绍集合、元素和属于关系',
+                    'outlineKey': 'section-1',
+                    'title': '集合的概念与表示',
+                    'summary': '从集合定义过渡到集合表示方法',
                     'startSec': 0,
-                    'endSec': 180,
+                    'endSec': 360,
                     'sortNo': 1,
-                    'generationStatus': 'pending',
-                    'sourceSegmentKeys': ['mp4-c1'],
+                    'children': [
+                      {
+                        'outlineKey': 'outline-1',
+                        'blockId': 4001,
+                        'title': '集合的基本概念',
+                        'summary': '介绍集合、元素和属于关系',
+                        'startSec': 0,
+                        'endSec': 180,
+                        'sortNo': 1,
+                        'generationStatus': 'pending',
+                        'sourceSegmentKeys': ['mp4-c1'],
+                        'topicTags': ['集合'],
+                      },
+                    ],
                   },
                 ],
+                'outlineUsedFallback': false,
+                'outlineIssues': [],
               },
             }),
             200,
@@ -723,7 +736,7 @@ void main() {
     expect(generated.entity.id, 3001);
     expect(status.status, 'outline_ready');
     expect(latest.totalBlocks, 3);
-    expect(outline.items.single.sourceSegmentKeys, ['mp4-c1']);
+    expect(outline.items.single.children.single.sourceSegmentKeys, ['mp4-c1']);
     expect(blocks.items.single.citations.single.pageNo, 2);
     expect(blockGenerated.entity?.type, 'handout_block');
     expect(blockStatus.status, 'generating');

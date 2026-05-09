@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -54,8 +55,9 @@ class _HandoutPageState extends ConsumerState<HandoutPage> {
     final state = ref.watch(handoutProvider);
     final player = ref.watch(playerStateProvider);
     final notifier = ref.read(handoutProvider.notifier);
-    final highlighted = state.highlightedBlockFor(player.positionSec);
-    final selectedBlock = state.selectedBlock ?? highlighted;
+    final highlighted = state.highlightedChildFor(player.positionSec);
+    final selectedChild = state.selectedOutlineChild;
+    final selectedBlock = state.selectedBlock;
 
     return AppScaffold(
       title: '个性化互动讲义',
@@ -65,7 +67,8 @@ class _HandoutPageState extends ConsumerState<HandoutPage> {
         courseId: widget.courseId,
         state: state,
         player: player,
-        highlightedBlock: highlighted,
+        highlightedChild: highlighted,
+        selectedBlockId: selectedChild?.blockId,
         selectedBlock: selectedBlock,
         questionController: _questionController,
         onTogglePlay: () {
@@ -85,19 +88,19 @@ class _HandoutPageState extends ConsumerState<HandoutPage> {
             positionSec: next,
           );
         },
-        onSelectBlock: notifier.selectBlock,
+        onSelectChild: notifier.selectOutlineChild,
         onRefresh: () => notifier.refreshData(widget.courseId),
         onGenerate: () => notifier.generateAndPoll(widget.courseId),
-        onGenerateBlock: selectedBlock == null
+        onGenerateBlock: selectedChild == null
             ? null
             : () => notifier.generateBlock(
-                  selectedBlock.blockId,
+                  selectedChild.blockId,
                   courseId: widget.courseId,
                 ),
-        onCitationTap: selectedBlock == null
+        onCitationTap: selectedChild == null
             ? null
             : (citation) => notifier.requestJumpTarget(
-                  selectedBlock.blockId,
+                  selectedChild.blockId,
                   citation: citation,
                 ),
         onSubmitQuestion: () async {
@@ -140,12 +143,13 @@ class _HandoutWorkspace extends StatelessWidget {
     required this.courseId,
     required this.state,
     required this.player,
-    required this.highlightedBlock,
+    required this.highlightedChild,
+    required this.selectedBlockId,
     required this.selectedBlock,
     required this.questionController,
     required this.onTogglePlay,
     required this.onSeek,
-    required this.onSelectBlock,
+    required this.onSelectChild,
     required this.onRefresh,
     required this.onGenerate,
     required this.onGenerateBlock,
@@ -156,12 +160,13 @@ class _HandoutWorkspace extends StatelessWidget {
   final String courseId;
   final HandoutState state;
   final PlayerState player;
-  final HandoutBlockModel? highlightedBlock;
+  final HandoutOutlineChildModel? highlightedChild;
+  final int? selectedBlockId;
   final HandoutBlockModel? selectedBlock;
   final TextEditingController questionController;
   final VoidCallback onTogglePlay;
   final ValueChanged<int> onSeek;
-  final ValueChanged<HandoutBlockModel> onSelectBlock;
+  final ValueChanged<HandoutOutlineChildModel> onSelectChild;
   final VoidCallback onRefresh;
   final VoidCallback onGenerate;
   final VoidCallback? onGenerateBlock;
@@ -178,9 +183,9 @@ class _HandoutWorkspace extends StatelessWidget {
               _OutlinePanel(
                 courseId: courseId,
                 state: state,
-                highlightedBlockId: highlightedBlock?.blockId,
-                selectedBlockId: selectedBlock?.blockId,
-                onSelect: onSelectBlock,
+                highlightedBlockId: highlightedChild?.blockId,
+                selectedBlockId: selectedBlockId,
+                onSelect: onSelectChild,
                 onRefresh: onRefresh,
                 onGenerate: onGenerate,
               ),
@@ -189,7 +194,7 @@ class _HandoutWorkspace extends StatelessWidget {
                 courseId: courseId,
                 state: state,
                 player: player,
-                highlightedBlock: highlightedBlock,
+                highlightedChild: highlightedChild,
                 selectedBlock: selectedBlock,
                 onTogglePlay: onTogglePlay,
                 onSeek: onSeek,
@@ -216,9 +221,9 @@ class _HandoutWorkspace extends StatelessWidget {
               child: _OutlinePanel(
                 courseId: courseId,
                 state: state,
-                highlightedBlockId: highlightedBlock?.blockId,
-                selectedBlockId: selectedBlock?.blockId,
-                onSelect: onSelectBlock,
+                highlightedBlockId: highlightedChild?.blockId,
+                selectedBlockId: selectedBlockId,
+                onSelect: onSelectChild,
                 onRefresh: onRefresh,
                 onGenerate: onGenerate,
               ),
@@ -229,7 +234,7 @@ class _HandoutWorkspace extends StatelessWidget {
                 courseId: courseId,
                 state: state,
                 player: player,
-                highlightedBlock: highlightedBlock,
+                highlightedChild: highlightedChild,
                 selectedBlock: selectedBlock,
                 onTogglePlay: onTogglePlay,
                 onSeek: onSeek,
@@ -270,20 +275,20 @@ class _OutlinePanel extends StatelessWidget {
   final HandoutState state;
   final int? highlightedBlockId;
   final int? selectedBlockId;
-  final ValueChanged<HandoutBlockModel> onSelect;
+  final ValueChanged<HandoutOutlineChildModel> onSelect;
   final VoidCallback onRefresh;
   final VoidCallback onGenerate;
 
   @override
   Widget build(BuildContext context) {
     final latest = state.latest.valueOrNull;
-    final blocks = state.blocks.valueOrNull?.items ?? const [];
+    final outline = state.outline.valueOrNull;
     final status = state.versionStatus.valueOrNull;
     final blockList = Padding(
       padding: const EdgeInsets.all(12),
       child: _BlockList(
         state: state,
-        blocks: blocks,
+        outline: outline,
         highlightedBlockId: highlightedBlockId,
         selectedBlockId: selectedBlockId,
         onSelect: onSelect,
@@ -344,6 +349,12 @@ class _OutlinePanel extends StatelessWidget {
                         total: status.totalBlocks,
                       ),
                     ],
+                    if (outline != null &&
+                        (outline.outlineUsedFallback ||
+                            outline.outlineIssues.isNotEmpty)) ...[
+                      const SizedBox(height: 12),
+                      _OutlineIssueNotice(outline: outline),
+                    ],
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
                       onPressed: state.isGenerating ? null : onGenerate,
@@ -401,58 +412,213 @@ class _MiniProgress extends StatelessWidget {
   }
 }
 
+class _OutlineIssueNotice extends StatelessWidget {
+  const _OutlineIssueNotice({
+    required this.outline,
+  });
+
+  final HandoutOutlineModel outline;
+
+  @override
+  Widget build(BuildContext context) {
+    final issueText = [
+      if (outline.outlineUsedFallback) '目录已使用降级结构展示。',
+      ...outline.outlineIssues,
+    ].join('；');
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.info_outline,
+            size: 18,
+            color: Color(0xFFB45309),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              issueText,
+              style: const TextStyle(
+                color: Color(0xFF92400E),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BlockList extends StatelessWidget {
   const _BlockList({
     required this.state,
-    required this.blocks,
+    required this.outline,
     required this.highlightedBlockId,
     required this.selectedBlockId,
     required this.onSelect,
   });
 
   final HandoutState state;
-  final List<HandoutBlockModel> blocks;
+  final HandoutOutlineModel? outline;
   final int? highlightedBlockId;
   final int? selectedBlockId;
-  final ValueChanged<HandoutBlockModel> onSelect;
+  final ValueChanged<HandoutOutlineChildModel> onSelect;
 
   @override
   Widget build(BuildContext context) {
-    if (state.blocks.isLoading) {
-      return const AppLoadingView(label: '正在读取讲义块');
+    if (state.outline.isLoading) {
+      return const AppLoadingView(label: '正在读取讲义目录');
     }
-    if (state.blocks.hasError) {
-      return AppErrorView(message: '讲义块暂不可用：${state.blocks.error}');
+    if (state.outline.hasError) {
+      return AppErrorView(message: '讲义目录暂不可用：${state.outline.error}');
     }
-    if (blocks.isEmpty) {
-      return const Text('暂无讲义块。');
+    final sections = outline?.items ?? const [];
+    if (sections.isEmpty) {
+      return const Text('暂无讲义目录。');
     }
 
-    return ListView.separated(
-      itemCount: blocks.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 6),
+    return ListView.builder(
+      itemCount: sections.length,
       itemBuilder: (context, index) {
-        final block = blocks[index];
-        return _BlockTile(
-          block: block,
-          isHighlighted: block.blockId == highlightedBlockId,
-          isSelected: block.blockId == selectedBlockId,
-          onTap: () => onSelect(block),
+        final section = sections[index];
+        return Padding(
+          padding:
+              EdgeInsets.only(bottom: index == sections.length - 1 ? 0 : 14),
+          child: _OutlineSectionGroup(
+            section: section,
+            highlightedBlockId: highlightedBlockId,
+            selectedBlockId: selectedBlockId,
+            onSelect: onSelect,
+          ),
         );
       },
     );
   }
 }
 
+class _OutlineSectionGroup extends StatelessWidget {
+  const _OutlineSectionGroup({
+    required this.section,
+    required this.highlightedBlockId,
+    required this.selectedBlockId,
+    required this.onSelect,
+  });
+
+  final HandoutOutlineSectionModel section;
+  final int? highlightedBlockId;
+  final int? selectedBlockId;
+  final ValueChanged<HandoutOutlineChildModel> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader(section: section),
+        const SizedBox(height: 6),
+        if (section.children.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(left: 10, bottom: 4),
+            child: Text(
+              '该分组暂无二级目录。',
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          )
+        else
+          for (final child in section.children)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _BlockTile(
+                child: child,
+                isHighlighted: child.blockId == highlightedBlockId,
+                isSelected: child.blockId == selectedBlockId,
+                onTap: () => onSelect(child),
+              ),
+            ),
+      ],
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.section,
+  });
+
+  final HandoutOutlineSectionModel section;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            section.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppTheme.ink,
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            [
+              '${section.children.length} 个二级目录',
+              '${_formatSec(section.startSec)}-${_formatSec(section.endSec)}',
+            ].join(' · '),
+            style: const TextStyle(
+              color: AppTheme.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (section.summary.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              section.summary,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _BlockTile extends StatelessWidget {
   const _BlockTile({
-    required this.block,
+    required this.child,
     required this.isHighlighted,
     required this.isSelected,
     required this.onTap,
   });
 
-  final HandoutBlockModel block;
+  final HandoutOutlineChildModel child;
   final bool isHighlighted;
   final bool isSelected;
   final VoidCallback onTap;
@@ -486,15 +652,52 @@ class _BlockTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 9),
                 Expanded(
-                  child: Text(
-                    block.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: color,
-                      fontWeight:
-                          isSelected ? FontWeight.w800 : FontWeight.w600,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        child.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: color,
+                          fontWeight:
+                              isSelected ? FontWeight.w800 : FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          Text(
+                            _statusLabel(child.generationStatus),
+                            style: TextStyle(
+                              color: color,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          Text(
+                            '${_formatSec(child.startSec)}-${_formatSec(child.endSec)}',
+                            style: const TextStyle(
+                              color: AppTheme.muted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (child.topicTags.isNotEmpty)
+                            Text(
+                              child.topicTags.take(2).join(' / '),
+                              style: const TextStyle(
+                                color: AppTheme.muted,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -511,7 +714,7 @@ class _LearningCenterPanel extends StatelessWidget {
     required this.courseId,
     required this.state,
     required this.player,
-    required this.highlightedBlock,
+    required this.highlightedChild,
     required this.selectedBlock,
     required this.onTogglePlay,
     required this.onSeek,
@@ -522,7 +725,7 @@ class _LearningCenterPanel extends StatelessWidget {
   final String courseId;
   final HandoutState state;
   final PlayerState player;
-  final HandoutBlockModel? highlightedBlock;
+  final HandoutOutlineChildModel? highlightedChild;
   final HandoutBlockModel? selectedBlock;
   final VoidCallback onTogglePlay;
   final ValueChanged<int> onSeek;
@@ -532,6 +735,9 @@ class _LearningCenterPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final block = selectedBlock;
+    final highlightedBlock = highlightedChild == null
+        ? null
+        : state.blockForId(highlightedChild!.blockId);
     return SectionCard(
       padding: const EdgeInsets.all(20),
       child: ListView(
@@ -938,7 +1144,7 @@ class _BlockContent extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '该讲义块状态为${_statusLabel(block.status)}，正文生成后会展示原始 Markdown。',
+            '该讲义块状态为${_statusLabel(block.status)}，正文生成后会展示结构化讲义内容。',
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
@@ -961,12 +1167,37 @@ class _BlockContent extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppTheme.line),
       ),
-      child: Text(
-        content,
-        style: const TextStyle(
-          color: AppTheme.ink,
-          fontFamily: 'monospace',
-          height: 1.45,
+      child: MarkdownBody(
+        data: content,
+        selectable: true,
+        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+          p: const TextStyle(
+            color: AppTheme.ink,
+            height: 1.5,
+            fontSize: 14,
+          ),
+          h1: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: AppTheme.ink,
+                fontWeight: FontWeight.w900,
+              ),
+          h2: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: AppTheme.ink,
+                fontWeight: FontWeight.w900,
+              ),
+          h3: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: AppTheme.ink,
+                fontWeight: FontWeight.w900,
+              ),
+          listBullet: const TextStyle(
+            color: AppTheme.ink,
+            height: 1.45,
+          ),
+          blockquoteDecoration: const BoxDecoration(
+            color: Color(0xFFEFF6FF),
+            border: Border(
+              left: BorderSide(color: AppTheme.brandBlue, width: 3),
+            ),
+          ),
         ),
       ),
     );
