@@ -4,9 +4,11 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from server.ai.qa_policy import (
+    VivoQaAnswerClient,
     build_qa_message_refs,
     build_block_scoped_qa_candidates,
     generate_block_qa_response,
+    get_configured_qa_answer_client,
     normalize_qa_answer_with_refs,
 )
 
@@ -211,6 +213,189 @@ def test_schema_valid_client_citation_is_mapped_back_to_candidate():
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "direct_answer"
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
+
+
+def test_configured_qa_answer_client_requires_enable_and_app_key(monkeypatch):
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_QA", raising=False)
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "fake-key")
+    assert get_configured_qa_answer_client() is None
+
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_QA", "true")
+    monkeypatch.delenv("KNOWLINK_VIVO_APP_KEY", raising=False)
+    assert get_configured_qa_answer_client() is None
+
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "fake-key")
+    monkeypatch.setenv("KNOWLINK_VIVO_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("KNOWLINK_VIVO_QA_MODEL", "qa-model")
+    monkeypatch.setenv("KNOWLINK_VIVO_QA_TIMEOUT_SEC", "9")
+
+    assert isinstance(get_configured_qa_answer_client(), VivoQaAnswerClient)
+
+
+def test_vivo_qa_answer_client_uses_chat_completions_and_normalizes_json(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "```json\n"
+                                        + json.dumps(
+                                            {
+                                                "answerMd": "集合是确定对象组成的整体。",
+                                                "answerType": "direct_answer",
+                                                "citations": [
+                                                    {
+                                                        "resourceId": 2,
+                                                        "segmentKey": "pdf-p1",
+                                                        "pageNo": 1,
+                                                        "refLabel": "PDF 第 1 页",
+                                                    }
+                                                ],
+                                            },
+                                            ensure_ascii=False,
+                                        )
+                                        + "\n```",
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = request.data.decode("utf-8")
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = VivoQaAnswerClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-pro",
+        timeout_sec=7,
+    )
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={**_current_block(), "citations": [], "knowledgePoints": []},
+        segments=_segments(),
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    body = json.loads(captured["body"])
+    assert captured["url"].startswith("https://example.invalid/v1/chat/completions?request_id=")
+    assert captured["headers"]["Authorization"] == "Bearer fake-key"
+    assert captured["headers"]["Content-type"] == "application/json; charset=utf-8"
+    assert captured["timeout"] == 7
+    assert body["model"] == "Doubao-Seed-2.0-pro"
+    assert body["temperature"] == 0.1
+    assert body["stream"] is False
+    assert "evidenceCandidates" in body["messages"][1]["content"]
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
+
+
+def test_vivo_qa_bad_json_falls_back_to_candidate(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "not-json"}}]}).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+    client = VivoQaAnswerClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-pro",
+        timeout_sec=7,
+    )
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={**_current_block(), "citations": [], "knowledgePoints": []},
+        segments=_segments(),
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
+
+
+def test_vivo_qa_candidate_outside_citation_becomes_insufficient_evidence(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "answerMd": "候选外引用不能被接受。",
+                                        "answerType": "direct_answer",
+                                        "citations": [{"resourceId": 999, "pageNo": 1, "refLabel": "外部资料"}],
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            }
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+    client = VivoQaAnswerClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-pro",
+        timeout_sec=7,
+    )
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={**_current_block(), "citations": [], "knowledgePoints": []},
+        segments=_segments(),
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    assert response["answerType"] == "insufficient_evidence"
+    assert response["citations"] == []
 
 
 def test_qa_message_refs_include_only_answer_citations_not_all_candidates():
