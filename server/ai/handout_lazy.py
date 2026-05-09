@@ -24,7 +24,9 @@ JSON 格式固定为：
 2. 每个 item 的 sourceSegmentKeys 必须来自输入 segmentKey。
 3. startSec/endSec 必须覆盖 sourceSegmentKeys 对应字幕的时间范围，按 sortNo 递增且不得重叠。
 4. generationStatus 固定返回 pending；完整讲义和知识点后续按 block 懒生成。
-5. 标题要短，摘要用 1 句中文说明该段学习重点。
+5. title 必须是 4-12 字的概念型短标题，例如“集合论基础”“文氏图表示”；不要直接复制 ASR 长句，不要以省略号结尾。
+6. summary 必须是 1 句学习重点，不要截断字幕原文，不要写成时间轴说明。
+7. 可用补充资料上下文纠正 ASR 噪声，例如把 zero/ZF、文试图/文氏图一类误识别改成课程资料中的正确概念。
 """
 
 
@@ -101,7 +103,10 @@ def generate_handout_outline(
             used_fallback=True,
         )
 
-    issues = outline_timeline_issues(outline.get("items", []))
+    issues = [
+        *outline_timeline_issues(outline.get("items", [])),
+        *outline_source_issues(outline.get("items", []), caption_segments),
+    ]
     if issues:
         return HandoutOutlineGeneration(
             outline=build_handout_outline_from_captions(
@@ -262,6 +267,39 @@ def outline_timeline_issues(items: Sequence[Mapping[str, Any]]) -> list[str]:
     return issues
 
 
+def outline_source_issues(
+    items: Sequence[Mapping[str, Any]],
+    caption_segments: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    captions = _valid_video_captions(caption_segments)
+    captions_by_key = {str(item["segmentKey"]): item for item in captions}
+    issues: list[str] = []
+
+    for item in items:
+        raw_keys = item.get("sourceSegmentKeys")
+        if not isinstance(raw_keys, list) or not raw_keys:
+            issues.append("outline.source_segments_missing")
+            continue
+
+        source_keys = [str(key) for key in raw_keys]
+        source_captions = [captions_by_key[key] for key in source_keys if key in captions_by_key]
+        if len(source_captions) != len(source_keys):
+            issues.append("outline.source_segment_unknown")
+            continue
+
+        start_sec = _as_int(item.get("startSec"))
+        end_sec = _as_int(item.get("endSec"))
+        if start_sec is None or end_sec is None:
+            continue
+        if start_sec != min(int(source["startSec"]) for source in source_captions):
+            issues.append("outline.source_time_mismatch")
+            continue
+        if end_sec != max(int(source["endSec"]) for source in source_captions):
+            issues.append("outline.source_time_mismatch")
+
+    return issues
+
+
 def current_outline_item(
     items: Sequence[Mapping[str, Any]],
     *,
@@ -348,9 +386,11 @@ def _build_outline_prompt(
         [
             f"课程标题：{title}",
             f"默认摘要：{summary}",
-            f"补充资料上下文：{context or '无'}",
+            f"补充资料上下文（用于纠正 ASR 同音词和识别噪声，不可生成超出字幕时间线的新段落）：{context or '无'}",
             "请基于以下 video_caption segments 的预分组生成目录。每个 group 建议对应一个 outline item；"
             "可以合并相邻 group，但不要拆分 group 内的 sourceSegmentKeys。",
+            "每个 item 的 title 用概念短语，不要复制字幕长句；summary 只写 1 句学习重点；"
+            "startSec/endSec 必须等于该 item 引用的 sourceSegmentKeys 的最小 startSec 和最大 endSec。",
             f"video_caption groups：{json.dumps(caption_groups, ensure_ascii=False, sort_keys=True)}",
         ]
     )
