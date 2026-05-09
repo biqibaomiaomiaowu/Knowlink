@@ -61,6 +61,9 @@
 | `KNOWLINK_VIVO_VISION_BATCH_SIZE` | 同一文件视觉资产批量请求大小，默认 `2`，大文件按批拆分。 |
 | `KNOWLINK_VIVO_OUTLINE_MODEL` | 视频目录生成模型，默认优先快模型 `Doubao-Seed-2.0-mini`。 |
 | `KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL` | 单段讲义生成候选模型，默认 `Doubao-Seed-2.0-pro`；可与 `Volc-DeepSeek-V3.2`、`qwen3.5-plus` 做质量 / 耗时对比。 |
+| `KNOWLINK_ENABLE_VIVO_QA` | 是否启用 vivo OpenAI-compatible QA 模型，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才允许发起网络请求。 |
+| `KNOWLINK_VIVO_QA_MODEL` | 块级 QA 回答模型，默认 `Doubao-Seed-2.0-pro`；返回内容必须经过服务端 JSON 解析、候选引用反查和归一化。 |
+| `KNOWLINK_VIVO_QA_TIMEOUT_SEC` | 块级 QA 单次 LLM 调用超时，默认 `60` 秒；超时、坏 JSON、空引用或候选外引用必须降级为本地 fallback 或 `insufficient_evidence`。 |
 | `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` | 目录生成单次 LLM 调用超时，默认 `40` 秒；超时后回退为本地目录生成。 |
 | `KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC` | 单段讲义块生成单次 LLM 调用超时，默认 `120` 秒；超时后该 block 标记 `failed` 或降级为短摘要。 |
 | `KNOWLINK_ENABLE_VIVO_EMBEDDING` | 是否启用 vivo 文本向量，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才可创建 embedding client。 |
@@ -120,6 +123,13 @@
 - `generationStatus` 固定为 `pending`、`generating`、`ready`、`failed`；解析阶段创建 outline 时 block 默认是 `pending`。
 - `sourceSegmentKeys` 只能引用当前 active parse run 下的 `video_caption` segment；后续单段讲义生成只允许以该时间段 ASR 文本为主输入。
 - outline 生成优先使用快模型，默认 `Doubao-Seed-2.0-mini`；调用超过 `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` 时必须记录失败原因，不阻塞已成功的字幕 segment。
+
+块级 QA 模型约束：
+
+- QA 可选接入 `KNOWLINK_VIVO_QA_MODEL`，但前端请求 / 响应结构不因模型接入改变。
+- 模型只接收当前 active course、active parse run、active handout version 和当前 block 范围内的候选证据。
+- 模型只能返回 `answerMd`、`answerType`、`citations` JSON；`citations` 必须由服务端反查候选证据后再归一化为前端可见引用。
+- 坏 JSON、候选外引用、空引用或无候选证据时，不得编造答案；服务端必须降级为本地 fallback 或 `insufficient_evidence`。
 
 ### 1.3 `knowledge_points`
 

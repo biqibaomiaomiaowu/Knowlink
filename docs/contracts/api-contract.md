@@ -972,6 +972,7 @@ stub 阶段约束：
   "sessionId": 6001,
   "messageId": 6002,
   "answerMd": "定义控制了题型的判断边界。",
+  "answerType": "direct_answer",
   "citations": [
     {
       "resourceId": 501,
@@ -981,6 +982,12 @@ stub 阶段约束：
   ]
 }
 ```
+
+说明：
+
+- `answerType` 取值为 `direct_answer`、`clarification`、`insufficient_evidence`。
+- Doubao / vivo QA 接入只影响服务端回答生成策略，不改变前端请求字段、接口路径或 citations 结构。
+- `citations` 只能来自服务端当前候选证据反查；`insufficient_evidence` 时固定为空数组。
 
 ### `GET /api/v1/qa/sessions/{sessionId}/messages`
 
@@ -993,6 +1000,7 @@ stub 阶段约束：
       "sessionId": 6001,
       "messageId": 6002,
       "answerMd": "定义控制了题型的判断边界。",
+      "answerType": "direct_answer",
       "citations": [
         {
           "resourceId": 501,
