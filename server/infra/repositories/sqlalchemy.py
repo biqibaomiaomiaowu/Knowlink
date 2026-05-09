@@ -171,6 +171,19 @@ class SqlAlchemyRuntimeRepository:
         ).all()
         return [_resource_dict(resource) for resource in resources]
 
+    def get_resource(self, resource_id: int) -> dict[str, Any] | None:
+        resource = self.session.scalar(
+            select(CourseResource)
+            .join(Course, Course.id == CourseResource.course_id)
+            .where(
+                CourseResource.id == resource_id,
+                Course.user_id == self.user_id,
+            )
+        )
+        if resource is None:
+            return None
+        return _resource_dict(resource)
+
     def delete_resource(self, course_id: int, resource_id: int) -> bool:
         result = self.session.execute(
             delete(CourseResource).where(

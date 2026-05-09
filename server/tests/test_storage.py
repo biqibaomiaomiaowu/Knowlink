@@ -9,7 +9,7 @@ from minio import Minio
 
 from server.domain.services import ResourceService
 from server.domain.services.errors import ServiceError
-from server.domain.services.resources import UPLOAD_EXPIRES_IN
+from server.domain.services.resources import PLAYBACK_EXPIRES_IN, UPLOAD_EXPIRES_IN
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
 from server.infra.storage import MinioObjectStorage, ObjectNotFoundError, ObjectStat, build_object_storage
@@ -20,6 +20,7 @@ class FakeObjectStorage:
     def __init__(self, stats: dict[str, ObjectStat] | None = None) -> None:
         self.stats = stats or {}
         self.presigned_calls: list[dict[str, object]] = []
+        self.presigned_get_calls: list[dict[str, object]] = []
         self.stat_calls: list[str] = []
 
     def presigned_put_url(
@@ -39,6 +40,10 @@ class FakeObjectStorage:
             }
         )
         return f"https://storage.test/{object_key}?signature=fake"
+
+    def presigned_get_url(self, object_key: str, *, expires: timedelta) -> str:
+        self.presigned_get_calls.append({"objectKey": object_key, "expires": expires})
+        return f"https://storage.test/{object_key}?signature=fake-get"
 
     def stat_object(self, object_key: str) -> ObjectStat:
         self.stat_calls.append(object_key)
@@ -67,6 +72,16 @@ class RecordingMinioClient:
     ) -> str:
         self.presigned_call = (bucket_name, object_name, expires)
         return "https://minio.test/knowlink/raw-object?X-Amz-Signature=fake"
+
+    def presigned_get_object(
+        self,
+        bucket_name: str,
+        object_name: str,
+        *,
+        expires: timedelta,
+    ) -> str:
+        self.presigned_call = (bucket_name, object_name, expires)
+        return "https://minio.test/knowlink/raw-object?X-Amz-Signature=fake-get"
 
     def get_presigned_url(
         self,
@@ -208,6 +223,30 @@ def test_minio_storage_uses_public_endpoint_for_presign_and_internal_client_for_
     assert stat.size_bytes == 1024
 
 
+def test_minio_storage_presigned_get_url_uses_public_endpoint():
+    internal_client = RecordingMinioClient()
+    public_client = Minio(
+        "127.0.0.1:9000",
+        access_key="minio-access",
+        secret_key="minio-secret",
+        secure=False,
+        region="us-east-1",
+    )
+    storage = MinioObjectStorage(
+        client=internal_client,
+        presign_client=public_client,
+        bucket_name="knowlink",
+    )
+
+    url = storage.presigned_get_url(
+        "raw/1/101/temp/mp4/demo.mp4",
+        expires=PLAYBACK_EXPIRES_IN,
+    )
+
+    assert urlsplit(url).netloc == "127.0.0.1:9000"
+    assert internal_client.presigned_call is None
+
+
 def test_build_object_storage_uses_internal_endpoint_and_public_presign_endpoint():
     settings = SimpleNamespace(
         storage_backend="minio",
@@ -232,6 +271,11 @@ def test_build_object_storage_uses_internal_endpoint_and_public_presign_endpoint
         metadata={"x-amz-meta-course-id": "101"},
     )
     assert urlsplit(url).netloc == "127.0.0.1:9000"
+    playback_url = storage.presigned_get_url(
+        "raw/1/101/temp/mp4/demo.mp4",
+        expires=PLAYBACK_EXPIRES_IN,
+    )
+    assert urlsplit(playback_url).netloc == "127.0.0.1:9000"
 
 
 def test_build_object_storage_falls_back_to_legacy_minio_endpoint():
@@ -433,3 +477,85 @@ def test_upload_complete_with_fake_storage_creates_resource():
     assert result["objectKey"] == object_key
     assert result["ingestStatus"] == "ready"
     assert repo.list_resources(course_id) == [result]
+
+
+def test_resource_playback_returns_presigned_get_url_for_mp4():
+    storage = FakeObjectStorage()
+    service, repo, course_id = _build_service(storage)
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "mp4",
+            "objectKey": f"raw/1/{course_id}/temp/mp4/demo.mp4",
+            "originalName": "demo.mp4",
+            "mimeType": "video/mp4",
+        },
+    )
+
+    result = service.get_playback(resource_id=resource["resourceId"])
+
+    assert result["resourceId"] == resource["resourceId"]
+    assert result["resourceType"] == "mp4"
+    assert result["playbackUrl"] == (
+        f"https://storage.test/raw/1/{course_id}/temp/mp4/demo.mp4?signature=fake-get"
+    )
+    assert result["mimeType"] == "video/mp4"
+    assert result["durationSec"] is None
+    assert storage.presigned_get_calls == [
+        {
+            "objectKey": f"raw/1/{course_id}/temp/mp4/demo.mp4",
+            "expires": PLAYBACK_EXPIRES_IN,
+        }
+    ]
+
+
+def test_resource_playback_rejects_non_video_resource():
+    storage = FakeObjectStorage()
+    service, repo, course_id = _build_service(storage)
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/temp/pdf/demo.pdf",
+            "originalName": "demo.pdf",
+            "mimeType": "application/pdf",
+        },
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.get_playback(resource_id=resource["resourceId"])
+
+    assert exc_info.value.error_code == "resource.not_video"
+    assert exc_info.value.status_code == 409
+    assert storage.presigned_get_calls == []
+
+
+def test_resource_playback_returns_not_found_for_missing_resource():
+    storage = FakeObjectStorage()
+    service, _, _ = _build_service(storage)
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.get_playback(resource_id=999999)
+
+    assert exc_info.value.error_code == "resource.not_found"
+    assert exc_info.value.status_code == 404
+    assert storage.presigned_get_calls == []
+
+
+def test_resource_playback_maps_missing_storage_to_playback_unavailable():
+    service, repo, course_id = _build_service(None)
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "mp4",
+            "objectKey": f"raw/1/{course_id}/temp/mp4/demo.mp4",
+            "originalName": "demo.mp4",
+            "mimeType": "video/mp4",
+        },
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.get_playback(resource_id=resource["resourceId"])
+
+    assert exc_info.value.error_code == "resource.playback_unavailable"
+    assert exc_info.value.status_code == 503

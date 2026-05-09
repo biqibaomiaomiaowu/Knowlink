@@ -101,9 +101,11 @@ class RuntimeStore:
         resource_id = self.next_id("resource")
         resource = {
             "resourceId": resource_id,
+            "courseId": course_id,
             "resourceType": payload["resourceType"],
             "originalName": payload["originalName"],
             "objectKey": payload["objectKey"],
+            "mimeType": payload.get("mimeType"),
             "ingestStatus": "ready",
             "validationStatus": "passed",
             "processingStatus": "pending",
@@ -113,6 +115,13 @@ class RuntimeStore:
 
     def list_resources(self, course_id: int) -> list[dict[str, Any]]:
         return self.resources.get(course_id, [])
+
+    def get_resource(self, resource_id: int) -> dict[str, Any] | None:
+        for resources in self.resources.values():
+            for resource in resources:
+                if resource["resourceId"] == resource_id:
+                    return resource
+        return None
 
     def create_parse_run(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
         parse_run_id = self.next_id("parse_run")

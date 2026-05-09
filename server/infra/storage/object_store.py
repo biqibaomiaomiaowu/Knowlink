@@ -51,6 +51,8 @@ class ObjectStorage(Protocol):
         metadata: Mapping[str, str] | None = None,
     ) -> str: ...
 
+    def presigned_get_url(self, object_key: str, *, expires: timedelta) -> str: ...
+
     def stat_object(self, object_key: str) -> ObjectStat: ...
 
     def read_object_bytes(self, object_key: str) -> bytes: ...
@@ -118,6 +120,16 @@ class MinioObjectStorage:
             )
         except Exception as exc:  # pragma: no cover - covered via service mapping.
             raise ObjectStorageUnavailable("Failed to generate presigned upload URL") from exc
+
+    def presigned_get_url(self, object_key: str, *, expires: timedelta) -> str:
+        try:
+            return self.presign_client.presigned_get_object(
+                self.bucket_name,
+                object_key,
+                expires=expires,
+            )
+        except Exception as exc:  # pragma: no cover - covered via service mapping.
+            raise ObjectStorageUnavailable("Failed to generate presigned playback URL") from exc
 
     def stat_object(self, object_key: str) -> ObjectStat:
         try:
@@ -281,6 +293,9 @@ class DemoObjectStorage:
         metadata: Mapping[str, str] | None = None,
     ) -> str:
         return f"http://object-storage.local/{object_key}?demo=1"
+
+    def presigned_get_url(self, object_key: str, *, expires: timedelta) -> str:
+        return f"http://object-storage.local/{object_key}?demo=1&method=get"
 
     def stat_object(self, object_key: str) -> ObjectStat:
         return ObjectStat(size_bytes=None, checksum_required=False)

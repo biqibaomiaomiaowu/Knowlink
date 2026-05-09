@@ -229,6 +229,7 @@ def _discover_sql_repository_class() -> type[Any]:
         "run_idempotent",
         "create_course",
         "create_resource",
+        "get_resource",
         "list_resources",
         "create_parse_run",
         "get_async_task",
@@ -369,6 +370,9 @@ def test_sync_sql_repository_closes_course_resource_parse_task_and_inquiry_on_sq
     )
     resource_id = _value(resource, "resourceId", "resource_id", "id")
     assert _value(same_resource, "resourceId", "resource_id", "id") == resource_id
+    assert _value(repo.get_resource(resource_id), "resourceId", "resource_id", "id") == resource_id
+    other_user_repo = repository_cls(session, user_id=2)
+    assert other_user_repo.get_resource(resource_id) is None
     assert any(
         _value(item, "resourceId", "resource_id", "id") == resource_id
         for item in repo.list_resources(course_id)

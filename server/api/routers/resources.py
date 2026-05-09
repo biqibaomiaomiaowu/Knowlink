@@ -6,6 +6,7 @@ from server.domain.services import ResourceService
 from server.schemas.requests import UploadCompleteRequest, UploadInitRequest
 
 router = APIRouter(prefix="/courses", tags=["resources"])
+playback_router = APIRouter(prefix="/course-resources", tags=["resources"])
 
 
 @router.post("/{courseId}/resources/upload-init")
@@ -41,6 +42,15 @@ async def list_resources(
     service: ResourceService = Depends(get_resource_service),
 ):
     return api_ok(request, service.list_resources(course_id=courseId))
+
+
+@playback_router.get("/{resourceId}/playback")
+async def get_resource_playback(
+    resourceId: int,
+    request: Request,
+    service: ResourceService = Depends(get_resource_service),
+):
+    return api_ok(request, service.get_playback(resource_id=resourceId))
 
 
 @router.delete("/{courseId}/resources/{resourceId}")

@@ -45,6 +45,9 @@ class MemoryScaffoldRepository:
     def list_resources(self, course_id: int) -> list[dict[str, Any]]:
         return self.store.list_resources(course_id)
 
+    def get_resource(self, resource_id: int) -> dict[str, Any] | None:
+        return self.store.get_resource(resource_id)
+
     def delete_resource(self, course_id: int, resource_id: int) -> bool:
         resources = self.store.list_resources(course_id)
         remaining = [item for item in resources if item["resourceId"] != resource_id]
