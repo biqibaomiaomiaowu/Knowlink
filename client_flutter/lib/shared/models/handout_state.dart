@@ -41,42 +41,72 @@ class HandoutState {
   bool get isGenerating => generateRequest.isLoading || isPolling;
   bool get isSubmittingQuestion => qaSubmit.isLoading;
 
-  HandoutBlockModel? get selectedBlock {
-    final items = blocks.valueOrNull?.items ?? const [];
-    if (items.isEmpty) {
+  List<HandoutOutlineChildModel> get outlineChildren {
+    return outline.valueOrNull?.children ?? const [];
+  }
+
+  HandoutOutlineChildModel? get selectedOutlineChild {
+    final children = outlineChildren;
+    if (children.isEmpty) {
       return null;
     }
     if (selectedBlockId == null) {
-      return items.first;
+      return null;
     }
+    for (final child in children) {
+      if (child.blockId == selectedBlockId) {
+        return child;
+      }
+    }
+    return null;
+  }
+
+  HandoutBlockModel? get selectedBlock {
+    final child = selectedOutlineChild;
+    if (child == null) {
+      return null;
+    }
+    return blockForId(child.blockId);
+  }
+
+  HandoutBlockModel? blockForId(int blockId) {
+    final items = blocks.valueOrNull?.items ?? const [];
     for (final block in items) {
-      if (block.blockId == selectedBlockId) {
+      if (block.blockId == blockId) {
         return block;
       }
     }
-    return items.first;
+    return null;
   }
 
   List<QaMessageModel> get selectedBlockQaMessages {
-    final blockId = selectedBlockId;
+    final blockId = selectedOutlineChild?.blockId;
     if (blockId == null) {
       return const [];
     }
     return qaMessagesByBlockId[blockId] ?? const [];
   }
 
-  HandoutBlockModel? highlightedBlockFor(int positionSec) {
-    final items = blocks.valueOrNull?.items ?? const [];
-    for (var index = 0; index < items.length; index++) {
-      final block = items[index];
-      if (block.containsPosition(
+  HandoutOutlineChildModel? highlightedChildFor(int positionSec) {
+    final children = outlineChildren;
+    for (var index = 0; index < children.length; index++) {
+      final child = children[index];
+      if (child.containsPosition(
         positionSec,
-        isLast: index == items.length - 1,
+        isLast: index == children.length - 1,
       )) {
-        return block;
+        return child;
       }
     }
     return null;
+  }
+
+  HandoutBlockModel? highlightedBlockFor(int positionSec) {
+    final child = highlightedChildFor(positionSec);
+    if (child == null) {
+      return null;
+    }
+    return blockForId(child.blockId);
   }
 
   HandoutState copyWith({

@@ -200,6 +200,9 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     if (state.blockGenerateRequest.isLoading) {
       return;
     }
+    if (state.outline.valueOrNull?.childForBlockId(blockId) == null) {
+      return;
+    }
     final requestId = _loadRequestId;
     state = state.copyWith(blockGenerateRequest: const AsyncLoading());
     try {
@@ -262,13 +265,46 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     HandoutBlockModel block, {
     bool syncPlayer = true,
   }) async {
-    final selectionChanged = state.selectedBlockId != block.blockId;
+    final child = state.outline.valueOrNull?.childForBlockId(block.blockId);
+    if (child == null) {
+      return;
+    }
+    await _selectChildBlock(
+      blockId: block.blockId,
+      startSec: child.startSec,
+      syncPlayer: syncPlayer,
+    );
+  }
+
+  Future<void> selectOutlineChild(
+    HandoutOutlineChildModel child, {
+    bool syncPlayer = true,
+  }) async {
+    final currentChild = state.outline.valueOrNull?.childForBlockId(
+      child.blockId,
+    );
+    if (currentChild == null) {
+      return;
+    }
+    await _selectChildBlock(
+      blockId: currentChild.blockId,
+      startSec: currentChild.startSec,
+      syncPlayer: syncPlayer,
+    );
+  }
+
+  Future<void> _selectChildBlock({
+    required int blockId,
+    required int startSec,
+    required bool syncPlayer,
+  }) async {
+    final selectionChanged = state.selectedBlockId != blockId;
     if (selectionChanged) {
       _invalidateSelectionSideEffects();
       _clearQaSession();
     }
     state = state.copyWith(
-      selectedBlockId: block.blockId,
+      selectedBlockId: blockId,
       currentBlock:
           selectionChanged ? const AsyncData(null) : state.currentBlock,
       jumpTarget: const AsyncLoading(),
@@ -277,33 +313,18 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
           selectionChanged ? const AsyncData(null) : state.blockGenerateRequest,
       clearSelectedCitation: true,
     );
-    ref.read(activeBlockProvider.notifier).state = block.blockId;
+    ref.read(activeBlockProvider.notifier).state = blockId;
     if (syncPlayer) {
       ref.read(playerStateProvider.notifier).state =
           ref.read(playerStateProvider).copyWith(
-                positionSec: block.startSec,
+                positionSec: startSec,
               );
     }
-    await requestJumpTarget(block.blockId);
+    await requestJumpTarget(blockId);
   }
 
   void syncHighlightedBlock(int positionSec) {
-    final block = state.highlightedBlockFor(positionSec);
-    if (block == null || block.blockId == state.selectedBlockId) {
-      return;
-    }
-    _invalidateSelectionSideEffects();
-    _clearQaSession();
-    ref.read(activeBlockProvider.notifier).state = block.blockId;
-    state = state.copyWith(
-      selectedBlockId: block.blockId,
-      currentBlock: const AsyncData(null),
-      jumpTarget: const AsyncData(null),
-      qaSubmit: const AsyncData(null),
-      blockGenerateRequest: const AsyncData(null),
-      clearSelectedCitation: true,
-    );
-    unawaited(requestJumpTarget(block.blockId));
+    state.highlightedChildFor(positionSec);
   }
 
   Future<void> syncCurrentBlockFromPosition({
@@ -321,25 +342,15 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       if (!_shouldApplyCurrentBlock(requestId, courseId)) {
         return;
       }
-      final selectionChanged = state.selectedBlockId != current.blockId;
-      if (selectionChanged) {
-        _invalidateSelectionSideEffects(includeCurrentBlock: false);
-        _clearQaSession();
+      final child = state.outline.valueOrNull?.childForBlockId(current.blockId);
+      if (child == null) {
+        throw StateError(
+          '当前讲义块返回了不在目录 child 中的 blockId：${current.blockId}',
+        );
       }
-      ref.read(activeBlockProvider.notifier).state = current.blockId;
       state = state.copyWith(
         currentBlock: AsyncData(current),
-        selectedBlockId: current.blockId,
-        jumpTarget: selectionChanged ? const AsyncData(null) : state.jumpTarget,
-        qaSubmit: selectionChanged ? const AsyncData(null) : state.qaSubmit,
-        blockGenerateRequest: selectionChanged
-            ? const AsyncData(null)
-            : state.blockGenerateRequest,
-        clearSelectedCitation: selectionChanged,
       );
-      if (selectionChanged) {
-        unawaited(requestJumpTarget(current.blockId));
-      }
     } catch (error, stackTrace) {
       if (!_shouldApplyCurrentBlock(requestId, courseId)) {
         return;
@@ -352,6 +363,9 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     int blockId, {
     CitationModel? citation,
   }) async {
+    if (state.outline.valueOrNull?.childForBlockId(blockId) == null) {
+      return;
+    }
     final requestId = ++_jumpTargetRequestId;
     final requestCourseId = ref.read(courseFlowProvider).courseId;
     state = state.copyWith(
@@ -383,7 +397,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     required String question,
   }) async {
     final trimmed = question.trim();
-    final selected = state.selectedBlock;
+    final selected = state.selectedOutlineChild;
     final numericCourseId = int.tryParse(courseId);
     if (trimmed.isEmpty || selected == null || numericCourseId == null) {
       return;
@@ -611,7 +625,7 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       if (!_shouldApply(requestId, courseId)) {
         return;
       }
-      final selectedBlockId = _resolveSelectedBlockId(blocks.items);
+      final selectedBlockId = _resolveSelectedBlockId(outline.children);
       final selectionChanged = state.selectedBlockId != selectedBlockId;
       if (selectionChanged) {
         _invalidateSelectionSideEffects();
@@ -651,15 +665,18 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     }
   }
 
-  int? _resolveSelectedBlockId(List<HandoutBlockModel> blocks) {
-    if (blocks.isEmpty) {
+  int? _resolveSelectedBlockId(List<HandoutOutlineChildModel> children) {
+    if (children.isEmpty) {
       return null;
     }
     final current = state.selectedBlockId;
-    if (current != null && blocks.any((block) => block.blockId == current)) {
+    if (current != null && children.any((child) => child.blockId == current)) {
       return current;
     }
-    return blocks.first.blockId;
+    if (current != null) {
+      return null;
+    }
+    return children.first.blockId;
   }
 
   bool _shouldApply(int requestId, [String? courseId]) {

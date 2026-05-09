@@ -36,6 +36,31 @@ void main() {
     expect(container.read(activeBlockProvider), 4001);
   });
 
+  test('default selection follows the first outline child, not block order',
+      () async {
+    final fakeApiClient = _OutOfOrderBlocksFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+
+    final state = container.read(handoutProvider);
+    expect(state.outlineChildren.map((child) => child.blockId), [4001, 4002]);
+    expect(state.selectedOutlineChild?.blockId, 4001);
+    expect(state.selectedBlock?.blockId, 4001);
+    expect(container.read(activeBlockProvider), 4001);
+  });
+
   test('load auto generates when latest handout is missing', () async {
     final fakeApiClient = _HandoutProviderFakeApiClient(noActiveFirst: true);
     final container = ProviderContainer(
@@ -415,6 +440,51 @@ void main() {
     );
   });
 
+  test('blocks outside the outline cannot drive selection or jump target',
+      () async {
+    final fakeApiClient = _OrphanBlockFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final orphanBlock = container
+        .read(handoutProvider)
+        .blocks
+        .valueOrNull!
+        .items
+        .singleWhere((block) => block.blockId == 4999);
+
+    await container.read(handoutProvider.notifier).selectBlock(orphanBlock);
+    await container.read(handoutProvider.notifier).requestJumpTarget(4999);
+    await container.read(handoutProvider.notifier).generateBlock(
+          4999,
+          courseId: '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    await container.read(handoutProvider.notifier).submitQuestion(
+          courseId: '101',
+          question: '孤儿 block 会被选中吗？',
+        );
+
+    expect(container.read(handoutProvider).selectedOutlineChild?.blockId, 4001);
+    expect(container.read(handoutProvider).selectedBlock?.blockId, 4001);
+    expect(container.read(activeBlockProvider), 4001);
+    expect(fakeApiClient.jumpTargetBlockIds, isEmpty);
+    expect(fakeApiClient.generateBlockCalls, 0);
+    expect(fakeApiClient.qaRequests.single.handoutBlockId, 4001);
+  });
+
   test('submitting a QA question uses selected block and syncs session',
       () async {
     final fakeApiClient = _HandoutProviderFakeApiClient();
@@ -558,7 +628,7 @@ void main() {
     expect(container.read(handoutProvider).qaSubmit.isLoading, isFalse);
   });
 
-  test('playhead block switch clears stale QA loading state', () async {
+  test('playhead highlight does not change selected QA context', () async {
     final fakeApiClient = _DelayedQaFakeApiClient();
     final container = ProviderContainer(
       overrides: [
@@ -583,10 +653,11 @@ void main() {
     container.read(handoutProvider.notifier).syncHighlightedBlock(380);
     await Future<void>.delayed(Duration.zero);
 
-    final switchedState = container.read(handoutProvider);
-    expect(switchedState.selectedBlock?.blockId, 4002);
-    expect(switchedState.qaSubmit.isLoading, isFalse);
-    expect(switchedState.jumpTarget.valueOrNull?.blockId, 4002);
+    final highlightedState = container.read(handoutProvider);
+    expect(highlightedState.highlightedChildFor(380)?.blockId, 4002);
+    expect(highlightedState.selectedBlock?.blockId, 4001);
+    expect(highlightedState.qaSubmit.isLoading, isTrue);
+    expect(highlightedState.jumpTarget.valueOrNull, isNull);
 
     fakeApiClient.qaResponse.complete(
       QaMessageModel.fromJson({
@@ -598,8 +669,10 @@ void main() {
     );
     await pendingQa;
 
-    expect(container.read(courseFlowProvider).sessionId, isNull);
-    expect(container.read(handoutProvider).qaMessagesByBlockId, isEmpty);
+    expect(container.read(courseFlowProvider).sessionId, 6001);
+    expect(container.read(handoutProvider).selectedBlock?.blockId, 4001);
+    expect(container.read(handoutProvider).qaMessagesByBlockId[4001],
+        hasLength(1));
     expect(container.read(handoutProvider).qaSubmit.isLoading, isFalse);
   });
 
@@ -731,6 +804,42 @@ void main() {
       container.read(handoutProvider).blocks.valueOrNull!.items[1].status,
       'ready',
     );
+  });
+
+  test('block refresh clears selection when selected child leaves outline',
+      () async {
+    final fakeApiClient = _SelectionInvalidatedOutlineFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    final secondBlock =
+        container.read(handoutProvider).blocks.valueOrNull!.items[1];
+    await container.read(handoutProvider.notifier).selectBlock(secondBlock);
+    expect(container.read(activeBlockProvider), 4002);
+
+    await container.read(handoutProvider.notifier).generateBlock(
+          4002,
+          courseId: '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+
+    final state = container.read(handoutProvider);
+    expect(state.selectedBlockId, isNull);
+    expect(state.selectedOutlineChild, isNull);
+    expect(state.selectedBlock, isNull);
+    expect(container.read(activeBlockProvider), isNull);
   });
 
   test('selecting another block clears stale block generation error', () async {
@@ -893,24 +1002,7 @@ class _HandoutProviderFakeApiClient extends ApiClient {
   Future<HandoutOutlineModel> fetchLatestHandoutOutline(
     String courseId,
   ) async {
-    return HandoutOutlineModel.fromJson({
-      'handoutVersionId': 3001,
-      'title': '高数期末冲刺讲义',
-      'summary': '按视频时间线组织',
-      'items': [
-        {
-          'outlineKey': 'outline-1',
-          'blockId': 4001,
-          'title': '极限与连续',
-          'summary': '先抓必考定义和题型',
-          'startSec': 120,
-          'endSec': 360,
-          'sortNo': 1,
-          'generationStatus': 'ready',
-          'sourceSegmentKeys': ['mp4-c1'],
-        },
-      ],
-    });
+    return HandoutOutlineModel.fromJson(_outlineJson());
   }
 
   @override
@@ -984,6 +1076,66 @@ class _UnexpectedGenerateEntityFakeApiClient
   }
 }
 
+class _OutOfOrderBlocksFakeApiClient extends _HandoutProviderFakeApiClient {
+  @override
+  Future<HandoutBlocksModel> fetchLatestHandoutBlocks(String courseId) async {
+    return HandoutBlocksModel.fromJson({
+      'items': [
+        {
+          'blockId': 4002,
+          'outlineKey': 'outline-2',
+          'title': '集合的表示方法',
+          'summary': '从列举法过渡到描述法',
+          'status': 'pending',
+          'contentMd': null,
+          'startSec': 360,
+          'endSec': 540,
+          'citations': [],
+        },
+        _readyBlockJson(),
+      ],
+    });
+  }
+}
+
+class _OrphanBlockFakeApiClient extends _HandoutProviderFakeApiClient {
+  var generateBlockCalls = 0;
+
+  @override
+  Future<HandoutBlocksModel> fetchLatestHandoutBlocks(String courseId) async {
+    return HandoutBlocksModel.fromJson({
+      'items': [
+        _readyBlockJson(),
+        {
+          'blockId': 4999,
+          'outlineKey': 'outline-orphan',
+          'title': '孤儿讲义块',
+          'summary': '不在 outline child 中的块',
+          'status': 'ready',
+          'contentMd': '### 孤儿讲义块',
+          'startSec': 900,
+          'endSec': 960,
+          'citations': [],
+        },
+      ],
+    });
+  }
+
+  @override
+  Future<HandoutBlockGenerateResultModel> generateHandoutBlock({
+    required int blockId,
+    required String idempotencyKey,
+  }) async {
+    generateBlockCalls++;
+    return HandoutBlockGenerateResultModel.fromJson({
+      'taskId': 7102,
+      'status': 'queued',
+      'nextAction': 'poll',
+      'entity': {'type': 'handout_block', 'id': blockId},
+    });
+  }
+}
+
 class _FailingLatestFakeApiClient extends _HandoutProviderFakeApiClient {
   @override
   Future<HandoutLatestModel> fetchLatestHandout(String courseId) async {
@@ -1035,12 +1187,35 @@ class _SwitchCourseFakeApiClient extends _HandoutProviderFakeApiClient {
     String courseId,
   ) async {
     if (courseId == '202') {
-      return HandoutOutlineModel.fromJson({
-        'handoutVersionId': 3002,
-        'title': '新课程讲义',
-        'summary': '切课后的讲义',
-        'items': [],
-      });
+      return HandoutOutlineModel.fromJson(_outlineJson(
+        handoutVersionId: 3002,
+        title: '新课程讲义',
+        summary: '切课后的讲义',
+        sections: [
+          {
+            'outlineKey': 'section-new',
+            'title': '新课程章节',
+            'summary': '切课后的章节',
+            'startSec': 0,
+            'endSec': 120,
+            'sortNo': 1,
+            'children': [
+              {
+                'outlineKey': 'outline-new',
+                'blockId': 5001,
+                'title': '新课程块',
+                'summary': '切课后的块',
+                'startSec': 0,
+                'endSec': 120,
+                'sortNo': 1,
+                'generationStatus': 'ready',
+                'sourceSegmentKeys': ['mp4-new'],
+                'topicTags': ['新课程'],
+              },
+            ],
+          },
+        ],
+      ));
     }
     return super.fetchLatestHandoutOutline(courseId);
   }
@@ -1277,6 +1452,56 @@ class _ReadyBlockGenerateFakeApiClient extends _BlockGenerateFakeApiClient {
   }
 }
 
+class _SelectionInvalidatedOutlineFakeApiClient
+    extends _BlockGenerateFakeApiClient {
+  @override
+  Future<HandoutOutlineModel> fetchLatestHandoutOutline(
+    String courseId,
+  ) async {
+    if (blockStatusCalls == 0) {
+      return super.fetchLatestHandoutOutline(courseId);
+    }
+    return HandoutOutlineModel.fromJson(_outlineJson(
+      sections: [
+        {
+          'outlineKey': 'section-1',
+          'title': '极限与集合',
+          'summary': '刷新后只保留第一个 child',
+          'startSec': 120,
+          'endSec': 360,
+          'sortNo': 1,
+          'children': [
+            {
+              'outlineKey': 'outline-1',
+              'blockId': 4001,
+              'title': '极限与连续',
+              'summary': '先抓必考定义和题型',
+              'startSec': 120,
+              'endSec': 360,
+              'sortNo': 1,
+              'generationStatus': 'ready',
+              'sourceSegmentKeys': ['mp4-c1'],
+              'topicTags': ['极限'],
+            },
+          ],
+        },
+      ],
+    ));
+  }
+
+  @override
+  Future<HandoutBlocksModel> fetchLatestHandoutBlocks(String courseId) async {
+    if (blockStatusCalls == 0) {
+      return super.fetchLatestHandoutBlocks(courseId);
+    }
+    return HandoutBlocksModel.fromJson({
+      'items': [
+        _readyBlockJson(),
+      ],
+    });
+  }
+}
+
 class _UnexpectedBlockGenerateEntityFakeApiClient
     extends _HandoutProviderFakeApiClient {
   @override
@@ -1357,5 +1582,57 @@ Map<String, Object?> _readyBlockJson() {
         'pageNo': 2,
       },
     ],
+  };
+}
+
+Map<String, Object?> _outlineJson({
+  int handoutVersionId = 3001,
+  String title = '高数期末冲刺讲义',
+  String summary = '按视频时间线组织',
+  List<Map<String, Object?>>? sections,
+}) {
+  return {
+    'handoutVersionId': handoutVersionId,
+    'title': title,
+    'summary': summary,
+    'items': sections ??
+        [
+          {
+            'outlineKey': 'section-1',
+            'title': '极限与集合',
+            'summary': '从极限连续过渡到集合表示',
+            'startSec': 120,
+            'endSec': 540,
+            'sortNo': 1,
+            'children': [
+              {
+                'outlineKey': 'outline-1',
+                'blockId': 4001,
+                'title': '极限与连续',
+                'summary': '先抓必考定义和题型',
+                'startSec': 120,
+                'endSec': 360,
+                'sortNo': 1,
+                'generationStatus': 'ready',
+                'sourceSegmentKeys': ['mp4-c1'],
+                'topicTags': ['极限'],
+              },
+              {
+                'outlineKey': 'outline-2',
+                'blockId': 4002,
+                'title': '集合的表示方法',
+                'summary': '从列举法过渡到描述法',
+                'startSec': 360,
+                'endSec': 540,
+                'sortNo': 2,
+                'generationStatus': 'pending',
+                'sourceSegmentKeys': ['mp4-c2'],
+                'topicTags': ['集合'],
+              },
+            ],
+          },
+        ],
+    'outlineUsedFallback': false,
+    'outlineIssues': [],
   };
 }
