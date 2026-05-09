@@ -9,6 +9,7 @@ import '../../core/widgets/app_scaffold.dart';
 import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/course_import_state.dart';
 import '../../shared/models/recommendation_enums.dart';
+import '../../shared/models/resource_upload_models.dart';
 import '../../shared/providers/course_import_provider.dart';
 
 class CourseImportPage extends ConsumerStatefulWidget {
@@ -861,12 +862,12 @@ class _UploadDisplayItem {
     );
   }
 
-  factory _UploadDisplayItem.fromResource(dynamic resource) {
+  factory _UploadDisplayItem.fromResource(CourseResourceModel resource) {
     return _UploadDisplayItem(
-      name: resource.originalName as String,
-      type: resource.resourceType.name as String,
+      name: resource.originalName,
+      type: resource.resourceType.name,
       detail: '${resource.validationStatus} · ${resource.processingStatus}',
-      resourceId: resource.resourceId as int,
+      resourceId: resource.resourceId,
     );
   }
 }
