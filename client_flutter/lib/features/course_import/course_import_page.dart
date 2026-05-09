@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_error_view.dart';
 import '../../core/widgets/app_loading_view.dart';
 import '../../core/widgets/app_scaffold.dart';
+import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/course_import_state.dart';
 import '../../shared/models/recommendation_enums.dart';
+import '../../shared/models/resource_upload_models.dart';
 import '../../shared/providers/course_import_provider.dart';
 
 class CourseImportPage extends ConsumerStatefulWidget {
@@ -74,9 +77,12 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
 
     return AppScaffold(
       title: '自主导入',
-      body: ListView(
-        children: [
-          _CourseCreateSection(
+      activeTab: KnowLinkTab.import,
+      courseId: effectiveCourseId,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 980;
+          final createSection = _CourseCreateSection(
             titleController: _titleController,
             goalController: _goalController,
             examAtController: _examAtController,
@@ -94,16 +100,8 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
               }
             },
             onSubmit: notifier.createCourse,
-          ),
-          if (state.createdCourse.hasError) ...[
-            const SizedBox(height: 12),
-            AppErrorView(
-              message: '创建课程失败：${state.createdCourse.error}',
-              onRetry: notifier.createCourse,
-            ),
-          ],
-          const SizedBox(height: 16),
-          _UploadSection(
+          );
+          final uploadSection = _UploadSection(
             courseId: effectiveCourseId,
             state: state,
             onPickFiles: notifier.pickFiles,
@@ -120,16 +118,52 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
             onRefresh: effectiveCourseId == null
                 ? null
                 : () => notifier.fetchResources(effectiveCourseId),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: effectiveCourseId == null
-                ? null
-                : () => context.go('/courses/$effectiveCourseId/progress'),
-            icon: const Icon(Icons.timeline),
-            label: const Text('进入解析进度'),
-          ),
-        ],
+          );
+
+          return ListView(
+            children: [
+              _ImportHero(courseId: effectiveCourseId),
+              if (state.createdCourse.hasError) ...[
+                const SizedBox(height: 12),
+                AppErrorView(
+                  message: '创建课程失败：${state.createdCourse.error}',
+                  onRetry: notifier.createCourse,
+                ),
+              ],
+              const SizedBox(height: 18),
+              if (isWide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: createSection),
+                    const SizedBox(width: 18),
+                    Expanded(child: uploadSection),
+                  ],
+                )
+              else ...[
+                createSection,
+                const SizedBox(height: 16),
+                uploadSection,
+              ],
+              const SizedBox(height: 18),
+              const _ImportGuideCard(),
+              const SizedBox(height: 22),
+              SizedBox(
+                height: 58,
+                child: FilledButton.icon(
+                  onPressed: effectiveCourseId == null
+                      ? null
+                      : () =>
+                          context.go('/courses/$effectiveCourseId/progress'),
+                  icon: const Icon(Icons.analytics_outlined),
+                  label: Text(
+                    effectiveCourseId == null ? '先创建课程后开始解析' : '进入解析进度',
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -147,6 +181,53 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
       }
       ref.read(courseImportProvider.notifier).fetchResources(courseId);
     });
+  }
+}
+
+class _ImportHero extends StatelessWidget {
+  const _ImportHero({
+    required this.courseId,
+  });
+
+  final String? courseId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            _StepBadge(number: '2'),
+            SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                '自主导入',
+                style: TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: 34,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          '上传课程视频与学习资料，开始智能解析，构建你的专属知识库。',
+          style: TextStyle(
+            color: AppTheme.muted,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        if (courseId != null) ...[
+          const SizedBox(height: 10),
+          StatusPill(label: '课程 ID：$courseId'),
+        ],
+      ],
+    );
   }
 }
 
@@ -183,20 +264,19 @@ class _CourseCreateSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              '创建课程',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
+            const Text('课程信息',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 22),
             TextField(
               controller: titleController,
               enabled: !isCreating,
               decoration: const InputDecoration(
-                labelText: '课程标题',
+                labelText: '课程名称',
+                hintText: '如：数据结构（C语言版）',
                 border: OutlineInputBorder(),
               ),
               onChanged: onTitleChanged,
@@ -249,11 +329,11 @@ class _CourseCreateSection extends StatelessWidget {
               ],
               onChanged: isCreating ? null : onPreferredStyleChanged,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             FilledButton.icon(
               onPressed: canSubmit ? onSubmit : null,
               icon: const Icon(Icons.add_circle_outline),
-              label: Text(isCreating ? '正在创建' : '创建课程'),
+              label: Text(isCreating ? '正在创建课程' : '创建课程'),
             ),
           ],
         ),
@@ -287,10 +367,14 @@ class _UploadSection extends StatelessWidget {
     final hasUploadableFiles = state.uploadQueue.any(
       (item) => item.isPending || item.hasFailed,
     );
+    final visibleItems = [
+      ...state.uploadQueue.map(_UploadDisplayItem.fromQueue),
+      ...resources.map(_UploadDisplayItem.fromResource),
+    ];
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -298,10 +382,10 @@ class _UploadSection extends StatelessWidget {
               children: [
                 const Expanded(
                   child: Text(
-                    '课程资料',
+                    '上传教材 / PPT / 讲义 / 笔记',
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
@@ -312,8 +396,27 @@ class _UploadSection extends StatelessWidget {
                 ),
               ],
             ),
+            const Text(
+              '支持 PDF、PPTX、DOCX、视频等格式',
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 18),
+            _UploadDropZone(
+              enabled: courseId != null,
+              isUploading: state.isUploading,
+              onPickFiles: onPickFiles,
+            ),
+            const SizedBox(height: 16),
             Text(
               courseId == null ? '请先创建课程或从推荐页进入。' : '当前课程：$courseId',
+              style: const TextStyle(
+                color: AppTheme.muted,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -355,30 +458,152 @@ class _UploadSection extends StatelessWidget {
                 onRetry: onRefresh,
               )
             else if (resources.isEmpty)
-              const Text('还没有上传完成的资源。')
+              const _EmptyUploadList()
             else
-              ...resources.map(
-                (resource) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.description_outlined),
-                  title: Text(resource.originalName),
-                  subtitle: Text(
-                    '${resource.resourceType.name.toUpperCase()} · '
-                    '${resource.validationStatus} · '
-                    '${resource.processingStatus}',
-                  ),
-                  trailing: IconButton(
-                    tooltip: '删除资源',
-                    onPressed: onDeleteResource == null
-                        ? null
-                        : () => onDeleteResource!(resource.resourceId),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ),
+              _UploadedResourceList(
+                items: visibleItems,
+                onDeleteResource: onDeleteResource,
               ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _UploadDropZone extends StatelessWidget {
+  const _UploadDropZone({
+    required this.enabled,
+    required this.isUploading,
+    required this.onPickFiles,
+  });
+
+  final bool enabled;
+  final bool isUploading;
+  final VoidCallback onPickFiles;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: enabled && !isUploading ? onPickFiles : null,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 142),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FBFF),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: enabled ? AppTheme.brandBlue : AppTheme.line,
+            style: BorderStyle.solid,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.cloud_upload_outlined,
+              color: AppTheme.brandBlue,
+              size: 38,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              enabled ? '点击选择上传文件' : '创建课程后可上传文件',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppTheme.brandBlue,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '单个文件最大 200MB，视频文件按后端限制处理',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadedResourceList extends StatelessWidget {
+  const _UploadedResourceList({
+    required this.items,
+    required this.onDeleteResource,
+  });
+
+  final List<_UploadDisplayItem> items;
+  final ValueChanged<int>? onDeleteResource;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: items
+          .map(
+            (item) => Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border.all(color: AppTheme.line),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  _FileTypeIcon(type: item.type),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppTheme.ink,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          item.detail,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppTheme.muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Icon(
+                    Icons.check_circle_outline,
+                    color: Color(0xFF22C55E),
+                    size: 22,
+                  ),
+                  IconButton(
+                    tooltip: '删除资源',
+                    onPressed:
+                        item.resourceId == null || onDeleteResource == null
+                            ? null
+                            : () => onDeleteResource!(item.resourceId!),
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -421,6 +646,228 @@ class _UploadQueueTile extends StatelessWidget {
         onPressed: onRemove,
         icon: const Icon(Icons.close),
       ),
+    );
+  }
+}
+
+class _ImportGuideCard extends StatelessWidget {
+  const _ImportGuideCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(22),
+        child: Wrap(
+          spacing: 34,
+          runSpacing: 20,
+          alignment: WrapAlignment.spaceBetween,
+          children: [
+            _GuideItem(
+              icon: Icons.description_outlined,
+              title: '支持的文件类型',
+              lines: ['PDF、PPTX、DOCX、MP4、MOV、AVI 等', '文档最大 200MB，视频按后端限制处理'],
+            ),
+            _GuideItem(
+              icon: Icons.lightbulb_outline,
+              title: '建议',
+              lines: ['建议按章节或知识点拆分资料，提升解析效果', 'PPT 建议包含完整的文字内容'],
+              color: Color(0xFFF97316),
+            ),
+            _GuideItem(
+              icon: Icons.info_outline,
+              title: '说明',
+              lines: ['上传后系统将自动解析内容并生成知识结构', '解析完成后可在「课程」页查看'],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GuideItem extends StatelessWidget {
+  const _GuideItem({
+    required this.icon,
+    required this.title,
+    required this.lines,
+    this.color = AppTheme.brandBlue,
+  });
+
+  final IconData icon;
+  final String title;
+  final List<String> lines;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 360,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SoftIcon(icon: icon, color: color, size: 44),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppTheme.ink,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final line in lines)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Text(
+                      line,
+                      style: const TextStyle(
+                        color: AppTheme.muted,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyUploadList extends StatelessWidget {
+  const _EmptyUploadList();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBFF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.line),
+      ),
+      child: const Text(
+        '还没有上传完成的资源。',
+        style: TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _StepBadge extends StatelessWidget {
+  const _StepBadge({required this.number});
+
+  final String number;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF60A5FA), AppTheme.brandBlueDark],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x262563EB),
+            blurRadius: 12,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Text(
+        number,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 24,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _FileTypeIcon extends StatelessWidget {
+  const _FileTypeIcon({required this.type});
+
+  final String type;
+
+  @override
+  Widget build(BuildContext context) {
+    final lower = type.toLowerCase();
+    final color = switch (lower) {
+      'pdf' => const Color(0xFFEF4444),
+      'pptx' => const Color(0xFFF97316),
+      'docx' => const Color(0xFF3B82F6),
+      'mp4' || 'mov' || 'avi' => const Color(0xFF8B5CF6),
+      _ => AppTheme.brandBlue,
+    };
+    return Container(
+      width: 34,
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        lower.toUpperCase().substring(0, lower.length > 3 ? 3 : lower.length),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadDisplayItem {
+  const _UploadDisplayItem({
+    required this.name,
+    required this.type,
+    required this.detail,
+    this.resourceId,
+  });
+
+  final String name;
+  final String type;
+  final String detail;
+  final int? resourceId;
+
+  factory _UploadDisplayItem.fromQueue(UploadQueueItemModel item) {
+    final statusLabel = switch (item.status) {
+      'uploading' => '上传中',
+      'ready' => '已完成',
+      'failed' => '失败',
+      _ => '待上传',
+    };
+    return _UploadDisplayItem(
+      name: item.name,
+      type: item.resourceType.name,
+      detail: '${item.sizeBytes} bytes · $statusLabel',
+    );
+  }
+
+  factory _UploadDisplayItem.fromResource(CourseResourceModel resource) {
+    return _UploadDisplayItem(
+      name: resource.originalName,
+      type: resource.resourceType.name,
+      detail: '${resource.validationStatus} · ${resource.processingStatus}',
+      resourceId: resource.resourceId,
     );
   }
 }

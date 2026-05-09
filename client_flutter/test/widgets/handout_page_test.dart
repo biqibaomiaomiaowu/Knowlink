@@ -27,9 +27,13 @@ void main() {
     expect(find.text('极限与连续'), findsWidgets);
     expect(find.text('### 极限与连续'), findsOneWidget);
     expect(find.text('PDF 第 2 页'), findsOneWidget);
-    expect(find.text('当前块 QA'), findsOneWidget);
+    expect(find.textContaining('当前块 QA'), findsOneWidget);
+    expect(find.text('当前块还没有问答记录。'), findsOneWidget);
     expect(find.text('集合构造中'), findsOneWidget);
     expect(find.text('集合失败示例'), findsOneWidget);
+    expect(find.textContaining('Push'), findsNothing);
+    expect(find.text('第 1 章  绪论'), findsNothing);
+    expect(find.text('查看原文'), findsNothing);
 
     await tester.tap(find.text('PDF 第 2 页'));
     await tester.pumpAndSettle();
@@ -90,7 +94,7 @@ void main() {
 
     final jumpCallCountBeforeQaCitation =
         fakeApiClient.jumpTargetBlockIds.length;
-    await tester.tap(find.text('PDF 第 8 页'));
+    await tester.tap(find.text('PDF 第 8 页').first);
     await tester.pumpAndSettle();
 
     expect(

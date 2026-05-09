@@ -64,8 +64,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(QaPage), findsOneWidget);
     expect(find.textContaining('QA'), findsOneWidget);
-    expect(find.textContaining('205'), findsOneWidget);
-    expect(find.textContaining('9876'), findsOneWidget);
+    expect(find.text('课程编号：205'), findsOneWidget);
+    expect(find.text('QA 会话：9876'), findsOneWidget);
+    expect(find.text('暂无会话消息'), findsOneWidget);
+    final qaSendButton = find.byWidgetPredicate(
+      (widget) => widget is IconButton && widget.tooltip == '发送',
+    );
+    expect(qaSendButton, findsOneWidget);
+    expect(tester.widget<IconButton>(qaSendButton).onPressed, isNull);
+    expect(find.textContaining('Push'), findsNothing);
+    expect(find.textContaining('SqStack'), findsNothing);
+    expect(find.text('第 1 章 绪论'), findsNothing);
+    expect(find.text('教材 PDF 第 42 页'), findsNothing);
+    expect(find.text('来源回看'), findsNothing);
 
     router.go('/quizzes/8001');
     await tester.pumpAndSettle();
@@ -118,6 +129,91 @@ void main() {
     expect(find.byType(QaPage), findsOneWidget);
     expect(container.read(courseFlowProvider).courseId, '306');
   });
+
+  testWidgets('home bottom nav does not invent course or quiz ids', (
+    tester,
+  ) async {
+    _useTestSurface(tester, const Size(1448, 1086));
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, isNull);
+
+    await tester.tap(find.text('讲义').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byType(HandoutPage), findsNothing);
+    expect(container.read(courseFlowProvider).courseId, isNull);
+
+    await tester.tap(find.text('测验').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byType(QuizPage), findsNothing);
+    expect(container.read(courseFlowProvider).courseId, isNull);
+  });
+
+  testWidgets('home primary actions work on narrow screens', (
+    tester,
+  ) async {
+    _useTestSurface(tester, const Size(390, 900));
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('自主导入'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CourseImportPage), findsOneWidget);
+
+    router.go('/');
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('智能课程推荐'));
+    await tester.tap(find.text('智能课程推荐'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(CourseRecommendPage), findsOneWidget);
+  });
+}
+
+void _useTestSurface(WidgetTester tester, Size size) {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
 }
 
 class _RouterFakeApiClient extends ApiClient {

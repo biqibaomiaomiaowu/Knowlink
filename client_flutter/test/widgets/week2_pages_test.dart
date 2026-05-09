@@ -9,6 +9,7 @@ import 'package:knowlink_client/shared/models/course_create_request.dart';
 import 'package:knowlink_client/shared/models/course_summary.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
 import 'package:knowlink_client/shared/models/pipeline_status.dart';
+import 'package:knowlink_client/shared/models/recommendation_enums.dart';
 import 'package:knowlink_client/shared/models/resource_upload_models.dart';
 import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
@@ -66,6 +67,37 @@ void main() {
     expect(find.text('请先创建课程或从推荐页进入。'), findsOneWidget);
     expect(find.text('当前课程：999'), findsNothing);
     expect(fakeApiClient.fetchedResourceCourseIds, isEmpty);
+  });
+
+  testWidgets('course import page renders existing resources', (tester) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _Week2PageFakeApiClient(
+      resources: const [
+        CourseResourceModel(
+          resourceId: 501,
+          resourceType: ResourceType.pdf,
+          originalName: 'chapter-1.pdf',
+          objectKey: 'raw/1/101/chapter-1.pdf',
+          ingestStatus: 'completed',
+          validationStatus: 'valid',
+          processingStatus: 'ready',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: CourseImportPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.fetchedResourceCourseIds, ['101']);
+    expect(find.text('chapter-1.pdf'), findsOneWidget);
+    expect(find.textContaining('valid · ready'), findsOneWidget);
   });
 
   testWidgets('parse progress page renders pipeline status', (tester) async {
@@ -137,9 +169,14 @@ void _useLargeTestSurface(WidgetTester tester) {
 }
 
 class _Week2PageFakeApiClient extends ApiClient {
+  _Week2PageFakeApiClient({
+    this.resources = const [],
+  });
+
   int createCourseCalls = 0;
   int saveInquiryCalls = 0;
   final List<String> fetchedResourceCourseIds = [];
+  final List<CourseResourceModel> resources;
 
   @override
   Future<CourseSummaryModel> createCourse({
@@ -162,7 +199,7 @@ class _Week2PageFakeApiClient extends ApiClient {
   Future<List<CourseResourceModel>> fetchCourseResources(
       String courseId) async {
     fetchedResourceCourseIds.add(courseId);
-    return const [];
+    return resources;
   }
 
   @override
