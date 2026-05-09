@@ -260,12 +260,34 @@ class HandoutOutlineModel {
     required this.title,
     required this.summary,
     required this.items,
+    required this.outlineUsedFallback,
+    required this.outlineIssues,
   });
 
   final int handoutVersionId;
   final String title;
   final String summary;
-  final List<HandoutOutlineItemModel> items;
+  final List<HandoutOutlineSectionModel> items;
+  final bool outlineUsedFallback;
+  final List<String> outlineIssues;
+
+  List<HandoutOutlineChildModel> get children {
+    return [
+      for (final section in items) ...section.children,
+    ];
+  }
+
+  HandoutOutlineChildModel? childForBlockId(int? blockId) {
+    if (blockId == null) {
+      return null;
+    }
+    for (final child in children) {
+      if (child.blockId == blockId) {
+        return child;
+      }
+    }
+    return null;
+  }
 
   factory HandoutOutlineModel.fromJson(Map<String, dynamic> json) {
     return HandoutOutlineModel(
@@ -274,7 +296,49 @@ class HandoutOutlineModel {
       summary: json['summary'] as String? ?? '',
       items: (json['items'] as List<dynamic>? ?? const [])
           .map(
-            (item) => HandoutOutlineItemModel.fromJson(
+            (item) => HandoutOutlineSectionModel.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(),
+      outlineUsedFallback: json['outlineUsedFallback'] as bool? ?? false,
+      outlineIssues: (json['outlineIssues'] as List<dynamic>? ?? const [])
+          .map((item) => item as String)
+          .toList(),
+    );
+  }
+}
+
+class HandoutOutlineSectionModel {
+  const HandoutOutlineSectionModel({
+    required this.outlineKey,
+    required this.title,
+    required this.summary,
+    required this.startSec,
+    required this.endSec,
+    required this.sortNo,
+    required this.children,
+  });
+
+  final String outlineKey;
+  final String title;
+  final String summary;
+  final int startSec;
+  final int endSec;
+  final int sortNo;
+  final List<HandoutOutlineChildModel> children;
+
+  factory HandoutOutlineSectionModel.fromJson(Map<String, dynamic> json) {
+    return HandoutOutlineSectionModel(
+      outlineKey: json['outlineKey'] as String,
+      title: json['title'] as String,
+      summary: json['summary'] as String? ?? '',
+      startSec: json['startSec'] as int? ?? 0,
+      endSec: json['endSec'] as int? ?? 0,
+      sortNo: json['sortNo'] as int? ?? 0,
+      children: (json['children'] as List<dynamic>? ?? const [])
+          .map(
+            (item) => HandoutOutlineChildModel.fromJson(
               Map<String, dynamic>.from(item as Map),
             ),
           )
@@ -283,8 +347,8 @@ class HandoutOutlineModel {
   }
 }
 
-class HandoutOutlineItemModel {
-  const HandoutOutlineItemModel({
+class HandoutOutlineChildModel {
+  const HandoutOutlineChildModel({
     required this.outlineKey,
     required this.blockId,
     required this.title,
@@ -294,6 +358,7 @@ class HandoutOutlineItemModel {
     required this.sortNo,
     required this.generationStatus,
     required this.sourceSegmentKeys,
+    required this.topicTags,
   });
 
   final String outlineKey;
@@ -305,9 +370,17 @@ class HandoutOutlineItemModel {
   final int sortNo;
   final String generationStatus;
   final List<String> sourceSegmentKeys;
+  final List<String> topicTags;
 
-  factory HandoutOutlineItemModel.fromJson(Map<String, dynamic> json) {
-    return HandoutOutlineItemModel(
+  bool containsPosition(int positionSec, {required bool isLast}) {
+    if (positionSec < startSec) {
+      return false;
+    }
+    return isLast ? positionSec <= endSec : positionSec < endSec;
+  }
+
+  factory HandoutOutlineChildModel.fromJson(Map<String, dynamic> json) {
+    return HandoutOutlineChildModel(
       outlineKey: json['outlineKey'] as String,
       blockId: json['blockId'] as int,
       title: json['title'] as String,
@@ -320,6 +393,9 @@ class HandoutOutlineItemModel {
           (json['sourceSegmentKeys'] as List<dynamic>? ?? const [])
               .map((item) => item as String)
               .toList(),
+      topicTags: (json['topicTags'] as List<dynamic>? ?? const [])
+          .map((item) => item as String)
+          .toList(),
     );
   }
 }
