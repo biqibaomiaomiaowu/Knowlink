@@ -183,8 +183,18 @@ class MemoryScaffoldRepository:
                 }
         return None
 
-    def create_qa_message(self, course_id: int, handout_block_id: int, question: str) -> dict[str, Any] | None:
-        return self.store.create_qa_message(course_id, handout_block_id, question)
+    def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
+        return self.store.get_qa_context(course_id, handout_block_id)
+
+    def save_qa_exchange(
+        self,
+        context: dict[str, Any],
+        question: str,
+        response: dict[str, Any],
+        refs: list[dict[str, Any]],
+        candidate_count: int,
+    ) -> dict[str, Any]:
+        return self.store.save_qa_exchange(context, question, response, refs, candidate_count)
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         return self.store.get_qa_session_messages(session_id)

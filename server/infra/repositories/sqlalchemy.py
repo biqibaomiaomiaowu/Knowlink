@@ -9,11 +9,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from server.ai.qa_policy import (
-    build_block_scoped_qa_candidates,
-    build_qa_message_refs,
-    generate_block_qa_response,
-)
 from server.parsers.base import clean_text
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
@@ -821,7 +816,7 @@ class SqlAlchemyRuntimeRepository:
         self._commit_or_flush()
         return _vector_document_dict(document)
 
-    def create_qa_message(self, course_id: int, handout_block_id: int, question: str) -> dict[str, Any] | None:
+    def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
         course = self._get_course_model(course_id)
         if course is None or course.active_parse_run_id is None or course.active_handout_version_id is None:
             return None
@@ -846,45 +841,57 @@ class SqlAlchemyRuntimeRepository:
             version=version,
             vector_documents=active_block_vectors,
         )
-        candidates = build_block_scoped_qa_candidates(
-            question,
-            current_block=current_block,
-            segments=segments,
-            adjacent_blocks=adjacent_blocks,
-            active_course_id=course.id,
-            active_parse_run_id=course.active_parse_run_id,
-            active_handout_version_id=version.id,
-        )
-        response = generate_block_qa_response(
-            question,
-            current_block=current_block,
-            segments=segments,
-            adjacent_blocks=adjacent_blocks,
-            active_course_id=course.id,
-            active_parse_run_id=course.active_parse_run_id,
-            active_handout_version_id=version.id,
-        )
-        refs = build_qa_message_refs(
-            response,
-            candidates,
-            active_course_id=course.id,
-            active_parse_run_id=course.active_parse_run_id,
-            active_handout_version_id=version.id,
-        )
+        return {
+            "courseId": course.id,
+            "activeCourseId": course.id,
+            "activeParseRunId": course.active_parse_run_id,
+            "activeHandoutVersionId": version.id,
+            "handoutBlockId": block.id,
+            "currentBlock": current_block,
+            "segments": segments,
+            "knowledgePointEvidences": [],
+            "adjacentBlocks": adjacent_blocks,
+        }
+
+    def save_qa_exchange(
+        self,
+        context: dict[str, Any],
+        question: str,
+        response: dict[str, Any],
+        refs: list[dict[str, Any]],
+        candidate_count: int,
+    ) -> dict[str, Any]:
+        course_id = _as_positive_int(_payload_value(context, "courseId", "activeCourseId"))
+        parse_run_id = _as_positive_int(_payload_value(context, "activeParseRunId"))
+        handout_version_id = _as_positive_int(_payload_value(context, "activeHandoutVersionId"))
+        handout_block_id = _as_positive_int(_payload_value(context, "handoutBlockId"))
+        if (
+            course_id is None
+            or parse_run_id is None
+            or handout_version_id is None
+            or handout_block_id is None
+            or not self._qa_context_is_active(
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout_version_id=handout_version_id,
+                handout_block_id=handout_block_id,
+            )
+        ):
+            raise RuntimeError("Cannot save QA exchange for stale or invalid context.")
 
         now = utcnow()
         qa_session = QaSession(
             user_id=self.user_id,
-            course_id=course.id,
-            handout_version_id=version.id,
-            handout_block_id=block.id,
+            course_id=course_id,
+            handout_version_id=handout_version_id,
+            handout_block_id=handout_block_id,
             status="active",
             context_snapshot_json={
-                "courseId": course.id,
-                "activeParseRunId": course.active_parse_run_id,
-                "activeHandoutVersionId": version.id,
-                "handoutBlockId": block.id,
-                "candidateCount": len(candidates),
+                "courseId": course_id,
+                "activeParseRunId": parse_run_id,
+                "activeHandoutVersionId": handout_version_id,
+                "handoutBlockId": handout_block_id,
+                "candidateCount": candidate_count,
             },
             message_count=0,
             last_message_at=now,
@@ -930,7 +937,7 @@ class SqlAlchemyRuntimeRepository:
                     sort_no=int(ref["sortNo"]),
                     rank=ref.get("rank"),
                 )
-            )
+        )
 
         qa_session.message_count = 2
         qa_session.last_message_at = now
@@ -985,6 +992,34 @@ class SqlAlchemyRuntimeRepository:
                 Course.active_handout_version_id == HandoutBlock.handout_version_id,
                 HandoutVersion.source_parse_run_id == Course.active_parse_run_id,
             )
+        )
+
+    def _qa_context_is_active(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int,
+        handout_version_id: int,
+        handout_block_id: int,
+    ) -> bool:
+        return (
+            self.session.scalar(
+                select(HandoutBlock.id)
+                .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
+                .join(Course, Course.id == HandoutVersion.course_id)
+                .where(
+                    Course.id == course_id,
+                    Course.user_id == self.user_id,
+                    Course.active_parse_run_id == parse_run_id,
+                    Course.active_handout_version_id == handout_version_id,
+                    HandoutVersion.id == handout_version_id,
+                    HandoutVersion.course_id == course_id,
+                    HandoutVersion.source_parse_run_id == parse_run_id,
+                    HandoutBlock.id == handout_block_id,
+                    HandoutBlock.handout_version_id == handout_version_id,
+                )
+            )
+            is not None
         )
 
     def _current_handout_block_task(self, block: HandoutBlock) -> AsyncTask | None:

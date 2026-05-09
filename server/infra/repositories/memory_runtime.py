@@ -38,7 +38,7 @@ class RuntimeStore:
     handouts: dict[int, dict[str, Any]] = field(default_factory=dict)
     handout_by_course: dict[int, int] = field(default_factory=dict)
     quizzes: dict[int, dict[str, Any]] = field(default_factory=dict)
-    qa_sessions: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    qa_sessions: dict[int, dict[str, Any]] = field(default_factory=dict)
     review_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
     review_tasks: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     progress: dict[int, dict[str, Any]] = field(default_factory=dict)
@@ -270,43 +270,203 @@ class RuntimeStore:
             return outline
         return None
 
-    def create_qa_message(self, course_id: int, handout_block_id: int, question: str = "") -> dict[str, Any] | None:
-        session_id = self.next_id("qa_session")
-        user_message_id = self.next_id("qa_message")
-        assistant_message_id = self.next_id("qa_message")
+    def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
+        course = self.courses.get(course_id)
         handout = self.get_latest_handout(course_id)
-        if handout is None:
+        if course is None or handout is None:
+            return None
+        if handout.get("sourceParseRunId") != course.get("activeParseRunId"):
             return None
         block = next(
             (item for item in handout["blocks"] if item["blockId"] == handout_block_id),
             None,
         )
-        citation = (
-            block["citations"][0]
-            if block
-            else {"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}
+        if block is None:
+            return None
+
+        parse_run_id = course.get("activeParseRunId")
+        handout_version_id = handout["handoutVersionId"]
+        segments = self._qa_segments_from_memory_handout(
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+            handout=handout,
         )
+        adjacent_blocks = [
+            self._qa_block_payload_from_memory(
+                adjacent,
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout_version_id=handout_version_id,
+            )
+            for adjacent in handout["blocks"]
+            if adjacent["blockId"] != handout_block_id
+            and abs(int(adjacent.get("startSec") or 0) - int(block.get("startSec") or 0)) <= 300
+        ]
+        return {
+            "courseId": course_id,
+            "activeCourseId": course_id,
+            "activeParseRunId": parse_run_id,
+            "activeHandoutVersionId": handout_version_id,
+            "handoutBlockId": handout_block_id,
+            "currentBlock": self._qa_block_payload_from_memory(
+                block,
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout_version_id=handout_version_id,
+            ),
+            "segments": segments,
+            "knowledgePointEvidences": [],
+            "adjacentBlocks": adjacent_blocks,
+        }
+
+    def save_qa_exchange(
+        self,
+        context: dict[str, Any],
+        question: str,
+        response: dict[str, Any],
+        refs: list[dict[str, Any]],
+        candidate_count: int,
+    ) -> dict[str, Any]:
+        live_context = self.get_qa_context(int(context.get("courseId") or 0), int(context.get("handoutBlockId") or 0))
+        if (
+            live_context is None
+            or live_context.get("activeParseRunId") != context.get("activeParseRunId")
+            or live_context.get("activeHandoutVersionId") != context.get("activeHandoutVersionId")
+        ):
+            raise RuntimeError("Cannot save QA exchange for stale or invalid context.")
+
+        session_id = self.next_id("qa_session")
+        user_message_id = self.next_id("qa_message")
+        assistant_message_id = self.next_id("qa_message")
+        citations = [] if response.get("answerType") == "insufficient_evidence" else list(response.get("citations") or [])
         payload = {
             "sessionId": session_id,
             "messageId": assistant_message_id,
-            "answerMd": "定义决定了题型判断的边界，先记判定条件，再看典型题型转换。",
-            "citations": [citation],
+            "answerMd": response["answerMd"],
+            "answerType": response.get("answerType"),
+            "citations": citations,
         }
-        self.qa_sessions[session_id] = [
-            {
-                "sessionId": session_id,
-                "messageId": user_message_id,
-                "role": "user",
-                "contentMd": question,
-                "answerMd": None,
-                "citations": [],
+        self.qa_sessions[session_id] = {
+            "context": {
+                "courseId": context.get("courseId"),
+                "activeParseRunId": context.get("activeParseRunId"),
+                "activeHandoutVersionId": context.get("activeHandoutVersionId"),
+                "handoutBlockId": context.get("handoutBlockId"),
+                "candidateCount": candidate_count,
             },
-            {"role": "assistant", **payload},
-        ]
+            "messages": [
+                {
+                    "sessionId": session_id,
+                    "messageId": user_message_id,
+                    "role": "user",
+                    "contentMd": question,
+                    "answerMd": None,
+                    "answerType": None,
+                    "citations": [],
+                },
+                {"role": "assistant", **payload},
+            ],
+        }
         return payload
 
+    def _qa_block_payload_from_memory(
+        self,
+        block: dict[str, Any],
+        *,
+        course_id: int,
+        parse_run_id: int | None,
+        handout_version_id: int,
+    ) -> dict[str, Any]:
+        return {
+            "courseId": course_id,
+            "parseRunId": parse_run_id,
+            "handoutVersionId": handout_version_id,
+            "handoutBlockId": block["blockId"],
+            "outlineKey": block["outlineKey"],
+            "sortNo": block.get("sortNo") or 0,
+            "title": block["title"],
+            "summary": block["summary"],
+            "contentMd": block.get("contentMd") or block["summary"],
+            "knowledgePoints": block.get("knowledgePoints") or [],
+            "citations": block.get("citations") or [],
+        }
+
+    def _qa_segments_from_memory_handout(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None,
+        handout: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        segments: list[dict[str, Any]] = []
+        for block_index, block in enumerate(handout["blocks"], start=1):
+            text_content = " ".join(
+                item
+                for item in [block.get("title"), block.get("summary"), block.get("contentMd")]
+                if isinstance(item, str) and item
+            )
+            for citation_index, citation in enumerate(block.get("citations") or [], start=1):
+                if not isinstance(citation, dict):
+                    continue
+                locator = {
+                    key: citation[key]
+                    for key in ("pageNo", "slideNo", "anchorKey", "startSec", "endSec")
+                    if citation.get(key) not in (None, "")
+                }
+                if not locator:
+                    continue
+                segment_key = str(citation.get("segmentKey") or f"memory-{block['blockId']}-{citation_index}")
+                segments.append(
+                    {
+                        "courseId": course_id,
+                        "parseRunId": parse_run_id,
+                        "resourceId": citation["resourceId"],
+                        "segmentId": None,
+                        "segmentKey": segment_key,
+                        "segmentType": self._memory_segment_type(locator),
+                        "resourceType": self._memory_resource_type(locator),
+                        "textContent": text_content or block["summary"],
+                        "orderNo": block_index * 100 + citation_index,
+                        **locator,
+                    }
+                )
+        return segments
+
+    def _memory_segment_type(self, locator: dict[str, Any]) -> str:
+        if "startSec" in locator and "endSec" in locator:
+            return "video_caption"
+        if "pageNo" in locator:
+            return "pdf_page_text"
+        if "slideNo" in locator:
+            return "ppt_slide_text"
+        if "anchorKey" in locator:
+            return "docx_block_text"
+        return "text"
+
+    def _memory_resource_type(self, locator: dict[str, Any]) -> str:
+        if "startSec" in locator and "endSec" in locator:
+            return "mp4"
+        if "pageNo" in locator:
+            return "pdf"
+        if "slideNo" in locator:
+            return "pptx"
+        if "anchorKey" in locator:
+            return "docx"
+        return "document"
+
     def get_qa_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
-        return self.qa_sessions.get(session_id)
+        session = self.qa_sessions.get(session_id)
+        if session is None:
+            return None
+        context = session.get("context") or {}
+        live_context = self.get_qa_context(int(context.get("courseId") or 0), int(context.get("handoutBlockId") or 0))
+        if (
+            live_context is None
+            or live_context.get("activeParseRunId") != context.get("activeParseRunId")
+            or live_context.get("activeHandoutVersionId") != context.get("activeHandoutVersionId")
+        ):
+            return None
+        return list(session.get("messages") or [])
 
     def create_quiz(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
         quiz_id = self.next_id("quiz")

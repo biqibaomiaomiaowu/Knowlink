@@ -5,6 +5,7 @@ from functools import lru_cache
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from server.ai.qa_policy import get_configured_qa_answer_client
 from server.config.settings import Settings, get_settings
 from server.domain.services import (
     BilibiliService,
@@ -213,7 +214,7 @@ async def get_handout_service(
 async def get_qa_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> QaService:
-    return QaService(courses=repo, qa=repo)
+    return QaService(courses=repo, qa=repo, qa_answer_client=get_configured_qa_answer_client())
 
 
 async def get_quiz_service(
