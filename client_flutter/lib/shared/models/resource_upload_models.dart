@@ -111,6 +111,35 @@ class CourseResourceModel {
   }
 }
 
+class CourseResourcePlaybackModel {
+  const CourseResourcePlaybackModel({
+    required this.resourceId,
+    required this.resourceType,
+    required this.playbackUrl,
+    required this.mimeType,
+    required this.expiresAt,
+    this.durationSec,
+  });
+
+  final int resourceId;
+  final ResourceType resourceType;
+  final String playbackUrl;
+  final String mimeType;
+  final DateTime expiresAt;
+  final int? durationSec;
+
+  factory CourseResourcePlaybackModel.fromJson(Map<String, dynamic> json) {
+    return CourseResourcePlaybackModel(
+      resourceId: json['resourceId'] as int,
+      resourceType: _resourceTypeFromName(json['resourceType'] as String),
+      playbackUrl: json['playbackUrl'] as String,
+      mimeType: json['mimeType'] as String,
+      expiresAt: DateTime.parse(json['expiresAt'] as String),
+      durationSec: json['durationSec'] as int?,
+    );
+  }
+}
+
 class DeleteCourseResourceResultModel {
   const DeleteCourseResourceResultModel({
     required this.deleted,

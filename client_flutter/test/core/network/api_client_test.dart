@@ -310,6 +310,58 @@ void main() {
     );
   });
 
+  test('fetchCourseResourcePlayback uses API path and keeps presigned URL',
+      () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        return ResponseBody.fromString(
+          jsonEncode({
+            'data': {
+              'resourceId': 501,
+              'resourceType': 'mp4',
+              'playbackUrl':
+                  'http://127.0.0.1:9000/knowlink/raw/1/101/temp/video.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256',
+              'mimeType': 'video/mp4',
+              'expiresAt': '2026-04-18T16:00:00+00:00',
+              'durationSec': null,
+            },
+          }),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final objectAdapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async => ResponseBody.fromString('', 200),
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      objectStorageHttpClientAdapter: objectAdapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'week-three-token',
+    );
+
+    final playback = await client.fetchCourseResourcePlayback(501);
+
+    expect(playback.resourceId, 501);
+    expect(playback.resourceType, ResourceType.mp4);
+    expect(playback.durationSec, isNull);
+    expect(
+      playback.playbackUrl,
+      'http://127.0.0.1:9000/knowlink/raw/1/101/temp/video.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256',
+    );
+    expect(adapter.requests.single.method, 'GET');
+    expect(
+        adapter.requests.single.path, '/api/v1/course-resources/501/playback');
+    expect(
+      _headerValue(adapter.requests.single.headers, 'authorization'),
+      'Bearer week-three-token',
+    );
+    expect(objectAdapter.requests, isEmpty);
+  });
+
   test('parse and inquiry methods parse Week 2 response models', () async {
     final adapter = _RecordingHttpClientAdapter(
       onFetch: (options, _) async {
