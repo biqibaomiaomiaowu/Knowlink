@@ -39,6 +39,15 @@ GRANULARITY_MAP = {
     "detailed": ("high", "high"),
 }
 
+OUTLINE_DOCUMENT_CONTEXT_TYPES = {
+    "pdf_page_text",
+    "ppt_slide_text",
+    "docx_block_text",
+    "ocr_text",
+    "formula",
+    "image_caption",
+}
+
 
 class SqlAlchemyRuntimeRepository:
     def __init__(self, session: Session, *, user_id: int = 1) -> None:
@@ -445,30 +454,32 @@ class SqlAlchemyRuntimeRepository:
     def create_handout(
         self,
         course_id: int,
+        *,
+        outline: dict[str, Any] | None = None,
+        outline_meta: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         course = self._get_course_model(course_id)
         if course is None:
             raise ValueError(f"Course {course_id} was not found.")
 
         source_parse_run_id = course.active_parse_run_id
-        outline_payload: dict[str, Any] | None = None
-        if source_parse_run_id is not None:
-            outline_payload = _build_outline_from_caption_segments(
-                course=course,
-                captions=self._list_active_video_caption_segments(
-                    course_id=course_id,
-                    parse_run_id=source_parse_run_id,
-                ),
-            )
+        outline_payload = outline
+        outline_items = [
+            item
+            for item in (outline_payload or {}).get("items", [])
+            if isinstance(item, dict)
+        ]
 
-        if outline_payload is None:
+        if outline_payload is None or not outline_items:
             status = "failed"
             outline_status = "failed"
             title = course.title
             summary = "没有可用的视频字幕片段，未生成视频时间轴目录。"
-            error_code = "handout_outline.no_video_caption"
-            error_message = "Active parse run has no usable video_caption segments."
-            outline_items: list[dict[str, Any]] = []
+            error_code = error_code or "handout_outline.no_video_caption"
+            error_message = error_message or "Active parse run has no usable video_caption segments."
+            outline_items = []
         else:
             status = "outline_ready"
             outline_status = "ready"
@@ -476,7 +487,6 @@ class SqlAlchemyRuntimeRepository:
             summary = str(outline_payload["summary"])
             error_code = None
             error_message = None
-            outline_items = list(outline_payload["items"])
 
         version = HandoutVersion(
             course_id=course_id,
@@ -490,13 +500,13 @@ class SqlAlchemyRuntimeRepository:
             pending_blocks=len(outline_items),
             error_code=error_code,
             error_message=error_message,
-            meta_json=None,
+            meta_json=_json_ready(outline_meta) if outline_meta else None,
         )
         self.session.add(version)
         self.session.flush()
 
         blocks: list[HandoutBlock] = []
-        if outline_payload is not None:
+        if status == "outline_ready" and outline_payload is not None:
             self.session.add(
                 HandoutOutline(
                     handout_version_id=version.id,
@@ -815,6 +825,31 @@ class SqlAlchemyRuntimeRepository:
         self.session.add(document)
         self._commit_or_flush()
         return _vector_document_dict(document)
+
+    def get_handout_outline_context(self, course_id: int) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None or course.active_parse_run_id is None:
+            return None
+        parse_run_id = int(course.active_parse_run_id)
+        caption_segments = [
+            _course_segment_dict(segment)
+            for segment in self._list_active_video_caption_segments(
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+            )
+        ]
+        document_segments = self._list_active_outline_document_segments(
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+        )
+        return {
+            "courseId": course_id,
+            "activeParseRunId": parse_run_id,
+            "title": course.title or "视频时间轴目录",
+            "summary": "基于视频字幕和配套资料生成的语义讲义目录。",
+            "captionSegments": caption_segments,
+            "documentContext": _document_context_from_segments(document_segments),
+        }
 
     def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
         course = self._get_course_model(course_id)
@@ -1189,6 +1224,25 @@ class SqlAlchemyRuntimeRepository:
             ).all()
         )
 
+    def _list_active_outline_document_segments(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int,
+    ) -> list[CourseSegment]:
+        return list(
+            self.session.scalars(
+                select(CourseSegment)
+                .where(
+                    CourseSegment.course_id == course_id,
+                    CourseSegment.parse_run_id == parse_run_id,
+                    CourseSegment.segment_type.in_(OUTLINE_DOCUMENT_CONTEXT_TYPES),
+                    CourseSegment.is_active.is_(True),
+                )
+                .order_by(CourseSegment.order_no.asc(), CourseSegment.id.asc())
+            ).all()
+        )
+
     def _list_handout_blocks(self, handout_version_id: int) -> list[dict[str, Any]]:
         blocks = self.session.scalars(
             select(HandoutBlock)
@@ -1497,6 +1551,7 @@ def _handout_version_dict(
         "sourceParseRunId": version.source_parse_run_id,
         "errorCode": version.error_code,
         "errorMessage": version.error_message,
+        "metaJson": version.meta_json or {},
         "blocks": blocks,
     }
 
@@ -1741,6 +1796,41 @@ def _caption_payload(segment: CourseSegment) -> dict[str, Any] | None:
         "endSec": end_sec,
         "orderNo": segment.order_no,
     }
+
+
+def _document_context_from_segments(
+    segments: Sequence[CourseSegment],
+    *,
+    max_chars: int = 3600,
+    per_segment_chars: int = 260,
+) -> str:
+    lines: list[str] = []
+    total_chars = 0
+    for segment in segments:
+        text = _compact_text(segment.text_content or segment.plain_text or segment.formula_text)
+        if not text:
+            continue
+        title = _compact_text(segment.title)
+        locator = _outline_context_locator(segment)
+        prefix = f"- [{_segment_source_key(segment)} {segment.segment_type}{locator}]"
+        content = _truncate_text(f"{title}：{text}" if title else text, per_segment_chars)
+        line = f"{prefix} {content}"
+        next_total = total_chars + len(line) + 1
+        if next_total > max_chars:
+            break
+        lines.append(line)
+        total_chars = next_total
+    return "\n".join(lines)
+
+
+def _outline_context_locator(segment: CourseSegment) -> str:
+    if segment.page_no is not None:
+        return f" page={segment.page_no}"
+    if segment.slide_no is not None:
+        return f" slide={segment.slide_no}"
+    if segment.section_path:
+        return f" section={'/'.join(str(item) for item in segment.section_path)}"
+    return ""
 
 
 def _outline_item_from_caption_group(group: list[dict[str, Any]], index: int) -> dict[str, Any]:

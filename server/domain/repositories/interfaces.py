@@ -96,9 +96,16 @@ class InquiryRepository(Protocol):
 
 
 class HandoutRepository(Protocol):
+    def get_handout_outline_context(self, course_id: int) -> dict[str, Any] | None: ...
+
     def create_handout(
         self,
         course_id: int,
+        *,
+        outline: dict[str, Any] | None = None,
+        outline_meta: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]: ...
 
     def get_handout(self, handout_version_id: int) -> dict[str, Any] | None: ...

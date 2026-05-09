@@ -74,8 +74,16 @@ class MemoryScaffoldRepository:
     def create_handout(
         self,
         course_id: int,
+        *,
+        outline: dict[str, Any] | None = None,
+        outline_meta: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         return self.store.create_handout(course_id)
+
+    def get_handout_outline_context(self, course_id: int) -> dict[str, Any] | None:
+        return None
 
     def get_handout(self, handout_version_id: int) -> dict[str, Any] | None:
         return self.store.handouts.get(handout_version_id)
