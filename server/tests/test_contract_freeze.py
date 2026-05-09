@@ -265,6 +265,36 @@ def test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape(
     assert '"answerCount"' not in delete_session_section
 
 
+def test_course_resource_playback_contract_is_frozen():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    error_codes = load_text("docs/contracts/error-codes.md")
+    team_division = load_text("TEAM_DIVISION.md")
+
+    playback_section = api_contract.split(
+        "### `GET /api/v1/course-resources/{resourceId}/playback`", 1
+    )[1].split("### `DELETE /api/v1/courses/{courseId}/resources/{resourceId}`", 1)[0]
+
+    for token in (
+        "videoResourceId",
+        "playbackUrl",
+        "mimeType",
+        "expiresAt",
+        "durationSec",
+        "KNOWLINK_MINIO_PUBLIC_ENDPOINT",
+        "http://127.0.0.1:9000",
+        "minio:9000",
+        "`404 resource.not_found`",
+        "`409 resource.not_video`",
+        "`503 resource.playback_unavailable`",
+    ):
+        assert token in playback_section
+
+    for token in ("resource.not_found", "resource.not_video", "resource.playback_unavailable"):
+        assert token in error_codes
+
+    assert "GET /api/v1/course-resources/{resourceId}/playback" in team_division
+
+
 def test_demo_token_and_statuses_are_consistent_across_docs():
     architecture = load_text("ARCHITECTURE.md")
     api_contract = load_text("docs/contracts/api-contract.md")

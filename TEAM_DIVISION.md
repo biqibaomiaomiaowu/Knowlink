@@ -185,6 +185,7 @@
 | `HandoutPage` `activeBlockProvider` | `GET /api/v1/handout-blocks/{blockId}/status` | 杨彩艺 |
 | `HandoutPage` `activeBlockProvider` | `GET /api/v1/courses/{courseId}/handouts/current-block` | 杨彩艺 |
 | `HandoutPage` `activeBlockProvider` | `GET /api/v1/handout-blocks/{blockId}/jump-target` | 杨彩艺 |
+| `HandoutPage` `activeBlockProvider` | `GET /api/v1/course-resources/{resourceId}/playback` | 杨彩艺 |
 | `QaPage` `courseFlowProvider` | `POST /api/v1/qa/messages` | 杨彩艺 |
 | `QaPage` `courseFlowProvider` | `GET /api/v1/qa/sessions/{sessionId}/messages` | 杨彩艺 |
 | `QuizPage` `courseFlowProvider` | `POST /api/v1/courses/{courseId}/quizzes/generate` | 杨彩艺 |

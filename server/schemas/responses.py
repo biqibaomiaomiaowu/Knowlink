@@ -236,6 +236,15 @@ class ResourceListData(CamelModel):
     items: list[ResourceStatusData]
 
 
+class ResourcePlaybackData(CamelModel):
+    resource_id: int
+    resource_type: str
+    playback_url: str
+    mime_type: str
+    expires_at: datetime
+    duration_sec: int | None = None
+
+
 class UploadInitData(CamelModel):
     upload_url: str
     object_key: str

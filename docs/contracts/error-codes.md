@@ -21,6 +21,8 @@
 - `course.not_found`: 课程不存在
 - `resource.not_found`: 资源不存在
 - `resource.invalid_payload`: 上传完成回调字段不完整
+- `resource.not_video`: 资源不是可播放视频
+- `resource.playback_unavailable`: 播放地址生成失败
 
 ## Bilibili
 

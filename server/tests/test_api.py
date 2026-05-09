@@ -94,16 +94,33 @@ def create_manual_course(*, idempotency_key: str, title: str) -> tuple[int, dict
 
 
 def upload_ready_pdf(*, course_id: int, idempotency_key: str, suffix: str) -> dict:
+    return upload_ready_resource(
+        course_id=course_id,
+        idempotency_key=idempotency_key,
+        suffix=suffix,
+        resource_type="pdf",
+        mime_type="application/pdf",
+    )
+
+
+def upload_ready_resource(
+    *,
+    course_id: int,
+    idempotency_key: str,
+    suffix: str,
+    resource_type: str,
+    mime_type: str,
+) -> dict:
     status, body = asyncio.run(
         request(
             "POST",
             f"/api/v1/courses/{course_id}/resources/upload-complete",
             headers=AUTH_HEADERS | {"idempotency-key": idempotency_key},
             json_body={
-                "resourceType": "pdf",
-                "objectKey": f"raw/1/{course_id}/{suffix}.pdf",
-                "originalName": f"{suffix}.pdf",
-                "mimeType": "application/pdf",
+                "resourceType": resource_type,
+                "objectKey": f"raw/1/{course_id}/{suffix}.{resource_type}",
+                "originalName": f"{suffix}.{resource_type}",
+                "mimeType": mime_type,
                 "sizeBytes": 1024,
                 "checksum": f"sha256:{suffix}",
             },
@@ -246,6 +263,69 @@ def test_upload_complete_is_idempotent():
         identity_getter=lambda body: body["data"]["resourceId"],
     )
     assert first["data"]["resourceType"] == "pdf"
+
+
+def test_resource_playback_returns_presigned_url_for_video():
+    course_id, _ = create_manual_course(
+        idempotency_key="playback-course-1",
+        title="视频播放课",
+    )
+    upload = upload_ready_resource(
+        course_id=course_id,
+        idempotency_key="playback-video-upload-1",
+        suffix="playback-video",
+        resource_type="mp4",
+        mime_type="video/mp4",
+    )
+    resource_id = upload["data"]["resourceId"]
+
+    status, body = asyncio.run(
+        request(
+            "GET",
+            f"/api/v1/course-resources/{resource_id}/playback",
+            headers=AUTH_HEADERS,
+        )
+    )
+
+    assert status == 200
+    assert body["data"]["resourceId"] == resource_id
+    assert body["data"]["resourceType"] == "mp4"
+    assert body["data"]["playbackUrl"].startswith("http://object-storage.local/")
+    assert "method=get" in body["data"]["playbackUrl"]
+    assert body["data"]["mimeType"] == "video/mp4"
+    assert body["data"]["durationSec"] is None
+
+
+def test_resource_playback_rejects_non_video_and_missing_resource():
+    course_id, _ = create_manual_course(
+        idempotency_key="playback-course-2",
+        title="非视频播放边界课",
+    )
+    upload = upload_ready_pdf(
+        course_id=course_id,
+        idempotency_key="playback-pdf-upload-1",
+        suffix="playback-pdf",
+    )
+
+    non_video_status, non_video_body = asyncio.run(
+        request(
+            "GET",
+            f"/api/v1/course-resources/{upload['data']['resourceId']}/playback",
+            headers=AUTH_HEADERS,
+        )
+    )
+    missing_status, missing_body = asyncio.run(
+        request(
+            "GET",
+            "/api/v1/course-resources/99999999/playback",
+            headers=AUTH_HEADERS,
+        )
+    )
+
+    assert non_video_status == 409
+    assert non_video_body["errorCode"] == "resource.not_video"
+    assert missing_status == 404
+    assert missing_body["errorCode"] == "resource.not_found"
 
 
 def test_parse_start_is_idempotent():

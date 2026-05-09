@@ -11,7 +11,9 @@ from server.infra.storage import ObjectNotFoundError, ObjectStat, ObjectStorage,
 
 
 UPLOAD_EXPIRES_IN = timedelta(minutes=15)
+PLAYBACK_EXPIRES_IN = timedelta(hours=1)
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+VIDEO_RESOURCE_TYPES = {"mp4"}
 
 
 class ResourceService:
@@ -78,6 +80,41 @@ class ResourceService:
     def list_resources(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
         return {"items": self.resources.list_resources(course_id)}
+
+    def get_playback(self, *, resource_id: int) -> dict[str, object]:
+        resource = self.resources.get_resource(resource_id)
+        if resource is None:
+            raise ServiceError(
+                message="Resource was not found.",
+                error_code="resource.not_found",
+                status_code=404,
+            )
+        if resource.get("resourceType") not in VIDEO_RESOURCE_TYPES:
+            raise ServiceError(
+                message="Resource is not a playable video.",
+                error_code="resource.not_video",
+                status_code=409,
+            )
+
+        storage = self._require_playback_storage()
+        object_key = str(resource.get("objectKey") or "")
+        expires_at = utcnow() + PLAYBACK_EXPIRES_IN
+        try:
+            playback_url = storage.presigned_get_url(object_key, expires=PLAYBACK_EXPIRES_IN)
+        except ObjectStorageError as exc:
+            raise ServiceError(
+                message="Playback URL is unavailable.",
+                error_code="resource.playback_unavailable",
+                status_code=503,
+            ) from exc
+        return {
+            "resourceId": resource["resourceId"],
+            "resourceType": resource["resourceType"],
+            "playbackUrl": playback_url,
+            "mimeType": resource["mimeType"],
+            "expiresAt": expires_at,
+            "durationSec": None,
+        }
 
     def delete_resource(self, *, course_id: int, resource_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
@@ -177,6 +214,15 @@ class ResourceService:
             raise ServiceError(
                 message="Object storage is not configured.",
                 error_code="storage.unavailable",
+                status_code=503,
+            )
+        return self.storage
+
+    def _require_playback_storage(self) -> ObjectStorage:
+        if self.storage is None:
+            raise ServiceError(
+                message="Playback URL is unavailable.",
+                error_code="resource.playback_unavailable",
                 status_code=503,
             )
         return self.storage
