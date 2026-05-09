@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "KnowLinkQuizGeneration",
+  "description": "Schema for Cao Le-owned quiz generation strategy. Questions carry source keys for server-side reverse lookup; AI output must not invent page, slide, anchor, or video timestamp locators.",
   "type": "object",
   "required": ["quizType", "questions"],
   "properties": {
@@ -10,18 +11,40 @@
     },
     "questions": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 3,
+      "maxItems": 5,
       "items": {
         "type": "object",
-        "required": ["stemMd", "options", "correctAnswer", "explanationMd", "difficultyLevel"],
+        "required": [
+          "questionKey",
+          "questionType",
+          "stemMd",
+          "options",
+          "correctAnswer",
+          "explanationMd",
+          "difficultyLevel",
+          "knowledgePointKey",
+          "knowledgePointName",
+          "sourceBlockKey",
+          "sourceSegmentKeys"
+        ],
         "properties": {
+          "questionKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "questionType": {
+            "type": "string",
+            "enum": ["single_choice"]
+          },
           "stemMd": {
             "type": "string",
             "minLength": 1
           },
           "options": {
             "type": "array",
-            "minItems": 2,
+            "minItems": 4,
+            "maxItems": 4,
             "items": {
               "type": "string",
               "minLength": 1
@@ -29,7 +52,7 @@
           },
           "correctAnswer": {
             "type": "string",
-            "minLength": 1
+            "enum": ["A", "B", "C", "D"]
           },
           "explanationMd": {
             "type": "string",
@@ -38,6 +61,27 @@
           "difficultyLevel": {
             "type": "string",
             "enum": ["easy", "medium", "hard"]
+          },
+          "knowledgePointKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "knowledgePointName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceBlockKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceSegmentKeys": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "additionalProperties": false
