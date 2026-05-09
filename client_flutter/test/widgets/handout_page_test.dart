@@ -24,8 +24,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('高数期末冲刺讲义'), findsOneWidget);
+    expect(find.text('集合的概念与表示'), findsOneWidget);
+    expect(find.text('目录已使用降级结构展示。；目录按视频时间线降级生成'), findsOneWidget);
     expect(find.text('极限与连续'), findsWidgets);
-    expect(find.text('### 极限与连续'), findsOneWidget);
+    expect(find.textContaining('### 极限与连续'), findsNothing);
+    expect(find.text('抓住定义与题型边界。'), findsOneWidget);
     expect(find.text('PDF 第 2 页'), findsOneWidget);
     expect(find.textContaining('当前块 QA'), findsOneWidget);
     expect(find.text('当前块还没有问答记录。'), findsOneWidget);
@@ -34,6 +37,14 @@ void main() {
     expect(find.textContaining('Push'), findsNothing);
     expect(find.text('第 1 章  绪论'), findsNothing);
     expect(find.text('查看原文'), findsNothing);
+    expect(find.text('待生成'), findsWidgets);
+    expect(find.text('2:00-6:00'), findsWidgets);
+
+    await tester.tap(find.text('集合的概念与表示'));
+    await tester.pumpAndSettle();
+    expect(fakeApiClient.jumpTargetBlockIds, isEmpty);
+    expect(find.text('抓住定义与题型边界。'), findsOneWidget);
+    expect(fakeApiClient.qaRequests, isEmpty);
 
     await tester.tap(find.text('PDF 第 2 页'));
     await tester.pumpAndSettle();
@@ -48,7 +59,7 @@ void main() {
     expect(find.text('课程 101 · 6:00'), findsOneWidget);
     expect(fakeApiClient.jumpTargetBlockIds, [4001, 4002]);
     expect(
-      find.text('该讲义块状态为待生成，正文生成后会展示原始 Markdown。'),
+      find.text('该讲义块状态为待生成，正文生成后会展示结构化讲义内容。'),
       findsOneWidget,
     );
     expect(find.text('跳转位置：视频 501 6:00 · 文档 502 第 2 页'), findsOneWidget);
@@ -56,14 +67,14 @@ void main() {
     await tester.tap(find.text('集合构造中').first);
     await tester.pumpAndSettle();
     expect(
-      find.text('该讲义块状态为生成中，正文生成后会展示原始 Markdown。'),
+      find.text('该讲义块状态为生成中，正文生成后会展示结构化讲义内容。'),
       findsOneWidget,
     );
 
     await tester.tap(find.text('未知状态示例').first);
     await tester.pumpAndSettle();
     expect(
-      find.text('该讲义块状态为状态待确认，正文生成后会展示原始 Markdown。'),
+      find.text('该讲义块状态为状态待确认，正文生成后会展示结构化讲义内容。'),
       findsOneWidget,
     );
     expect(find.textContaining('mystery_state'), findsNothing);
@@ -71,6 +82,15 @@ void main() {
     await tester.tap(find.text('集合失败示例').first);
     await tester.pumpAndSettle();
     expect(find.text('该讲义块生成失败，可重试生成。'), findsOneWidget);
+
+    await tester.tap(find.text('极限与连续').first);
+    await tester.pumpAndSettle();
+    expect(find.text('抓住定义与题型边界。'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '+30').first);
+    await tester.pumpAndSettle();
+    expect(find.text('集合的表示方法'), findsWidgets);
+    expect(find.text('抓住定义与题型边界。'), findsOneWidget);
+    expect(fakeApiClient.jumpTargetBlockIds.last, 4001);
 
     await tester.tap(find.text('集合的表示方法').first);
     await tester.pumpAndSettle();
@@ -190,7 +210,80 @@ class _HandoutPageFakeApiClient extends ApiClient {
       'handoutVersionId': 3001,
       'title': '高数期末冲刺讲义',
       'summary': '按视频时间线组织',
-      'items': [],
+      'items': [
+        {
+          'outlineKey': 'section-1',
+          'title': '集合的概念与表示',
+          'summary': '从极限连续过渡到集合表示',
+          'startSec': 120,
+          'endSec': 1080,
+          'sortNo': 1,
+          'children': [
+            {
+              'outlineKey': 'outline-1',
+              'blockId': 4001,
+              'title': '极限与连续',
+              'summary': '先抓必考定义和题型',
+              'startSec': 120,
+              'endSec': 360,
+              'sortNo': 1,
+              'generationStatus': 'ready',
+              'sourceSegmentKeys': ['mp4-c1'],
+              'topicTags': ['极限'],
+            },
+            {
+              'outlineKey': 'outline-2',
+              'blockId': 4002,
+              'title': '集合的表示方法',
+              'summary': '从列举法过渡到描述法',
+              'startSec': 360,
+              'endSec': 540,
+              'sortNo': 2,
+              'generationStatus': 'pending',
+              'sourceSegmentKeys': ['mp4-c2'],
+              'topicTags': ['集合'],
+            },
+            {
+              'outlineKey': 'outline-3',
+              'blockId': 4003,
+              'title': '集合构造中',
+              'summary': '生成中的讲义块',
+              'startSec': 540,
+              'endSec': 720,
+              'sortNo': 3,
+              'generationStatus': 'generating',
+              'sourceSegmentKeys': ['mp4-c3'],
+              'topicTags': ['集合'],
+            },
+            {
+              'outlineKey': 'outline-4',
+              'blockId': 4004,
+              'title': '集合失败示例',
+              'summary': '失败状态示例',
+              'startSec': 720,
+              'endSec': 900,
+              'sortNo': 4,
+              'generationStatus': 'failed',
+              'sourceSegmentKeys': ['mp4-c4'],
+              'topicTags': ['集合'],
+            },
+            {
+              'outlineKey': 'outline-5',
+              'blockId': 4005,
+              'title': '未知状态示例',
+              'summary': '未知状态讲义块',
+              'startSec': 900,
+              'endSec': 1080,
+              'sortNo': 5,
+              'generationStatus': 'mystery_state',
+              'sourceSegmentKeys': ['mp4-c5'],
+              'topicTags': [],
+            },
+          ],
+        },
+      ],
+      'outlineUsedFallback': true,
+      'outlineIssues': ['目录按视频时间线降级生成'],
     });
   }
 
@@ -204,7 +297,7 @@ class _HandoutPageFakeApiClient extends ApiClient {
           'title': '极限与连续',
           'summary': '先抓必考定义和题型',
           'status': 'ready',
-          'contentMd': '### 极限与连续',
+          'contentMd': '### 极限与连续\n\n抓住定义与题型边界。',
           'startSec': 120,
           'endSec': 360,
           'pageFrom': 2,
