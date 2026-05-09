@@ -12,8 +12,12 @@ import 'package:knowlink_client/features/parse_progress/parse_progress_page.dart
 import 'package:knowlink_client/features/qa/qa_page.dart';
 import 'package:knowlink_client/features/quiz/quiz_page.dart';
 import 'package:knowlink_client/features/review/review_page.dart';
+import 'package:knowlink_client/shared/models/course_progress_models.dart';
+import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
 import 'package:knowlink_client/shared/models/pipeline_status.dart';
+import 'package:knowlink_client/shared/models/quiz_models.dart';
+import 'package:knowlink_client/shared/models/review_models.dart';
 import 'package:knowlink_client/shared/models/resource_upload_models.dart';
 import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
@@ -46,6 +50,7 @@ void main() {
       '/courses/101/progress': find.byType(ParseProgressPage),
       '/courses/101/inquiry': find.byType(InquiryPage),
       '/courses/101/handout': find.byType(HandoutPage),
+      '/courses/101/quiz': find.byType(QuizPage),
       '/quizzes/8001': find.byType(QuizPage),
       '/courses/101/review': find.byType(ReviewPage),
     };
@@ -244,6 +249,47 @@ class _RouterFakeApiClient extends ApiClient {
     return InquiryQuestionsModel.fromJson({
       'version': 1,
       'questions': [],
+    });
+  }
+
+  @override
+  Future<QuizModel> fetchQuiz(int quizId) async {
+    return QuizModel.fromJson({
+      'quizId': quizId,
+      'courseId': 101,
+      'status': 'ready',
+      'questionCount': 1,
+      'questions': [
+        {
+          'questionId': 8101,
+          'stemMd': '极限定义关注什么？',
+          'options': ['A', 'B', 'C', 'D'],
+        },
+      ],
+    });
+  }
+
+  @override
+  Future<ReviewTasksModel> fetchReviewTasks(String courseId) async {
+    return const ReviewTasksModel(items: []);
+  }
+
+  @override
+  Future<HomeDashboardModel> fetchHomeDashboard() async {
+    return HomeDashboardModel.fromJson({
+      'recentCourses': [],
+      'topReviewTasks': [],
+      'recommendationEntryEnabled': true,
+      'dailyRecommendedKnowledgePoints': [],
+      'learningStats': {},
+    });
+  }
+
+  @override
+  Future<CourseProgressModel> fetchCourseProgress(String courseId) async {
+    return CourseProgressModel.fromJson({
+      'courseId': int.parse(courseId),
+      'lastActivityAt': '2026-05-11T10:00:00+00:00',
     });
   }
 }
