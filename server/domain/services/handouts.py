@@ -7,6 +7,7 @@ from server.domain.repositories import (
     TaskDispatcher,
 )
 from server.domain.services.errors import ServiceError
+from server.ai.handout_lazy import HandoutOutlineClient, generate_handout_outline
 
 
 class HandoutService:
@@ -17,11 +18,13 @@ class HandoutService:
         handouts: HandoutRepository,
         idempotency: IdempotencyRepository,
         task_dispatcher: TaskDispatcher | None = None,
+        outline_client: HandoutOutlineClient | None = None,
     ) -> None:
         self.courses = courses
         self.handouts = handouts
         self.idempotency = idempotency
         self.task_dispatcher = task_dispatcher
+        self.outline_client = outline_client
 
     def generate_handout(self, *, course_id: int, idempotency_key: str | None) -> dict[str, object]:
         course = self._ensure_course(course_id)
@@ -37,7 +40,14 @@ class HandoutService:
 
         def factory() -> dict[str, object]:
             nonlocal enqueue_request, created_response
-            _, trigger, _ = self.handouts.create_handout(course_id)
+            outline, outline_meta, error_code, error_message = self._build_outline_for_course(course_id)
+            _, trigger, _ = self.handouts.create_handout(
+                course_id,
+                outline=outline,
+                outline_meta=outline_meta,
+                error_code=error_code,
+                error_message=error_message,
+            )
             task_id = _int_value(trigger.get("taskId"))
             payload = {
                 "courseId": course_id,
@@ -54,6 +64,49 @@ class HandoutService:
             task_id, payload = enqueue_request
             self.task_dispatcher.enqueue_handout_generate(task_id=task_id, payload=payload)
         return result
+
+    def _build_outline_for_course(
+        self,
+        course_id: int,
+    ) -> tuple[dict[str, object] | None, dict[str, object], str | None, str | None]:
+        context = self.handouts.get_handout_outline_context(course_id)
+        if context is None:
+            return None, {}, None, None
+
+        caption_segments = context.get("captionSegments")
+        if not isinstance(caption_segments, list) or not caption_segments:
+            return (
+                None,
+                {"outlineUsedFallback": False, "outlineIssues": ["handout_outline.no_video_caption"]},
+                "handout_outline.no_video_caption",
+                "Active parse run has no usable video_caption segments.",
+            )
+
+        try:
+            generation = generate_handout_outline(
+                caption_segments,
+                client=self.outline_client,
+                title=str(context.get("title") or "视频时间轴目录"),
+                summary=str(context.get("summary") or "基于视频字幕快速生成的讲义目录。"),
+                document_context=_optional_text(context.get("documentContext")),
+            )
+        except ValueError:
+            return (
+                None,
+                {"outlineUsedFallback": False, "outlineIssues": ["handout_outline.no_video_caption"]},
+                "handout_outline.no_video_caption",
+                "Active parse run has no usable video_caption segments.",
+            )
+
+        return (
+            generation.outline,
+            {
+                "outlineUsedFallback": generation.used_fallback,
+                "outlineIssues": generation.issues,
+            },
+            None,
+            None,
+        )
 
     def get_status(self, *, handout_version_id: int) -> dict[str, object]:
         handout = self.handouts.get_handout(handout_version_id)
@@ -199,3 +252,10 @@ def _int_value(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

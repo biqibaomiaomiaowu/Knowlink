@@ -816,15 +816,38 @@ stub 阶段约束：
   "summary": "按视频时间线组织的讲义目录",
   "items": [
     {
-      "outlineKey": "outline-1",
-      "blockId": 4001,
-      "title": "集合的基本概念",
-      "summary": "介绍集合、元素和属于关系",
+      "outlineKey": "section-1",
+      "title": "集合的概念与表示",
+      "summary": "从集合定义过渡到集合表示方法",
       "startSec": 0,
-      "endSec": 180,
+      "endSec": 360,
       "sortNo": 1,
-      "generationStatus": "pending",
-      "sourceSegmentKeys": ["mp4-c1", "mp4-c2"]
+      "children": [
+        {
+          "outlineKey": "outline-1",
+          "blockId": 4001,
+          "title": "集合的基本概念",
+          "summary": "介绍集合、元素和属于关系",
+          "startSec": 0,
+          "endSec": 180,
+          "sortNo": 1,
+          "generationStatus": "pending",
+          "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+          "topicTags": ["集合"]
+        },
+        {
+          "outlineKey": "outline-2",
+          "blockId": 4002,
+          "title": "集合的表示方法",
+          "summary": "从列举法过渡到描述法",
+          "startSec": 180,
+          "endSec": 360,
+          "sortNo": 2,
+          "generationStatus": "pending",
+          "sourceSegmentKeys": ["mp4-c3"],
+          "topicTags": []
+        }
+      ]
     }
   ]
 }
@@ -832,9 +855,12 @@ stub 阶段约束：
 
 说明：
 
-- 这是视频优先讲义页的首屏读取接口方向；接口实现 owner 仍按 `TEAM_DIVISION.md` 执行。
-- `items[*].sourceSegmentKeys` 是 API read model 必返字段，用于后续 block 生成和引用校验；前端可忽略展示。
-- 点击目录项时，播放器跳转到 `startSec`；播放时间落在 `[startSec, endSec)` 时高亮对应目录项，最后一段允许命中 `endSec`。
+- 这是视频优先讲义页的首屏读取接口；本轮为破坏性两级 outline API 改动，Flutter 需后续单独适配。
+- `items[]` 是大标题，只负责语义分组和展开；大标题没有 `blockId`，不可直接生成讲义块，也不作为点击、跳转、高亮或 QA 的目标。
+- `items[*].children[]` 是小标题，也是唯一 leaf item；只有 child 绑定 `blockId`、`generationStatus`、`sourceSegmentKeys` 和 `topicTags`。
+- `items[*].children[*].sourceSegmentKeys` 是 API read model 必返字段，用于后续 block 生成和引用校验；前端可忽略展示。
+- 点击 child 目录项时，播放器跳转到 child `startSec`；播放时间落在 child `[startSec, endSec)` 时高亮对应 child，最后一个 child 允许命中 `endSec`。
+- 同一个大标题下的 children 必须在视频时间线上连续归属，不能与其他大标题穿插；大标题 `startSec/endSec` 等于 children 的最小开始和最大结束。
 
 ### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`
 
@@ -901,7 +927,7 @@ stub 阶段约束：
 
 说明：
 
-- 这是单个目录项懒生成的接口方向；幂等、任务入队和 DTO 由后端 owner 落地。
+- 这是单个 child 目录项懒生成的接口方向；幂等、任务入队和 DTO 由后端 owner 落地。
 - 必须支持 `Idempotency-Key`；相同用户、相同 `blockId`、相同 `Idempotency-Key` 的重复请求不得创建重复 block 或重复任务。
 - 当 block 已处于 `generating` 时，重复请求返回当前任务，`entity.type = handout_block`，不得重复入队。
 - 当 block 已处于 `ready` 时，重复请求返回当前 block 状态，不重新生成。
@@ -972,6 +998,7 @@ stub 阶段约束：
   "sessionId": 6001,
   "messageId": 6002,
   "answerMd": "定义控制了题型的判断边界。",
+  "answerType": "direct_answer",
   "citations": [
     {
       "resourceId": 501,
@@ -981,6 +1008,12 @@ stub 阶段约束：
   ]
 }
 ```
+
+说明：
+
+- `answerType` 取值为 `direct_answer`、`clarification`、`insufficient_evidence`。
+- Doubao / vivo QA 接入只影响服务端回答生成策略，不改变前端请求字段、接口路径或 citations 结构。
+- `citations` 只能来自服务端当前候选证据反查；`insufficient_evidence` 时固定为空数组。
 
 ### `GET /api/v1/qa/sessions/{sessionId}/messages`
 
@@ -993,6 +1026,7 @@ stub 阶段约束：
       "sessionId": 6001,
       "messageId": 6002,
       "answerMd": "定义控制了题型的判断边界。",
+      "answerType": "direct_answer",
       "citations": [
         {
           "resourceId": 501,

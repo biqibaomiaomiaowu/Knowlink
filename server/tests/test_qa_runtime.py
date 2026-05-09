@@ -291,13 +291,7 @@ def test_sql_qa_create_rejects_mismatched_course_active_pointer():
         )
         session.commit()
 
-        result = repo.create_qa_message(
-            other_course["courseId"],
-            block_id,
-            "集合的定义是什么？",
-        )
-
-        assert result is None
+        assert repo.get_qa_context(other_course["courseId"], block_id) is None
     finally:
         session.close()
         engine.dispose()
@@ -334,7 +328,7 @@ def test_sql_qa_create_rejects_active_handout_from_old_parse_run():
         )
         repo.mark_parse_run_succeeded(new_parse_run["parseRunId"])
 
-        assert repo.create_qa_message(course_id, block_id, "集合的定义是什么？") is None
+        assert repo.get_qa_context(course_id, block_id) is None
     finally:
         session.close()
         engine.dispose()

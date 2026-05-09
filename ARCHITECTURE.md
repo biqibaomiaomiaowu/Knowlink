@@ -319,6 +319,7 @@ server/
 
 - 不单独保留 `controller` 层，FastAPI 的 router + service 已足够。
 - `domain` 只承载业务语义，不依赖 HTTP。
+- 本轮 QA 分层接入目标是：`QaService` 负责编排上下文、候选证据、AI policy 和落库；repository 只负责读取当前 active scope 数据与写入会话 / 引用，`server/ai/qa_policy.py` 负责模型策略和回答归一化。
 - `infra/repositories/memory.py` 是当前 demo 适配器；真实仓储后续按同一协议替换。
 - `infra` 统一放数据库、队列、对象存储和仓储适配器等基础设施封装。
 - 以上是当前关键骨架快照；历史兼容文件已经移除，不再出现在目录树中。
@@ -1215,11 +1216,13 @@ exports/{courseId}/handouts/v{versionNo}.md
 
 ## 12.4 块级问答
 
+本轮 QA 分层接入完成后的目标链路：
+
 1. 前端提交 `courseId + handoutBlockId + question`。
-2. 后端读取当前讲义版本和块级上下文。
-3. 检索 `vector_documents`，限定在当前课程与当前 `handout_version_id` 范围。
-4. 模型输出答案与引用段 ID。
-5. 服务端反查生成 `qa_message_refs`，返回结构化 citations。
+2. `QaService` 读取当前讲义版本和块级上下文，并限定 active course / parse run / handout version。
+3. `QaService` 构造候选证据并调用 `server/ai/qa_policy.py`；repository 不做 AI 决策。
+4. 模型只允许基于候选证据输出 `answerMd`、`answerType`、`citations` JSON。
+5. 服务端反查并归一化 citations，repository 写入 `qa_sessions`、`qa_messages`、`qa_message_refs` 后返回结构化 citations。
 
 ## 12.5 测验与掌握度
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "KnowLinkHandoutOutline",
-  "description": "Structural schema for video-first handout outlines. Cross-item timeline constraints such as non-overlap, increasing sortNo, and sourceSegmentKeys belonging to the active caption set are contract rules enforced by server.ai.handout_lazy.outline_timeline_issues and generation-time validation.",
+  "description": "Structural schema for video-first two-level handout outlines. Root items are parent sections without blockId/sourceSegmentKeys; only child items bind lazy handout blocks. Cross-item timeline constraints such as non-overlap, parent time covering children, increasing leaf sortNo, and sourceSegmentKeys belonging to the active caption set are contract rules enforced by server.ai.handout_lazy.outline_timeline_issues and generation-time validation.",
   "$defs": {
     "stableKey": {
       "type": "string",
@@ -11,6 +11,111 @@
     "generationStatus": {
       "type": "string",
       "enum": ["pending", "generating", "ready", "failed"]
+    },
+    "childItem": {
+      "type": "object",
+      "required": [
+        "outlineKey",
+        "title",
+        "summary",
+        "startSec",
+        "endSec",
+        "sortNo",
+        "generationStatus",
+        "sourceSegmentKeys"
+      ],
+      "properties": {
+        "outlineKey": {
+          "$ref": "#/$defs/stableKey"
+        },
+        "blockId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startSec": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endSec": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sortNo": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "generationStatus": {
+          "$ref": "#/$defs/generationStatus"
+        },
+        "sourceSegmentKeys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/stableKey"
+          }
+        },
+        "topicTags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sectionItem": {
+      "type": "object",
+      "required": [
+        "outlineKey",
+        "title",
+        "summary",
+        "startSec",
+        "endSec",
+        "sortNo",
+        "children"
+      ],
+      "properties": {
+        "outlineKey": {
+          "$ref": "#/$defs/stableKey"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startSec": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endSec": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sortNo": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/childItem"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "type": "object",
@@ -28,60 +133,7 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "object",
-        "required": [
-          "outlineKey",
-          "title",
-          "summary",
-          "startSec",
-          "endSec",
-          "sortNo",
-          "generationStatus",
-          "sourceSegmentKeys"
-        ],
-        "properties": {
-          "outlineKey": {
-            "$ref": "#/$defs/stableKey"
-          },
-          "title": {
-            "type": "string",
-            "minLength": 1
-          },
-          "summary": {
-            "type": "string",
-            "minLength": 1
-          },
-          "startSec": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "endSec": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "sortNo": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "generationStatus": {
-            "$ref": "#/$defs/generationStatus"
-          },
-          "sourceSegmentKeys": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/$defs/stableKey"
-            }
-          },
-          "topicTags": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        "additionalProperties": false
+        "$ref": "#/$defs/sectionItem"
       }
     }
   },

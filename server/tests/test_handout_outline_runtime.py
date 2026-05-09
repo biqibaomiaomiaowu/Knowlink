@@ -40,9 +40,11 @@ def test_sql_handout_generate_persists_latest_outline_and_api_read_model():
         outline = repo.get_latest_outline(course_id)
         assert outline is not None
         assert outline["handoutVersionId"] == handout_version_id
-        assert outline["items"][0]["sourceSegmentKeys"] == segment_keys
-        assert outline["items"][0]["generationStatus"] == "pending"
-        assert isinstance(outline["items"][0]["blockId"], int)
+        outline_children = _outline_children(outline)
+        assert outline["items"][0]["children"] == outline_children
+        assert outline_children[0]["sourceSegmentKeys"] == segment_keys
+        assert outline_children[0]["generationStatus"] == "pending"
+        assert isinstance(outline_children[0]["blockId"], int)
         blocks = service.get_latest_blocks(course_id=course_id)
         assert blocks["items"][0]["sourceSegmentKeys"] == segment_keys
 
@@ -57,7 +59,94 @@ def test_sql_handout_generate_persists_latest_outline_and_api_read_model():
 
         assert api_status == 200
         assert body["data"]["handoutVersionId"] == handout_version_id
-        assert body["data"]["items"][0]["sourceSegmentKeys"] == segment_keys
+        assert body["data"]["items"][0]["children"][0]["sourceSegmentKeys"] == segment_keys
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_handout_generate_uses_semantic_outline_client_and_document_context():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_active_video_segments(repo)
+        parse_run_id = int(repo.get_course(course_id)["activeParseRunId"])
+        pdf_resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pdf",
+                "objectKey": f"raw/1/{course_id}/set.pdf",
+                "originalName": "set.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 1024,
+                "checksum": "sha256:set-pdf",
+            },
+        )
+        repo.create_course_segments(
+            course_id=course_id,
+            resource_id=pdf_resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "pdf_page_text",
+                    "title": "ZF 公理化集合论",
+                    "orderNo": 10,
+                    "textContent": "补充资料说明 ZF 公理化集合论和文氏图表示。",
+                    "pageNo": 3,
+                }
+            ],
+        )
+        outline_client = _SemanticOutlineClient()
+        service = HandoutService(
+            courses=repo,
+            handouts=repo,
+            idempotency=repo,
+            outline_client=outline_client,
+        )
+
+        trigger = service.generate_handout(course_id=course_id, idempotency_key=None)
+        handout_version_id = trigger["entity"]["id"]
+
+        assert outline_client.document_context is not None
+        assert "ZF 公理化集合论" in outline_client.document_context
+        assert "文氏图" in outline_client.document_context
+
+        latest = repo.get_latest_handout(course_id)
+        assert latest["handoutVersionId"] == handout_version_id
+        assert latest["metaJson"] == {"outlineUsedFallback": False, "outlineIssues": []}
+
+        outline = repo.get_latest_outline(course_id)
+        child = _outline_children(outline)[0]
+        assert outline["items"][0]["title"] == "集合的概念与表示"
+        assert child["title"] == "集合论基础"
+        assert child["summary"] == "理解集合、元素和属于关系的核心定义。"
+        assert child["sourceSegmentKeys"] == segment_keys
+        assert isinstance(child["blockId"], int)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_handout_generate_falls_back_and_records_invalid_outline_issues():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_active_video_segments(repo)
+        service = HandoutService(
+            courses=repo,
+            handouts=repo,
+            idempotency=repo,
+            outline_client=_InvalidTimelineOutlineClient(),
+        )
+
+        service.generate_handout(course_id=course_id, idempotency_key=None)
+
+        latest = repo.get_latest_handout(course_id)
+        assert latest["metaJson"]["outlineUsedFallback"] is True
+        assert "outline.time_overlap" in latest["metaJson"]["outlineIssues"]
+
+        outline = repo.get_latest_outline(course_id)
+        child = _outline_children(outline)[0]
+        assert child["sourceSegmentKeys"] == segment_keys
+        assert child["generationStatus"] == "pending"
     finally:
         session.close()
         engine.dispose()
@@ -496,8 +585,8 @@ def test_current_block_matches_boundaries_and_prefetches_next_pending_block():
         service.generate_handout(course_id=course_id, idempotency_key=None)
         blocks = repo.get_latest_handout(course_id)["blocks"]
 
-        first = service.get_current_block(course_id=course_id, current_sec=199)
-        boundary = service.get_current_block(course_id=course_id, current_sec=200)
+        first = service.get_current_block(course_id=course_id, current_sec=240)
+        boundary = service.get_current_block(course_id=course_id, current_sec=260)
         last_end = service.get_current_block(course_id=course_id, current_sec=320)
 
         assert first["blockId"] == blocks[0]["blockId"]
@@ -814,7 +903,7 @@ def test_latest_handout_blocks_read_active_version_only_after_regenerate():
         engine.dispose()
 
 
-def test_sql_handout_generate_repairs_cross_group_caption_overlap():
+def test_sql_handout_generate_merges_cross_group_caption_overlap():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, segment_keys = _create_course_with_overlapping_caption_segments(repo)
@@ -825,17 +914,18 @@ def test_sql_handout_generate_repairs_cross_group_caption_overlap():
         session.expire_all()
         outline = repo.get_latest_outline(course_id)
         assert outline is not None
-        assert [item["sourceSegmentKeys"] for item in outline["items"]] == [
-            [segment_keys[0]],
-            [segment_keys[1], segment_keys[2]],
+        children = _outline_children(outline)
+        assert [item["sourceSegmentKeys"] for item in children] == [
+            [segment_keys[0], segment_keys[1]],
+            [segment_keys[2]],
         ]
-        first, second = outline["items"]
+        first, second = children
         assert first["startSec"] == 0
-        assert first["endSec"] == 200
-        assert second["startSec"] == 200
+        assert first["endSec"] == 250
+        assert second["startSec"] == 260
         assert second["endSec"] == 320
         assert first["endSec"] <= second["startSec"]
-        assert [item["sortNo"] for item in outline["items"]] == [1, 2]
+        assert [item["sortNo"] for item in children] == [1, 2]
     finally:
         session.close()
         engine.dispose()
@@ -1055,6 +1145,14 @@ def _create_course_with_overlapping_caption_segments(
     return course_id, [segment["segmentKey"] for segment in segments]
 
 
+def _outline_children(outline: dict[str, Any]) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    for section in outline.get("items") or []:
+        if isinstance(section, dict) and isinstance(section.get("children"), list):
+            children.extend(child for child in section["children"] if isinstance(child, dict))
+    return children
+
+
 @contextmanager
 def _override_handout_service(service: HandoutService) -> Iterator[None]:
     previous_overrides: dict[Any, Any] = dict(app.dependency_overrides)
@@ -1068,6 +1166,86 @@ def _override_handout_service(service: HandoutService) -> Iterator[None]:
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous_overrides)
+
+
+class _SemanticOutlineClient:
+    def __init__(self) -> None:
+        self.document_context: str | None = None
+
+    def generate_outline(self, caption_segments, *, title, summary, document_context=None):
+        self.document_context = document_context
+        source_keys = [str(segment["segmentKey"]) for segment in caption_segments]
+        return {
+            "title": "集合论语义目录",
+            "summary": "按集合论概念组织的视频讲义目录。",
+            "items": [
+                {
+                    "outlineKey": "section-set-basics",
+                    "title": "集合的概念与表示",
+                    "summary": "从集合定义过渡到集合表示。",
+                    "startSec": min(int(segment["startSec"]) for segment in caption_segments),
+                    "endSec": max(int(segment["endSec"]) for segment in caption_segments),
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "set-basics",
+                            "title": "集合论基础",
+                            "summary": "理解集合、元素和属于关系的核心定义。",
+                            "startSec": min(int(segment["startSec"]) for segment in caption_segments),
+                            "endSec": max(int(segment["endSec"]) for segment in caption_segments),
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": source_keys,
+                            "topicTags": ["集合", "元素"],
+                        }
+                    ],
+                }
+            ],
+        }
+
+
+class _InvalidTimelineOutlineClient:
+    def generate_outline(self, caption_segments, *, title, summary, document_context=None):
+        first = caption_segments[0]
+        second = caption_segments[-1]
+        return {
+            "title": "非法目录",
+            "summary": "非法时间线。",
+            "items": [
+                {
+                    "outlineKey": "bad-section",
+                    "title": "非法分组",
+                    "summary": "非法分组。",
+                    "startSec": int(first["startSec"]),
+                    "endSec": int(second["endSec"]),
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "bad-1",
+                            "title": "集合定义",
+                            "summary": "第一段。",
+                            "startSec": int(first["startSec"]),
+                            "endSec": int(second["endSec"]),
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [str(first["segmentKey"]), str(second["segmentKey"])],
+                            "topicTags": [],
+                        },
+                        {
+                            "outlineKey": "bad-2",
+                            "title": "属于关系",
+                            "summary": "第二段。",
+                            "startSec": int(second["startSec"]),
+                            "endSec": int(second["endSec"]),
+                            "sortNo": 2,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [str(second["segmentKey"])],
+                            "topicTags": [],
+                        },
+                    ],
+                },
+            ],
+        }
 
 
 class _RecordingHandoutDispatcher:

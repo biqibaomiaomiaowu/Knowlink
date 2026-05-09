@@ -77,16 +77,51 @@ class InquiryQuestionsData(CamelModel):
 
 class HandoutBlock(CamelModel):
     block_id: int
+    handout_version_id: int | None = None
+    outline_key: str | None = None
     title: str
     summary: str
-    content_md: str
+    status: str | None = None
+    content_md: str | None = None
     start_sec: int | None = None
     end_sec: int | None = None
+    source_segment_keys: list[str] = []
+    knowledge_points: list[dict[str, object]] = []
     page_from: int | None = None
     page_to: int | None = None
     slide_no: int | None = None
     anchor_key: str | None = None
     citations: list[Citation]
+
+
+class HandoutOutlineChild(CamelModel):
+    outline_key: str
+    block_id: int | None = None
+    title: str
+    summary: str
+    start_sec: int
+    end_sec: int
+    sort_no: int
+    generation_status: str
+    source_segment_keys: list[str]
+    topic_tags: list[str] = []
+
+
+class HandoutOutlineSection(CamelModel):
+    outline_key: str
+    title: str
+    summary: str
+    start_sec: int
+    end_sec: int
+    sort_no: int
+    children: list[HandoutOutlineChild]
+
+
+class HandoutOutlineData(CamelModel):
+    handout_version_id: int
+    title: str
+    summary: str
+    items: list[HandoutOutlineSection]
 
 
 class HandoutStatusData(CamelModel):

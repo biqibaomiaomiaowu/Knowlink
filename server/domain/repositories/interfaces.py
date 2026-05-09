@@ -96,9 +96,16 @@ class InquiryRepository(Protocol):
 
 
 class HandoutRepository(Protocol):
+    def get_handout_outline_context(self, course_id: int) -> dict[str, Any] | None: ...
+
     def create_handout(
         self,
         course_id: int,
+        *,
+        outline: dict[str, Any] | None = None,
+        outline_meta: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]: ...
 
     def get_handout(self, handout_version_id: int) -> dict[str, Any] | None: ...
@@ -126,7 +133,16 @@ class HandoutRepository(Protocol):
 
 
 class QaRepository(Protocol):
-    def create_qa_message(self, course_id: int, handout_block_id: int, question: str) -> dict[str, Any] | None: ...
+    def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None: ...
+
+    def save_qa_exchange(
+        self,
+        context: dict[str, Any],
+        question: str,
+        response: dict[str, Any],
+        refs: list[dict[str, Any]],
+        candidate_count: int,
+    ) -> dict[str, Any]: ...
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None: ...
 

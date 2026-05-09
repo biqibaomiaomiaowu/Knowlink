@@ -6,7 +6,7 @@ from jsonschema import Draft202012Validator
 
 from server.ai.asr import AsrSegment
 from server.ai.handout_block import generate_handout_block
-from server.ai.handout_lazy import build_handout_outline_from_captions
+from server.ai.handout_lazy import build_handout_outline_from_captions, outline_leaf_items
 from server.ai.knowledge_extraction import handout_block_to_knowledge_extraction
 from server.ai.vector_projection import build_vector_document_inputs
 from server.parsers import parse_resource
@@ -53,7 +53,7 @@ def test_real_assets_can_build_no_db_handout_block_flow(monkeypatch):
 
     video_segments = [segment for segment in all_segments if segment["segmentType"] == "video_caption"]
     outline = build_handout_outline_from_captions(video_segments, max_block_duration_sec=60)
-    block = generate_handout_block(outline["items"][0], all_segments)
+    block = generate_handout_block(outline_leaf_items(outline["items"])[0], all_segments)
     extraction = handout_block_to_knowledge_extraction(block, all_segments)
     vector_inputs = build_vector_document_inputs(
         segments=all_segments,

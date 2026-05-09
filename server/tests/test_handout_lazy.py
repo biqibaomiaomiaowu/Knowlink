@@ -8,6 +8,8 @@ from server.ai.handout_lazy import (
     get_configured_handout_outline_client,
     jump_target_for_outline_item,
     next_prefetch_outline_item,
+    outline_leaf_items,
+    outline_source_issues,
     outline_timeline_issues,
 )
 
@@ -50,21 +52,39 @@ def test_build_handout_outline_from_captions_sorts_pending_items_and_keeps_sourc
         max_block_duration_sec=60,
     )
 
-    assert [item["startSec"] for item in outline["items"]] == [0, 80]
-    assert [item["endSec"] for item in outline["items"]] == [45, 120]
-    assert [item["generationStatus"] for item in outline["items"]] == ["pending", "pending"]
-    assert outline["items"][0]["sourceSegmentKeys"] == ["caption-1", "caption-2"]
-    assert outline["items"][1]["sourceSegmentKeys"] == ["caption-3"]
+    leaves = outline_leaf_items(outline["items"])
+    assert [item["startSec"] for item in leaves] == [0, 80]
+    assert [item["endSec"] for item in leaves] == [45, 120]
+    assert [item["generationStatus"] for item in leaves] == ["pending", "pending"]
+    assert leaves[0]["sourceSegmentKeys"] == ["caption-1", "caption-2"]
+    assert leaves[1]["sourceSegmentKeys"] == ["caption-3"]
+    assert outline["items"][0]["children"] == [leaves[0]]
 
 
 def test_outline_timeline_issues_detects_invalid_timeline_and_accepts_valid_outline():
     valid_items = [
-        _outline_item("outline-1", start_sec=0, end_sec=30, sort_no=1),
-        _outline_item("outline-2", start_sec=30, end_sec=60, sort_no=2),
+        _outline_section(
+            "section-1",
+            start_sec=0,
+            end_sec=60,
+            sort_no=1,
+            children=[
+                _outline_item("outline-1", start_sec=0, end_sec=30, sort_no=1),
+                _outline_item("outline-2", start_sec=30, end_sec=60, sort_no=2),
+            ],
+        ),
     ]
     invalid_items = [
-        _outline_item("outline-1", start_sec=0, end_sec=40, sort_no=1),
-        _outline_item("outline-1", start_sec=35, end_sec=70, sort_no=1),
+        _outline_section(
+            "section-1",
+            start_sec=0,
+            end_sec=70,
+            sort_no=1,
+            children=[
+                _outline_item("outline-1", start_sec=0, end_sec=40, sort_no=1),
+                _outline_item("outline-1", start_sec=35, end_sec=70, sort_no=1),
+            ],
+        ),
     ]
 
     assert outline_timeline_issues(valid_items) == []
@@ -77,9 +97,17 @@ def test_outline_timeline_issues_detects_invalid_timeline_and_accepts_valid_outl
 
 def test_outline_timeline_issues_detects_nested_overlaps():
     items = [
-        _outline_item("outline-1", start_sec=0, end_sec=100, sort_no=1),
-        _outline_item("outline-2", start_sec=10, end_sec=20, sort_no=2),
-        _outline_item("outline-3", start_sec=30, end_sec=40, sort_no=3),
+        _outline_section(
+            "section-1",
+            start_sec=0,
+            end_sec=100,
+            sort_no=1,
+            children=[
+                _outline_item("outline-1", start_sec=0, end_sec=100, sort_no=1),
+                _outline_item("outline-2", start_sec=10, end_sec=20, sort_no=2),
+                _outline_item("outline-3", start_sec=30, end_sec=40, sort_no=3),
+            ],
+        ),
     ]
 
     assert outline_timeline_issues(items) == [
@@ -88,10 +116,72 @@ def test_outline_timeline_issues_detects_nested_overlaps():
     ]
 
 
+def test_outline_timeline_issues_detects_nested_parent_mismatch_and_child_overlap():
+    items = [
+        {
+            "outlineKey": "section-1",
+            "title": "集合基础",
+            "summary": "集合基础",
+            "startSec": 0,
+            "endSec": 80,
+            "sortNo": 1,
+            "children": [
+                _outline_item("outline-1", start_sec=0, end_sec=50, sort_no=1),
+                _outline_item("outline-2", start_sec=40, end_sec=70, sort_no=2),
+            ],
+        }
+    ]
+
+    assert outline_timeline_issues(items) == [
+        "outline.time_overlap",
+        "outline.parent_time_mismatch",
+    ]
+
+
+def test_outline_source_issues_rejects_unknown_sources_and_time_drift():
+    captions = _caption_segments()
+
+    assert outline_source_issues(
+        [
+            _outline_section(
+                "section-1",
+                start_sec=0,
+                end_sec=30,
+                sort_no=1,
+                children=[
+                    {
+                        "outlineKey": "bad-source",
+                        "startSec": 0,
+                        "endSec": 30,
+                        "sourceSegmentKeys": ["not-a-real-segment"],
+                    },
+                    {
+                        "outlineKey": "bad-time",
+                        "startSec": 1,
+                        "endSec": 30,
+                        "sourceSegmentKeys": ["mp4-c1"],
+                    },
+                ],
+            ),
+        ],
+        captions,
+    ) == ["outline.source_segment_unknown", "outline.source_time_mismatch"]
+
+
 def test_current_outline_item_returns_active_item_and_includes_last_end_boundary():
     items = [
-        _outline_item("outline-1", start_sec=0, end_sec=30, sort_no=1),
-        _outline_item("outline-2", start_sec=30, end_sec=60, sort_no=2),
+        {
+            "outlineKey": "section-1",
+            "title": "第一部分",
+            "summary": "第一部分",
+            "startSec": 0,
+            "endSec": 60,
+            "sortNo": 1,
+            "children": [
+                _outline_item("outline-1", start_sec=0, end_sec=30, sort_no=1),
+                _outline_item("outline-2", start_sec=30, end_sec=60, sort_no=2),
+            ],
+        }
     ]
 
     assert current_outline_item(items, current_sec=15)["outlineKey"] == "outline-1"
@@ -112,9 +202,19 @@ def test_jump_target_for_outline_item_returns_timeline_locator():
 
 def test_next_prefetch_outline_item_returns_next_pending_only_near_active_end():
     items = [
-        _outline_item("outline-1", start_sec=0, end_sec=60, sort_no=1, generation_status="ready"),
-        _outline_item("outline-2", start_sec=60, end_sec=120, sort_no=2),
-        _outline_item("outline-3", start_sec=120, end_sec=180, sort_no=3, generation_status="ready"),
+        {
+            "outlineKey": "section-1",
+            "title": "第一部分",
+            "summary": "第一部分",
+            "startSec": 0,
+            "endSec": 180,
+            "sortNo": 1,
+            "children": [
+                _outline_item("outline-1", start_sec=0, end_sec=60, sort_no=1, generation_status="ready"),
+                _outline_item("outline-2", start_sec=60, end_sec=120, sort_no=2),
+                _outline_item("outline-3", start_sec=120, end_sec=180, sort_no=3, generation_status="ready"),
+            ],
+        }
     ]
 
     assert next_prefetch_outline_item(items, current_sec=40, threshold_sec=15) is None
@@ -160,26 +260,36 @@ def test_vivo_handout_outline_client_uses_chat_completions_and_normalizes_model_
                                                 "summary": "按时间线学习集合概念。",
                                                 "items": [
                                                     {
-                                                        "outlineKey": "intro",
-                                                        "title": "集合基础",
-                                                        "summary": "认识集合。",
-                                                        "startSec": 99,
-                                                        "endSec": 100,
-                                                        "sortNo": 9,
-                                                        "generationStatus": "ready",
-                                                        "sourceSegmentKeys": ["mp4-c1", "unknown"],
-                                                        "topicTags": ["集合", "集合"],
-                                                    },
-                                                    {
-                                                        "outlineKey": "relation",
-                                                        "title": "集合关系",
-                                                        "summary": "理解包含关系。",
-                                                        "startSec": 30,
+                                                        "outlineKey": "set-concepts",
+                                                        "title": "集合概念",
+                                                        "summary": "理解集合和关系。",
+                                                        "startSec": 0,
                                                         "endSec": 70,
-                                                        "sortNo": 2,
-                                                        "generationStatus": "pending",
-                                                        "sourceSegmentKeys": ["mp4-c2"],
-                                                    },
+                                                        "sortNo": 1,
+                                                        "children": [
+                                                            {
+                                                                "outlineKey": "intro",
+                                                                "title": "集合基础",
+                                                                "summary": "认识集合。",
+                                                                "startSec": 0,
+                                                                "endSec": 30,
+                                                                "sortNo": 1,
+                                                                "generationStatus": "ready",
+                                                                "sourceSegmentKeys": ["mp4-c1"],
+                                                                "topicTags": ["集合", "集合"],
+                                                            },
+                                                            {
+                                                                "outlineKey": "relation",
+                                                                "title": "集合关系",
+                                                                "summary": "理解包含关系。",
+                                                                "startSec": 30,
+                                                                "endSec": 70,
+                                                                "sortNo": 2,
+                                                                "generationStatus": "pending",
+                                                                "sourceSegmentKeys": ["mp4-c2"],
+                                                            },
+                                                        ],
+                                                    }
                                                 ],
                                             },
                                             ensure_ascii=False,
@@ -226,26 +336,36 @@ def test_vivo_handout_outline_client_uses_chat_completions_and_normalizes_model_
         "summary": "按时间线学习集合概念。",
         "items": [
             {
-                "outlineKey": "intro",
-                "title": "集合基础",
-                "summary": "认识集合。",
+                "outlineKey": "set-concepts",
+                "title": "集合概念",
+                "summary": "理解集合和关系。",
                 "startSec": 0,
-                "endSec": 30,
-                "sortNo": 1,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c1"],
-                "topicTags": ["集合"],
-            },
-            {
-                "outlineKey": "relation",
-                "title": "集合关系",
-                "summary": "理解包含关系。",
-                "startSec": 30,
                 "endSec": 70,
-                "sortNo": 2,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c2"],
-                "topicTags": [],
+                "sortNo": 1,
+                "children": [
+                    {
+                        "outlineKey": "intro",
+                        "title": "集合基础",
+                        "summary": "认识集合。",
+                        "startSec": 0,
+                        "endSec": 30,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c1"],
+                        "topicTags": ["集合"],
+                    },
+                    {
+                        "outlineKey": "relation",
+                        "title": "集合关系",
+                        "summary": "理解包含关系。",
+                        "startSec": 30,
+                        "endSec": 70,
+                        "sortNo": 2,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c2"],
+                        "topicTags": [],
+                    },
+                ],
             },
         ],
     }
@@ -261,7 +381,7 @@ def test_generate_handout_outline_falls_back_when_llm_fails():
     assert result.used_fallback is True
     assert result.issues == ["outline.llm_failed"]
     assert result.outline["title"] == "集合论"
-    assert result.outline["items"][0]["sourceSegmentKeys"] == ["mp4-c1", "mp4-c2"]
+    assert result.outline["items"][0]["children"][0]["sourceSegmentKeys"] == ["mp4-c1", "mp4-c2"]
 
 
 def test_generate_handout_outline_falls_back_when_llm_timeline_is_invalid():
@@ -271,8 +391,24 @@ def test_generate_handout_outline_falls_back_when_llm_timeline_is_invalid():
                 "title": "bad",
                 "summary": "bad",
                 "items": [
-                    _outline_item("outline-1", start_sec=0, end_sec=40, sort_no=1),
-                    _outline_item("outline-2", start_sec=35, end_sec=70, sort_no=2),
+                    {
+                        "outlineKey": "section-1",
+                        "title": "非法分组",
+                        "summary": "非法分组。",
+                        "startSec": 0,
+                        "endSec": 70,
+                        "sortNo": 1,
+                        "children": [
+                            {
+                                **_outline_item("outline-1", start_sec=0, end_sec=70, sort_no=1),
+                                "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                            },
+                            {
+                                **_outline_item("outline-2", start_sec=30, end_sec=70, sort_no=2),
+                                "sourceSegmentKeys": ["mp4-c2"],
+                            },
+                        ],
+                    },
                 ],
             }
 
@@ -280,10 +416,116 @@ def test_generate_handout_outline_falls_back_when_llm_timeline_is_invalid():
 
     assert result.used_fallback is True
     assert result.issues == ["outline.time_overlap"]
-    assert result.outline["items"][0]["generationStatus"] == "pending"
+    assert result.outline["items"][0]["children"][0]["generationStatus"] == "pending"
 
 
-def test_build_handout_outline_normalizes_small_asr_overlaps_between_blocks():
+def test_generate_handout_outline_falls_back_when_llm_references_unknown_source():
+    class UnknownSourceClient:
+        def generate_outline(self, caption_segments, *, title, summary, document_context=None):
+            return {
+                "title": "bad",
+                "summary": "bad",
+                "items": [
+                    {
+                        "outlineKey": "section-1",
+                        "title": "集合基础",
+                        "summary": "集合基础。",
+                        "startSec": 0,
+                        "endSec": 30,
+                        "sortNo": 1,
+                        "children": [
+                            {
+                                **_outline_item("outline-1", start_sec=0, end_sec=30, sort_no=1),
+                                "sourceSegmentKeys": ["missing-source"],
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    result = generate_handout_outline(_caption_segments(), client=UnknownSourceClient(), title="集合论")
+
+    assert result.used_fallback is True
+    assert result.issues == ["outline.source_segment_unknown"]
+
+
+def test_generate_handout_outline_falls_back_when_llm_returns_flat_outline():
+    class FlatOutlineClient:
+        def generate_outline(self, caption_segments, *, title, summary, document_context=None):
+            return {
+                "title": "flat",
+                "summary": "flat",
+                "items": [
+                    {
+                        "outlineKey": "outline-1",
+                        "title": "集合基础",
+                        "summary": "集合基础。",
+                        "startSec": 0,
+                        "endSec": 30,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c1"],
+                    }
+                ],
+            }
+
+    result = generate_handout_outline(_caption_segments(), client=FlatOutlineClient(), title="集合论")
+
+    assert result.used_fallback is True
+    assert result.issues == ["outline.parent_leaf_fields_present", "outline.children_missing"]
+    assert "children" in result.outline["items"][0]
+
+
+def test_generate_handout_outline_normalizes_injected_client_child_status_to_pending():
+    class ReadyStatusClient:
+        def generate_outline(self, caption_segments, *, title, summary, document_context=None):
+            return {
+                "title": "集合论",
+                "summary": "集合论目录。",
+                "items": [
+                    {
+                        "outlineKey": "section-1",
+                        "title": "集合基础",
+                        "summary": "集合基础。",
+                        "startSec": 0,
+                        "endSec": 70,
+                        "sortNo": 1,
+                        "children": [
+                            {
+                                "outlineKey": "outline-1",
+                                "title": "集合定义",
+                                "summary": "集合定义。",
+                                "startSec": 0,
+                                "endSec": 30,
+                                "sortNo": 1,
+                                "generationStatus": "ready",
+                                "sourceSegmentKeys": ["mp4-c1"],
+                            },
+                            {
+                                "outlineKey": "outline-2",
+                                "title": "集合关系",
+                                "summary": "集合关系。",
+                                "startSec": 30,
+                                "endSec": 70,
+                                "sortNo": 2,
+                                "generationStatus": "failed",
+                                "sourceSegmentKeys": ["mp4-c2"],
+                            },
+                        ],
+                    }
+                ],
+            }
+
+    result = generate_handout_outline(_caption_segments(), client=ReadyStatusClient(), title="集合论")
+
+    assert result.used_fallback is False
+    assert [item["generationStatus"] for item in outline_leaf_items(result.outline["items"])] == [
+        "pending",
+        "pending",
+    ]
+
+
+def test_build_handout_outline_merges_overlapping_asr_segments_to_preserve_source_times():
     outline = build_handout_outline_from_captions(
         [
             {
@@ -306,9 +548,60 @@ def test_build_handout_outline_normalizes_small_asr_overlaps_between_blocks():
         max_block_duration_sec=60,
     )
 
-    assert outline["items"][0]["endSec"] == 61
-    assert outline["items"][1]["startSec"] == 61
+    leaves = outline_leaf_items(outline["items"])
+    assert len(leaves) == 1
+    assert leaves[0]["startSec"] == 0
+    assert leaves[0]["endSec"] == 120
+    assert leaves[0]["sourceSegmentKeys"] == ["mp4-c1", "mp4-c2"]
     assert outline_timeline_issues(outline["items"]) == []
+
+
+def test_build_handout_outline_uses_source_max_end_for_nested_asr_overlap():
+    outline = build_handout_outline_from_captions(
+        [
+            {
+                "segmentKey": "mp4-c1",
+                "segmentType": "video_caption",
+                "textContent": "长字幕",
+                "startSec": 0,
+                "endSec": 100,
+                "orderNo": 1,
+            },
+            {
+                "segmentKey": "mp4-c2",
+                "segmentType": "video_caption",
+                "textContent": "嵌套短字幕",
+                "startSec": 10,
+                "endSec": 20,
+                "orderNo": 2,
+            },
+        ],
+        max_block_duration_sec=60,
+    )
+
+    leaves = outline_leaf_items(outline["items"])
+    assert len(leaves) == 1
+    assert leaves[0]["startSec"] == 0
+    assert leaves[0]["endSec"] == 100
+    assert leaves[0]["sourceSegmentKeys"] == ["mp4-c1", "mp4-c2"]
+    assert outline_source_issues(outline["items"], [
+        {
+            "segmentKey": "mp4-c1",
+            "segmentType": "video_caption",
+            "textContent": "长字幕",
+            "startSec": 0,
+            "endSec": 100,
+            "orderNo": 1,
+        },
+        {
+            "segmentKey": "mp4-c2",
+            "segmentType": "video_caption",
+            "textContent": "嵌套短字幕",
+            "startSec": 10,
+            "endSec": 20,
+            "orderNo": 2,
+        },
+    ]) == []
 
 
 def _caption_segments() -> list[dict[str, object]]:
@@ -350,4 +643,23 @@ def _outline_item(
         "generationStatus": generation_status,
         "sourceSegmentKeys": [f"{outline_key}-caption"],
         "topicTags": [],
+    }
+
+
+def _outline_section(
+    outline_key: str,
+    *,
+    start_sec: int,
+    end_sec: int,
+    sort_no: int,
+    children: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "outlineKey": outline_key,
+        "title": outline_key,
+        "summary": outline_key,
+        "startSec": start_sec,
+        "endSec": end_sec,
+        "sortNo": sort_no,
+        "children": children,
     }

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import time
+import uuid
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
@@ -14,6 +20,18 @@ QaCandidateSource = Literal[
     "course_document_segment",
 ]
 QaAnswerType = Literal["direct_answer", "clarification", "insufficient_evidence"]
+_DEFAULT_QA_MODEL = "Doubao-Seed-2.0-pro"
+_DEFAULT_QA_TIMEOUT_SEC = 60.0
+_QA_SYSTEM_PROMPT = """你是 KnowLink 的块级学习问答助手。只返回 JSON，不要返回 Markdown 代码块或解释。
+JSON 格式固定为：
+{"answerMd":"...","answerType":"direct_answer|clarification|insufficient_evidence","citations":[{"resourceId":1,"segmentKey":"...","pageNo":1,"refLabel":"..."}]}
+规则：
+1. 只能基于输入 evidenceCandidates 回答，不得使用候选外资料或常识补充。
+2. 如果候选证据不足，answerType 返回 insufficient_evidence，citations 返回空数组。
+3. citations 只能从 evidenceCandidates 中选择，必须保留候选的 resourceId、segmentId 或 segmentKey、locator 和 refLabel。
+4. 每个 citation 只能使用一种定位：pageNo、slideNo、anchorKey、或 startSec/endSec。
+5. answerMd 使用中文 Markdown，简洁回答用户问题。
+"""
 
 
 @dataclass(frozen=True)
@@ -46,6 +64,79 @@ class QaAnswerWithRefs:
 class QaAnswerClient(Protocol):
     def generate_answer(self, question: str, candidates: Sequence[QaEvidenceCandidate]) -> dict[str, Any]:
         """Return a raw QA response generated only from the provided candidates."""
+
+
+def get_configured_qa_answer_client() -> QaAnswerClient | None:
+    if not _env_bool("KNOWLINK_ENABLE_VIVO_QA"):
+        return None
+
+    app_key = os.getenv("KNOWLINK_VIVO_APP_KEY", "").strip()
+    if not app_key:
+        return None
+
+    return VivoQaAnswerClient(
+        app_key=app_key,
+        base_url=os.getenv("KNOWLINK_VIVO_BASE_URL", "https://api-ai.vivo.com.cn"),
+        model=os.getenv("KNOWLINK_VIVO_QA_MODEL", _DEFAULT_QA_MODEL),
+        timeout_sec=_env_float("KNOWLINK_VIVO_QA_TIMEOUT_SEC", _DEFAULT_QA_TIMEOUT_SEC),
+    )
+
+
+class VivoQaAnswerClient:
+    def __init__(
+        self,
+        *,
+        app_key: str,
+        base_url: str,
+        model: str,
+        timeout_sec: float | None = None,
+    ) -> None:
+        self._app_key = app_key
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._timeout_sec = timeout_sec if timeout_sec is not None else _DEFAULT_QA_TIMEOUT_SEC
+        self._last_request_at = 0.0
+        self._min_request_interval_sec = 0.8
+
+    def generate_answer(self, question: str, candidates: Sequence[QaEvidenceCandidate]) -> dict[str, Any]:
+        if not candidates:
+            raise RuntimeError("vivo qa requires at least one evidence candidate")
+
+        self._throttle()
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": _QA_SYSTEM_PROMPT},
+                {"role": "user", "content": _build_qa_prompt(question, candidates)},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2048,
+            "stream": False,
+        }
+        request = urllib.request.Request(
+            f"{_chat_base_url(self._base_url)}/chat/completions?request_id={uuid.uuid4()}",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self._app_key}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
+                body = response.read().decode("utf-8")
+            chat_payload = json.loads(body)
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"vivo qa request failed: {exc}") from exc
+
+        return _parse_chat_json_payload(chat_payload, label="vivo qa")
+
+    def _throttle(self) -> None:
+        elapsed = time.monotonic() - self._last_request_at
+        if elapsed < self._min_request_interval_sec:
+            time.sleep(self._min_request_interval_sec - elapsed)
+        self._last_request_at = time.monotonic()
 
 
 def generate_block_qa_response(
@@ -924,3 +1015,98 @@ def _truncate(text: str, max_chars: int) -> str:
     if len(cleaned) <= max_chars:
         return cleaned
     return cleaned[: max_chars - 1].rstrip() + "..."
+
+
+def _build_qa_prompt(question: str, candidates: Sequence[QaEvidenceCandidate], *, max_content_chars: int = 800) -> str:
+    evidence = [
+        {
+            "candidateKey": candidate.candidate_key,
+            "source": candidate.source,
+            "rank": candidate.rank,
+            "resourceId": candidate.resource_id,
+            "segmentId": candidate.segment_id,
+            "segmentKey": candidate.segment_key,
+            "refLabel": candidate.ref_label,
+            "locator": candidate.locator,
+            "textContent": _truncate(candidate.content_text, max_content_chars),
+        }
+        for candidate in candidates
+    ]
+    return "\n".join(
+        [
+            f"用户问题：{clean_text(question)}",
+            "请只基于 evidenceCandidates 回答，并只引用 evidenceCandidates 内的候选。",
+            f"evidenceCandidates：{json.dumps(evidence, ensure_ascii=False, sort_keys=True)}",
+        ]
+    )
+
+
+def _parse_chat_json_payload(payload: Mapping[str, Any], *, label: str) -> dict[str, Any]:
+    if "error" in payload:
+        raise RuntimeError(f"{label} failed: {payload['error']}")
+
+    try:
+        content = payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"{label} response missing message content") from exc
+
+    text = _message_content_to_text(content)
+    json_text = _extract_json_object(text)
+    if json_text is None:
+        raise RuntimeError(f"{label} response is not JSON")
+
+    try:
+        model_payload = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{label} response has invalid JSON: {exc}") from exc
+    if not isinstance(model_payload, dict):
+        raise RuntimeError(f"{label} JSON must be an object")
+    return model_payload
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, Mapping):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
+
+
+def _extract_json_object(text: str) -> str | None:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?", "", stripped, flags=re.IGNORECASE).strip()
+        stripped = re.sub(r"```$", "", stripped).strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        return stripped[start : end + 1]
+    return None
+
+
+def _chat_base_url(base_url: str) -> str:
+    clean_url = base_url.rstrip("/")
+    if clean_url.endswith("/v1"):
+        return clean_url
+    return f"{clean_url}/v1"
+
+
+def _env_bool(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default

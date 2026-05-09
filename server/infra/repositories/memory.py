@@ -74,8 +74,16 @@ class MemoryScaffoldRepository:
     def create_handout(
         self,
         course_id: int,
+        *,
+        outline: dict[str, Any] | None = None,
+        outline_meta: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         return self.store.create_handout(course_id)
+
+    def get_handout_outline_context(self, course_id: int) -> dict[str, Any] | None:
+        return None
 
     def get_handout(self, handout_version_id: int) -> dict[str, Any] | None:
         return self.store.handouts.get(handout_version_id)
@@ -183,8 +191,18 @@ class MemoryScaffoldRepository:
                 }
         return None
 
-    def create_qa_message(self, course_id: int, handout_block_id: int, question: str) -> dict[str, Any] | None:
-        return self.store.create_qa_message(course_id, handout_block_id, question)
+    def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
+        return self.store.get_qa_context(course_id, handout_block_id)
+
+    def save_qa_exchange(
+        self,
+        context: dict[str, Any],
+        question: str,
+        response: dict[str, Any],
+        refs: list[dict[str, Any]],
+        candidate_count: int,
+    ) -> dict[str, Any]:
+        return self.store.save_qa_exchange(context, question, response, refs, candidate_count)
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         return self.store.get_qa_session_messages(session_id)

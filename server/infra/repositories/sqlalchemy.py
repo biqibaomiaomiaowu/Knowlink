@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 import re
 from typing import Any, TypeVar
@@ -9,11 +9,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from server.ai.qa_policy import (
-    build_block_scoped_qa_candidates,
-    build_qa_message_refs,
-    generate_block_qa_response,
-)
 from server.parsers.base import clean_text
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
@@ -42,6 +37,15 @@ GRANULARITY_MAP = {
     "quick": ("low", "low"),
     "balanced": ("medium", "medium"),
     "detailed": ("high", "high"),
+}
+
+OUTLINE_DOCUMENT_CONTEXT_TYPES = {
+    "pdf_page_text",
+    "ppt_slide_text",
+    "docx_block_text",
+    "ocr_text",
+    "formula",
+    "image_caption",
 }
 
 
@@ -450,30 +454,28 @@ class SqlAlchemyRuntimeRepository:
     def create_handout(
         self,
         course_id: int,
+        *,
+        outline: dict[str, Any] | None = None,
+        outline_meta: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         course = self._get_course_model(course_id)
         if course is None:
             raise ValueError(f"Course {course_id} was not found.")
 
         source_parse_run_id = course.active_parse_run_id
-        outline_payload: dict[str, Any] | None = None
-        if source_parse_run_id is not None:
-            outline_payload = _build_outline_from_caption_segments(
-                course=course,
-                captions=self._list_active_video_caption_segments(
-                    course_id=course_id,
-                    parse_run_id=source_parse_run_id,
-                ),
-            )
+        outline_payload = outline
+        outline_items = _outline_child_items(outline_payload or {})
 
-        if outline_payload is None:
+        if outline_payload is None or not outline_items:
             status = "failed"
             outline_status = "failed"
             title = course.title
             summary = "没有可用的视频字幕片段，未生成视频时间轴目录。"
-            error_code = "handout_outline.no_video_caption"
-            error_message = "Active parse run has no usable video_caption segments."
-            outline_items: list[dict[str, Any]] = []
+            error_code = error_code or "handout_outline.no_video_caption"
+            error_message = error_message or "Active parse run has no usable video_caption segments."
+            outline_items = []
         else:
             status = "outline_ready"
             outline_status = "ready"
@@ -481,7 +483,6 @@ class SqlAlchemyRuntimeRepository:
             summary = str(outline_payload["summary"])
             error_code = None
             error_message = None
-            outline_items = list(outline_payload["items"])
 
         version = HandoutVersion(
             course_id=course_id,
@@ -495,13 +496,13 @@ class SqlAlchemyRuntimeRepository:
             pending_blocks=len(outline_items),
             error_code=error_code,
             error_message=error_message,
-            meta_json=None,
+            meta_json=_json_ready(outline_meta) if outline_meta else None,
         )
         self.session.add(version)
         self.session.flush()
 
         blocks: list[HandoutBlock] = []
-        if outline_payload is not None:
+        if status == "outline_ready" and outline_payload is not None:
             self.session.add(
                 HandoutOutline(
                     handout_version_id=version.id,
@@ -821,7 +822,32 @@ class SqlAlchemyRuntimeRepository:
         self._commit_or_flush()
         return _vector_document_dict(document)
 
-    def create_qa_message(self, course_id: int, handout_block_id: int, question: str) -> dict[str, Any] | None:
+    def get_handout_outline_context(self, course_id: int) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None or course.active_parse_run_id is None:
+            return None
+        parse_run_id = int(course.active_parse_run_id)
+        caption_segments = [
+            _course_segment_dict(segment)
+            for segment in self._list_active_video_caption_segments(
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+            )
+        ]
+        document_segments = self._list_active_outline_document_segments(
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+        )
+        return {
+            "courseId": course_id,
+            "activeParseRunId": parse_run_id,
+            "title": course.title or "视频时间轴目录",
+            "summary": "基于视频字幕和配套资料生成的语义讲义目录。",
+            "captionSegments": caption_segments,
+            "documentContext": _document_context_from_segments(document_segments),
+        }
+
+    def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
         course = self._get_course_model(course_id)
         if course is None or course.active_parse_run_id is None or course.active_handout_version_id is None:
             return None
@@ -846,45 +872,57 @@ class SqlAlchemyRuntimeRepository:
             version=version,
             vector_documents=active_block_vectors,
         )
-        candidates = build_block_scoped_qa_candidates(
-            question,
-            current_block=current_block,
-            segments=segments,
-            adjacent_blocks=adjacent_blocks,
-            active_course_id=course.id,
-            active_parse_run_id=course.active_parse_run_id,
-            active_handout_version_id=version.id,
-        )
-        response = generate_block_qa_response(
-            question,
-            current_block=current_block,
-            segments=segments,
-            adjacent_blocks=adjacent_blocks,
-            active_course_id=course.id,
-            active_parse_run_id=course.active_parse_run_id,
-            active_handout_version_id=version.id,
-        )
-        refs = build_qa_message_refs(
-            response,
-            candidates,
-            active_course_id=course.id,
-            active_parse_run_id=course.active_parse_run_id,
-            active_handout_version_id=version.id,
-        )
+        return {
+            "courseId": course.id,
+            "activeCourseId": course.id,
+            "activeParseRunId": course.active_parse_run_id,
+            "activeHandoutVersionId": version.id,
+            "handoutBlockId": block.id,
+            "currentBlock": current_block,
+            "segments": segments,
+            "knowledgePointEvidences": [],
+            "adjacentBlocks": adjacent_blocks,
+        }
+
+    def save_qa_exchange(
+        self,
+        context: dict[str, Any],
+        question: str,
+        response: dict[str, Any],
+        refs: list[dict[str, Any]],
+        candidate_count: int,
+    ) -> dict[str, Any]:
+        course_id = _as_positive_int(_payload_value(context, "courseId", "activeCourseId"))
+        parse_run_id = _as_positive_int(_payload_value(context, "activeParseRunId"))
+        handout_version_id = _as_positive_int(_payload_value(context, "activeHandoutVersionId"))
+        handout_block_id = _as_positive_int(_payload_value(context, "handoutBlockId"))
+        if (
+            course_id is None
+            or parse_run_id is None
+            or handout_version_id is None
+            or handout_block_id is None
+            or not self._qa_context_is_active(
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout_version_id=handout_version_id,
+                handout_block_id=handout_block_id,
+            )
+        ):
+            raise RuntimeError("Cannot save QA exchange for stale or invalid context.")
 
         now = utcnow()
         qa_session = QaSession(
             user_id=self.user_id,
-            course_id=course.id,
-            handout_version_id=version.id,
-            handout_block_id=block.id,
+            course_id=course_id,
+            handout_version_id=handout_version_id,
+            handout_block_id=handout_block_id,
             status="active",
             context_snapshot_json={
-                "courseId": course.id,
-                "activeParseRunId": course.active_parse_run_id,
-                "activeHandoutVersionId": version.id,
-                "handoutBlockId": block.id,
-                "candidateCount": len(candidates),
+                "courseId": course_id,
+                "activeParseRunId": parse_run_id,
+                "activeHandoutVersionId": handout_version_id,
+                "handoutBlockId": handout_block_id,
+                "candidateCount": candidate_count,
             },
             message_count=0,
             last_message_at=now,
@@ -930,7 +968,7 @@ class SqlAlchemyRuntimeRepository:
                     sort_no=int(ref["sortNo"]),
                     rank=ref.get("rank"),
                 )
-            )
+        )
 
         qa_session.message_count = 2
         qa_session.last_message_at = now
@@ -985,6 +1023,34 @@ class SqlAlchemyRuntimeRepository:
                 Course.active_handout_version_id == HandoutBlock.handout_version_id,
                 HandoutVersion.source_parse_run_id == Course.active_parse_run_id,
             )
+        )
+
+    def _qa_context_is_active(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int,
+        handout_version_id: int,
+        handout_block_id: int,
+    ) -> bool:
+        return (
+            self.session.scalar(
+                select(HandoutBlock.id)
+                .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
+                .join(Course, Course.id == HandoutVersion.course_id)
+                .where(
+                    Course.id == course_id,
+                    Course.user_id == self.user_id,
+                    Course.active_parse_run_id == parse_run_id,
+                    Course.active_handout_version_id == handout_version_id,
+                    HandoutVersion.id == handout_version_id,
+                    HandoutVersion.course_id == course_id,
+                    HandoutVersion.source_parse_run_id == parse_run_id,
+                    HandoutBlock.id == handout_block_id,
+                    HandoutBlock.handout_version_id == handout_version_id,
+                )
+            )
+            is not None
         )
 
     def _current_handout_block_task(self, block: HandoutBlock) -> AsyncTask | None:
@@ -1151,6 +1217,25 @@ class SqlAlchemyRuntimeRepository:
                     CourseSegment.order_no.asc(),
                     CourseSegment.id.asc(),
                 )
+            ).all()
+        )
+
+    def _list_active_outline_document_segments(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int,
+    ) -> list[CourseSegment]:
+        return list(
+            self.session.scalars(
+                select(CourseSegment)
+                .where(
+                    CourseSegment.course_id == course_id,
+                    CourseSegment.parse_run_id == parse_run_id,
+                    CourseSegment.segment_type.in_(OUTLINE_DOCUMENT_CONTEXT_TYPES),
+                    CourseSegment.is_active.is_(True),
+                )
+                .order_by(CourseSegment.order_no.asc(), CourseSegment.id.asc())
             ).all()
         )
 
@@ -1462,6 +1547,7 @@ def _handout_version_dict(
         "sourceParseRunId": version.source_parse_run_id,
         "errorCode": version.error_code,
         "errorMessage": version.error_message,
+        "metaJson": version.meta_json or {},
         "blocks": blocks,
     }
 
@@ -1477,17 +1563,22 @@ def _handout_outline_dict(
     for raw_item in payload.get("items", []):
         if not isinstance(raw_item, dict):
             continue
-        item = dict(raw_item)
-        block = blocks_by_key.get(str(item.get("outlineKey") or ""))
-        if block is not None:
-            item["blockId"] = block.id
-            item["generationStatus"] = block.status
-            item["sourceSegmentKeys"] = list(
-                block.source_segment_keys_json or item.get("sourceSegmentKeys") or []
-            )
-        else:
-            item.setdefault("sourceSegmentKeys", [])
-        items.append(item)
+        children = raw_item.get("children")
+        if isinstance(children, list):
+            item = {
+                "outlineKey": raw_item.get("outlineKey"),
+                "title": raw_item.get("title"),
+                "summary": raw_item.get("summary"),
+                "startSec": raw_item.get("startSec"),
+                "endSec": raw_item.get("endSec"),
+                "sortNo": raw_item.get("sortNo"),
+                "children": [
+                    _outline_child_with_block(child, blocks_by_key)
+                    for child in children
+                    if isinstance(child, dict)
+                ],
+            }
+            items.append(item)
 
     return {
         "handoutVersionId": version.id,
@@ -1706,6 +1797,69 @@ def _caption_payload(segment: CourseSegment) -> dict[str, Any] | None:
         "endSec": end_sec,
         "orderNo": segment.order_no,
     }
+
+
+def _outline_child_items(outline_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    for raw_item in outline_payload.get("items", []):
+        if not isinstance(raw_item, dict):
+            continue
+        raw_children = raw_item.get("children")
+        if isinstance(raw_children, list):
+            children.extend(dict(child) for child in raw_children if isinstance(child, dict))
+    return children
+
+
+def _outline_child_with_block(
+    raw_child: Mapping[str, Any],
+    blocks_by_key: Mapping[str, HandoutBlock],
+) -> dict[str, Any]:
+    child = dict(raw_child)
+    block = blocks_by_key.get(str(child.get("outlineKey") or ""))
+    if block is not None:
+        child["blockId"] = block.id
+        child["generationStatus"] = block.status
+        child["sourceSegmentKeys"] = list(
+            block.source_segment_keys_json or child.get("sourceSegmentKeys") or []
+        )
+    else:
+        child.setdefault("sourceSegmentKeys", [])
+    return child
+
+
+def _document_context_from_segments(
+    segments: Sequence[CourseSegment],
+    *,
+    max_chars: int = 3600,
+    per_segment_chars: int = 260,
+) -> str:
+    lines: list[str] = []
+    total_chars = 0
+    for segment in segments:
+        text = _compact_text(segment.text_content or segment.plain_text or segment.formula_text)
+        if not text:
+            continue
+        title = _compact_text(segment.title)
+        locator = _outline_context_locator(segment)
+        prefix = f"- [{_segment_source_key(segment)} {segment.segment_type}{locator}]"
+        content = _truncate_text(f"{title}：{text}" if title else text, per_segment_chars)
+        line = f"{prefix} {content}"
+        next_total = total_chars + len(line) + 1
+        if next_total > max_chars:
+            break
+        lines.append(line)
+        total_chars = next_total
+    return "\n".join(lines)
+
+
+def _outline_context_locator(segment: CourseSegment) -> str:
+    if segment.page_no is not None:
+        return f" page={segment.page_no}"
+    if segment.slide_no is not None:
+        return f" slide={segment.slide_no}"
+    if segment.section_path:
+        return f" section={'/'.join(str(item) for item in segment.section_path)}"
+    return ""
 
 
 def _outline_item_from_caption_group(group: list[dict[str, Any]], index: int) -> dict[str, Any]:

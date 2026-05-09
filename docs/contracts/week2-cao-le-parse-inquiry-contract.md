@@ -61,7 +61,10 @@
 | `KNOWLINK_VIVO_VISION_BATCH_SIZE` | 同一文件视觉资产批量请求大小，默认 `2`，大文件按批拆分。 |
 | `KNOWLINK_VIVO_OUTLINE_MODEL` | 视频目录生成模型，默认优先快模型 `Doubao-Seed-2.0-mini`。 |
 | `KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL` | 单段讲义生成候选模型，默认 `Doubao-Seed-2.0-pro`；可与 `Volc-DeepSeek-V3.2`、`qwen3.5-plus` 做质量 / 耗时对比。 |
-| `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` | 目录生成单次 LLM 调用超时，默认 `40` 秒；超时后回退为本地目录生成。 |
+| `KNOWLINK_ENABLE_VIVO_QA` | 是否启用 vivo OpenAI-compatible QA 模型，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才允许发起网络请求。 |
+| `KNOWLINK_VIVO_QA_MODEL` | 块级 QA 回答模型，默认 `Doubao-Seed-2.0-pro`；返回内容必须经过服务端 JSON 解析、候选引用反查和归一化。 |
+| `KNOWLINK_VIVO_QA_TIMEOUT_SEC` | 块级 QA 单次 LLM 调用超时，默认 `60` 秒；超时、坏 JSON、空引用或候选外引用必须降级为本地 fallback 或 `insufficient_evidence`。 |
+| `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` | 目录生成单次 LLM 调用超时，默认 `75` 秒；超时后回退为本地目录生成。 |
 | `KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC` | 单段讲义块生成单次 LLM 调用超时，默认 `120` 秒；超时后该 block 标记 `failed` 或降级为短摘要。 |
 | `KNOWLINK_ENABLE_VIVO_EMBEDDING` | 是否启用 vivo 文本向量，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才可创建 embedding client。 |
 | `KNOWLINK_VIVO_EMBEDDING_MODEL` | 文本向量模型，默认 `m3e-base`；请求体必须使用 `model_name` 与 `sentences`，查询参数必须带 `requestId`。 |
@@ -102,7 +105,7 @@
 
 ### 1.2 `handout_outline`
 
-`handout_outline` 是视频驱动讲义页的左侧时间轴目录。解析完成后优先产出 outline，让用户可以先进入讲义页，点击目录跳转视频；完整讲义正文和知识点按 block 懒生成。
+`handout_outline` 是视频驱动讲义页的左侧时间轴目录。解析完成后优先产出两级 outline，让用户可以先进入讲义页，展开大标题并点击小标题跳转视频；完整讲义正文和知识点按 child block 懒生成。
 
 | 字段 | 语义 |
 |---|---|
@@ -110,16 +113,25 @@
 | `parse_run_id` | 来源解析版本。 |
 | `title` | 当前讲义目录标题，可来自课程标题或模型生成短标题。 |
 | `summary` | 1 到 3 句整体摘要，只用于进入讲义页前的轻量预览。 |
-| `items` | 时间轴目录项数组，结构见 `schemas/ai/handout_outline.schema.json`。 |
+| `items` | 顶层大标题数组，结构见 `schemas/ai/handout_outline.schema.json`；下层小标题在 `items[].children[]`。 |
 
 目录项约束：
 
-- 每个 item 必须包含 `outlineKey`、`title`、`summary`、`startSec`、`endSec`、`sortNo`、`generationStatus`、`sourceSegmentKeys`。
-- `startSec` / `endSec` 必须来自 `video_caption` segment 的时间范围；目录项时间区间按 `sortNo` 严格递增且不得重叠。
-- `handout_outline.schema.json` 只校验结构；跨 item 的时间线规则必须再通过 `server.ai.handout_lazy.outline_timeline_issues` 或等价服务端校验，不得把 schema valid 当成 timeline valid。
-- `generationStatus` 固定为 `pending`、`generating`、`ready`、`failed`；解析阶段创建 outline 时 block 默认是 `pending`。
-- `sourceSegmentKeys` 只能引用当前 active parse run 下的 `video_caption` segment；后续单段讲义生成只允许以该时间段 ASR 文本为主输入。
-- outline 生成优先使用快模型，默认 `Doubao-Seed-2.0-mini`；调用超过 `KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC` 时必须记录失败原因，不阻塞已成功的字幕 segment。
+- 顶层 `items[]` 是大标题 section，只负责语义分组和展开，必须包含 `outlineKey`、`title`、`summary`、`startSec`、`endSec`、`sortNo`、`children`；大标题没有 `blockId`，不可直接生成讲义块。
+- 下层 `items[].children[]` 是小标题 leaf，必须包含 `outlineKey`、`title`、`summary`、`startSec`、`endSec`、`sortNo`、`generationStatus`、`sourceSegmentKeys`；只有 child 绑定 block、点击跳转、高亮、QA 和讲义懒生成。
+- child 的 `startSec` / `endSec` 必须等于其 `sourceSegmentKeys` 对应 `video_caption` segment 的最小开始和最大结束；child 时间区间按 `sortNo` 严格递增且不得重叠。
+- parent 的 `startSec` / `endSec` 必须等于 children 的最小开始和最大结束；同一个 parent 下的 children 必须在视频时间线上连续归属，不能与其他 parent 穿插。
+- `handout_outline.schema.json` 只校验结构；跨 child / parent 的时间线规则必须再通过 `server.ai.handout_lazy.outline_timeline_issues` 或等价服务端校验，不得把 schema valid 当成 timeline valid。
+- child `generationStatus` 固定为 `pending`、`generating`、`ready`、`failed`；解析阶段创建 outline 时 child block 默认是 `pending`。
+- child `sourceSegmentKeys` 只能引用当前 active parse run 下的 `video_caption` segment；后续单段讲义生成只允许以该时间段 ASR 文本为主输入。
+- outline 正常路径优先使用快模型，默认 `Doubao-Seed-2.0-mini`，由模型按语义关联生成大标题，例如“集合的概念与表示”下包含“集合的定义”“集合符号与枚举法”；本地规则聚合只作为无 key、模型失败或输出非法时的 fallback，并必须记录 `outlineUsedFallback=true` 与 `outlineIssues`。
+
+块级 QA 模型约束：
+
+- QA 可选接入 `KNOWLINK_VIVO_QA_MODEL`，但前端请求 / 响应结构不因模型接入改变。
+- 模型只接收当前 active course、active parse run、active handout version 和当前 block 范围内的候选证据。
+- 模型只能返回 `answerMd`、`answerType`、`citations` JSON；`citations` 必须由服务端反查候选证据后再归一化为前端可见引用。
+- 坏 JSON、候选外引用、空引用或无候选证据时，不得编造答案；服务端必须降级为本地 fallback 或 `insufficient_evidence`。
 
 ### 1.3 `knowledge_points`
 
@@ -199,13 +211,13 @@
 
 ### 1.7 `handout_blocks`
 
-`handout_blocks` 是 outline item 对应的完整讲义正文。它按需生成，不作为进入讲义页的前置条件。
+`handout_blocks` 是 outline child item 对应的完整讲义正文。它按需生成，不作为进入讲义页的前置条件。
 `schemas/ai/handout_block.schema.json` 只描述 `ready` block 的 AI 生成结果；API 读模型里的 `pending`、`generating`、`failed` block 可以没有正文、知识点和引用。
 
 | 字段 | 语义 |
 |---|---|
 | `handout_version_id` | 所属讲义版本。 |
-| `outline_key` | 对应 `handout_outline.items[].outlineKey`。 |
+| `outline_key` | 对应 `handout_outline.items[].children[].outlineKey`。 |
 | `status` | `pending`、`generating`、`ready`、`failed`。 |
 | `content_md` | 完整讲义 Markdown；只有 `ready` 时必填。 |
 | `knowledge_points` | 当前 block 生成出的知识点列表，结构见 `schemas/ai/handout_block.schema.json`。 |
@@ -213,10 +225,10 @@
 
 生成约束：
 
-- 用户点击目录项时，可将对应 block 从 `pending` 置为 `generating` 并触发生成；播放进入当前目录段时可自动触发当前段；距离当前段结束 `15` 秒以内可预生成下一段。
+- 用户点击 child 目录项时，可将对应 block 从 `pending` 置为 `generating` 并触发生成；播放进入当前 child 时间段时可自动触发当前段；距离当前 child 结束 `15` 秒以内可预生成下一段。
 - 单段生成输入只允许包含当前时间段 ASR 文本、相邻上下文、用户偏好，以及与该段相关的 PDF/PPTX/DOCX 片段。
 - 单段生成默认控制在 `120` 秒内；超时后该 block 标记 `failed` 或保留短摘要，允许用户稍后重试。
-- block 引用不得跨课程，不得引用未进入当前 active parse run 的 segment；视频引用必须落在该 outline item 的 `startSec/endSec` 范围内。
+- block 引用不得跨课程，不得引用未进入当前 active parse run 的 segment；视频引用必须落在该 outline child item 的 `startSec/endSec` 范围内。
 
 ### 1.8 `vector_documents`
 
