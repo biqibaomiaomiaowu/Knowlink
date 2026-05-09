@@ -960,10 +960,22 @@ def test_handout_block_schema_rejects_invalid_lazy_block_payloads(payload: dict)
             {
                 "tasks": [
                     {
+                        "taskKey": "review-kp-limit",
                         "taskType": "redo_quiz",
                         "priorityScore": 80,
                         "reasonText": "错题集中。",
                         "recommendedMinutes": 15,
+                        "knowledgePointKey": "kp-limit",
+                        "sourceQuestionKeys": ["q1-kp-limit"],
+                        "sourceBlockKey": "block-limit",
+                        "sourceSegmentKeys": ["pdf-p1"],
+                        "reviewOrder": 1,
+                        "reasonTags": ["recent_wrong", "low_mastery"],
+                        "recommendedAction": {
+                            "type": "redo_quiz",
+                            "targetBlockKey": "block-limit",
+                            "label": "再练同类题",
+                        },
                     }
                 ],
             },
@@ -1137,6 +1149,32 @@ def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload
                         "reasonText": "原因",
                         "recommendedMinutes": 15,
                         "intensity": "high",
+                    }
+                ]
+            },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {
+                "tasks": [
+                    {
+                        "taskKey": "review-kp-limit",
+                        "taskType": "redo_quiz",
+                        "priorityScore": 80,
+                        "reasonText": "错题集中。",
+                        "recommendedMinutes": 15,
+                        "knowledgePointKey": "kp-limit",
+                        "sourceQuestionKeys": ["q1-kp-limit"],
+                        "sourceBlockKey": "block-limit",
+                        "sourceSegmentKeys": ["pdf-p1"],
+                        "reviewOrder": 1,
+                        "reasonTags": ["recent_wrong"],
+                        "recommendedAction": {
+                            "type": "redo_quiz",
+                            "targetBlockKey": "block-limit",
+                            "label": "再练同类题",
+                        },
+                        "pageNo": 2,
                     }
                 ]
             },
