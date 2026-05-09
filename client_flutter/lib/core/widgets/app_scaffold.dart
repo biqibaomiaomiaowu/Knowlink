@@ -340,7 +340,11 @@ class _KnowLinkBottomNav extends StatelessWidget {
         KnowLinkTab.quiz,
         Icons.check_box_outlined,
         '测验',
-        quizId == null ? null : '/quizzes/$quizId',
+        quizId == null
+            ? currentCourseId == null
+                ? null
+                : '/courses/$currentCourseId/quiz'
+            : '/quizzes/$quizId',
       ),
       _NavItem(
         KnowLinkTab.review,

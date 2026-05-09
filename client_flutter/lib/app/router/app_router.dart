@@ -79,6 +79,16 @@ class AppRouter {
           },
         ),
         GoRoute(
+          path: '/courses/:courseId/quiz',
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: QuizPage(courseId: courseId),
+            );
+          },
+        ),
+        GoRoute(
           path: '/quizzes/:quizId',
           builder: (context, state) => QuizPage(
             quizId: state.pathParameters['quizId']!,

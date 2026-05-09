@@ -5,12 +5,16 @@ import 'package:dio/dio.dart';
 import '../../shared/models/confirm_recommendation_request.dart';
 import '../../shared/models/confirm_recommendation_result.dart';
 import '../../shared/models/course_create_request.dart';
+import '../../shared/models/course_progress_models.dart';
 import '../../shared/models/course_summary.dart';
 import '../../shared/models/handout_models.dart';
+import '../../shared/models/home_dashboard_models.dart';
 import '../../shared/models/inquiry_models.dart';
 import '../../shared/models/pipeline_status.dart';
+import '../../shared/models/quiz_models.dart';
 import '../../shared/models/recommendation_card.dart';
 import '../../shared/models/recommendation_request.dart';
+import '../../shared/models/review_models.dart';
 import '../../shared/models/resource_upload_models.dart';
 import '../config/app_config.dart';
 
@@ -372,5 +376,123 @@ class ApiClient {
 
     final data = response.data?['data'] as Map<String, dynamic>;
     return QaSessionMessagesModel.fromJson(data);
+  }
+
+  Future<QuizGenerateResultModel> generateQuiz({
+    required String courseId,
+    required String idempotencyKey,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/quizzes/generate',
+      options: Options(
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      ),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return QuizGenerateResultModel.fromJson(data);
+  }
+
+  Future<QuizModel> fetchQuiz(int quizId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/quizzes/$quizId',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return QuizModel.fromJson(data);
+  }
+
+  Future<SubmitQuizResultModel> submitQuizAttempt({
+    required int quizId,
+    required SubmitQuizRequestModel request,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/quizzes/$quizId/attempts',
+      data: request.toJson(),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return SubmitQuizResultModel.fromJson(data);
+  }
+
+  Future<ReviewTasksModel> fetchReviewTasks(String courseId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/review-tasks',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return ReviewTasksModel.fromJson(data);
+  }
+
+  Future<ReviewRegenerateResultModel> regenerateReviewTasks({
+    required String courseId,
+    required String idempotencyKey,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/review-tasks/regenerate',
+      options: Options(
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      ),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return ReviewRegenerateResultModel.fromJson(data);
+  }
+
+  Future<ReviewRunStatusModel> fetchReviewRunStatus(
+    int reviewTaskRunId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/review-task-runs/$reviewTaskRunId/status',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return ReviewRunStatusModel.fromJson(data);
+  }
+
+  Future<CompleteReviewTaskResultModel> completeReviewTask(
+    int reviewTaskId,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/review-tasks/$reviewTaskId/complete',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CompleteReviewTaskResultModel.fromJson(data);
+  }
+
+  Future<HomeDashboardModel> fetchHomeDashboard() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/home/dashboard',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return HomeDashboardModel.fromJson(data);
+  }
+
+  Future<CourseProgressModel> fetchCourseProgress(String courseId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/progress',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseProgressModel.fromJson(data);
+  }
+
+  Future<CourseProgressModel> updateCourseProgress({
+    required String courseId,
+    required CourseProgressUpdateModel request,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/progress',
+      data: request.toJson(),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseProgressModel.fromJson(data);
   }
 }

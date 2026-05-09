@@ -7,8 +7,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/shared/models/confirm_recommendation_request.dart';
 import 'package:knowlink_client/shared/models/course_create_request.dart';
+import 'package:knowlink_client/shared/models/course_progress_models.dart';
 import 'package:knowlink_client/shared/models/handout_models.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
+import 'package:knowlink_client/shared/models/quiz_models.dart';
 import 'package:knowlink_client/shared/models/recommendation_enums.dart';
 import 'package:knowlink_client/shared/models/recommendation_request.dart';
 import 'package:knowlink_client/shared/models/resource_upload_models.dart';
@@ -865,6 +867,229 @@ void main() {
       _headerValue(adapter.requests.single.headers, 'idempotency-key'),
       'handout-block-ready-1',
     );
+  });
+
+  test('week 4 methods use frozen quiz, review, dashboard, and progress paths',
+      () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        final data = switch (options.path) {
+          '/api/v1/courses/101/quizzes/generate' => {
+              'taskId': 9001,
+              'status': 'queued',
+              'nextAction': 'poll',
+              'entity': {'type': 'quiz', 'id': 8001},
+            },
+          '/api/v1/quizzes/8001' => {
+              'quizId': 8001,
+              'courseId': 101,
+              'status': 'ready',
+              'questionCount': 1,
+              'questions': [
+                {
+                  'questionId': 8101,
+                  'stemMd': '下列关于极限的说法哪项正确？',
+                  'options': ['A', 'B', 'C', 'D'],
+                },
+              ],
+            },
+          '/api/v1/quizzes/8001/attempts' => {
+              'attemptId': 8201,
+              'score': 100,
+              'totalScore': 100,
+              'accuracy': 1.0,
+              'reviewTaskRunId': 8301,
+              'masteryDelta': [
+                {
+                  'knowledgePoint': '极限定义',
+                  'delta': 0.2,
+                  'status': 'improved',
+                },
+              ],
+              'recommendedReviewAction': {
+                'type': 'revisit_block',
+                'targetBlockId': 4001,
+                'reason': '建议先回看易错知识块。',
+              },
+            },
+          '/api/v1/courses/101/review-tasks' => {
+              'items': [
+                {
+                  'reviewTaskId': 8401,
+                  'taskType': 'revisit_block',
+                  'priorityScore': 95,
+                  'reasonText': '该块是考试高频点',
+                  'recommendedMinutes': 20,
+                  'recommendedSegment': {
+                    'blockId': 4001,
+                    'startSec': 120,
+                    'endSec': 240,
+                    'label': '建议优先回看片段',
+                  },
+                  'practiceEntry': {
+                    'type': 'quiz',
+                    'targetId': 8001,
+                    'label': '再练 1 题',
+                  },
+                  'reviewOrder': 1,
+                  'intensity': 'high',
+                },
+              ],
+            },
+          '/api/v1/courses/101/review-tasks/regenerate' => {
+              'taskId': 9002,
+              'status': 'queued',
+              'nextAction': 'poll',
+              'entity': {'type': 'review_task_run', 'id': 8302},
+            },
+          '/api/v1/review-task-runs/8302/status' => {
+              'reviewTaskRunId': 8302,
+              'courseId': 101,
+              'status': 'ready',
+              'generatedCount': 3,
+            },
+          '/api/v1/review-tasks/8401/complete' => {
+              'reviewTaskId': 8401,
+              'completed': true,
+            },
+          '/api/v1/home/dashboard' => {
+              'recentCourses': [
+                {
+                  'courseId': 101,
+                  'title': 'KnowLink 固定联调课',
+                  'entryType': 'manual_import',
+                  'catalogId': null,
+                  'lifecycleStatus': 'learning_ready',
+                  'pipelineStage': 'handout',
+                  'pipelineStatus': 'succeeded',
+                  'updatedAt': '2026-05-11T10:00:00+00:00',
+                },
+              ],
+              'topReviewTasks': [
+                {
+                  'reviewTaskId': 8401,
+                  'taskType': 'revisit_block',
+                  'priorityScore': 95,
+                  'reasonText': '该块是考试高频点',
+                  'recommendedMinutes': 20,
+                  'reviewOrder': 1,
+                  'intensity': 'high',
+                },
+              ],
+              'recommendationEntryEnabled': true,
+              'dailyRecommendedKnowledgePoints': [
+                {
+                  'knowledgePoint': '极限定义',
+                  'reason': '高频考点且建议今天优先回看',
+                  'targetCourseId': 101,
+                },
+              ],
+              'learningStats': {
+                'streakDays': 3,
+                'completedCourses': 1,
+                'reviewTasksCompleted': 2,
+                'totalLearningMinutes': 95,
+              },
+            },
+          '/api/v1/courses/101/progress' => {
+              'courseId': 101,
+              'handoutVersionId': 3001,
+              'lastHandoutBlockId': 4001,
+              'lastVideoResourceId': 501,
+              'lastPositionSec': 180,
+              'lastDocResourceId': 502,
+              'lastPageNo': 3,
+              'lastActivityAt': '2026-05-11T10:00:00+00:00',
+            },
+          _ => throw StateError('Unexpected path ${options.path}'),
+        };
+        return ResponseBody.fromString(
+          jsonEncode({'data': data}),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'week-four-token',
+    );
+
+    final generated = await client.generateQuiz(
+      courseId: '101',
+      idempotencyKey: 'quiz-generate-1',
+    );
+    final quiz = await client.fetchQuiz(8001);
+    final attempt = await client.submitQuizAttempt(
+      quizId: 8001,
+      request: const SubmitQuizRequestModel(
+        answers: [
+          QuizAnswerModel(questionId: 8101, selectedOption: 'A'),
+        ],
+      ),
+    );
+    final reviewTasks = await client.fetchReviewTasks('101');
+    final regenerated = await client.regenerateReviewTasks(
+      courseId: '101',
+      idempotencyKey: 'review-regenerate-1',
+    );
+    final reviewStatus = await client.fetchReviewRunStatus(8302);
+    final completed = await client.completeReviewTask(8401);
+    final dashboard = await client.fetchHomeDashboard();
+    final progress = await client.fetchCourseProgress('101');
+    final updatedProgress = await client.updateCourseProgress(
+      courseId: '101',
+      request: const CourseProgressUpdateModel(
+        handoutVersionId: 3001,
+        lastHandoutBlockId: 4001,
+        lastPositionSec: 180,
+      ),
+    );
+
+    expect(generated.entity.type, 'quiz');
+    expect(quiz.questions.single.questionId, 8101);
+    expect(attempt.masteryDelta.single.knowledgePoint, '极限定义');
+    expect(reviewTasks.items.single.recommendedSegment?.blockId, 4001);
+    expect(regenerated.entity.id, 8302);
+    expect(reviewStatus.generatedCount, 3);
+    expect(completed.completed, isTrue);
+    expect(dashboard.recentCourses.single.courseId, 101);
+    expect(dashboard.learningStats.reviewTasksCompleted, 2);
+    expect(progress.hasResumeTarget, isTrue);
+    expect(updatedProgress.lastPositionSec, 180);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/courses/101/quizzes/generate',
+      '/api/v1/quizzes/8001',
+      '/api/v1/quizzes/8001/attempts',
+      '/api/v1/courses/101/review-tasks',
+      '/api/v1/courses/101/review-tasks/regenerate',
+      '/api/v1/review-task-runs/8302/status',
+      '/api/v1/review-tasks/8401/complete',
+      '/api/v1/home/dashboard',
+      '/api/v1/courses/101/progress',
+      '/api/v1/courses/101/progress',
+    ]);
+    expect(
+      _headerValue(adapter.requests.first.headers, 'idempotency-key'),
+      'quiz-generate-1',
+    );
+    expect(
+      _headerValue(adapter.requests[4].headers, 'idempotency-key'),
+      'review-regenerate-1',
+    );
+    expect(adapter.requests[2].data, {
+      'answers': [
+        {'questionId': 8101, 'selectedOption': 'A'},
+      ],
+    });
+    expect(adapter.requests.last.data, {
+      'handoutVersionId': 3001,
+      'lastHandoutBlockId': 4001,
+      'lastPositionSec': 180,
+    });
   });
 }
 
