@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 import re
 from typing import Any, TypeVar
@@ -466,11 +466,7 @@ class SqlAlchemyRuntimeRepository:
 
         source_parse_run_id = course.active_parse_run_id
         outline_payload = outline
-        outline_items = [
-            item
-            for item in (outline_payload or {}).get("items", [])
-            if isinstance(item, dict)
-        ]
+        outline_items = _outline_child_items(outline_payload or {})
 
         if outline_payload is None or not outline_items:
             status = "failed"
@@ -1567,17 +1563,22 @@ def _handout_outline_dict(
     for raw_item in payload.get("items", []):
         if not isinstance(raw_item, dict):
             continue
-        item = dict(raw_item)
-        block = blocks_by_key.get(str(item.get("outlineKey") or ""))
-        if block is not None:
-            item["blockId"] = block.id
-            item["generationStatus"] = block.status
-            item["sourceSegmentKeys"] = list(
-                block.source_segment_keys_json or item.get("sourceSegmentKeys") or []
-            )
-        else:
-            item.setdefault("sourceSegmentKeys", [])
-        items.append(item)
+        children = raw_item.get("children")
+        if isinstance(children, list):
+            item = {
+                "outlineKey": raw_item.get("outlineKey"),
+                "title": raw_item.get("title"),
+                "summary": raw_item.get("summary"),
+                "startSec": raw_item.get("startSec"),
+                "endSec": raw_item.get("endSec"),
+                "sortNo": raw_item.get("sortNo"),
+                "children": [
+                    _outline_child_with_block(child, blocks_by_key)
+                    for child in children
+                    if isinstance(child, dict)
+                ],
+            }
+            items.append(item)
 
     return {
         "handoutVersionId": version.id,
@@ -1796,6 +1797,34 @@ def _caption_payload(segment: CourseSegment) -> dict[str, Any] | None:
         "endSec": end_sec,
         "orderNo": segment.order_no,
     }
+
+
+def _outline_child_items(outline_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    for raw_item in outline_payload.get("items", []):
+        if not isinstance(raw_item, dict):
+            continue
+        raw_children = raw_item.get("children")
+        if isinstance(raw_children, list):
+            children.extend(dict(child) for child in raw_children if isinstance(child, dict))
+    return children
+
+
+def _outline_child_with_block(
+    raw_child: Mapping[str, Any],
+    blocks_by_key: Mapping[str, HandoutBlock],
+) -> dict[str, Any]:
+    child = dict(raw_child)
+    block = blocks_by_key.get(str(child.get("outlineKey") or ""))
+    if block is not None:
+        child["blockId"] = block.id
+        child["generationStatus"] = block.status
+        child["sourceSegmentKeys"] = list(
+            block.source_segment_keys_json or child.get("sourceSegmentKeys") or []
+        )
+    else:
+        child.setdefault("sourceSegmentKeys", [])
+    return child
 
 
 def _document_context_from_segments(

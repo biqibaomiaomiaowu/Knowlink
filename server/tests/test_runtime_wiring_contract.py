@@ -368,8 +368,9 @@ async def main():
         "handout_status": handout_status,
         "entity_type": handout_body["data"]["entity"]["type"],
         "outline_status": outline_status,
-        "outline_item_count": len(outline_body["data"]["items"]),
-        "outline_generation_status": outline_body["data"]["items"][0]["generationStatus"],
+        "outline_section_count": len(outline_body["data"]["items"]),
+        "outline_child_count": len(outline_body["data"]["items"][0]["children"]),
+        "outline_generation_status": outline_body["data"]["items"][0]["children"][0]["generationStatus"],
     }))
 
 asyncio.run(main())
@@ -392,7 +393,8 @@ asyncio.run(main())
         "handout_status": 200,
         "entity_type": "handout_version",
         "outline_status": 200,
-        "outline_item_count": 1,
+        "outline_section_count": 1,
+        "outline_child_count": 1,
         "outline_generation_status": "pending",
     }
 

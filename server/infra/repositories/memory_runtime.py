@@ -214,15 +214,26 @@ class RuntimeStore:
             "summary": "按演示讲义块组织的目录",
             "items": [
                 {
-                    "outlineKey": block["outlineKey"],
-                    "blockId": block["blockId"],
+                    "outlineKey": f"section-{index + 1}",
                     "title": block["title"],
                     "summary": block["summary"],
                     "startSec": block["startSec"],
                     "endSec": block["endSec"],
                     "sortNo": index + 1,
-                    "generationStatus": block["status"],
-                    "sourceSegmentKeys": block["sourceSegmentKeys"],
+                    "children": [
+                        {
+                            "outlineKey": block["outlineKey"],
+                            "blockId": block["blockId"],
+                            "title": block["title"],
+                            "summary": block["summary"],
+                            "startSec": block["startSec"],
+                            "endSec": block["endSec"],
+                            "sortNo": index + 1,
+                            "generationStatus": block["status"],
+                            "sourceSegmentKeys": block["sourceSegmentKeys"],
+                            "topicTags": [],
+                        }
+                    ],
                 }
                 for index, block in enumerate(blocks)
             ],
