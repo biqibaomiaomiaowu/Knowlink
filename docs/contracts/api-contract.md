@@ -899,15 +899,17 @@ stub 阶段约束：
 ```json
 {
   "blockId": 4001,
+  "handoutVersionId": 3001,
   "outlineKey": "outline-1",
   "title": "极限与连续",
   "summary": "先抓必考定义和题型",
   "status": "ready",
+  "generationStatus": "ready",
   "contentMd": "### 极限与连续",
   "startSec": 120,
   "endSec": 360,
-  "pageFrom": 2,
-  "pageTo": 5,
+  "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+  "knowledgePoints": [],
   "citations": [
     {
       "resourceId": 501,
@@ -918,7 +920,7 @@ stub 阶段约束：
 }
 ```
 
-同一结构也允许返回：
+`citations[]` 中同一结构也允许返回：
 
 - `slideNo`：PPTX slide 引用
 - `anchorKey`：DOCX heading / anchor 引用
@@ -928,13 +930,17 @@ stub 阶段约束：
 ```json
 {
   "blockId": 4002,
+  "handoutVersionId": 3001,
   "outlineKey": "outline-2",
   "title": "集合的表示方法",
   "summary": "从列举法过渡到描述法",
   "status": "pending",
+  "generationStatus": "pending",
   "contentMd": null,
   "startSec": 180,
   "endSec": 360,
+  "sourceSegmentKeys": ["mp4-c3"],
+  "knowledgePoints": [],
   "citations": []
 }
 ```
@@ -972,12 +978,13 @@ stub 阶段约束：
   "blockId": 4002,
   "outlineKey": "outline-2",
   "status": "generating",
+  "generationStatus": "generating",
   "startSec": 180,
   "endSec": 360
 }
 ```
 
-### `GET /api/v1/courses/{courseId}/handouts/current-block?currentSec=205`
+### `GET /api/v1/courses/{courseId}/handouts/current-block?currentSec=335`
 
 响应 `data`：
 
@@ -987,10 +994,17 @@ stub 阶段约束：
   "outlineKey": "outline-2",
   "startSec": 180,
   "endSec": 360,
+  "status": "pending",
   "generationStatus": "pending",
   "prefetchBlockId": 4003
 }
 ```
+
+说明：
+
+- 播放时间命中规则为 `[startSec, endSec)`；最后一个 block 允许命中 `endSec`。
+- 仅当距离当前 block 结束 30 秒以内，且紧邻的下一个 block 仍为 `pending` 时，返回 `prefetchBlockId`。
+- 如果紧邻下一个 block 已经是 `generating`、`ready` 或 `failed`，不跳过它去建议更后面的 pending block。
 
 ### `GET /api/v1/handout-blocks/{blockId}/jump-target`
 
