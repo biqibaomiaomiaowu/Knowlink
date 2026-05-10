@@ -145,7 +145,10 @@ def grade_quiz_attempt(
     for index, question in enumerate(questions, start=1):
         question_key = _question_key(question, fallback_index=index)
         answer = _answer_for_question(question, question_key=question_key, answers_by_key=answers_by_key)
-        selected = _normalize_answer(_field_value(answer, "selectedOption", "selected_option"))
+        selected = _normalize_selected_answer(
+            _field_value(answer, "selectedOption", "selected_option"),
+            question,
+        )
         correct_answer = _normalize_answer(_field_value(question, "correctAnswer", "correct_answer"))
         is_correct = selected == correct_answer
         obtained_score = 1 if is_correct else 0
@@ -498,6 +501,27 @@ def _normalize_answer(value: Any) -> str:
     if answer.upper() in _OPTION_LABELS:
         return answer.upper()
     return answer
+
+
+def _normalize_selected_answer(value: Any, question: Mapping[str, Any]) -> str:
+    answer = _normalize_answer(value)
+    if answer in _OPTION_LABELS:
+        return answer
+    normalized_answer = clean_text(answer)
+    if not normalized_answer:
+        return ""
+    for index, option in enumerate(_field_value(question, "options") or ()):
+        if index >= len(_OPTION_LABELS):
+            break
+        if clean_text(_option_text(option)) == normalized_answer:
+            return _OPTION_LABELS[index]
+    return ""
+
+
+def _option_text(option: Any) -> str:
+    if isinstance(option, Mapping):
+        return str(_field_value(option, "text", "label", "value") or "")
+    return str(option or "")
 
 
 def _mapping_list(value: Any) -> list[Mapping[str, Any]]:

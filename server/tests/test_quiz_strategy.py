@@ -79,6 +79,41 @@ def test_grade_quiz_attempt_returns_score_items_and_mastery_delta():
     assert result["recommendedReviewAction"]["targetBlockKey"] == "block-video"
 
 
+def test_grade_quiz_attempt_normalizes_selected_option_text_to_option_key():
+    payload = generate_quiz_payload(_handout_blocks(), question_count=3)
+    first_question = payload["questions"][0]
+
+    result = grade_quiz_attempt(
+        payload,
+        [
+            {
+                "questionKey": first_question["questionKey"],
+                "selectedOption": first_question["options"][0],
+            }
+        ],
+    )
+
+    assert result["items"][0]["selectedOption"] == "A"
+    assert result["items"][0]["isCorrect"] is True
+
+
+def test_grade_quiz_attempt_does_not_persist_unmatched_long_option_text():
+    payload = generate_quiz_payload(_handout_blocks(), question_count=3)
+
+    result = grade_quiz_attempt(
+        payload,
+        [
+            {
+                "questionKey": payload["questions"][0]["questionKey"],
+                "selectedOption": "这是一段无法匹配任何选项的超长中文答案文本，不能写入短选项字段",
+            }
+        ],
+    )
+
+    assert result["items"][0]["selectedOption"] == ""
+    assert result["items"][0]["isCorrect"] is False
+
+
 def test_grade_quiz_attempt_accepts_api_question_id_answers_without_dto_change():
     payload = generate_quiz_payload(_handout_blocks(), question_count=3)
     persisted_payload = {
