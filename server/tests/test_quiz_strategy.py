@@ -18,13 +18,14 @@ QUIZ_VALIDATOR = Draft202012Validator(QUIZ_SCHEMA)
 
 
 class FakeQuizClient:
-    def __init__(self, payload: dict):
-        self.payload = payload
+    def __init__(self, payload: dict | list[dict]):
+        self.payloads = list(payload) if isinstance(payload, list) else [payload]
         self.prompt_contexts: list[dict] = []
 
     def generate_quiz(self, prompt_context):
         self.prompt_contexts.append(dict(prompt_context))
-        return self.payload
+        index = min(len(self.prompt_contexts) - 1, len(self.payloads) - 1)
+        return self.payloads[index]
 
 
 def _generate_quiz_payload() -> dict:
@@ -112,6 +113,12 @@ def test_generate_quiz_payload_uses_deepseek_client_context_and_count_level(
     assert client.prompt_contexts[0]["course"]["title"] == "高数期末冲刺课"
     assert client.prompt_contexts[0]["learningPreferences"]["selfLevel"] == "intermediate"
     assert client.prompt_contexts[0]["readyHandoutBlocks"][0]["blockKey"] == "block-pdf"
+    assert client.prompt_contexts[0]["allowedQuestionSources"][0] == {
+        "sourceBlockKey": "block-pdf",
+        "blockTitle": "极限定义",
+        "allowedSourceSegmentKeys": ["pdf-p2"],
+        "allowedKnowledgePointKeys": ["kp-limit"],
+    }
     assert client.prompt_contexts[0]["activeParseRunSegments"][0]["segmentKey"] == "pdf-p2"
 
 
@@ -192,6 +199,74 @@ def test_generate_quiz_payload_rejects_segments_from_other_block_when_source_blo
             question_count_level="small",
             client=FakeQuizClient(bad_payload),
         )
+
+
+def test_generate_quiz_payload_retries_once_when_model_crosses_block_segment_sources():
+    bad_payload = _model_payload(3)
+    bad_payload["questions"][0] = {
+        **bad_payload["questions"][0],
+        "knowledgePointKey": "kp-continuity",
+        "knowledgePointName": "连续性",
+        "sourceBlockKey": "block-video",
+        "sourceSegmentKeys": ["pdf-p2"],
+    }
+    client = FakeQuizClient([bad_payload, _model_payload(3)])
+
+    payload = generate_quiz_payload(
+        _handout_blocks(),
+        segments=_segments(),
+        client=client,
+    )
+
+    QUIZ_VALIDATOR.validate(payload)
+    assert len(client.prompt_contexts) == 2
+    repair = client.prompt_contexts[1]["repairInstruction"]
+    assert "segments outside sourceBlockKey" in repair["serverError"]
+    assert repair["invalidPayload"] == bad_payload
+    assert client.prompt_contexts[1]["allowedQuestionSources"][1] == {
+        "sourceBlockKey": "block-video",
+        "blockTitle": "连续性的例题",
+        "allowedSourceSegmentKeys": ["mp4-c2"],
+        "allowedKnowledgePointKeys": ["kp-continuity"],
+    }
+
+
+def test_generate_quiz_payload_does_not_retry_schema_errors():
+    bad_question = dict(_model_question(1))
+    bad_question.pop("knowledgePointKey")
+    client = FakeQuizClient({"quizType": "chapter_review", "questions": [bad_question]})
+
+    with pytest.raises(ValueError, match="missing fields"):
+        generate_quiz_payload(
+            _handout_blocks(),
+            segments=_segments(),
+            question_count_level="small",
+            client=client,
+        )
+
+    assert len(client.prompt_contexts) == 1
+
+
+def test_quiz_prompt_context_excludes_blocks_without_source_segments():
+    blocks = [
+        *_handout_blocks(),
+        {
+            "handoutBlockId": "block-empty",
+            "title": "无来源块",
+            "summary": "没有来源片段。",
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [{"knowledgePointKey": "kp-empty", "displayName": "无来源"}],
+            "citations": [],
+        },
+    ]
+    client = FakeQuizClient(_model_payload(3))
+
+    generate_quiz_payload(blocks, segments=_segments(), client=client)
+
+    block_keys = {item["blockKey"] for item in client.prompt_contexts[0]["readyHandoutBlocks"]}
+    allowed_keys = {item["sourceBlockKey"] for item in client.prompt_contexts[0]["allowedQuestionSources"]}
+    assert "block-empty" not in block_keys
+    assert "block-empty" not in allowed_keys
 
 
 def test_deepseek_quiz_client_uses_thinking_json_mode(monkeypatch):

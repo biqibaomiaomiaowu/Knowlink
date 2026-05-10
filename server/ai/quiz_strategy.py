@@ -30,8 +30,9 @@ JSON 格式固定为：
 3. 题型只能是 single_choice；每题必须且只能有 4 个选项，correctAnswer 只能是 A/B/C/D。
 4. sourceBlockKey 必须来自 readyHandoutBlocks[].blockKey。
 5. sourceSegmentKeys 必须全部来自该 block 的 sourceSegmentKeys，不能为空；不得编造 pageNo、slideNo、anchorKey、startSec 或 endSec。
-6. stemMd、options、explanationMd 使用中文，围绕当前课程材料考查理解，不要生成与上下文无关的常识题。
-7. questionKey 在本次 JSON 内必须唯一。
+6. 每道题必须先从 allowedQuestionSources 中选择一个对象；sourceBlockKey、knowledgePointKey 和 sourceSegmentKeys 必须全部来自同一个 allowedQuestionSources 对象。
+7. stemMd、options、explanationMd 使用中文，围绕当前课程材料考查理解，不要生成与上下文无关的常识题。
+8. questionKey 在本次 JSON 内必须唯一。
 """
 _DIFFICULTY_BY_SOURCE = {
     "beginner": "easy",
@@ -135,13 +136,30 @@ def generate_quiz_payload(
         question_count_level=question_count_level,
     )
     model_payload = generation_client.generate_quiz(context)
-    return normalize_quiz_generation_payload(
-        model_payload,
-        handout_blocks=handout_blocks,
-        segments=segments,
-        quiz_type=quiz_type,
-        question_count_level=question_count_level,
-    )
+    try:
+        return normalize_quiz_generation_payload(
+            model_payload,
+            handout_blocks=handout_blocks,
+            segments=segments,
+            quiz_type=quiz_type,
+            question_count_level=question_count_level,
+        )
+    except ValueError as exc:
+        if not _is_repairable_source_reference_error(exc):
+            raise
+        repair_context = _build_quiz_repair_context(
+            context,
+            invalid_payload=model_payload,
+            error_message=str(exc),
+        )
+        repaired_payload = generation_client.generate_quiz(repair_context)
+        return normalize_quiz_generation_payload(
+            repaired_payload,
+            handout_blocks=handout_blocks,
+            segments=segments,
+            quiz_type=quiz_type,
+            question_count_level=question_count_level,
+        )
 
 
 def build_quiz_generation_context(
@@ -161,7 +179,14 @@ def build_quiz_generation_context(
         "course": dict(course_context or {}),
         "learningPreferences": dict(preferences or {}),
         "readyHandoutBlocks": [
-            _prompt_block_payload(block, index=index) for index, block in enumerate(handout_blocks, start=1) if isinstance(block, Mapping)
+            _prompt_block_payload(block, index=index)
+            for index, block in enumerate(handout_blocks, start=1)
+            if isinstance(block, Mapping) and _source_segment_keys(block)
+        ],
+        "allowedQuestionSources": [
+            _allowed_question_source_payload(block, index=index)
+            for index, block in enumerate(handout_blocks, start=1)
+            if isinstance(block, Mapping) and _source_segment_keys(block)
         ],
         "activeParseRunSegments": [
             _prompt_segment_payload(segment) for segment in segments if isinstance(segment, Mapping)
@@ -219,6 +244,33 @@ def _build_quiz_prompt(prompt_context: Mapping[str, Any]) -> str:
     )
 
 
+def _build_quiz_repair_context(
+    prompt_context: Mapping[str, Any],
+    *,
+    invalid_payload: Mapping[str, Any],
+    error_message: str,
+) -> dict[str, Any]:
+    return {
+        **dict(prompt_context),
+        "repairInstruction": {
+            "reason": "上一轮输出的题目来源引用没有通过服务端校验，请重新生成完整 quiz JSON。",
+            "serverError": error_message,
+            "rules": [
+                "不要局部补丁，必须返回完整 quiz JSON。",
+                "每道题只能选择 allowedQuestionSources 中的一项作为来源。",
+                "sourceBlockKey 必须等于该项 sourceBlockKey。",
+                "knowledgePointKey 必须来自该项 allowedKnowledgePointKeys。",
+                "sourceSegmentKeys 必须是该项 allowedSourceSegmentKeys 的非空子集，不能引用其他 block 的 segment。",
+            ],
+            "invalidPayload": invalid_payload,
+        },
+    }
+
+
+def _is_repairable_source_reference_error(exc: ValueError) -> bool:
+    return str(exc).startswith("quiz question references segments outside sourceBlockKey:")
+
+
 def _question_count_range(question_count_level: str) -> tuple[int, int]:
     if question_count_level not in QUESTION_COUNT_LEVEL_RANGES:
         raise ValueError(f"invalid questionCountLevel: {question_count_level}")
@@ -260,6 +312,23 @@ def _prompt_block_payload(block: Mapping[str, Any], *, index: int) -> dict[str, 
             }
             for citation in _mapping_list(_field_value(block, "citations"))
         ],
+    }
+
+
+def _allowed_question_source_payload(block: Mapping[str, Any], *, index: int) -> dict[str, Any]:
+    block_key = _block_key(block, fallback_index=index)
+    kp_keys = [
+        _stable_key(_field_value(item, "knowledgePointKey", "knowledge_point_key"))
+        for item in _mapping_list(_field_value(block, "knowledgePoints", "knowledge_points"))
+    ]
+    kp_keys = [key for key in kp_keys if key]
+    if not kp_keys:
+        kp_keys = [f"{block_key}-main"]
+    return {
+        "sourceBlockKey": block_key,
+        "blockTitle": clean_text(str(_field_value(block, "title") or f"讲义块 {index}")),
+        "allowedSourceSegmentKeys": _source_segment_keys(block),
+        "allowedKnowledgePointKeys": kp_keys,
     }
 
 
