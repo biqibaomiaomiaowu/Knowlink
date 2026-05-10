@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Request
 from server.api.deps import get_quiz_service
 from server.api.response import api_ok
 from server.domain.services import QuizService
-from server.schemas.requests import SubmitQuizRequest
+from server.schemas.requests import QuizGenerateRequest, SubmitQuizRequest
 
 router = APIRouter(tags=["quizzes"])
 
@@ -12,10 +12,12 @@ router = APIRouter(tags=["quizzes"])
 async def generate_quiz(
     courseId: int,
     request: Request,
+    payload: QuizGenerateRequest | None = None,
     service: QuizService = Depends(get_quiz_service),
 ):
     data = service.generate_quiz(
         course_id=courseId,
+        question_count_level=payload.question_count_level if payload is not None else "medium",
         idempotency_key=request.headers.get("Idempotency-Key"),
     )
     return api_ok(request, data)

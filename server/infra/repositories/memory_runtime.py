@@ -489,29 +489,20 @@ class RuntimeStore:
             return None
         return list(session.get("messages") or [])
 
-    def create_quiz(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    def create_quiz(
+        self,
+        course_id: int,
+        *,
+        question_count_level: str = "medium",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         quiz_id = self.next_id("quiz")
         task_id = self.next_id("task")
-        questions = []
-        for stem in [
-            "下列关于极限的说法哪项正确？",
-            "导数的几何意义是？",
-            "定积分最常见的考试用途是？",
-        ]:
-            question_id = self.next_id("question")
-            questions.append(
-                {
-                    "questionId": question_id,
-                    "stemMd": stem,
-                    "options": ["A", "B", "C", "D"],
-                }
-            )
         quiz = {
             "quizId": quiz_id,
             "courseId": course_id,
-            "status": "ready",
-            "questionCount": len(questions),
-            "questions": questions,
+            "status": "queued",
+            "questionCount": 0,
+            "questions": [],
         }
         self.quizzes[quiz_id] = quiz
         return quiz, {
@@ -519,6 +510,7 @@ class RuntimeStore:
             "status": "queued",
             "nextAction": "poll",
             "entity": {"type": "quiz", "id": quiz_id},
+            "payload": {"questionCountLevel": question_count_level},
         }
 
     def submit_quiz(self, quiz_id: int, answers: list[dict[str, Any]] | None = None) -> dict[str, Any]:

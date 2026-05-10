@@ -224,8 +224,13 @@ class MemoryScaffoldRepository:
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         return self.store.get_qa_session_messages(session_id)
 
-    def create_quiz(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
-        return self.store.create_quiz(course_id)
+    def create_quiz(
+        self,
+        course_id: int,
+        *,
+        question_count_level: str = "medium",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        return self.store.create_quiz(course_id, question_count_level=question_count_level)
 
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None:
         return self.store.quizzes.get(quiz_id)
