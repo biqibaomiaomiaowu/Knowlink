@@ -286,7 +286,7 @@
 
 ```json
 {
-  "uploadUrl": "https://minio.local/upload/demo",
+  "uploadUrl": "http://127.0.0.1:9000/knowlink/raw/1/101/temp/chapter-1.pdf?...",
   "objectKey": "raw/1/101/temp/chapter-1.pdf",
   "headers": {
     "x-amz-meta-course-id": "101"
@@ -294,6 +294,9 @@
   "expiresAt": "2026-04-18T15:15:00+00:00"
 }
 ```
+
+本地 Docker 联调时，`uploadUrl` 必须使用浏览器可访问的 `KNOWLINK_MINIO_PUBLIC_ENDPOINT`
+签名，例如 `http://127.0.0.1:9000/...`；不能返回容器内 hostname `minio:9000`。
 
 ### `POST /api/v1/courses/{courseId}/resources/upload-complete`
 

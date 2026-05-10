@@ -449,4 +449,9 @@ def test_compose_real_env_path_runs_migration_and_minio_bucket_init_before_api()
     assert "db-migrate:\n        condition: service_completed_successfully" in compose
     assert "minio-init:\n        condition: service_completed_successfully" in compose
     assert "pg_isready -U knowlink -d knowlink" in compose
+    assert compose.count("KNOWLINK_MINIO_INTERNAL_ENDPOINT: ${KNOWLINK_MINIO_INTERNAL_ENDPOINT:-minio:9000}") >= 3
+    assert (
+        compose.count("KNOWLINK_MINIO_PUBLIC_ENDPOINT: ${KNOWLINK_MINIO_PUBLIC_ENDPOINT:-127.0.0.1:9000}")
+        >= 3
+    )
     assert 'MINIO_API_CORS_ALLOW_ORIGIN: "${KNOWLINK_MINIO_CORS_ALLOW_ORIGIN:-*}"' in compose
