@@ -1824,38 +1824,42 @@ class _BlockContent extends StatelessWidget {
       child: MarkdownBody(
         data: content,
         selectable: true,
-        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-          p: const TextStyle(
-            color: AppTheme.ink,
-            height: 1.5,
-            fontSize: 14,
-          ),
-          h1: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: AppTheme.ink,
-                fontWeight: FontWeight.w900,
-              ),
-          h2: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: AppTheme.ink,
-                fontWeight: FontWeight.w900,
-              ),
-          h3: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: AppTheme.ink,
-                fontWeight: FontWeight.w900,
-              ),
-          listBullet: const TextStyle(
-            color: AppTheme.ink,
-            height: 1.45,
-          ),
-          blockquoteDecoration: const BoxDecoration(
-            color: Color(0xFFEFF6FF),
-            border: Border(
-              left: BorderSide(color: AppTheme.brandBlue, width: 3),
-            ),
-          ),
-        ),
+        styleSheet: _handoutMarkdownStyleSheet(context),
       ),
     );
   }
+}
+
+MarkdownStyleSheet _handoutMarkdownStyleSheet(BuildContext context) {
+  return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+    p: const TextStyle(
+      color: AppTheme.ink,
+      height: 1.5,
+      fontSize: 14,
+    ),
+    h1: Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: AppTheme.ink,
+          fontWeight: FontWeight.w900,
+        ),
+    h2: Theme.of(context).textTheme.titleMedium?.copyWith(
+          color: AppTheme.ink,
+          fontWeight: FontWeight.w900,
+        ),
+    h3: Theme.of(context).textTheme.titleSmall?.copyWith(
+          color: AppTheme.ink,
+          fontWeight: FontWeight.w900,
+        ),
+    listBullet: const TextStyle(
+      color: AppTheme.ink,
+      height: 1.45,
+    ),
+    blockquoteDecoration: const BoxDecoration(
+      color: Color(0xFFEFF6FF),
+      border: Border(
+        left: BorderSide(color: AppTheme.brandBlue, width: 3),
+      ),
+    ),
+  );
 }
 
 class _CitationList extends StatelessWidget {
@@ -2212,7 +2216,11 @@ class _QaAnswerCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              Text(message.answerMd),
+              MarkdownBody(
+                data: message.answerMd,
+                selectable: true,
+                styleSheet: _handoutMarkdownStyleSheet(context),
+              ),
               const SizedBox(height: 8),
               _CitationList(
                 citations: message.citations,

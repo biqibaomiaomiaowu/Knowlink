@@ -1021,6 +1021,7 @@ void main() {
     final generated = await client.generateQuiz(
       courseId: '101',
       idempotencyKey: 'quiz-generate-1',
+      questionCountLevel: QuizQuestionCountLevel.large,
     );
     final quiz = await client.fetchQuiz(8001);
     final attempt = await client.submitQuizAttempt(
@@ -1076,6 +1077,9 @@ void main() {
       _headerValue(adapter.requests.first.headers, 'idempotency-key'),
       'quiz-generate-1',
     );
+    expect(adapter.requests.first.data, {
+      'questionCountLevel': 'large',
+    });
     expect(
       _headerValue(adapter.requests[4].headers, 'idempotency-key'),
       'review-regenerate-1',

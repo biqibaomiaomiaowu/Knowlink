@@ -9,6 +9,7 @@ class QuizState {
     required this.status,
     required this.submission,
     required this.selectedAnswers,
+    this.questionCountLevel = QuizQuestionCountLevel.medium,
     this.isPolling = false,
   });
 
@@ -27,6 +28,7 @@ class QuizState {
   final AsyncValue<QuizStatusModel?> status;
   final AsyncValue<SubmitQuizResultModel?> submission;
   final Map<int, String> selectedAnswers;
+  final QuizQuestionCountLevel questionCountLevel;
   final bool isPolling;
 
   QuizModel? get quizValue => quiz.valueOrNull;
@@ -51,6 +53,7 @@ class QuizState {
     AsyncValue<QuizStatusModel?>? status,
     AsyncValue<SubmitQuizResultModel?>? submission,
     Map<int, String>? selectedAnswers,
+    QuizQuestionCountLevel? questionCountLevel,
     bool? isPolling,
   }) {
     return QuizState(
@@ -59,6 +62,7 @@ class QuizState {
       status: status ?? this.status,
       submission: submission ?? this.submission,
       selectedAnswers: selectedAnswers ?? this.selectedAnswers,
+      questionCountLevel: questionCountLevel ?? this.questionCountLevel,
       isPolling: isPolling ?? this.isPolling,
     );
   }

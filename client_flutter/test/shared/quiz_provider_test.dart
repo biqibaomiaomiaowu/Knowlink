@@ -47,9 +47,35 @@ void main() {
 
     final state = container.read(quizProvider);
     expect(fakeApiClient.generatedCourseIds, ['101']);
+    expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.medium]);
     expect(fakeApiClient.fetchedQuizIds, [8001]);
     expect(state.quizValue?.questions, hasLength(2));
     expect(container.read(courseFlowProvider).quizId, 8001);
+  });
+
+  test('generateAndPoll sends selected question count level', () async {
+    final fakeApiClient = _FakeQuizApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    final subscription = container.listen(quizProvider, (_, __) {});
+    addTearDown(subscription.close);
+    addTearDown(container.dispose);
+
+    container
+        .read(quizProvider.notifier)
+        .setQuestionCountLevel(QuizQuestionCountLevel.large);
+    await container.read(quizProvider.notifier).generateAndPoll(
+          '101',
+          interval: Duration.zero,
+          maxAttempts: 1,
+        );
+
+    expect(container.read(quizProvider).questionCountLevel,
+        QuizQuestionCountLevel.large);
+    expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.large]);
   });
 
   test('prepareCourse clears stale quiz when route course changes', () async {
@@ -140,6 +166,7 @@ void main() {
 
 class _FakeQuizApiClient extends ApiClient {
   final generatedCourseIds = <String>[];
+  final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
   final submittedAnswers = <SubmitQuizRequestModel>[];
 
@@ -147,8 +174,10 @@ class _FakeQuizApiClient extends ApiClient {
   Future<QuizGenerateResultModel> generateQuiz({
     required String courseId,
     required String idempotencyKey,
+    required QuizQuestionCountLevel questionCountLevel,
   }) async {
     generatedCourseIds.add(courseId);
+    generatedLevels.add(questionCountLevel);
     return QuizGenerateResultModel.fromJson({
       'taskId': 9001,
       'status': 'queued',
@@ -217,8 +246,10 @@ class _SlowGenerateQuizApiClient extends _FakeQuizApiClient {
   Future<QuizGenerateResultModel> generateQuiz({
     required String courseId,
     required String idempotencyKey,
+    required QuizQuestionCountLevel questionCountLevel,
   }) async {
     generatedCourseIds.add(courseId);
+    generatedLevels.add(questionCountLevel);
     return _completer.future;
   }
 }

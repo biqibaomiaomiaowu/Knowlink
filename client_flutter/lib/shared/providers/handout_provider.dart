@@ -242,6 +242,10 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
           courseId: courseId,
           requestId: requestId,
         );
+        await _refreshVersionStatusForActiveHandout(
+          courseId: courseId,
+          requestId: requestId,
+        );
         if (!_shouldApply(requestId, courseId)) {
           return true;
         }
@@ -636,6 +640,36 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       courseId: courseId,
       requestId: requestId,
     );
+    await _refreshVersionStatusForActiveHandout(
+      courseId: courseId,
+      requestId: requestId,
+    );
+  }
+
+  Future<void> _refreshVersionStatusForActiveHandout({
+    required String courseId,
+    required int requestId,
+  }) async {
+    final handoutVersionId =
+        ref.read(courseFlowProvider).activeHandoutVersionId ??
+            state.latest.valueOrNull?.handoutVersionId;
+    if (handoutVersionId == null) {
+      return;
+    }
+    try {
+      final versionStatus = await ref
+          .read(apiClientProvider)
+          .fetchHandoutVersionStatus(handoutVersionId);
+      if (!_shouldApply(requestId, courseId)) {
+        return;
+      }
+      state = state.copyWith(versionStatus: AsyncData(versionStatus));
+    } catch (error, stackTrace) {
+      if (!_shouldApply(requestId, courseId)) {
+        return;
+      }
+      state = state.copyWith(versionStatus: AsyncError(error, stackTrace));
+    }
   }
 
   Future<void> _loadKnownHandout({

@@ -1068,6 +1068,17 @@ void main() {
       container.read(handoutProvider).blocks.valueOrNull!.items[1].status,
       'ready',
     );
+    expect(fakeApiClient.versionStatusIds, [3001, 3001]);
+    expect(
+        container.read(handoutProvider).versionStatus.valueOrNull?.readyBlocks,
+        2);
+    expect(
+        container
+            .read(handoutProvider)
+            .versionStatus
+            .valueOrNull
+            ?.pendingBlocks,
+        0);
   });
 
   test('block generation stays locked while status polling is pending',
@@ -1233,6 +1244,17 @@ void main() {
       container.read(handoutProvider).blocks.valueOrNull!.items[1].status,
       'ready',
     );
+    expect(fakeApiClient.versionStatusIds, [3001, 3001]);
+    expect(
+        container.read(handoutProvider).versionStatus.valueOrNull?.readyBlocks,
+        2);
+    expect(
+        container
+            .read(handoutProvider)
+            .versionStatus
+            .valueOrNull
+            ?.pendingBlocks,
+        0);
   });
 
   test('direct ready block generation response wins over stale pending blocks',
@@ -1650,6 +1672,7 @@ class _HandoutProviderFakeApiClient extends ApiClient {
   final List<int> jumpTargetBlockIds = [];
   final List<int> playbackResourceIds = [];
   final List<QaMessageRequestModel> qaRequests = [];
+  final List<int> versionStatusIds = [];
 
   @override
   Future<HandoutLatestModel> fetchLatestHandout(String courseId) async {
@@ -1694,6 +1717,7 @@ class _HandoutProviderFakeApiClient extends ApiClient {
   Future<HandoutVersionStatusModel> fetchHandoutVersionStatus(
     int handoutVersionId,
   ) async {
+    versionStatusIds.add(handoutVersionId);
     return versionStatus;
   }
 
@@ -2387,6 +2411,25 @@ class _BlockGenerateFakeApiClient extends _HandoutProviderFakeApiClient {
   }
 
   @override
+  Future<HandoutVersionStatusModel> fetchHandoutVersionStatus(
+    int handoutVersionId,
+  ) async {
+    versionStatusIds.add(handoutVersionId);
+    if (!_blockReady) {
+      return versionStatus;
+    }
+    return const HandoutVersionStatusModel(
+      handoutVersionId: 3001,
+      status: 'ready',
+      outlineStatus: 'ready',
+      totalBlocks: 2,
+      readyBlocks: 2,
+      pendingBlocks: 0,
+      sourceParseRunId: 9001,
+    );
+  }
+
+  @override
   Future<HandoutBlocksModel> fetchLatestHandoutBlocks(String courseId) async {
     if (!_blockReady) {
       return super.fetchLatestHandoutBlocks(courseId);
@@ -2427,6 +2470,25 @@ class _ReadyBlockGenerateFakeApiClient extends _BlockGenerateFakeApiClient {
       'startSec': 360,
       'endSec': 540,
     });
+  }
+
+  @override
+  Future<HandoutVersionStatusModel> fetchHandoutVersionStatus(
+    int handoutVersionId,
+  ) async {
+    versionStatusIds.add(handoutVersionId);
+    if (!_generated) {
+      return versionStatus;
+    }
+    return const HandoutVersionStatusModel(
+      handoutVersionId: 3001,
+      status: 'ready',
+      outlineStatus: 'ready',
+      totalBlocks: 2,
+      readyBlocks: 2,
+      pendingBlocks: 0,
+      sourceParseRunId: 9001,
+    );
   }
 
   @override

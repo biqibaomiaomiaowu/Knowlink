@@ -381,9 +381,13 @@ class ApiClient {
   Future<QuizGenerateResultModel> generateQuiz({
     required String courseId,
     required String idempotencyKey,
+    required QuizQuestionCountLevel questionCountLevel,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/api/v1/courses/$courseId/quizzes/generate',
+      data: {
+        'questionCountLevel': questionCountLevel.apiValue,
+      },
       options: Options(
         headers: {
           'Idempotency-Key': idempotencyKey,

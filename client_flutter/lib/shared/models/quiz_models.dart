@@ -1,5 +1,13 @@
 import 'pipeline_status.dart';
 
+enum QuizQuestionCountLevel {
+  small,
+  medium,
+  large;
+
+  String get apiValue => name;
+}
+
 class QuizGenerateResultModel {
   const QuizGenerateResultModel({
     required this.taskId,
