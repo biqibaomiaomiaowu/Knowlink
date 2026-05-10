@@ -69,6 +69,9 @@ class _QuizPageState extends ConsumerState<QuizPage> {
               quiz: quiz,
               state: state,
               courseId: courseId,
+              questionCountLevel: state.questionCountLevel,
+              onLevelChanged:
+                  ref.read(quizProvider.notifier).setQuestionCountLevel,
               onGenerate: courseId == null
                   ? null
                   : () => ref.read(quizProvider.notifier).generateAndPoll(
@@ -143,12 +146,16 @@ class _QuizStatusBar extends StatelessWidget {
     required this.quiz,
     required this.state,
     required this.courseId,
+    required this.questionCountLevel,
+    required this.onLevelChanged,
     required this.onGenerate,
   });
 
   final QuizModel? quiz;
   final QuizState state;
   final String? courseId;
+  final QuizQuestionCountLevel questionCountLevel;
+  final ValueChanged<QuizQuestionCountLevel> onLevelChanged;
   final VoidCallback? onGenerate;
 
   @override
@@ -180,6 +187,11 @@ class _QuizStatusBar extends StatelessWidget {
                   '题目 ${state.status.valueOrNull!.questionCount} · ${_statusLabel(state.status.valueOrNull!.status)}',
               color: _statusColor(state.status.valueOrNull!.status),
             ),
+          _QuestionCountLevelSelector(
+            selected: questionCountLevel,
+            enabled: !state.isGenerating,
+            onChanged: onLevelChanged,
+          ),
           FilledButton.icon(
             onPressed: state.isGenerating ? null : onGenerate,
             icon: state.isGenerating
@@ -192,6 +204,51 @@ class _QuizStatusBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _QuestionCountLevelSelector extends StatelessWidget {
+  const _QuestionCountLevelSelector({
+    required this.selected,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final QuizQuestionCountLevel selected;
+  final bool enabled;
+  final ValueChanged<QuizQuestionCountLevel> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<QuizQuestionCountLevel>(
+      showSelectedIcon: false,
+      selected: {selected},
+      onSelectionChanged: enabled
+          ? (selection) {
+              final next = selection.firstOrNull;
+              if (next != null) {
+                onChanged(next);
+              }
+            }
+          : null,
+      segments: const [
+        ButtonSegment(
+          value: QuizQuestionCountLevel.small,
+          label: Text('少量 1-3题'),
+          icon: Icon(Icons.looks_one_outlined),
+        ),
+        ButtonSegment(
+          value: QuizQuestionCountLevel.medium,
+          label: Text('适中 3-5题'),
+          icon: Icon(Icons.tune),
+        ),
+        ButtonSegment(
+          value: QuizQuestionCountLevel.large,
+          label: Text('多练 5-10题'),
+          icon: Icon(Icons.add_task),
+        ),
+      ],
     );
   }
 }

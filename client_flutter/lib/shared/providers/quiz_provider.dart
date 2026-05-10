@@ -31,6 +31,13 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
     state = QuizState.initial();
   }
 
+  void setQuestionCountLevel(QuizQuestionCountLevel level) {
+    if (state.questionCountLevel == level || state.isGenerating) {
+      return;
+    }
+    state = state.copyWith(questionCountLevel: level);
+  }
+
   Future<void> loadQuiz(int quizId) async {
     final requestId = ++_latestRequestId;
     state = state.copyWith(
@@ -82,6 +89,7 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
             courseId: courseId,
             idempotencyKey:
                 'quiz-generate-$courseId-${DateTime.now().microsecondsSinceEpoch}',
+            questionCountLevel: state.questionCountLevel,
           );
       if (!_shouldApply(requestId, courseId: courseId)) {
         return;

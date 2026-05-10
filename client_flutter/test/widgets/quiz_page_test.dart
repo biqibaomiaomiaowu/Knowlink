@@ -62,13 +62,40 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('还没有测验'), findsOneWidget);
+    expect(find.text('适中 3-5题'), findsOneWidget);
 
     await tester.tap(find.text('生成测验'));
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.generatedCourseIds, ['101']);
+    expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.medium]);
     expect(fakeApiClient.fetchedQuizIds, [8001]);
     expect(find.text('极限定义关注什么？'), findsOneWidget);
+  });
+
+  testWidgets('course quiz page sends selected question count level', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _QuizPageFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: QuizPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('多练 5-10题'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('生成测验'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.generatedCourseIds, ['101']);
+    expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.large]);
   });
 }
 
@@ -81,6 +108,7 @@ void _useTestSurface(WidgetTester tester) {
 
 class _QuizPageFakeApiClient extends ApiClient {
   final generatedCourseIds = <String>[];
+  final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
   final submittedAnswers = <SubmitQuizRequestModel>[];
 
@@ -88,8 +116,10 @@ class _QuizPageFakeApiClient extends ApiClient {
   Future<QuizGenerateResultModel> generateQuiz({
     required String courseId,
     required String idempotencyKey,
+    required QuizQuestionCountLevel questionCountLevel,
   }) async {
     generatedCourseIds.add(courseId);
+    generatedLevels.add(questionCountLevel);
     return QuizGenerateResultModel.fromJson({
       'taskId': 9001,
       'status': 'queued',
