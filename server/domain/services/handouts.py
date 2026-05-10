@@ -166,6 +166,10 @@ class HandoutService:
         return {"items": handout["blocks"]}
 
     def generate_block(self, *, block_id: int, idempotency_key: str | None) -> dict[str, object]:
+        current_status = self.handouts.get_handout_block_status(block_id)
+        if current_status is not None and current_status.get("status") == "ready":
+            return current_status
+
         enqueue_request: tuple[int, dict[str, object]] | None = None
         created_response: dict[str, object] | None = None
 

@@ -16,6 +16,8 @@ from server.api.deps import get_handout_service, get_resource_service
 from server.app import app
 from server.domain.services import HandoutService, ResourceService
 from server.infra.db.base import Base
+from server.infra.repositories.memory import MemoryScaffoldRepository
+from server.infra.repositories.memory_runtime import RuntimeStore
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.infra.storage import ObjectStat
 from server.tasks.handouts import run_handout_block_generate, run_handout_generate
@@ -365,6 +367,119 @@ def test_sql_ready_handout_block_persists_content_and_normalized_refs():
         engine.dispose()
 
 
+def test_sql_ready_handout_block_refs_normalize_ppt_and_docx_locators():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _ = _create_course_with_active_video_segments(repo)
+        parse_run_id = repo.get_course(course_id)["activeParseRunId"]
+        ppt_resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pptx",
+                "objectKey": f"raw/1/{course_id}/block-ref.pptx",
+                "originalName": "block-ref.pptx",
+                "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "sizeBytes": 2048,
+                "checksum": "sha256:block-ref-pptx",
+            },
+        )
+        docx_resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "docx",
+                "objectKey": f"raw/1/{course_id}/block-ref.docx",
+                "originalName": "block-ref.docx",
+                "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "sizeBytes": 2048,
+                "checksum": "sha256:block-ref-docx",
+            },
+        )
+        ppt_segments = repo.create_course_segments(
+            course_id=course_id,
+            resource_id=ppt_resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "ppt_slide_text",
+                    "orderNo": 10,
+                    "textContent": "PPT 第 6 页继续解释集合的基本概念。",
+                    "slideNo": 6,
+                }
+            ],
+        )
+        docx_segments = repo.create_course_segments(
+            course_id=course_id,
+            resource_id=docx_resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "docx_block_text",
+                    "orderNo": 11,
+                    "textContent": "DOCX 补充集合与元素的关系。",
+                    "sectionPath": ["集合补充"],
+                }
+            ],
+        )
+        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service.generate_handout(course_id=course_id, idempotency_key=None)
+        block = repo.get_latest_handout(course_id)["blocks"][0]
+
+        saved = repo.save_handout_block_result(
+            block["blockId"],
+            {
+                "title": "集合定义",
+                "summary": "理解集合定义。",
+                "contentMd": "## 集合定义",
+                "sourceSegmentKeys": block["sourceSegmentKeys"],
+                "knowledgePoints": [],
+                "citations": [
+                    {
+                        "resourceId": ppt_resource["resourceId"],
+                        "segmentKey": ppt_segments[0]["segmentKey"],
+                        "slideNo": 99,
+                        "refLabel": "模型给错 slide 时以 segment 为准",
+                    },
+                    {
+                        "resourceId": docx_resource["resourceId"],
+                        "segmentKey": docx_segments[0]["segmentKey"],
+                        "anchorKey": "model-made-anchor",
+                        "refLabel": "模型给错 anchor 时以 segment 为准",
+                    },
+                ],
+            },
+        )
+
+        assert saved["citations"] == [
+            {
+                "resourceId": ppt_resource["resourceId"],
+                "segmentId": ppt_segments[0]["segmentId"],
+                "segmentKey": ppt_segments[0]["segmentKey"],
+                "refLabel": "模型给错 slide 时以 segment 为准",
+                "slideNo": 6,
+            },
+            {
+                "resourceId": docx_resource["resourceId"],
+                "segmentId": docx_segments[0]["segmentId"],
+                "segmentKey": docx_segments[0]["segmentKey"],
+                "refLabel": "模型给错 anchor 时以 segment 为准",
+                "anchorKey": docx_segments[0]["segmentKey"],
+            },
+        ]
+
+        handout_block_refs = Base.metadata.tables["handout_block_refs"]
+        ref_rows = session.execute(
+            sa.select(handout_block_refs)
+            .where(handout_block_refs.c.handout_block_id == block["blockId"])
+            .order_by(handout_block_refs.c.sort_no.asc())
+        ).mappings().all()
+        assert [row["ref_type"] for row in ref_rows] == ["ppt_slide", "doc_anchor"]
+        assert ref_rows[0]["slide_no"] == 6
+        assert ref_rows[1]["anchor_key"] == docx_segments[0]["segmentKey"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_sql_ready_handout_block_refs_reject_non_candidate_segments_and_untrusted_source_keys():
     repo, session, engine = _build_sqlite_repository()
     try:
@@ -420,6 +535,55 @@ def test_sql_ready_handout_block_refs_reject_non_candidate_segments_and_untruste
         assert saved["sourceSegmentKeys"] == block["sourceSegmentKeys"]
         assert saved["citations"] == []
         assert repo.get_latest_handout(course_id)["blocks"][0]["sourceSegmentKeys"] == block["sourceSegmentKeys"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_ready_handout_block_refs_accept_block_range_video_citation_on_first_source_segment():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _ = _create_course_with_active_video_segments(repo)
+        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service.generate_handout(course_id=course_id, idempotency_key=None)
+        block = repo.get_latest_handout(course_id)["blocks"][0]
+        first_segment_id = int(str(block["sourceSegmentKeys"][0]).removeprefix("segment-"))
+        course_segments = Base.metadata.tables["course_segments"]
+        first_segment = session.execute(
+            sa.select(course_segments).where(course_segments.c.id == first_segment_id)
+        ).mappings().one()
+
+        saved = repo.save_handout_block_result(
+            block["blockId"],
+            {
+                "title": "集合定义",
+                "summary": "视频范围 citation 绑定首个 source segment。",
+                "contentMd": "## 集合定义",
+                "sourceSegmentKeys": block["sourceSegmentKeys"],
+                "knowledgePoints": [],
+                "citations": [
+                    {
+                        "resourceId": first_segment["resource_id"],
+                        "segmentId": first_segment_id,
+                        "segmentKey": block["sourceSegmentKeys"][0],
+                        "startSec": block["startSec"],
+                        "endSec": block["endSec"],
+                        "refLabel": "视频全段",
+                    }
+                ],
+            },
+        )
+
+        assert saved["citations"] == [
+            {
+                "resourceId": first_segment["resource_id"],
+                "segmentId": first_segment_id,
+                "segmentKey": block["sourceSegmentKeys"][0],
+                "refLabel": "视频全段",
+                "startSec": block["startSec"],
+                "endSec": block["endSec"],
+            }
+        ]
     finally:
         session.close()
         engine.dispose()
@@ -541,6 +705,120 @@ def test_handout_block_generate_is_idempotent_and_does_not_duplicate_generating_
         engine.dispose()
 
 
+def test_generating_handout_block_status_is_visible_and_no_key_generate_is_idempotent():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _ = _create_course_with_active_video_segments(repo)
+        dispatcher = _RecordingHandoutDispatcher()
+        service = HandoutService(
+            courses=repo,
+            handouts=repo,
+            idempotency=repo,
+            task_dispatcher=dispatcher,
+        )
+        service.generate_handout(course_id=course_id, idempotency_key=None)
+        block_id = repo.get_latest_handout(course_id)["blocks"][0]["blockId"]
+
+        first = service.generate_block(block_id=block_id, idempotency_key=None)
+        repeat_without_key = service.generate_block(block_id=block_id, idempotency_key=None)
+
+        assert first == repeat_without_key
+        assert dispatcher.block_calls == [
+            {
+                "taskId": first["taskId"],
+                "payload": {
+                    "courseId": course_id,
+                    "handoutVersionId": repo.get_course(course_id)["activeHandoutVersionId"],
+                    "handoutBlockId": block_id,
+                    "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                },
+            }
+        ]
+
+        outline_child = _outline_children(service.get_latest_outline(course_id=course_id))[0]
+        blocks_item = service.get_latest_blocks(course_id=course_id)["items"][0]
+        status = service.get_block_status(block_id=block_id)
+        current = service.get_current_block(course_id=course_id, current_sec=30)
+
+        assert outline_child["generationStatus"] == "generating"
+        assert blocks_item["status"] == "generating"
+        assert blocks_item["generationStatus"] == "generating"
+        assert status["status"] == "generating"
+        assert status["generationStatus"] == "generating"
+        assert current["status"] == "generating"
+        assert current["generationStatus"] == "generating"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_memory_handout_block_generation_status_aliases_stay_in_sync():
+    repo = MemoryScaffoldRepository(RuntimeStore())
+    course = repo.create_course(
+        title="memory handout",
+        entry_type="manual_import",
+        goal_text="验证 memory 状态",
+        preferred_style="balanced",
+    )
+    repo.create_parse_run(course["courseId"])
+    dispatcher = _RecordingHandoutDispatcher()
+    service = HandoutService(
+        courses=repo,
+        handouts=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+    )
+    service.generate_handout(course_id=course["courseId"], idempotency_key=None)
+    block_id = service.get_latest_blocks(course_id=course["courseId"])["items"][0]["blockId"]
+
+    first = service.generate_block(block_id=block_id, idempotency_key=None)
+    repeat = service.generate_block(block_id=block_id, idempotency_key=None)
+
+    outline_child = _outline_children(service.get_latest_outline(course_id=course["courseId"]))[0]
+    blocks_item = service.get_latest_blocks(course_id=course["courseId"])["items"][0]
+    status = service.get_block_status(block_id=block_id)
+    current = service.get_current_block(course_id=course["courseId"], current_sec=130)
+
+    assert first == repeat
+    assert len(dispatcher.block_calls) == 1
+    assert outline_child["generationStatus"] == "generating"
+    assert blocks_item["status"] == "generating"
+    assert blocks_item["generationStatus"] == "generating"
+    assert status["status"] == "generating"
+    assert status["generationStatus"] == "generating"
+    assert current["status"] == "generating"
+    assert current["generationStatus"] == "generating"
+
+
+def test_memory_current_block_prefetch_uses_30_seconds_and_only_next_pending_block():
+    repo = MemoryScaffoldRepository(RuntimeStore())
+    course = repo.create_course(
+        title="memory prefetch",
+        entry_type="manual_import",
+        goal_text="验证 memory 预取",
+        preferred_style="balanced",
+    )
+    repo.create_parse_run(course["courseId"])
+    dispatcher = _RecordingHandoutDispatcher()
+    service = HandoutService(
+        courses=repo,
+        handouts=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+    )
+    service.generate_handout(course_id=course["courseId"], idempotency_key=None)
+    blocks = service.get_latest_blocks(course_id=course["courseId"])["items"]
+
+    outside_threshold = service.get_current_block(course_id=course["courseId"], current_sec=269)
+    inside_threshold = service.get_current_block(course_id=course["courseId"], current_sec=270)
+    service.generate_block(block_id=blocks[1]["blockId"], idempotency_key=None)
+    next_generating = service.get_current_block(course_id=course["courseId"], current_sec=270)
+
+    assert outside_threshold["prefetchBlockId"] is None
+    assert inside_threshold["prefetchBlockId"] == blocks[1]["blockId"]
+    assert next_generating["prefetchBlockId"] is None
+
+
 def test_ready_handout_block_generate_returns_status_without_requeue():
     repo, session, engine = _build_sqlite_repository()
     try:
@@ -571,9 +849,57 @@ def test_ready_handout_block_generate_returns_status_without_requeue():
             "blockId": block["blockId"],
             "outlineKey": block["outlineKey"],
             "status": "ready",
+            "generationStatus": "ready",
             "startSec": block["startSec"],
             "endSec": block["endSec"],
         }
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_same_idempotency_key_returns_ready_status_after_block_generation_finishes():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _ = _create_course_with_active_video_segments(repo)
+        dispatcher = _RecordingHandoutDispatcher()
+        service = HandoutService(
+            courses=repo,
+            handouts=repo,
+            idempotency=repo,
+            task_dispatcher=dispatcher,
+        )
+        service.generate_handout(course_id=course_id, idempotency_key=None)
+        block = repo.get_latest_handout(course_id)["blocks"][0]
+
+        first = service.generate_block(block_id=block["blockId"], idempotency_key="same-key")
+        assert first["status"] == "queued"
+        assert len(dispatcher.block_calls) == 1
+        task_message = {"taskId": first["taskId"], **dispatcher.block_calls[0]["payload"]}
+
+        run_handout_block_generate(
+            task_message,
+            session_factory=lambda: session,
+            generate_block_func=lambda outline_item, segments, preferences=None: {
+                "title": "集合定义",
+                "summary": "理解集合定义。",
+                "contentMd": "## 集合定义",
+                "sourceSegmentKeys": block["sourceSegmentKeys"],
+                "knowledgePoints": [],
+                "citations": [],
+            },
+        )
+        repeat = service.generate_block(block_id=block["blockId"], idempotency_key="same-key")
+
+        assert repeat == {
+            "blockId": block["blockId"],
+            "outlineKey": block["outlineKey"],
+            "status": "ready",
+            "generationStatus": "ready",
+            "startSec": block["startSec"],
+            "endSec": block["endSec"],
+        }
+        assert len(dispatcher.block_calls) == 1
     finally:
         session.close()
         engine.dispose()
@@ -595,6 +921,34 @@ def test_current_block_matches_boundaries_and_prefetches_next_pending_block():
         assert first["prefetchBlockId"] == blocks[1]["blockId"]
         assert boundary["blockId"] == blocks[1]["blockId"]
         assert last_end["blockId"] == blocks[1]["blockId"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_current_block_prefetch_uses_30_seconds_and_only_next_pending_block():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _ = _create_course_with_three_video_blocks(repo)
+        dispatcher = _RecordingHandoutDispatcher()
+        service = HandoutService(
+            courses=repo,
+            handouts=repo,
+            idempotency=repo,
+            task_dispatcher=dispatcher,
+        )
+        service.generate_handout(course_id=course_id, idempotency_key=None)
+        blocks = repo.get_latest_handout(course_id)["blocks"]
+        assert len(blocks) == 3
+
+        outside_threshold = service.get_current_block(course_id=course_id, current_sec=69)
+        inside_threshold = service.get_current_block(course_id=course_id, current_sec=70)
+        service.generate_block(block_id=blocks[1]["blockId"], idempotency_key=None)
+        next_generating = service.get_current_block(course_id=course_id, current_sec=70)
+
+        assert outside_threshold["prefetchBlockId"] is None
+        assert inside_threshold["prefetchBlockId"] == blocks[1]["blockId"]
+        assert next_generating["prefetchBlockId"] is None
     finally:
         session.close()
         engine.dispose()
@@ -1201,6 +1555,61 @@ def _create_course_with_overlapping_caption_segments(
                 "textContent": "第二组后续字幕。",
                 "startSec": 260,
                 "endSec": 320,
+            },
+        ],
+    )
+    return course_id, [segment["segmentKey"] for segment in segments]
+
+
+def _create_course_with_three_video_blocks(
+    repo: SqlAlchemyRuntimeRepository,
+) -> tuple[int, list[str]]:
+    course = repo.create_course(
+        title="三段预取课程",
+        entry_type="manual_import",
+        goal_text="验证 current-block prefetch",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "mp4",
+            "objectKey": f"raw/1/{course_id}/three-blocks.mp4",
+            "originalName": "three-blocks.mp4",
+            "mimeType": "video/mp4",
+            "sizeBytes": 2048,
+            "checksum": "sha256:three-blocks-video",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = parse_run["parseRunId"]
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "video_caption",
+                "orderNo": 1,
+                "textContent": "第一段介绍集合定义。",
+                "startSec": 0,
+                "endSec": 100,
+            },
+            {
+                "segmentType": "video_caption",
+                "orderNo": 2,
+                "textContent": "第二段说明集合表示方法。",
+                "startSec": 100,
+                "endSec": 200,
+            },
+            {
+                "segmentType": "video_caption",
+                "orderNo": 3,
+                "textContent": "第三段总结集合运算。",
+                "startSec": 200,
+                "endSec": 300,
             },
         ],
     )
