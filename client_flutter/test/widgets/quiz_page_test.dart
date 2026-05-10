@@ -73,6 +73,47 @@ void main() {
     expect(find.text('极限定义关注什么？'), findsOneWidget);
   });
 
+  testWidgets('course quiz page keeps generate disabled while polling', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _PollingQuizPageFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: QuizPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('生成测验'));
+    await tester.pump();
+
+    expect(fakeApiClient.generatedCourseIds, ['101']);
+    expect(fakeApiClient.fetchedQuizIds, [8001]);
+    var button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '生成中'),
+    );
+    expect(button.onPressed, isNull);
+
+    await tester.pump(const Duration(milliseconds: 700));
+
+    button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '生成中'),
+    );
+    expect(button.onPressed, isNull);
+    expect(fakeApiClient.generatedCourseIds, ['101']);
+
+    fakeApiClient.markReady();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+
+    expect(find.text('极限定义关注什么？'), findsOneWidget);
+  });
+
   testWidgets('course quiz page sends selected question count level', (
     tester,
   ) async {
@@ -131,6 +172,10 @@ class _QuizPageFakeApiClient extends ApiClient {
   @override
   Future<QuizModel> fetchQuiz(int quizId) async {
     fetchedQuizIds.add(quizId);
+    return _readyQuiz(quizId);
+  }
+
+  QuizModel _readyQuiz(int quizId) {
     return QuizModel.fromJson({
       'quizId': quizId,
       'courseId': 101,
@@ -180,6 +225,29 @@ class _QuizPageFakeApiClient extends ApiClient {
         'targetBlockId': 4001,
         'reason': '建议先回看易错知识块。',
       },
+    });
+  }
+}
+
+class _PollingQuizPageFakeApiClient extends _QuizPageFakeApiClient {
+  var _ready = false;
+
+  void markReady() {
+    _ready = true;
+  }
+
+  @override
+  Future<QuizModel> fetchQuiz(int quizId) async {
+    fetchedQuizIds.add(quizId);
+    if (_ready) {
+      return _readyQuiz(quizId);
+    }
+    return QuizModel.fromJson({
+      'quizId': quizId,
+      'courseId': 101,
+      'status': 'generating',
+      'questionCount': 0,
+      'questions': [],
     });
   }
 }

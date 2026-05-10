@@ -76,7 +76,6 @@ class _QuizPageState extends ConsumerState<QuizPage> {
                   ? null
                   : () => ref.read(quizProvider.notifier).generateAndPoll(
                         courseId,
-                        interval: const Duration(milliseconds: 20),
                       ),
             ),
             const SizedBox(height: 16),
