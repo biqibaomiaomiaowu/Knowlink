@@ -175,6 +175,7 @@ def test_quiz_generate_actor_invokes_runner_without_broker_send(monkeypatch):
             "taskId": 7,
             "courseId": 11,
             "quizId": 23,
+            "questionCountLevel": "small",
         }
     )
 
@@ -184,6 +185,7 @@ def test_quiz_generate_actor_invokes_runner_without_broker_send(monkeypatch):
             "taskId": 7,
             "courseId": 11,
             "quizId": 23,
+            "questionCountLevel": "small",
         }
     ]
 
@@ -369,7 +371,7 @@ from server.tasks.dispatcher import DramatiqTaskDispatcher
 dispatcher = DramatiqTaskDispatcher(quiz_generate_actor_path="fake_worker_actor:quiz_generate")
 dispatcher.enqueue_quiz_generate(
     task_id=23,
-    payload={"courseId": 29, "quizId": 43},
+    payload={"courseId": 29, "quizId": 43, "questionCountLevel": "large"},
 )
 print(json.dumps({
     "sent": sent,
@@ -381,7 +383,7 @@ print(json.dumps({
     )
 
     assert payload == {
-        "sent": [{"taskId": 23, "courseId": 29, "quizId": 43}],
+        "sent": [{"taskId": 23, "courseId": 29, "quizId": 43, "questionCountLevel": "large"}],
         "worker_imported": False,
         "broker_imported": False,
         "dramatiq_imported": False,
