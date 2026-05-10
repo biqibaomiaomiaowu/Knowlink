@@ -126,7 +126,6 @@ def test_minio_bucket_cors_xml_allows_video_playback_and_seek_headers():
         "<AllowedMethod>GET</AllowedMethod>",
         "<AllowedMethod>HEAD</AllowedMethod>",
         "<AllowedMethod>PUT</AllowedMethod>",
-        "<AllowedMethod>OPTIONS</AllowedMethod>",
         "<AllowedHeader>Authorization</AllowedHeader>",
         "<AllowedHeader>Content-Type</AllowedHeader>",
         "<AllowedHeader>Range</AllowedHeader>",
@@ -138,6 +137,7 @@ def test_minio_bucket_cors_xml_allows_video_playback_and_seek_headers():
         "<ExposeHeader>ETag</ExposeHeader>",
     ):
         assert token in xml
+    assert "<AllowedMethod>OPTIONS</AllowedMethod>" not in xml
 
 
 def test_minio_bucket_init_applies_cors_configuration():

@@ -7,7 +7,7 @@ from minio import Minio
 
 from server.config.settings import get_settings
 
-MINIO_CORS_METHODS = ("GET", "HEAD", "PUT", "OPTIONS")
+MINIO_CORS_METHODS = ("GET", "HEAD", "PUT")
 MINIO_CORS_ALLOWED_HEADERS = ("Authorization", "Content-Type", "Range", "x-amz-*")
 MINIO_CORS_EXPOSE_HEADERS = (
     "Accept-Ranges",
