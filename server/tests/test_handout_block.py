@@ -169,8 +169,10 @@ def test_model_citations_filter_cross_time_unknown_and_mixed_locators():
     block = generate_handout_block(_outline_item(), _segments(), client=DirtyCitationClient())
 
     HANDOUT_BLOCK_VALIDATOR.validate(block)
-    assert [citation["refLabel"] for citation in block["citations"]] == ["valid", "valid-doc"]
+    assert [citation["refLabel"] for citation in block["citations"]] == ["视频 00s-60s", "valid-doc"]
     assert [citation["segmentKey"] for citation in block["citations"]] == ["mp4-c1", "pdf-p1"]
+    assert block["citations"][0]["startSec"] == 0
+    assert block["citations"][0]["endSec"] == 60
 
 
 def test_model_citations_are_candidate_segments_and_server_normalized_locators():
@@ -207,13 +209,13 @@ def test_model_citations_are_candidate_segments_and_server_normalized_locators()
     assert handout_block_ref_identity(block["citations"][1]) == (2, "id:201", (("pageNo", 1),))
 
 
-def test_model_video_time_range_citation_expands_across_source_segments():
+def test_model_video_time_range_citation_collapses_to_one_block_range_video_citation():
     class CrossSegmentCitationClient:
         def generate_block(self, outline_item, context_segments, *, preferences=None):
             return {
                 "title": "集合",
-                "summary": "跨字幕片段引用。",
-                "contentMd": "同一段讲义需要引用连续字幕。",
+                "summary": "跨字幕片段引用会收敛。",
+                "contentMd": "同一段讲义只暴露一个视频跳转范围。",
                 "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
                 "knowledgePoints": [
                     {
@@ -241,7 +243,47 @@ def test_model_video_time_range_citation_expands_across_source_segments():
     assert [
         (citation["segmentKey"], citation["segmentId"], citation["startSec"], citation["endSec"])
         for citation in block["citations"]
-    ] == [("mp4-c1", 101, 0, 20), ("mp4-c2", 102, 20, 50)]
+        if "startSec" in citation
+    ] == [("mp4-c1", 101, 0, 60)]
+
+
+def test_block_range_video_citation_uses_outline_first_source_segment_even_with_model_source_subset():
+    class SubsetSourceClient:
+        def generate_block(self, outline_item, context_segments, *, preferences=None):
+            return {
+                "title": "集合",
+                "summary": "模型只选择第二个 source segment。",
+                "contentMd": "视频 citation 仍应绑定 block 的首个 source segment。",
+                "sourceSegmentKeys": ["mp4-c2"],
+                "knowledgePoints": [
+                    {
+                        "knowledgePointKey": "kp-set",
+                        "displayName": "集合",
+                        "description": "集合的定义。",
+                        "difficultyLevel": "beginner",
+                        "importanceScore": 80,
+                    }
+                ],
+                "citations": [
+                    {
+                        "resourceId": 1,
+                        "segmentKey": "mp4-c2",
+                        "startSec": 20,
+                        "endSec": 50,
+                        "refLabel": "模型选择第二段",
+                    }
+                ],
+            }
+
+    block = generate_handout_block(_outline_item(), _segments(), client=SubsetSourceClient())
+
+    HANDOUT_BLOCK_VALIDATOR.validate(block)
+    assert block["sourceSegmentKeys"] == ["mp4-c2"]
+    assert [
+        (citation["segmentKey"], citation["segmentId"], citation["startSec"], citation["endSec"])
+        for citation in block["citations"]
+        if "startSec" in citation
+    ] == [("mp4-c1", 101, 0, 60)]
 
 
 def test_model_video_time_range_without_segment_key_expands_by_resource_and_time_overlap():
@@ -277,7 +319,8 @@ def test_model_video_time_range_without_segment_key_expands_by_resource_and_time
     assert [
         (citation["segmentKey"], citation["segmentId"], citation["startSec"], citation["endSec"])
         for citation in block["citations"]
-    ] == [("mp4-c1", 101, 10, 20), ("mp4-c2", 102, 20, 45)]
+        if "startSec" in citation
+    ] == [("mp4-c1", 101, 0, 60)]
 
 
 def test_model_video_time_range_is_clipped_to_outline_item_and_split_by_overlap():
@@ -305,7 +348,8 @@ def test_model_video_time_range_is_clipped_to_outline_item_and_split_by_overlap(
     assert [
         (citation["segmentKey"], citation["startSec"], citation["endSec"])
         for citation in block["citations"]
-    ] == [("mp4-c1", 10, 20), ("mp4-c2", 20, 45)]
+        if "startSec" in citation
+    ] == [("mp4-c1", 10, 45)]
 
 
 def test_video_time_range_rejects_conflicting_segment_key_and_segment_id():
@@ -375,7 +419,120 @@ def test_model_citations_prepend_source_video_when_only_supplemental_citation_is
     HANDOUT_BLOCK_VALIDATOR.validate(block)
     assert [citation["segmentKey"] for citation in block["citations"]] == ["mp4-c1", "pdf-p1"]
     assert block["citations"][0]["startSec"] == 0
-    assert block["citations"][0]["endSec"] == 20
+    assert block["citations"][0]["endSec"] == 60
+
+
+def test_model_citations_adds_fallback_doc_citation_when_supplemental_doc_exists():
+    class VideoOnlyCitationClient:
+        def generate_block(self, outline_item, context_segments, *, preferences=None):
+            return {
+                "title": "集合",
+                "summary": "模型漏掉文档引用时需要兜底。",
+                "contentMd": "讲义块仍应保留相关补充资料来源。",
+                "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                "knowledgePoints": [
+                    {
+                        "knowledgePointKey": "kp-set",
+                        "displayName": "集合",
+                        "description": "集合的定义。",
+                        "difficultyLevel": "beginner",
+                        "importanceScore": 80,
+                    }
+                ],
+                "citations": [
+                    {"resourceId": 1, "segmentKey": "mp4-c1", "startSec": 0, "endSec": 20, "refLabel": "视频"}
+                ],
+            }
+
+    block = generate_handout_block(_outline_item(), _segments(), client=VideoOnlyCitationClient())
+
+    HANDOUT_BLOCK_VALIDATOR.validate(block)
+    assert [
+        (citation["segmentKey"], citation.get("pageNo"), citation.get("slideNo"), citation.get("anchorKey"))
+        for citation in block["citations"]
+        if "startSec" not in citation
+    ] == [("pdf-p1", 1, None, None)]
+
+
+def test_model_citations_do_not_fallback_to_unrelated_document_segment():
+    class VideoOnlyCitationClient:
+        def generate_block(self, outline_item, context_segments, *, preferences=None):
+            return {
+                "title": "集合",
+                "summary": "无相关文档时不补引用。",
+                "contentMd": "只有视频来源。",
+                "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                "knowledgePoints": [
+                    {
+                        "knowledgePointKey": "kp-set",
+                        "displayName": "集合",
+                        "description": "集合的定义。",
+                        "difficultyLevel": "beginner",
+                        "importanceScore": 80,
+                    }
+                ],
+                "citations": [
+                    {"resourceId": 1, "segmentKey": "mp4-c1", "startSec": 0, "endSec": 20, "refLabel": "视频"}
+                ],
+            }
+
+    block = generate_handout_block(_outline_item(), _segments_with_unrelated_doc(), client=VideoOnlyCitationClient())
+
+    HANDOUT_BLOCK_VALIDATOR.validate(block)
+    assert [citation for citation in block["citations"] if "startSec" not in citation] == []
+
+
+def test_fallback_handout_block_does_not_cite_unrelated_document_segment(monkeypatch):
+    monkeypatch.delenv("KNOWLINK_VIVO_APP_KEY", raising=False)
+
+    block = generate_handout_block(_outline_item(), _segments_with_unrelated_doc())
+
+    HANDOUT_BLOCK_VALIDATOR.validate(block)
+    assert [citation for citation in block["citations"] if "startSec" not in citation] == []
+    assert [
+        (citation["segmentKey"], citation["startSec"], citation["endSec"])
+        for citation in block["citations"]
+        if "startSec" in citation
+    ] == [("mp4-c1", 0, 60)]
+
+
+def test_model_citations_preserve_up_to_three_selected_document_citations_with_server_locators():
+    class MultiDocCitationClient:
+        def generate_block(self, outline_item, context_segments, *, preferences=None):
+            return {
+                "title": "集合",
+                "summary": "模型可选择多个补充资料引用。",
+                "contentMd": "PDF、PPT、DOCX 引用由服务端反查真实 locator。",
+                "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                "knowledgePoints": [
+                    {
+                        "knowledgePointKey": "kp-set",
+                        "displayName": "集合",
+                        "description": "集合的定义。",
+                        "difficultyLevel": "beginner",
+                        "importanceScore": 80,
+                    }
+                ],
+                "citations": [
+                    {"resourceId": 2, "segmentKey": "pdf-p1", "pageNo": 99, "refLabel": "pdf"},
+                    {"resourceId": 3, "segmentKey": "ppt-s2", "slideNo": 99, "refLabel": "ppt"},
+                    {"resourceId": 4, "segmentKey": "docx-a", "anchorKey": "fake", "refLabel": "docx"},
+                    {"resourceId": 5, "segmentKey": "pdf-p2", "pageNo": 99, "refLabel": "extra"},
+                ],
+            }
+
+    block = generate_handout_block(_outline_item(), _segments_with_multiple_docs(), client=MultiDocCitationClient())
+
+    HANDOUT_BLOCK_VALIDATOR.validate(block)
+    doc_citations = [citation for citation in block["citations"] if "startSec" not in citation]
+    assert [
+        (citation["segmentKey"], citation.get("pageNo"), citation.get("slideNo"), citation.get("anchorKey"))
+        for citation in doc_citations
+    ] == [
+        ("pdf-p1", 1, None, None),
+        ("ppt-s2", None, 2, None),
+        ("docx-a", None, None, "docx-a"),
+    ]
 
 
 def test_configured_handout_block_client_requires_app_key(monkeypatch):
@@ -547,6 +704,58 @@ def _segments():
             "orderNo": 4,
             "textContent": "集合是一些确定对象组成的整体。",
             "pageNo": 1,
+        },
+    ]
+
+
+def _segments_with_multiple_docs():
+    return [
+        *_segments(),
+        {
+            "resourceId": 3,
+            "segmentId": 301,
+            "resourceType": "pptx",
+            "segmentKey": "ppt-s2",
+            "segmentType": "ppt_slide_text",
+            "orderNo": 5,
+            "textContent": "课件用文氏图展示集合关系。",
+            "slideNo": 2,
+        },
+        {
+            "resourceId": 4,
+            "segmentId": 401,
+            "resourceType": "docx",
+            "segmentKey": "docx-a",
+            "segmentType": "docx_block_text",
+            "orderNo": 6,
+            "textContent": "DOCX 补充集合表示法。",
+            "anchorKey": "docx-a",
+        },
+        {
+            "resourceId": 5,
+            "segmentId": 501,
+            "resourceType": "pdf",
+            "segmentKey": "pdf-p2",
+            "segmentType": "pdf_page_text",
+            "orderNo": 7,
+            "textContent": "额外 PDF 资料不应超过三条文档引用上限。",
+            "pageNo": 2,
+        },
+    ]
+
+
+def _segments_with_unrelated_doc():
+    return [
+        *_segments()[:3],
+        {
+            "resourceId": 8,
+            "segmentId": 801,
+            "resourceType": "pdf",
+            "segmentKey": "pdf-unrelated",
+            "segmentType": "pdf_page_text",
+            "orderNo": 4,
+            "textContent": "矩阵特征值与线性变换的例题。",
+            "pageNo": 8,
         },
     ]
 
