@@ -10,6 +10,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
+from server.ai.deepseek import DeepSeekJsonChatClient, get_configured_deepseek_chat_config
 from server.parsers.base import clean_text
 
 
@@ -52,6 +53,21 @@ class HandoutBlockClient(Protocol):
 
 
 def get_configured_handout_block_client() -> HandoutBlockClient | None:
+    provider = os.getenv("KNOWLINK_HANDOUT_BLOCK_PROVIDER", "vivo").strip().lower()
+    if provider == "deepseek":
+        config = get_configured_deepseek_chat_config()
+        if config is None:
+            return None
+        return DeepSeekHandoutBlockClient(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            model=config.model,
+            reasoning_effort=config.reasoning_effort,
+            timeout_sec=_env_float("KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC", _DEFAULT_HANDOUT_BLOCK_TIMEOUT_SEC),
+        )
+    if provider not in {"", "vivo"}:
+        return None
+
     app_key = os.getenv("KNOWLINK_VIVO_APP_KEY", "").strip()
     if not app_key:
         return None
@@ -229,6 +245,46 @@ class VivoHandoutBlockClient:
         if elapsed < self._min_request_interval_sec:
             time.sleep(self._min_request_interval_sec - elapsed)
         self._last_request_at = time.monotonic()
+
+
+class DeepSeekHandoutBlockClient:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        reasoning_effort: str,
+        timeout_sec: float | None = None,
+    ) -> None:
+        self._client = DeepSeekJsonChatClient(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_sec=timeout_sec if timeout_sec is not None else _DEFAULT_HANDOUT_BLOCK_TIMEOUT_SEC,
+            label="deepseek handout block",
+        )
+
+    def generate_block(
+        self,
+        outline_item: Mapping[str, Any],
+        context_segments: Sequence[Mapping[str, Any]],
+        *,
+        preferences: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not context_segments:
+            raise RuntimeError("deepseek handout block requires context segments")
+
+        return self._client.complete_json(
+            system_prompt=_HANDOUT_BLOCK_SYSTEM_PROMPT,
+            user_prompt=_build_handout_block_prompt(
+                outline_item,
+                context_segments,
+                preferences=preferences,
+            ),
+            max_tokens=8192,
+        )
 
 
 def normalize_handout_block_payload(

@@ -10,6 +10,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
+from server.ai.deepseek import DeepSeekJsonChatClient, get_configured_deepseek_chat_config
 from server.parsers.base import clean_text
 
 
@@ -54,6 +55,21 @@ class HandoutOutlineClient(Protocol):
 
 
 def get_configured_handout_outline_client() -> HandoutOutlineClient | None:
+    provider = os.getenv("KNOWLINK_HANDOUT_OUTLINE_PROVIDER", "vivo").strip().lower()
+    if provider == "deepseek":
+        config = get_configured_deepseek_chat_config()
+        if config is None:
+            return None
+        return DeepSeekHandoutOutlineClient(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            model=config.model,
+            reasoning_effort=config.reasoning_effort,
+            timeout_sec=_env_float("KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC", _DEFAULT_HANDOUT_TIMEOUT_SEC),
+        )
+    if provider not in {"", "vivo"}:
+        return None
+
     app_key = os.getenv("KNOWLINK_VIVO_APP_KEY", "").strip()
     if not app_key:
         return None
@@ -241,6 +257,50 @@ class VivoHandoutOutlineClient:
         if elapsed < self._min_request_interval_sec:
             time.sleep(self._min_request_interval_sec - elapsed)
         self._last_request_at = time.monotonic()
+
+
+class DeepSeekHandoutOutlineClient:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        reasoning_effort: str,
+        timeout_sec: float | None = None,
+    ) -> None:
+        self._client = DeepSeekJsonChatClient(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_sec=timeout_sec if timeout_sec is not None else _DEFAULT_HANDOUT_TIMEOUT_SEC,
+            label="deepseek outline",
+        )
+
+    def generate_outline(
+        self,
+        caption_segments: Sequence[Mapping[str, Any]],
+        *,
+        title: str = "视频时间轴目录",
+        summary: str = "基于视频字幕快速生成的讲义目录。",
+        document_context: str | None = None,
+    ) -> dict[str, Any]:
+        captions = _valid_video_captions(caption_segments)
+        if not captions:
+            raise RuntimeError("deepseek outline requires at least one valid video_caption segment")
+
+        model_payload = self._client.complete_json(
+            system_prompt=_OUTLINE_SYSTEM_PROMPT,
+            user_prompt=_build_outline_prompt(
+                captions,
+                title=title,
+                summary=summary,
+                document_context=document_context,
+            ),
+            max_tokens=8192,
+        )
+        return _normalize_model_outline(model_payload, captions=captions, title=title, summary=summary)
 
 
 def outline_structure_issues(items: Any) -> list[str]:
