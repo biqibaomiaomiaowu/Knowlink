@@ -4,6 +4,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from server.ai.qa_policy import (
+    DeepSeekQaAnswerClient,
     VivoQaAnswerClient,
     build_qa_message_refs,
     build_block_scoped_qa_candidates,
@@ -230,6 +231,98 @@ def test_configured_qa_answer_client_requires_enable_and_app_key(monkeypatch):
     monkeypatch.setenv("KNOWLINK_VIVO_QA_TIMEOUT_SEC", "9")
 
     assert isinstance(get_configured_qa_answer_client(), VivoQaAnswerClient)
+
+
+def test_configured_qa_answer_client_supports_deepseek_provider_without_vivo_enable(monkeypatch):
+    monkeypatch.setenv("KNOWLINK_QA_PROVIDER", "deepseek")
+    monkeypatch.delenv("KNOWLINK_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_QA", raising=False)
+    assert get_configured_qa_answer_client() is None
+
+    monkeypatch.setenv("KNOWLINK_DEEPSEEK_API_KEY", "fake-deepseek-key")
+    monkeypatch.setenv("KNOWLINK_DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("KNOWLINK_DEEPSEEK_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("KNOWLINK_DEEPSEEK_REASONING_EFFORT", "high")
+
+    assert isinstance(get_configured_qa_answer_client(), DeepSeekQaAnswerClient)
+
+
+def test_deepseek_qa_answer_client_uses_thinking_json_mode(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "reasoning_content": "思考内容不会被解析。",
+                                "content": json.dumps(
+                                    {
+                                        "answerMd": "集合是确定对象组成的整体。",
+                                        "answerType": "direct_answer",
+                                        "citations": [
+                                            {
+                                                "resourceId": 1,
+                                                "segmentKey": "mp4-c1",
+                                                "startSec": 0,
+                                                "endSec": 20,
+                                                "refLabel": "视频 00s-20s",
+                                            }
+                                        ],
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["body"] = request.data.decode("utf-8")
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = DeepSeekQaAnswerClient(
+        api_key="fake-deepseek-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        timeout_sec=13,
+    )
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block=_current_block(),
+        segments=_segments(),
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    body = json.loads(captured["body"])
+    assert captured["url"] == "https://api.deepseek.com/chat/completions"
+    assert captured["timeout"] == 13
+    assert body["model"] == "deepseek-v4-flash"
+    assert body["thinking"] == {"type": "enabled"}
+    assert body["reasoning_effort"] == "high"
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["max_tokens"] == 4096
+    assert "temperature" not in body
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
 
 
 def test_vivo_qa_answer_client_uses_chat_completions_and_normalizes_json(monkeypatch):
