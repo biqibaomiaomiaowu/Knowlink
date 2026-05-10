@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from minio.error import S3Error
 
 from server.api.app_factory import _build_cors_origin_rules, create_app
 from server.config.settings import get_settings
@@ -158,12 +159,13 @@ def test_minio_bucket_init_applies_cors_configuration():
 
     client = FakeMinioClient()
 
-    configure_bucket_cors(
+    configured = configure_bucket_cors(
         client,
         bucket_name="knowlink",
         allowed_origins=("http://localhost:*",),
     )
 
+    assert configured is True
     assert client.calls == [
         {
             "method": "PUT",
@@ -173,3 +175,47 @@ def test_minio_bucket_init_applies_cors_configuration():
             "queryParams": {"cors": ""},
         }
     ]
+
+
+def test_minio_bucket_init_skips_unsupported_bucket_cors_configuration(capsys):
+    class FakeMinioClient:
+        def _execute(self, method, *, bucket_name, body, headers, query_params):
+            raise S3Error(
+                response=None,
+                code="NotImplemented",
+                message="A header you provided implies functionality that is not implemented",
+                resource=f"/{bucket_name}",
+                request_id="",
+                host_id="",
+                bucket_name=bucket_name,
+            )
+
+    configured = configure_bucket_cors(
+        FakeMinioClient(),
+        bucket_name="knowlink",
+        allowed_origins=("http://localhost:*",),
+    )
+
+    assert configured is False
+    assert "server-level CORS settings" in capsys.readouterr().out
+
+
+def test_minio_bucket_init_reraises_other_cors_configuration_errors():
+    class FakeMinioClient:
+        def _execute(self, method, *, bucket_name, body, headers, query_params):
+            raise S3Error(
+                response=None,
+                code="AccessDenied",
+                message="Access denied",
+                resource=f"/{bucket_name}",
+                request_id="",
+                host_id="",
+                bucket_name=bucket_name,
+            )
+
+    with pytest.raises(S3Error, match="AccessDenied"):
+        configure_bucket_cors(
+            FakeMinioClient(),
+            bucket_name="knowlink",
+            allowed_origins=("http://localhost:*",),
+        )

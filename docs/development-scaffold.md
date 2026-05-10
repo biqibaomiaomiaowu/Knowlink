@@ -44,7 +44,7 @@
 | `async_tasks` 任务骨架 | Week 1 scaffold 已完成 | 已有表模型、任务 payload、worker / scheduler 占位和内存态异步返回结构；真实状态流转进入 Week 2 |
 | PostgreSQL / Redis / MinIO / Worker 真实运行时 | Week 1 scaffold 已完成，真实接入进入 Week 2 | 数据库 model 与初始迁移已接纳；完整 SQLAlchemy 持久化仓储、Redis、MinIO、Dramatiq Worker 仍未接通 |
 
-FastAPI 与 MinIO bucket CORS 当前默认允许本地 Flutter Web origin；生产环境可通过 `KNOWLINK_CORS_ALLOW_ORIGINS` 显式收紧。
+FastAPI 当前默认允许本地 Flutter Web origin；MinIO 本地默认使用全局 `MINIO_API_CORS_ALLOW_ORIGIN=*`，生产环境可通过 `KNOWLINK_CORS_ALLOW_ORIGINS` 和 `KNOWLINK_MINIO_CORS_ALLOW_ORIGIN` 显式收紧。
 
 ## 5. 当前未接通的部分
 

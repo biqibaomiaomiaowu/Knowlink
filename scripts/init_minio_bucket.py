@@ -4,6 +4,7 @@ import time
 from xml.sax.saxutils import escape
 
 from minio import Minio
+from minio.error import S3Error
 
 from server.config.settings import get_settings
 
@@ -44,15 +45,25 @@ def main() -> None:
             time.sleep(1)
 
 
-def configure_bucket_cors(client, *, bucket_name: str, allowed_origins: tuple[str, ...]) -> None:
+def configure_bucket_cors(client, *, bucket_name: str, allowed_origins: tuple[str, ...]) -> bool:
     cors_xml = build_bucket_cors_xml(allowed_origins)
-    client._execute(
-        "PUT",
-        bucket_name=bucket_name,
-        body=cors_xml.encode("utf-8"),
-        headers={"Content-Type": "application/xml"},
-        query_params={"cors": ""},
-    )
+    try:
+        client._execute(
+            "PUT",
+            bucket_name=bucket_name,
+            body=cors_xml.encode("utf-8"),
+            headers={"Content-Type": "application/xml"},
+            query_params={"cors": ""},
+        )
+    except S3Error as exc:
+        if exc.code != "NotImplemented":
+            raise
+        print(
+            "MinIO server does not support bucket CORS configuration; "
+            "continuing with server-level CORS settings."
+        )
+        return False
+    return True
 
 
 def build_bucket_cors_xml(allowed_origins: tuple[str, ...]) -> str:
