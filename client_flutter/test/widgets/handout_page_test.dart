@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
@@ -190,6 +191,47 @@ void main() {
     expect(fakeApiClient.qaRequests.single.handoutBlockId, 4001);
     expect(find.text('证据不足'), findsNothing);
     expect(find.text('暂无引用。'), findsOneWidget);
+  });
+
+  testWidgets('handout QA renders markdown answers', (
+    tester,
+  ) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _HandoutPageFakeApiClient(
+      qaAnswerMd: '### 解题提示\n\n- 先看 `定义域`\n- 再看题干',
+      qaCitations: const [],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+          handoutVideoControllerFactoryProvider.overrideWithValue(
+            (uri) => _FakeHandoutVideoController(uri),
+          ),
+        ],
+        child: const MaterialApp(home: HandoutPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '这题怎么切入？');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '提交问题'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is MarkdownBody &&
+            widget.data == '### 解题提示\n\n- 先看 `定义域`\n- 再看题干',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('解题提示'), findsOneWidget);
+    expect(find.textContaining('### 解题提示'), findsNothing);
+    expect(find.textContaining('- 先看'), findsNothing);
+    expect(find.textContaining('`定义域`'), findsNothing);
   });
 
   testWidgets('handout QA keeps video citation time without block fallback', (
@@ -462,6 +504,7 @@ void _useLargeTestSurface(WidgetTester tester) {
 
 class _HandoutPageFakeApiClient extends ApiClient {
   _HandoutPageFakeApiClient({
+    this.qaAnswerMd = '定义控制了题型的判断边界。',
     this.qaCitations = const [
       {
         'resourceId': 777,
@@ -474,6 +517,7 @@ class _HandoutPageFakeApiClient extends ApiClient {
   final List<int> jumpTargetBlockIds = [];
   final List<int> playbackResourceIds = [];
   final List<QaMessageRequestModel> qaRequests = [];
+  final String qaAnswerMd;
   final List<Map<String, Object?>> qaCitations;
 
   @override
@@ -717,7 +761,7 @@ class _HandoutPageFakeApiClient extends ApiClient {
     return QaMessageModel.fromJson({
       'sessionId': 6001,
       'messageId': 6002,
-      'answerMd': '定义控制了题型的判断边界。',
+      'answerMd': qaAnswerMd,
       'citations': qaCitations,
       'retrievedDocuments': [
         {'resourceId': 999},
