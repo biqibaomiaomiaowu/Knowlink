@@ -276,7 +276,7 @@ def test_handout_qa_and_jump_target_keep_single_locator_per_citation():
     assert jump_anchor_body["data"]["anchorKey"] == "section-integral"
 
 
-def test_inquiry_quiz_and_review_cover_planning_display_fields():
+def test_inquiry_and_quiz_generate_cover_planning_display_fields():
     create_status, create_body = asyncio.run(
         request(
             "POST",
@@ -345,6 +345,18 @@ def test_inquiry_quiz_and_review_cover_planning_display_fields():
     )
     assert quiz_generate_status == 200
     quiz_id = quiz_generate["data"]["entity"]["id"]
+    assert quiz_generate["data"]["entity"]["type"] == "quiz"
+
+    quiz_status, quiz_body = asyncio.run(
+        request(
+            "GET",
+            f"/api/v1/quizzes/{quiz_id}/status",
+            headers=AUTH_HEADERS,
+        )
+    )
+    assert quiz_status == 200
+    assert quiz_body["data"]["status"] == "queued"
+    assert quiz_body["data"]["questionCount"] == 0
 
     submit_status, submit_body = asyncio.run(
         request(
@@ -354,23 +366,8 @@ def test_inquiry_quiz_and_review_cover_planning_display_fields():
             json_body={"answers": [{"questionId": 8101, "selectedOption": "A"}]},
         )
     )
-    assert submit_status == 200
-    assert "masteryDelta" in submit_body["data"]
-    assert "recommendedReviewAction" in submit_body["data"]
-
-    review_status, review_body = asyncio.run(
-        request(
-            "GET",
-            f"/api/v1/courses/{course_id}/review-tasks",
-            headers=AUTH_HEADERS,
-        )
-    )
-    assert review_status == 200
-    first_task = review_body["data"]["items"][0]
-    assert "recommendedSegment" in first_task
-    assert "practiceEntry" in first_task
-    assert "reviewOrder" in first_task
-    assert "intensity" in first_task
+    assert submit_status == 409
+    assert submit_body["errorCode"] == "quiz.not_ready"
 
 
 def test_scaffold_structure_and_docs_are_aligned():

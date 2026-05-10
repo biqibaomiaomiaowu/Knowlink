@@ -1,18 +1,38 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
+from server.ai.deepseek import DeepSeekJsonChatClient, get_configured_deepseek_chat_config
 from server.parsers.base import clean_text
 
 
 QuizType = Literal["block_check", "chapter_review", "exam_drill"]
 QuestionType = Literal["single_choice"]
 DifficultyLevel = Literal["easy", "medium", "hard"]
+QuestionCountLevel = Literal["small", "medium", "large"]
 
 _OPTION_LABELS = ("A", "B", "C", "D")
-_MIN_QUESTION_COUNT = 3
-_MAX_QUESTION_COUNT = 5
+QUESTION_COUNT_LEVEL_RANGES: dict[QuestionCountLevel, tuple[int, int]] = {
+    "small": (1, 3),
+    "medium": (3, 5),
+    "large": (5, 10),
+}
+_DEFAULT_QUIZ_TIMEOUT_SEC = 60.0
+_QUIZ_SYSTEM_PROMPT = """你是 KnowLink 的实时测验出题器。只返回 JSON，不要返回 Markdown 代码块或解释。
+JSON 格式固定为：
+{"quizType":"chapter_review","questions":[{"questionKey":"q1-kp-limit","questionType":"single_choice","stemMd":"...","options":["A. ...","B. ...","C. ...","D. ..."],"correctAnswer":"A","explanationMd":"...","difficultyLevel":"easy|medium|hard","knowledgePointKey":"...","knowledgePointName":"...","sourceBlockKey":"...","sourceSegmentKeys":["..."]}]}
+规则：
+1. 只能基于输入 JSON 中的 course、learningPreferences、readyHandoutBlocks 和 activeParseRunSegments 出题，不得使用课程外知识补充。
+2. questions 数量必须落在输入 questionCountRange 内；不要返回固定题数解释。
+3. 题型只能是 single_choice；每题必须且只能有 4 个选项，correctAnswer 只能是 A/B/C/D。
+4. sourceBlockKey 必须来自 readyHandoutBlocks[].blockKey。
+5. sourceSegmentKeys 必须全部来自该 block 的 sourceSegmentKeys，不能为空；不得编造 pageNo、slideNo、anchorKey、startSec 或 endSec。
+6. stemMd、options、explanationMd 使用中文，围绕当前课程材料考查理解，不要生成与上下文无关的常识题。
+7. questionKey 在本次 JSON 内必须唯一。
+"""
 _DIFFICULTY_BY_SOURCE = {
     "beginner": "easy",
     "easy": "easy",
@@ -41,32 +61,393 @@ class QuizSourceCandidate:
     source_segment_keys: tuple[str, ...]
 
 
+class QuizGenerationClient(Protocol):
+    def generate_quiz(self, prompt_context: Mapping[str, Any]) -> dict[str, Any]:
+        """Return a raw model payload for quiz generation."""
+
+
+class DeepSeekQuizGenerationClient:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        reasoning_effort: str,
+        timeout_sec: float | None = None,
+    ) -> None:
+        self._client = DeepSeekJsonChatClient(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_sec=timeout_sec if timeout_sec is not None else _DEFAULT_QUIZ_TIMEOUT_SEC,
+            label="deepseek quiz",
+        )
+
+    def generate_quiz(self, prompt_context: Mapping[str, Any]) -> dict[str, Any]:
+        return self._client.complete_json(
+            system_prompt=_QUIZ_SYSTEM_PROMPT,
+            user_prompt=_build_quiz_prompt(prompt_context),
+            max_tokens=8192,
+        )
+
+
+def get_configured_quiz_generation_client() -> QuizGenerationClient | None:
+    config = get_configured_deepseek_chat_config()
+    if config is None:
+        return None
+    return DeepSeekQuizGenerationClient(
+        api_key=config.api_key,
+        base_url=config.base_url,
+        model=config.model,
+        reasoning_effort=config.reasoning_effort,
+        timeout_sec=_env_float("KNOWLINK_DEEPSEEK_QUIZ_TIMEOUT_SEC", _DEFAULT_QUIZ_TIMEOUT_SEC),
+    )
+
+
 def generate_quiz_payload(
     handout_blocks: Sequence[Mapping[str, Any]],
     *,
+    segments: Sequence[Mapping[str, Any]] = (),
+    course_context: Mapping[str, Any] | None = None,
+    preferences: Mapping[str, Any] | None = None,
     quiz_type: QuizType = "chapter_review",
-    question_count: int = _MIN_QUESTION_COUNT,
+    question_count_level: QuestionCountLevel = "medium",
+    client: QuizGenerationClient | None = None,
 ) -> dict[str, Any]:
-    """Build a deterministic MVP quiz from ready handout blocks.
-
-    The payload is intentionally model/API-neutral: it stores source keys for
-    later reverse lookup and never asks an AI model to invent locator fields.
-    """
+    """Generate a quiz with DeepSeek and validate it against current course context."""
 
     candidates = build_quiz_source_candidates(handout_blocks)
     if not candidates:
         raise ValueError("at least one cited handout block or knowledge point is required")
 
-    target_count = min(_MAX_QUESTION_COUNT, max(_MIN_QUESTION_COUNT, question_count))
-    selected = _repeat_to_count(candidates, target_count)
+    generation_client = client if client is not None else get_configured_quiz_generation_client()
+    if generation_client is None:
+        raise RuntimeError("deepseek quiz generation is not configured")
 
+    context = build_quiz_generation_context(
+        handout_blocks,
+        segments=segments,
+        course_context=course_context,
+        preferences=preferences,
+        quiz_type=quiz_type,
+        question_count_level=question_count_level,
+    )
+    model_payload = generation_client.generate_quiz(context)
+    return normalize_quiz_generation_payload(
+        model_payload,
+        handout_blocks=handout_blocks,
+        segments=segments,
+        quiz_type=quiz_type,
+        question_count_level=question_count_level,
+    )
+
+
+def build_quiz_generation_context(
+    handout_blocks: Sequence[Mapping[str, Any]],
+    *,
+    segments: Sequence[Mapping[str, Any]] = (),
+    course_context: Mapping[str, Any] | None = None,
+    preferences: Mapping[str, Any] | None = None,
+    quiz_type: QuizType = "chapter_review",
+    question_count_level: QuestionCountLevel = "medium",
+) -> dict[str, Any]:
+    min_count, max_count = _question_count_range(question_count_level)
     return {
         "quizType": quiz_type,
-        "questions": [
-            _question_from_candidate(candidate, index=index)
-            for index, candidate in enumerate(selected, start=1)
+        "questionCountLevel": question_count_level,
+        "questionCountRange": {"min": min_count, "max": max_count},
+        "course": dict(course_context or {}),
+        "learningPreferences": dict(preferences or {}),
+        "readyHandoutBlocks": [
+            _prompt_block_payload(block, index=index) for index, block in enumerate(handout_blocks, start=1) if isinstance(block, Mapping)
+        ],
+        "activeParseRunSegments": [
+            _prompt_segment_payload(segment) for segment in segments if isinstance(segment, Mapping)
         ],
     }
+
+
+def normalize_quiz_generation_payload(
+    payload: Mapping[str, Any],
+    *,
+    handout_blocks: Sequence[Mapping[str, Any]],
+    segments: Sequence[Mapping[str, Any]] = (),
+    quiz_type: QuizType = "chapter_review",
+    question_count_level: QuestionCountLevel = "medium",
+) -> dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        raise ValueError("quiz generation payload must be an object")
+    _reject_extra_fields(payload, {"quizType", "questions"}, "quiz")
+
+    if payload.get("quizType") != quiz_type:
+        raise ValueError("quizType does not match the requested quiz type")
+
+    questions = payload.get("questions")
+    if not isinstance(questions, list):
+        raise ValueError("quiz questions must be a list")
+    min_count, max_count = _question_count_range(question_count_level)
+    if len(questions) < min_count or len(questions) > max_count:
+        raise ValueError(f"quiz question count must be in range {min_count}-{max_count}")
+
+    source_context = _source_context(handout_blocks, segments)
+    question_keys: set[str] = set()
+    normalized_questions: list[dict[str, Any]] = []
+    for index, raw_question in enumerate(questions, start=1):
+        if not isinstance(raw_question, Mapping):
+            raise ValueError("quiz question must be an object")
+        normalized_question = _normalize_model_question(
+            raw_question,
+            index=index,
+            source_context=source_context,
+        )
+        question_key = normalized_question["questionKey"]
+        if question_key in question_keys:
+            raise ValueError(f"duplicate quiz questionKey: {question_key}")
+        question_keys.add(question_key)
+        normalized_questions.append(normalized_question)
+
+    return {"quizType": quiz_type, "questions": normalized_questions}
+
+
+def _build_quiz_prompt(prompt_context: Mapping[str, Any]) -> str:
+    return (
+        "请严格基于以下 JSON 上下文生成测验 JSON。"
+        "除最终 JSON 外不要输出任何解释。\n\n"
+        f"{json.dumps(prompt_context, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
+def _question_count_range(question_count_level: str) -> tuple[int, int]:
+    if question_count_level not in QUESTION_COUNT_LEVEL_RANGES:
+        raise ValueError(f"invalid questionCountLevel: {question_count_level}")
+    return QUESTION_COUNT_LEVEL_RANGES[question_count_level]  # type: ignore[index]
+
+
+def _prompt_block_payload(block: Mapping[str, Any], *, index: int) -> dict[str, Any]:
+    block_key = _block_key(block, fallback_index=index)
+    return {
+        "blockKey": block_key,
+        "title": clean_text(str(_field_value(block, "title") or f"讲义块 {index}")),
+        "summary": _truncate_text(_field_value(block, "summary"), 240),
+        "contentMd": _truncate_text(_field_value(block, "contentMd", "content_md"), 1200),
+        "sourceSegmentKeys": _source_segment_keys(block),
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": _stable_key(
+                    _field_value(item, "knowledgePointKey", "knowledge_point_key")
+                ),
+                "displayName": clean_text(
+                    str(_field_value(item, "displayName", "display_name", "canonicalName", "canonical_name") or "")
+                ),
+                "description": _truncate_text(_field_value(item, "description"), 240),
+                "difficultyLevel": _field_value(item, "difficultyLevel", "difficulty_level"),
+                "importanceScore": _field_value(item, "importanceScore", "importance_score"),
+            }
+            for item in _mapping_list(_field_value(block, "knowledgePoints", "knowledge_points"))
+        ],
+        "citations": [
+            {
+                key: value
+                for key, value in {
+                    "resourceId": _field_value(citation, "resourceId", "resource_id"),
+                    "segmentKey": _stable_key(_field_value(citation, "segmentKey", "segment_key")),
+                    "refLabel": _field_value(citation, "refLabel", "ref_label"),
+                    **_locator(citation),
+                }.items()
+                if value not in (None, "", [])
+            }
+            for citation in _mapping_list(_field_value(block, "citations"))
+        ],
+    }
+
+
+def _prompt_segment_payload(segment: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in {
+            "segmentId": _field_value(segment, "segmentId", "segment_id"),
+            "segmentKey": _stable_key(_field_value(segment, "segmentKey", "segment_key")),
+            "resourceId": _field_value(segment, "resourceId", "resource_id"),
+            "segmentType": _field_value(segment, "segmentType", "segment_type"),
+            "title": _truncate_text(_field_value(segment, "title"), 120),
+            "textContent": _truncate_text(
+                _field_value(segment, "textContent", "text_content", "plainText", "plain_text"),
+                600,
+            ),
+            **_locator(segment),
+        }.items()
+        if value not in (None, "", [])
+    }
+
+
+def _source_context(
+    handout_blocks: Sequence[Mapping[str, Any]],
+    segments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    blocks_by_key: dict[str, Mapping[str, Any]] = {}
+    segment_keys_by_block: dict[str, set[str]] = {}
+    knowledge_point_keys_by_block: dict[str, set[str]] = {}
+    global_segment_keys = {
+        _stable_key(_field_value(segment, "segmentKey", "segment_key"))
+        for segment in segments
+        if isinstance(segment, Mapping) and _stable_key(_field_value(segment, "segmentKey", "segment_key"))
+    }
+
+    for block_index, block in enumerate(handout_blocks, start=1):
+        if not isinstance(block, Mapping):
+            continue
+        block_key = _block_key(block, fallback_index=block_index)
+        blocks_by_key[block_key] = block
+        block_segment_keys = set(_source_segment_keys(block))
+        global_segment_keys.update(block_segment_keys)
+        segment_keys_by_block[block_key] = block_segment_keys
+        kp_keys = {
+            _stable_key(_field_value(item, "knowledgePointKey", "knowledge_point_key"))
+            for item in _mapping_list(_field_value(block, "knowledgePoints", "knowledge_points"))
+            if _stable_key(_field_value(item, "knowledgePointKey", "knowledge_point_key"))
+        }
+        if not kp_keys:
+            kp_keys.add(f"{block_key}-main")
+        knowledge_point_keys_by_block[block_key] = kp_keys
+
+    return {
+        "blocksByKey": blocks_by_key,
+        "segmentKeysByBlock": segment_keys_by_block,
+        "globalSegmentKeys": global_segment_keys,
+        "knowledgePointKeysByBlock": knowledge_point_keys_by_block,
+    }
+
+
+_ALLOWED_QUESTION_FIELDS = {
+    "questionKey",
+    "questionType",
+    "stemMd",
+    "options",
+    "correctAnswer",
+    "explanationMd",
+    "difficultyLevel",
+    "knowledgePointKey",
+    "knowledgePointName",
+    "sourceBlockKey",
+    "sourceSegmentKeys",
+}
+
+
+def _normalize_model_question(
+    question: Mapping[str, Any],
+    *,
+    index: int,
+    source_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    _reject_extra_fields(question, _ALLOWED_QUESTION_FIELDS, f"quiz.questions[{index}]")
+    missing = [field for field in _ALLOWED_QUESTION_FIELDS if field not in question]
+    if missing:
+        raise ValueError(f"quiz question missing fields: {', '.join(sorted(missing))}")
+
+    question_key = _required_text(question["questionKey"], f"quiz.questions[{index}].questionKey")
+    question_type = _required_text(question["questionType"], f"quiz.questions[{index}].questionType")
+    if question_type != "single_choice":
+        raise ValueError("quiz questionType must be single_choice")
+
+    options = question["options"]
+    if not isinstance(options, list) or len(options) != 4:
+        raise ValueError("quiz options must contain exactly 4 items")
+    normalized_options = [_required_text(option, f"quiz.questions[{index}].options") for option in options]
+
+    correct_answer = _normalize_answer(question["correctAnswer"])
+    if correct_answer not in _OPTION_LABELS:
+        raise ValueError("quiz correctAnswer must be A/B/C/D")
+
+    difficulty_level = _required_text(question["difficultyLevel"], f"quiz.questions[{index}].difficultyLevel")
+    if difficulty_level not in {"easy", "medium", "hard"}:
+        raise ValueError("quiz difficultyLevel must be easy/medium/hard")
+
+    source_block_key = _required_text(question["sourceBlockKey"], f"quiz.questions[{index}].sourceBlockKey")
+    blocks_by_key = source_context["blocksByKey"]
+    if source_block_key not in blocks_by_key:
+        raise ValueError(f"quiz question references unknown sourceBlockKey: {source_block_key}")
+
+    source_segment_keys = _source_keys(question["sourceSegmentKeys"], f"quiz.questions[{index}].sourceSegmentKeys")
+    global_segment_keys: set[str] = source_context["globalSegmentKeys"]
+    unknown_segments = sorted(key for key in source_segment_keys if key not in global_segment_keys)
+    if unknown_segments:
+        raise ValueError(f"quiz question references unknown sourceSegmentKeys: {', '.join(unknown_segments)}")
+    block_segment_keys: set[str] = source_context["segmentKeysByBlock"].get(source_block_key, set())
+    if not block_segment_keys:
+        raise ValueError(f"quiz question references a sourceBlockKey without source segments: {source_block_key}")
+    out_of_block = sorted(key for key in source_segment_keys if key not in block_segment_keys)
+    if out_of_block:
+        raise ValueError(f"quiz question references segments outside sourceBlockKey: {', '.join(out_of_block)}")
+
+    knowledge_point_key = _required_text(
+        question["knowledgePointKey"],
+        f"quiz.questions[{index}].knowledgePointKey",
+    )
+    block_kp_keys: set[str] = source_context["knowledgePointKeysByBlock"].get(source_block_key, set())
+    if block_kp_keys and knowledge_point_key not in block_kp_keys:
+        raise ValueError(f"quiz question references unknown knowledgePointKey: {knowledge_point_key}")
+
+    return {
+        "questionKey": question_key,
+        "questionType": "single_choice",
+        "stemMd": _required_text(question["stemMd"], f"quiz.questions[{index}].stemMd"),
+        "options": normalized_options,
+        "correctAnswer": correct_answer,
+        "explanationMd": _required_text(question["explanationMd"], f"quiz.questions[{index}].explanationMd"),
+        "difficultyLevel": difficulty_level,
+        "knowledgePointKey": knowledge_point_key,
+        "knowledgePointName": _required_text(
+            question["knowledgePointName"],
+            f"quiz.questions[{index}].knowledgePointName",
+        ),
+        "sourceBlockKey": source_block_key,
+        "sourceSegmentKeys": source_segment_keys,
+    }
+
+
+def _reject_extra_fields(mapping: Mapping[str, Any], allowed: set[str], label: str) -> None:
+    extra = sorted(set(mapping) - allowed)
+    if extra:
+        raise ValueError(f"{label} has unsupported fields: {', '.join(extra)}")
+
+
+def _required_text(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    text = clean_text(value)
+    if not text:
+        raise ValueError(f"{label} must be a non-empty string")
+    return text
+
+
+def _source_keys(value: Any, label: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty list")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{label} must contain only strings")
+        key = _stable_key(item)
+        if not key:
+            raise ValueError(f"{label} must not contain empty keys")
+        if key in result:
+            raise ValueError(f"{label} contains duplicate key: {key}")
+        result.append(key)
+    return result
+
+
+def _truncate_text(value: Any, limit: int) -> str:
+    text = clean_text(str(value or ""))
+    return text[:limit]
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
 
 
 def build_quiz_source_candidates(
@@ -262,38 +643,6 @@ def build_quiz_question_refs(
                 break
 
     return refs
-
-
-def _question_from_candidate(candidate: QuizSourceCandidate, *, index: int) -> dict[str, Any]:
-    correct_text = f"{candidate.knowledge_point_name}：{candidate.description}"
-    options = [
-        correct_text,
-        f"{candidate.knowledge_point_name} 与当前讲义块没有直接关系。",
-        "只需要记住名称，不需要理解条件或例子。",
-        "当前材料没有提供可追溯依据。",
-    ]
-    return {
-        "questionKey": f"q{index}-{_slug(candidate.knowledge_point_key)}",
-        "questionType": "single_choice",
-        "stemMd": f"关于“{candidate.block_title}”中的“{candidate.knowledge_point_name}”，哪项说法最符合当前材料？",
-        "options": options,
-        "correctAnswer": "A",
-        "explanationMd": f"答案依据讲义块“{candidate.block_title}”及其来源片段，可回溯到当前课程材料。",
-        "difficultyLevel": candidate.difficulty_level,
-        "knowledgePointKey": candidate.knowledge_point_key,
-        "knowledgePointName": candidate.knowledge_point_name,
-        "sourceBlockKey": candidate.block_key,
-        "sourceSegmentKeys": list(candidate.source_segment_keys),
-    }
-
-
-def _repeat_to_count(candidates: Sequence[QuizSourceCandidate], target_count: int) -> list[QuizSourceCandidate]:
-    if len(candidates) >= target_count:
-        return list(candidates[:target_count])
-    repeated: list[QuizSourceCandidate] = []
-    while len(repeated) < target_count:
-        repeated.extend(candidates)
-    return repeated[:target_count]
 
 
 def _answers_by_question_key(answers: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
@@ -539,11 +888,3 @@ def _field_value(mapping: Mapping[str, Any], *names: str) -> Any:
 
 def _stable_key(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _slug(value: str) -> str:
-    chars = [char.lower() if char.isalnum() else "-" for char in value]
-    slug = "".join(chars).strip("-")
-    while "--" in slug:
-        slug = slug.replace("--", "-")
-    return slug or "item"

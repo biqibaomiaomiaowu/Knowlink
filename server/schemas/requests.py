@@ -70,6 +70,10 @@ class QaMessageRequest(CamelModel):
     question: str
 
 
+class QuizGenerateRequest(CamelModel):
+    question_count_level: Literal["small", "medium", "large"] = "medium"
+
+
 class QuizAnswerItem(CamelModel):
     question_id: int
     selected_option: str

@@ -94,6 +94,7 @@ def test_week2_video_outline_lazy_handout_semantics_are_frozen():
         "KNOWLINK_DEEPSEEK_BASE_URL",
         "KNOWLINK_DEEPSEEK_MODEL",
         "KNOWLINK_DEEPSEEK_REASONING_EFFORT",
+        "KNOWLINK_DEEPSEEK_QUIZ_TIMEOUT_SEC",
         "deepseek-v4-flash",
         "https://api.deepseek.com",
         "KNOWLINK_ENABLE_VIVO_EMBEDDING",
@@ -995,6 +996,33 @@ def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload
     build_validator(schema_path).validate(payload)
 
 
+def _quiz_question_payload(index: int) -> dict:
+    return {
+        "questionKey": f"q{index}",
+        "questionType": "single_choice",
+        "stemMd": "题干",
+        "options": ["A", "B", "C", "D"],
+        "correctAnswer": "A",
+        "explanationMd": "解释",
+        "difficultyLevel": "easy",
+        "knowledgePointKey": f"kp-{index}",
+        "knowledgePointName": "知识点",
+        "sourceBlockKey": f"block-{index}",
+        "sourceSegmentKeys": [f"seg-{index}"],
+    }
+
+
+def test_quiz_schema_accepts_live_generation_question_count_bounds():
+    validator = build_validator("schemas/ai/quiz_generation.schema.json")
+    for count in (1, 10):
+        validator.validate(
+            {
+                "quizType": "chapter_review",
+                "questions": [_quiz_question_payload(index) for index in range(1, count + 1)],
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("schema_path", "payload"),
     [
@@ -1005,6 +1033,13 @@ def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload
         (
             "schemas/ai/quiz_generation.schema.json",
             {"quizType": "exam_drill", "questions": []},
+        ),
+        (
+            "schemas/ai/quiz_generation.schema.json",
+            {
+                "quizType": "exam_drill",
+                "questions": [_quiz_question_payload(index) for index in range(1, 12)],
+            },
         ),
         (
             "schemas/ai/quiz_generation.schema.json",

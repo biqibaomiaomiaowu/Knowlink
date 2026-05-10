@@ -18,7 +18,13 @@ class QuizService:
         self.idempotency = idempotency
         self.task_dispatcher = task_dispatcher
 
-    def generate_quiz(self, *, course_id: int, idempotency_key: str | None) -> dict[str, object]:
+    def generate_quiz(
+        self,
+        *,
+        course_id: int,
+        question_count_level: str = "medium",
+        idempotency_key: str | None,
+    ) -> dict[str, object]:
         self._ensure_course(course_id)
         enqueue_request: tuple[int, dict[str, object]] | None = None
         created_response: dict[str, object] | None = None
@@ -26,7 +32,7 @@ class QuizService:
         def factory() -> dict[str, object]:
             nonlocal enqueue_request, created_response
             try:
-                _, trigger = self.quizzes.create_quiz(course_id)
+                _, trigger = self.quizzes.create_quiz(course_id, question_count_level=question_count_level)
             except ValueError as exc:
                 raise ServiceError(
                     message=str(exc),
@@ -41,6 +47,7 @@ class QuizService:
                     {
                         "courseId": course_id,
                         "quizId": quiz_id,
+                        "questionCountLevel": question_count_level,
                     },
                 )
             created_response = trigger

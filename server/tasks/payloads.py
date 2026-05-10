@@ -29,6 +29,7 @@ class QuizGeneratePayload(CamelModel):
     quiz_id: int
     handout_version_id: int | None = None
     source_parse_run_id: int | None = None
+    question_count_level: Literal["small", "medium", "large"] = "medium"
 
 
 class ReviewRefreshPayload(CamelModel):

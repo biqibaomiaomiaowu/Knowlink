@@ -69,10 +69,11 @@
 | `KNOWLINK_HANDOUT_OUTLINE_PROVIDER` | 目录生成 provider，默认 `vivo`；可设为 `deepseek` 仅切换目录 LLM，不影响 vivo OCR / ASR / Vision / Embedding。 |
 | `KNOWLINK_HANDOUT_BLOCK_PROVIDER` | 单段讲义生成 provider，默认 `vivo`；设为 `deepseek` 时仍沿用现有 JSON schema、引用校验和 fallback。 |
 | `KNOWLINK_QA_PROVIDER` | 块级 QA provider，默认 `vivo`；设为 `deepseek` 时不依赖 `KNOWLINK_ENABLE_VIVO_QA`，但仍要求 `KNOWLINK_DEEPSEEK_API_KEY` 非空。 |
-| `KNOWLINK_DEEPSEEK_API_KEY` | DeepSeek 官方 API key；只用于目录生成、单段讲义和块级 QA，必须通过本地环境配置，不提交真实密钥。 |
+| `KNOWLINK_DEEPSEEK_API_KEY` | DeepSeek 官方 API key；用于目录生成、单段讲义、块级 QA 和实时测验生成，必须通过本地环境配置，不提交真实密钥。 |
 | `KNOWLINK_DEEPSEEK_BASE_URL` | DeepSeek 官方 API 基础地址，默认 `https://api.deepseek.com`。 |
 | `KNOWLINK_DEEPSEEK_MODEL` | DeepSeek 文本生成模型，当前默认 `deepseek-v4-flash`。 |
 | `KNOWLINK_DEEPSEEK_REASONING_EFFORT` | DeepSeek thinking 强度，当前默认 `high`；请求需启用 thinking 并使用 JSON object response format。 |
+| `KNOWLINK_DEEPSEEK_QUIZ_TIMEOUT_SEC` | 实时测验生成单次 DeepSeek 调用超时，默认 `60` 秒；失败时测验任务失败，不回退模板题。 |
 | `KNOWLINK_ENABLE_VIVO_EMBEDDING` | 是否启用 vivo 文本向量，默认关闭；只有该开关为真且 `KNOWLINK_VIVO_APP_KEY` 非空时才可创建 embedding client。 |
 | `KNOWLINK_VIVO_EMBEDDING_MODEL` | 文本向量模型，默认 `m3e-base`；请求体必须使用 `model_name` 与 `sentences`，查询参数必须带 `requestId`。 |
 | `KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC` | 文本向量请求超时时间，默认 `10` 秒。 |

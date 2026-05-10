@@ -1057,7 +1057,12 @@ class SqlAlchemyRuntimeRepository:
         ).all()
         return [self._qa_message_dict(message) for message in messages]
 
-    def create_quiz(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    def create_quiz(
+        self,
+        course_id: int,
+        *,
+        question_count_level: str = "medium",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         course = self._get_course_model(course_id)
         version = self._get_latest_handout_version_model(course_id)
         if course is None:
@@ -1082,6 +1087,7 @@ class SqlAlchemyRuntimeRepository:
             "quizId": quiz.id,
             "handoutVersionId": version.id,
             "sourceParseRunId": version.source_parse_run_id,
+            "questionCountLevel": question_count_level,
         }
         task = AsyncTask(
             course_id=course_id,

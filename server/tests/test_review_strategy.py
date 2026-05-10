@@ -17,7 +17,7 @@ REVIEW_VALIDATOR = Draft202012Validator(REVIEW_SCHEMA)
 
 
 def test_mastery_updates_raise_correct_points_and_lower_wrong_points():
-    quiz_payload = generate_quiz_payload(_handout_blocks(), question_count=3)
+    quiz_payload = _generate_quiz_payload()
     attempt = grade_quiz_attempt(
         quiz_payload,
         [
@@ -44,7 +44,7 @@ def test_mastery_updates_raise_correct_points_and_lower_wrong_points():
 
 
 def test_generate_review_tasks_returns_top3_traceable_tasks_without_locators():
-    quiz_payload = generate_quiz_payload(_handout_blocks(), question_count=3)
+    quiz_payload = _generate_quiz_payload()
     attempt = grade_quiz_attempt(
         quiz_payload,
         [
@@ -115,7 +115,7 @@ def test_review_tasks_rank_by_final_priority_after_importance_bonus_before_top3(
 
 
 def test_review_task_refs_are_written_only_when_source_evidence_can_be_traced():
-    quiz_payload = generate_quiz_payload(_handout_blocks(), question_count=3)
+    quiz_payload = _generate_quiz_payload()
     attempt = grade_quiz_attempt(
         quiz_payload,
         [{"questionKey": question["questionKey"], "selectedOption": "B"} for question in quiz_payload["questions"]],
@@ -145,6 +145,59 @@ def test_review_task_refs_are_written_only_when_source_evidence_can_be_traced():
         ]
     }
     assert build_review_task_refs(untraceable_payload, handout_blocks=_handout_blocks(), segments=_segments()) == []
+
+
+class FakeQuizClient:
+    def generate_quiz(self, prompt_context):
+        _ = prompt_context
+        return {
+            "quizType": "chapter_review",
+            "questions": [
+                {
+                    "questionKey": "q1-kp-limit",
+                    "questionType": "single_choice",
+                    "stemMd": "关于极限定义，哪项说法符合当前材料？",
+                    "options": ["A. 函数极限描述稳定趋势。", "B. 与当前材料无关。", "C. 不需要理解。", "D. 没有依据。"],
+                    "correctAnswer": "A",
+                    "explanationMd": "依据 PDF 第 2 页。",
+                    "difficultyLevel": "hard",
+                    "knowledgePointKey": "kp-limit",
+                    "knowledgePointName": "函数极限",
+                    "sourceBlockKey": "block-pdf",
+                    "sourceSegmentKeys": ["pdf-p2"],
+                },
+                {
+                    "questionKey": "q2-kp-continuity",
+                    "questionType": "single_choice",
+                    "stemMd": "关于连续性，哪项说法符合当前材料？",
+                    "options": ["A. 函数值和极限一致。", "B. 与极限无关。", "C. 只看函数名。", "D. 没有依据。"],
+                    "correctAnswer": "A",
+                    "explanationMd": "依据视频 02:00-03:00。",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-continuity",
+                    "knowledgePointName": "连续性",
+                    "sourceBlockKey": "block-video",
+                    "sourceSegmentKeys": ["mp4-c2"],
+                },
+                {
+                    "questionKey": "q3-kp-set",
+                    "questionType": "single_choice",
+                    "stemMd": "关于集合表示，哪项说法符合当前材料？",
+                    "options": ["A. 可用列举法或描述法。", "B. 只能口头说明。", "C. 与材料无关。", "D. 没有依据。"],
+                    "correctAnswer": "A",
+                    "explanationMd": "依据 PPT 第 6 页。",
+                    "difficultyLevel": "easy",
+                    "knowledgePointKey": "kp-set",
+                    "knowledgePointName": "集合表示",
+                    "sourceBlockKey": "block-ppt",
+                    "sourceSegmentKeys": ["ppt-s6"],
+                },
+            ],
+        }
+
+
+def _generate_quiz_payload() -> dict:
+    return generate_quiz_payload(_handout_blocks(), segments=_segments(), client=FakeQuizClient())
 
 
 def _handout_blocks() -> list[dict]:

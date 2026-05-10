@@ -397,6 +397,44 @@ def test_quiz_generate_is_idempotent():
     assert first["data"]["entity"]["type"] == "quiz"
 
 
+def test_quiz_generate_accepts_question_count_level_and_defaults_to_medium():
+    course_id, _ = create_manual_course(
+        idempotency_key="quiz-generate-level-course",
+        title="测验档位课",
+    )
+
+    default_status, default_body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=AUTH_HEADERS | {"idempotency-key": "quiz-generate-level-default"},
+        )
+    )
+    small_status, small_body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=AUTH_HEADERS | {"idempotency-key": "quiz-generate-level-small"},
+            json_body={"questionCountLevel": "small"},
+        )
+    )
+    invalid_status, invalid_body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=AUTH_HEADERS | {"idempotency-key": "quiz-generate-level-invalid"},
+            json_body={"questionCountLevel": "tiny"},
+        )
+    )
+
+    assert default_status == 200
+    assert default_body["data"]["entity"]["type"] == "quiz"
+    assert small_status == 200
+    assert small_body["data"]["entity"]["type"] == "quiz"
+    assert invalid_status == 422
+    assert invalid_body["code"] == 1
+
+
 def test_review_regenerate_is_idempotent():
     course_id, _ = create_manual_course(
         idempotency_key="review-regenerate-course-1",

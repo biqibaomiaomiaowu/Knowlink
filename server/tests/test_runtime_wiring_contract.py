@@ -509,6 +509,14 @@ try:
             ],
         },
     )
+    repo.save_inquiry_answers(
+        course_id,
+        [
+            {"key": "mastery_level", "value": "advanced"},
+            {"key": "time_budget_minutes", "value": 120},
+            {"key": "handout_style", "value": "exam"},
+        ],
+    )
 finally:
     session.close()
 
@@ -517,10 +525,47 @@ async def main():
         "POST",
         f"/api/v1/courses/{course_id}/quizzes/generate",
         headers=AUTH_HEADERS | {"idempotency-key": "sql-api-quiz"},
+        json_body={"questionCountLevel": "large"},
     )
     task_id = generate_body["data"]["taskId"]
     quiz_id = generate_body["data"]["entity"]["id"]
-    run_quiz_generate({"taskId": task_id, "courseId": course_id, "quizId": quiz_id})
+    captured_generation = {}
+
+    def fake_generate_quiz(block_payloads, *, segments, course_context, preferences, question_count_level):
+        captured_generation.update({
+            "blockCount": len(block_payloads),
+            "segmentCount": len(segments),
+            "courseTitle": course_context["title"],
+            "preferenceSelfLevel": preferences["selfLevel"],
+            "questionCountLevel": question_count_level,
+            "segmentKey": segments[0]["segmentKey"],
+        })
+        block_key = str(block_payloads[0]["blockId"])
+        segment_key = block_payloads[0]["sourceSegmentKeys"][0]
+        return {
+            "quizType": "chapter_review",
+            "questions": [
+                {
+                    "questionKey": f"q{index}-kp-limit",
+                    "questionType": "single_choice",
+                    "stemMd": "关于极限定义，哪项说法符合当前材料？",
+                    "options": ["A. 同时关注自变量趋近和函数值趋近。", "B. 只需要记住名称。", "C. 与当前材料无关。", "D. 当前材料没有依据。"],
+                    "correctAnswer": "A",
+                    "explanationMd": "依据当前课程的极限定义讲义块。",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-limit",
+                    "knowledgePointName": "极限定义",
+                    "sourceBlockKey": block_key,
+                    "sourceSegmentKeys": [segment_key],
+                }
+                for index in range(1, 6)
+            ],
+        }
+
+    run_quiz_generate(
+        {"taskId": task_id, "courseId": course_id, "quizId": quiz_id, "questionCountLevel": "large"},
+        generate_quiz_func=fake_generate_quiz,
+    )
     quiz_status, quiz_body = await request(
         "GET",
         f"/api/v1/quizzes/{quiz_id}",
@@ -664,6 +709,7 @@ async def main():
         "quiz_status": quiz_status,
         "quiz_ready_status": quiz_body["data"]["status"],
         "question_count": quiz_body["data"]["questionCount"],
+        "captured_generation": captured_generation,
         "submit_status": submit_status,
         "attempt_id": submit_body["data"]["attemptId"],
         "review_task_run_id": review_task_run_id,
@@ -720,7 +766,13 @@ asyncio.run(main())
     assert payload["entity_type"] == "quiz"
     assert payload["quiz_status"] == 200
     assert payload["quiz_ready_status"] == "ready"
-    assert payload["question_count"] >= 3
+    assert payload["question_count"] == 5
+    assert payload["captured_generation"]["blockCount"] == 1
+    assert payload["captured_generation"]["segmentCount"] == 1
+    assert payload["captured_generation"]["courseTitle"] == "SQL quiz API course"
+    assert payload["captured_generation"]["preferenceSelfLevel"] == "advanced"
+    assert payload["captured_generation"]["questionCountLevel"] == "large"
+    assert payload["captured_generation"]["segmentKey"].startswith("segment-")
     assert payload["submit_status"] == 200
     assert payload["attempt_id"] > 0
     assert payload["review_task_run_id"] > 0
@@ -903,6 +955,158 @@ finally:
     assert payload["course_pipeline_status"] == "succeeded"
     assert payload["course_last_error"] is None
     assert payload["active_handout_version_id"] is None
+
+
+def test_quiz_generate_worker_marks_failed_without_saving_questions_on_deepseek_error(tmp_path):
+    script = """
+import json
+
+import sqlalchemy as sa
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.models import AsyncTask, Course, Quiz
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.quizzes import run_quiz_generate
+
+Base.metadata.create_all(get_engine())
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL failed quiz course",
+        entry_type="manual_import",
+        goal_text="verify failed DeepSeek quiz path",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/failed-quiz.pdf",
+            "originalName": "failed-quiz.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:failed-quiz",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run["parseRunId"],
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "plainText": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "pageNo": 2,
+            }
+        ],
+    )
+    _, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "失败测验目录",
+            "summary": "用于失败路径验证。",
+            "items": [
+                {
+                    "outlineKey": "section-failed",
+                    "title": "极限",
+                    "summary": "极限定义。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-failed",
+                            "title": "极限定义",
+                            "summary": "极限定义。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segments[0]["segmentKey"]],
+                            "topicTags": [],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "极限定义",
+            "summary": "极限定义。",
+            "contentMd": "极限定义需要同时关注自变量趋近和函数值趋近。",
+            "knowledgePoints": [{"knowledgePointKey": "kp-limit", "displayName": "极限定义"}],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": segments[0]["segmentKey"],
+                    "pageNo": 2,
+                    "refLabel": "PDF 第 2 页",
+                }
+            ],
+        },
+    )
+    _, trigger = repo.create_quiz(course_id, question_count_level="small")
+    task_id = trigger["taskId"]
+    quiz_id = trigger["entity"]["id"]
+finally:
+    session.close()
+
+def failing_generate(*args, **kwargs):
+    raise RuntimeError("deepseek timeout")
+
+result = run_quiz_generate(
+    {"taskId": task_id, "courseId": course_id, "quizId": quiz_id, "questionCountLevel": "small"},
+    generate_quiz_func=failing_generate,
+)
+
+session = create_session()
+try:
+    tables = Base.metadata.tables
+    course_row = session.get(Course, course_id)
+    task_row = session.get(AsyncTask, task_id)
+    quiz_row = session.get(Quiz, quiz_id)
+    question_count = session.execute(sa.select(sa.func.count()).select_from(tables["quiz_questions"])).scalar_one()
+    print(json.dumps({
+        "result_status": result["status"],
+        "task_status": task_row.status,
+        "quiz_status": quiz_row.status,
+        "course_pipeline_status": course_row.pipeline_status,
+        "question_count": question_count,
+        "task_error": task_row.error_message,
+    }))
+finally:
+    session.close()
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'failed-quiz.sqlite3'}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["result_status"] == "failed"
+    assert payload["task_status"] == "failed"
+    assert payload["quiz_status"] == "failed"
+    assert payload["course_pipeline_status"] == "failed"
+    assert payload["question_count"] == 0
+    assert "deepseek timeout" in payload["task_error"]
 
 
 def test_home_and_progress_use_sql_runtime_repository_for_api_wiring(tmp_path):

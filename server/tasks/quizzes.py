@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session
 
 from server.ai.quiz_strategy import build_quiz_question_refs, generate_quiz_payload
 from server.infra.db.base import utcnow
-from server.infra.db.models import AsyncTask, Course, CourseSegment, HandoutBlock, HandoutVersion, Quiz
+from server.infra.db.models import (
+    AsyncTask,
+    Course,
+    CourseSegment,
+    HandoutBlock,
+    HandoutVersion,
+    LearningPreference,
+    Quiz,
+)
 from server.infra.db.session import create_session
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 
@@ -38,6 +46,7 @@ def run_quiz_generate(
             task_id=task_id,
             course_id=course_id,
             quiz_id=quiz_id,
+            message=message,
             generate_quiz_func=generate_quiz_func,
         )
         LOGGER.info(
@@ -78,6 +87,7 @@ def _run_quiz_generate_with_session(
     task_id: int,
     course_id: int,
     quiz_id: int,
+    message: Mapping[str, Any],
     generate_quiz_func: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
     task = _require_model(session, AsyncTask, task_id, "async_task.not_found")
@@ -85,6 +95,7 @@ def _run_quiz_generate_with_session(
     quiz = _require_model(session, Quiz, quiz_id, "quiz.not_found")
     version = _require_model(session, HandoutVersion, quiz.handout_version_id, "handout.not_found")
     _validate_quiz_task_ownership(task=task, course=course, quiz=quiz, version=version)
+    task_payload = _task_payload(task=task, message=message)
 
     if task.status in {"succeeded", "failed", "canceled", "skipped"}:
         return _terminal_quiz_task_result(task=task, quiz=quiz)
@@ -122,8 +133,15 @@ def _run_quiz_generate_with_session(
     block_payloads = [_handout_block_payload(block) for block in blocks]
     segments = _segments_for_quiz(session, course_id=course.id, parse_run_id=version.source_parse_run_id)
     segment_payloads = [_segment_payload(segment) for segment in segments]
+    question_count_level = _question_count_level(task_payload)
 
-    payload = generate_quiz_func(block_payloads)
+    payload = generate_quiz_func(
+        block_payloads,
+        segments=segment_payloads,
+        course_context=_course_context_payload(course),
+        preferences=_learning_preference_payload(session, course),
+        question_count_level=question_count_level,
+    )
     refs = build_quiz_question_refs(
         payload,
         handout_blocks=block_payloads,
@@ -310,6 +328,57 @@ def _segment_payload(segment: CourseSegment) -> dict[str, Any]:
         "startSec": int(segment.start_sec) if segment.start_sec is not None else None,
         "endSec": int(segment.end_sec) if segment.end_sec is not None else None,
         "bboxJson": segment.bbox_json,
+    }
+
+
+def _task_payload(*, task: AsyncTask, message: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if isinstance(task.payload_json, Mapping):
+        payload.update(task.payload_json)
+    payload.update({key: value for key, value in message.items() if value is not None})
+    return payload
+
+
+def _question_count_level(payload: Mapping[str, Any]) -> str:
+    value = payload.get("questionCountLevel") or payload.get("question_count_level") or "medium"
+    if not isinstance(value, str):
+        raise QuizTaskInputError("questionCountLevel must be a string")
+    normalized = value.strip().lower()
+    if normalized not in {"small", "medium", "large"}:
+        raise QuizTaskInputError(f"invalid questionCountLevel: {value}")
+    return normalized
+
+
+def _course_context_payload(course: Course) -> dict[str, Any]:
+    return {
+        "courseId": course.id,
+        "title": course.title,
+        "goalText": course.goal_text,
+        "preferredStyle": course.preferred_style,
+        "examAt": course.exam_at.isoformat() if course.exam_at is not None else None,
+        "summary": course.summary,
+    }
+
+
+def _learning_preference_payload(session: Session, course: Course) -> dict[str, Any]:
+    preference = session.scalar(
+        select(LearningPreference).where(
+            LearningPreference.user_id == course.user_id,
+            LearningPreference.course_id == course.id,
+        )
+    )
+    if preference is None:
+        return {}
+    return {
+        "goalType": preference.goal_type,
+        "selfLevel": preference.self_level,
+        "timeBudgetMinutes": preference.time_budget_minutes,
+        "examAt": preference.exam_at.isoformat() if preference.exam_at is not None else None,
+        "preferredStyle": preference.preferred_style,
+        "exampleDensity": preference.example_density,
+        "formulaDetailLevel": preference.formula_detail_level,
+        "languageStyle": preference.language_style,
+        "focusKnowledge": list(preference.focus_knowledge_json or []),
     }
 
 

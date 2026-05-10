@@ -154,7 +154,12 @@ class QaRepository(Protocol):
 
 
 class QuizRepository(Protocol):
-    def create_quiz(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]: ...
+    def create_quiz(
+        self,
+        course_id: int,
+        *,
+        question_count_level: str = "medium",
+    ) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None: ...
 
