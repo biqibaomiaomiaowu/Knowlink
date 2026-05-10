@@ -12,6 +12,7 @@ class HandoutState {
     this.generateRequest = const AsyncData<HandoutGenerateResultModel?>(null),
     this.blockGenerateRequest =
         const AsyncData<HandoutBlockGenerateResultModel?>(null),
+    this.blockGenerateRequestsById = const {},
     this.currentBlock = const AsyncData<CurrentHandoutBlockModel?>(null),
     this.jumpTarget = const AsyncData<HandoutJumpTargetModel?>(null),
     this.playback = const AsyncData<CourseResourcePlaybackModel?>(null),
@@ -28,6 +29,8 @@ class HandoutState {
   final AsyncValue<HandoutBlocksModel?> blocks;
   final AsyncValue<HandoutGenerateResultModel?> generateRequest;
   final AsyncValue<HandoutBlockGenerateResultModel?> blockGenerateRequest;
+  final Map<int, AsyncValue<HandoutBlockGenerateResultModel?>>
+      blockGenerateRequestsById;
   final AsyncValue<CurrentHandoutBlockModel?> currentBlock;
   final AsyncValue<HandoutJumpTargetModel?> jumpTarget;
   final AsyncValue<CourseResourcePlaybackModel?> playback;
@@ -72,6 +75,42 @@ class HandoutState {
     return blockForId(child.blockId);
   }
 
+  AsyncValue<HandoutBlockGenerateResultModel?> blockGenerateRequestFor(
+    int blockId,
+  ) {
+    return blockGenerateRequestsById[blockId] ?? const AsyncData(null);
+  }
+
+  bool isBlockGenerating(int blockId) {
+    return blockGenerateRequestFor(blockId).isLoading ||
+        effectiveBlockStatus(blockId) == 'generating';
+  }
+
+  String effectiveBlockStatus(int blockId) {
+    final request = blockGenerateRequestsById[blockId];
+    if (request != null && request.isLoading) {
+      return 'generating';
+    }
+    final requestStatus = request?.valueOrNull?.blockStatus?.status;
+    if (requestStatus == 'ready' ||
+        requestStatus == 'generating' ||
+        requestStatus == 'failed') {
+      return requestStatus!;
+    }
+    final block = blockForId(blockId);
+    final child = outline.valueOrNull?.childForBlockId(blockId);
+    final childStatus = child?.generationStatus;
+    if (block?.status == 'pending' &&
+        childStatus != null &&
+        childStatus != 'pending') {
+      return childStatus;
+    }
+    if (block != null) {
+      return block.status;
+    }
+    return childStatus ?? 'pending';
+  }
+
   HandoutBlockModel? blockForId(int blockId) {
     final items = blocks.valueOrNull?.items ?? const [];
     for (final block in items) {
@@ -112,6 +151,21 @@ class HandoutState {
     return blockForId(child.blockId);
   }
 
+  HandoutOutlineChildModel? nextChildNearPosition(
+    int positionSec, {
+    required int thresholdSec,
+  }) {
+    final children = outlineChildren;
+    for (final child in children) {
+      if (positionSec >= child.startSec) {
+        continue;
+      }
+      final distance = child.startSec - positionSec;
+      return distance <= thresholdSec ? child : null;
+    }
+    return null;
+  }
+
   HandoutState copyWith({
     AsyncValue<HandoutLatestModel?>? latest,
     AsyncValue<HandoutVersionStatusModel?>? versionStatus,
@@ -119,6 +173,9 @@ class HandoutState {
     AsyncValue<HandoutBlocksModel?>? blocks,
     AsyncValue<HandoutGenerateResultModel?>? generateRequest,
     AsyncValue<HandoutBlockGenerateResultModel?>? blockGenerateRequest,
+    Map<int, AsyncValue<HandoutBlockGenerateResultModel?>>?
+        blockGenerateRequestsById,
+    bool clearBlockGenerateRequests = false,
     AsyncValue<CurrentHandoutBlockModel?>? currentBlock,
     AsyncValue<HandoutJumpTargetModel?>? jumpTarget,
     AsyncValue<CourseResourcePlaybackModel?>? playback,
@@ -138,6 +195,9 @@ class HandoutState {
       blocks: blocks ?? this.blocks,
       generateRequest: generateRequest ?? this.generateRequest,
       blockGenerateRequest: blockGenerateRequest ?? this.blockGenerateRequest,
+      blockGenerateRequestsById: clearBlockGenerateRequests
+          ? const {}
+          : blockGenerateRequestsById ?? this.blockGenerateRequestsById,
       currentBlock: currentBlock ?? this.currentBlock,
       jumpTarget: jumpTarget ?? this.jumpTarget,
       playback: playback ?? this.playback,
