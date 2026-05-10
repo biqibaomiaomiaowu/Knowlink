@@ -34,13 +34,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('高数期末冲刺讲义'), findsOneWidget);
-    expect(find.text('集合的概念与表示'), findsOneWidget);
+    expect(find.text('讲义结构'), findsOneWidget);
+    expect(find.text('第 1 章  集合的概念与表示'), findsOneWidget);
     expect(find.text('目录已使用降级结构展示。；目录按视频时间线降级生成'), findsOneWidget);
     expect(find.text('极限与连续'), findsWidgets);
     expect(find.textContaining('### 极限与连续'), findsNothing);
     expect(find.text('抓住定义与题型边界。'), findsOneWidget);
     expect(find.text('PDF 第 2 页'), findsOneWidget);
+    expect(find.text('第 4 章课件 PPT · PPT 第 12 页'), findsOneWidget);
+    expect(find.text('DOCX 标题 · 文档锚点 stack-heading'), findsOneWidget);
+    expect(find.text('视频 · 2:00-6:00'), findsOneWidget);
+    expect(find.textContaining('02:00-02:30'), findsNothing);
+    expect(find.textContaining('02:30-03:00'), findsNothing);
     expect(find.textContaining('当前块 QA'), findsOneWidget);
     expect(find.text('当前块还没有问答记录。'), findsOneWidget);
     expect(find.text('集合构造中'), findsOneWidget);
@@ -51,7 +56,7 @@ void main() {
     expect(find.text('待生成'), findsWidgets);
     expect(find.text('2:00-6:00'), findsWidgets);
 
-    await tester.tap(find.text('集合的概念与表示'));
+    await tester.tap(find.text('第 1 章  集合的概念与表示'));
     await tester.pumpAndSettle();
     expect(fakeApiClient.jumpTargetBlockIds, isEmpty);
     expect(find.text('抓住定义与题型边界。'), findsOneWidget);
@@ -187,6 +192,43 @@ void main() {
     expect(find.text('暂无引用。'), findsOneWidget);
   });
 
+  testWidgets('handout QA keeps video citation time without block fallback', (
+    tester,
+  ) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _HandoutPageFakeApiClient(
+      qaCitations: const [
+        {
+          'resourceId': 501,
+          'refLabel': 'QA 视频片段',
+          'startSec': 600,
+          'endSec': 620,
+        },
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+          handoutVideoControllerFactoryProvider.overrideWithValue(
+            (uri) => _FakeHandoutVideoController(uri),
+          ),
+        ],
+        child: const MaterialApp(home: HandoutPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '这段视频讲了什么？');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '提交问题'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('QA 视频片段 · 10:00-10:20'), findsOneWidget);
+    expect(find.text('视频 · 2:00-6:00'), findsOneWidget);
+  });
+
   testWidgets('playback unavailable state can retry with a fresh URL', (
     tester,
   ) async {
@@ -292,6 +334,122 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('2:00 / --:--'), findsOneWidget);
+  });
+
+  testWidgets('video overlays auto collapse and can be toggled', (
+    tester,
+  ) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _LongSummaryHandoutPageFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+          handoutVideoControllerFactoryProvider.overrideWithValue(
+            (uri) => _FakeHandoutVideoController(uri),
+          ),
+        ],
+        child: const MaterialApp(home: HandoutPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('收起标题浮层'), findsOneWidget);
+    expect(find.byTooltip('收起讲义块信息'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+
+    expect(find.byTooltip('展开标题浮层'), findsOneWidget);
+    expect(find.byTooltip('展开讲义块信息'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('展开标题浮层'));
+    await tester.pump();
+    expect(find.byTooltip('收起标题浮层'), findsOneWidget);
+    expect(find.byTooltip('展开讲义块信息'), findsOneWidget);
+
+    await tester.tap(find.text('集合的表示方法').first);
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('收起标题浮层'), findsOneWidget);
+    expect(find.byTooltip('收起讲义块信息'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+
+    expect(find.byTooltip('展开标题浮层'), findsOneWidget);
+    expect(find.byTooltip('展开讲义块信息'), findsOneWidget);
+  });
+
+  testWidgets('handout page keeps stacked narrow layout bounded', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(_HandoutPageFakeApiClient()),
+          handoutVideoControllerFactoryProvider.overrideWithValue(
+            (uri) => _FakeHandoutVideoController(uri),
+          ),
+        ],
+        child: const MaterialApp(home: HandoutPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('讲义结构'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.textContaining('当前块 QA'),
+      500,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('handout_stacked_workspace')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.textContaining('当前块 QA'), findsOneWidget);
+  });
+
+  testWidgets('natural video progress prefetches the next pending block', (
+    tester,
+  ) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _PrefetchHandoutPageFakeApiClient();
+    final videoControllers = <_FakeHandoutVideoController>[];
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+          handoutVideoControllerFactoryProvider.overrideWithValue(
+            (uri) {
+              final controller = _FakeHandoutVideoController(uri);
+              videoControllers.add(controller);
+              return controller;
+            },
+          ),
+        ],
+        child: const MaterialApp(home: HandoutPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('PDF 第 2 页'));
+    await tester.pumpAndSettle();
+    expect(videoControllers, isNotEmpty);
+
+    videoControllers.last.setPlaybackPosition(const Duration(seconds: 330));
+    await tester.pump();
+    await tester.pump();
+
+    expect(fakeApiClient.generatedBlockIds, [4002]);
   });
 }
 
@@ -447,8 +605,30 @@ class _HandoutPageFakeApiClient extends ApiClient {
           'citations': [
             {
               'resourceId': 501,
+              'refLabel': '视频 02:00-02:30',
+              'startSec': 120,
+              'endSec': 150,
+            },
+            {
+              'resourceId': 501,
+              'refLabel': '视频 02:30-03:00',
+              'startSec': 150,
+              'endSec': 180,
+            },
+            {
+              'resourceId': 501,
               'refLabel': 'PDF 第 2 页',
               'pageNo': 2,
+            },
+            {
+              'resourceId': 502,
+              'refLabel': '第 4 章课件 PPT',
+              'slideNo': 12,
+            },
+            {
+              'resourceId': 503,
+              'refLabel': 'DOCX 标题',
+              'anchorKey': 'stack-heading',
             },
           ],
         },
@@ -582,6 +762,64 @@ class _PlaybackUnavailableHandoutPageFakeApiClient
   }
 }
 
+class _LongSummaryHandoutPageFakeApiClient extends _HandoutPageFakeApiClient {
+  @override
+  Future<HandoutBlocksModel> fetchLatestHandoutBlocks(String courseId) async {
+    final blocks = await super.fetchLatestHandoutBlocks(courseId);
+    return HandoutBlocksModel.fromJson({
+      'items': [
+        for (final block in blocks.items)
+          {
+            'blockId': block.blockId,
+            'outlineKey': block.outlineKey,
+            'title': block.title,
+            'summary': '这一段摘要用于验证视频右下角讲义块信息浮层在真实长文本下不会撑破固定高度。'
+                '它会包含多个概念、多个动作和较长的中文句子，但浮层只应该保留紧凑提示。'
+                '用户需要阅读完整内容时可以看下方知识点解析区域。',
+            'status': block.status,
+            'contentMd': block.contentMd,
+            'startSec': block.startSec,
+            'endSec': block.endSec,
+            'pageFrom': block.pageFrom,
+            'pageTo': block.pageTo,
+            'citations': [
+              for (final citation in block.citations)
+                {
+                  'resourceId': citation.resourceId,
+                  'refLabel': citation.refLabel,
+                  if (citation.pageNo != null) 'pageNo': citation.pageNo,
+                  if (citation.slideNo != null) 'slideNo': citation.slideNo,
+                  if (citation.anchorKey != null)
+                    'anchorKey': citation.anchorKey,
+                  if (citation.startSec != null) 'startSec': citation.startSec,
+                  if (citation.endSec != null) 'endSec': citation.endSec,
+                },
+            ],
+          },
+      ],
+    });
+  }
+}
+
+class _PrefetchHandoutPageFakeApiClient extends _HandoutPageFakeApiClient {
+  final generatedBlockIds = <int>[];
+
+  @override
+  Future<HandoutBlockGenerateResultModel> generateHandoutBlock({
+    required int blockId,
+    required String idempotencyKey,
+  }) async {
+    generatedBlockIds.add(blockId);
+    return HandoutBlockGenerateResultModel.fromJson({
+      'blockId': blockId,
+      'outlineKey': 'outline-2',
+      'status': 'generating',
+      'startSec': 360,
+      'endSec': 540,
+    });
+  }
+}
+
 class _NonVideoHandoutPageFakeApiClient extends _HandoutPageFakeApiClient {
   @override
   Future<CourseResourcePlaybackModel> fetchCourseResourcePlayback(
@@ -700,6 +938,11 @@ class _FakeHandoutVideoController implements HandoutVideoController {
 
   @override
   double get aspectRatio => 16 / 9;
+
+  void setPlaybackPosition(Duration position) {
+    _position = position;
+    _notifyListeners();
+  }
 
   void _notifyListeners() {
     for (final listener in List<VoidCallback>.of(_listeners)) {

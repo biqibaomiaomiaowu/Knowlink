@@ -186,9 +186,9 @@ class _HandoutWorkspace extends StatelessWidget {
       builder: (context, constraints) {
         if (constraints.maxWidth < 1120) {
           return ListView(
+            key: const Key('handout_stacked_workspace'),
             children: [
               _OutlinePanel(
-                courseId: courseId,
                 state: state,
                 highlightedBlockId: highlightedChild?.blockId,
                 selectedBlockId: selectedBlockId,
@@ -227,7 +227,6 @@ class _HandoutWorkspace extends StatelessWidget {
             SizedBox(
               width: 294,
               child: _OutlinePanel(
-                courseId: courseId,
                 state: state,
                 highlightedBlockId: highlightedChild?.blockId,
                 selectedBlockId: selectedBlockId,
@@ -271,7 +270,6 @@ class _HandoutWorkspace extends StatelessWidget {
 
 class _OutlinePanel extends StatelessWidget {
   const _OutlinePanel({
-    required this.courseId,
     required this.state,
     required this.highlightedBlockId,
     required this.selectedBlockId,
@@ -280,7 +278,6 @@ class _OutlinePanel extends StatelessWidget {
     required this.onGenerate,
   });
 
-  final String courseId;
   final HandoutState state;
   final int? highlightedBlockId;
   final int? selectedBlockId;
@@ -290,11 +287,9 @@ class _OutlinePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final latest = state.latest.valueOrNull;
     final outline = state.outline.valueOrNull;
-    final status = state.versionStatus.valueOrNull;
     final blockList = Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
       child: _BlockList(
         state: state,
         outline: outline,
@@ -315,7 +310,7 @@ class _OutlinePanel extends StatelessWidget {
                 hasBoundedHeight ? MainAxisSize.max : MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 16, 12, 14),
+                padding: const EdgeInsets.fromLTRB(18, 14, 10, 12),
                 child: Row(
                   children: [
                     Expanded(
@@ -327,48 +322,7 @@ class _OutlinePanel extends StatelessWidget {
                     IconButton(
                       tooltip: '刷新讲义',
                       onPressed: state.isLoading ? null : onRefresh,
-                      icon: const Icon(Icons.refresh),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      latest?.title ?? '课程 $courseId 的讲义',
-                      style: const TextStyle(
-                        color: AppTheme.ink,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      latest?.summary ?? '读取最新讲义，并根据播放位置同步知识点。',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    if (status != null) ...[
-                      const SizedBox(height: 12),
-                      _MiniProgress(
-                        ready: status.readyBlocks,
-                        total: status.totalBlocks,
-                      ),
-                    ],
-                    if (outline != null &&
-                        (outline.outlineUsedFallback ||
-                            outline.outlineIssues.isNotEmpty)) ...[
-                      const SizedBox(height: 12),
-                      _OutlineIssueNotice(outline: outline),
-                    ],
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: state.isGenerating ? null : onGenerate,
-                      icon: const Icon(Icons.auto_awesome),
-                      label: Text(state.isGenerating ? '生成中' : '重新生成讲义'),
+                      icon: const Icon(Icons.sync),
                     ),
                   ],
                 ),
@@ -378,6 +332,15 @@ class _OutlinePanel extends StatelessWidget {
                 Expanded(child: blockList)
               else
                 SizedBox(height: 480, child: blockList),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                child: _OutlinePanelFooter(
+                  state: state,
+                  outline: outline,
+                  onGenerate: onGenerate,
+                ),
+              ),
             ],
           );
         },
@@ -386,36 +349,66 @@ class _OutlinePanel extends StatelessWidget {
   }
 }
 
-class _MiniProgress extends StatelessWidget {
-  const _MiniProgress({
-    required this.ready,
-    required this.total,
+class _OutlinePanelFooter extends StatelessWidget {
+  const _OutlinePanelFooter({
+    required this.state,
+    required this.outline,
+    required this.onGenerate,
   });
 
-  final int ready;
-  final int total;
+  final HandoutState state;
+  final HandoutOutlineModel? outline;
+  final VoidCallback onGenerate;
 
   @override
   Widget build(BuildContext context) {
+    final status = state.versionStatus.valueOrNull;
+    final total = status?.totalBlocks ?? 0;
+    final ready = status?.readyBlocks ?? 0;
     final value = total == 0 ? 0.0 : ready / total;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            const Icon(Icons.check_circle_outline, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              '已掌握 ${(value * 100).round()}%',
-              style: const TextStyle(
-                color: Color(0xFF16A34A),
-                fontWeight: FontWeight.w800,
+        if (outline != null &&
+            (outline!.outlineUsedFallback || outline!.outlineIssues.isNotEmpty))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _OutlineIssueNotice(outline: outline!),
+          ),
+        if (status != null) ...[
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    minHeight: 6,
+                    value: value,
+                    backgroundColor: const Color(0xFFE2E8F0),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Color(0xFF22C55E),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 10),
+              Text(
+                '$ready/$total',
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+        ],
+        OutlinedButton.icon(
+          onPressed: state.isGenerating ? null : onGenerate,
+          icon: const Icon(Icons.auto_awesome, size: 18),
+          label: Text(state.isGenerating ? '生成中' : '重新生成讲义'),
         ),
-        const SizedBox(height: 8),
-        ProgressRail(value: value, color: const Color(0xFF22C55E)),
       ],
     );
   }
@@ -497,14 +490,25 @@ class _BlockList extends StatelessWidget {
     }
 
     return ListView.builder(
+      padding: EdgeInsets.zero,
       itemCount: sections.length,
       itemBuilder: (context, index) {
         final section = sections[index];
+        final sectionBlockIds =
+            section.children.map((child) => child.blockId).toSet();
+        final containsSelected = selectedBlockId != null &&
+            sectionBlockIds.contains(selectedBlockId);
+        final containsHighlighted = highlightedBlockId != null &&
+            sectionBlockIds.contains(highlightedBlockId);
         return Padding(
           padding:
-              EdgeInsets.only(bottom: index == sections.length - 1 ? 0 : 14),
+              EdgeInsets.only(bottom: index == sections.length - 1 ? 0 : 8),
           child: _OutlineSectionGroup(
+            state: state,
             section: section,
+            index: index,
+            containsSelected: containsSelected,
+            containsHighlighted: containsHighlighted,
             highlightedBlockId: highlightedBlockId,
             selectedBlockId: selectedBlockId,
             onSelect: onSelect,
@@ -517,13 +521,21 @@ class _BlockList extends StatelessWidget {
 
 class _OutlineSectionGroup extends StatelessWidget {
   const _OutlineSectionGroup({
+    required this.state,
     required this.section,
+    required this.index,
+    required this.containsSelected,
+    required this.containsHighlighted,
     required this.highlightedBlockId,
     required this.selectedBlockId,
     required this.onSelect,
   });
 
+  final HandoutState state;
   final HandoutOutlineSectionModel section;
+  final int index;
+  final bool containsSelected;
+  final bool containsHighlighted;
   final int? highlightedBlockId;
   final int? selectedBlockId;
   final ValueChanged<HandoutOutlineChildModel> onSelect;
@@ -533,11 +545,14 @@ class _OutlineSectionGroup extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionHeader(section: section),
-        const SizedBox(height: 6),
+        _SectionHeader(
+          section: section,
+          index: index,
+          isActive: containsSelected || containsHighlighted,
+        ),
         if (section.children.isEmpty)
           const Padding(
-            padding: EdgeInsets.only(left: 10, bottom: 4),
+            padding: EdgeInsets.only(left: 34, top: 6, bottom: 4),
             child: Text(
               '该分组暂无二级目录。',
               style: TextStyle(
@@ -548,16 +563,24 @@ class _OutlineSectionGroup extends StatelessWidget {
             ),
           )
         else
-          for (final child in section.children)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: _BlockTile(
-                child: child,
-                isHighlighted: child.blockId == highlightedBlockId,
-                isSelected: child.blockId == selectedBlockId,
-                onTap: () => onSelect(child),
-              ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 30),
+            child: Column(
+              children: [
+                for (final child in section.children)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: _BlockTile(
+                      child: child,
+                      status: state.effectiveBlockStatus(child.blockId),
+                      isHighlighted: child.blockId == highlightedBlockId,
+                      isSelected: child.blockId == selectedBlockId,
+                      onTap: () => onSelect(child),
+                    ),
+                  ),
+              ],
             ),
+          ),
       ],
     );
   }
@@ -566,53 +589,49 @@ class _OutlineSectionGroup extends StatelessWidget {
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
     required this.section,
+    required this.index,
+    required this.isActive,
   });
 
   final HandoutOutlineSectionModel section;
+  final int index;
+  final bool isActive;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.line),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final color = isActive ? AppTheme.brandBlue : AppTheme.ink;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
         children: [
-          Text(
-            section.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: AppTheme.ink,
-              fontWeight: FontWeight.w900,
-              fontSize: 13,
-            ),
+          Icon(
+            section.children.isEmpty
+                ? Icons.chevron_right
+                : Icons.keyboard_arrow_down,
+            color: color,
+            size: 18,
           ),
-          const SizedBox(height: 4),
-          Text(
-            [
-              '${section.children.length} 个二级目录',
-              '${_formatSec(section.startSec)}-${_formatSec(section.endSec)}',
-            ].join(' · '),
-            style: const TextStyle(
-              color: AppTheme.muted,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          if (section.summary.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              section.summary,
-              maxLines: 2,
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '第 ${index + 1} 章  ${section.title}',
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: TextStyle(
+                color: color,
+                fontWeight: isActive ? FontWeight.w900 : FontWeight.w800,
+                fontSize: 13,
+              ),
             ),
-          ],
+          ),
+          Text(
+            '${section.children.length}',
+            style: TextStyle(
+              color: isActive ? AppTheme.brandBlue : AppTheme.subtle,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ],
       ),
     );
@@ -622,44 +641,58 @@ class _SectionHeader extends StatelessWidget {
 class _BlockTile extends StatelessWidget {
   const _BlockTile({
     required this.child,
+    required this.status,
     required this.isHighlighted,
     required this.isSelected,
     required this.onTap,
   });
 
   final HandoutOutlineChildModel child;
+  final String status;
   final bool isHighlighted;
   final bool isSelected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = isSelected
-        ? AppTheme.brandBlue
+    final color =
+        isSelected || isHighlighted ? AppTheme.brandBlue : AppTheme.muted;
+    final background = isSelected
+        ? const Color(0xFFEAF2FF)
         : isHighlighted
-            ? const Color(0xFF7C3AED)
-            : AppTheme.muted;
+            ? const Color(0xFFF4F8FF)
+            : Colors.transparent;
+    final statusColor = _statusColor(status);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: EdgeInsets.zero,
       child: Material(
-        color: isSelected ? const Color(0xFFEFF6FF) : Colors.transparent,
+        color: background,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  isSelected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: color,
-                  size: 16,
+                Container(
+                  width: 10,
+                  height: 10,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isSelected ? AppTheme.brandBlue : Colors.white,
+                    border: Border.all(
+                      color: isSelected || isHighlighted
+                          ? AppTheme.brandBlue
+                          : AppTheme.subtle,
+                      width: isSelected ? 2 : 1.4,
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 9),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -671,38 +704,28 @@ class _BlockTile extends StatelessWidget {
                         style: TextStyle(
                           color: color,
                           fontWeight:
-                              isSelected ? FontWeight.w800 : FontWeight.w600,
+                              isSelected ? FontWeight.w900 : FontWeight.w700,
+                          fontSize: 13,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Wrap(
                         spacing: 6,
                         runSpacing: 4,
                         children: [
-                          Text(
-                            _statusLabel(child.generationStatus),
-                            style: TextStyle(
-                              color: color,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
+                          _OutlineMetaChip(
+                            label: _statusLabel(status),
+                            color: statusColor,
                           ),
-                          Text(
-                            '${_formatSec(child.startSec)}-${_formatSec(child.endSec)}',
-                            style: const TextStyle(
-                              color: AppTheme.muted,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
+                          _OutlineMetaChip(
+                            label:
+                                '${_formatSec(child.startSec)}-${_formatSec(child.endSec)}',
+                            color: AppTheme.muted,
                           ),
                           if (child.topicTags.isNotEmpty)
-                            Text(
-                              child.topicTags.take(2).join(' / '),
-                              style: const TextStyle(
-                                color: AppTheme.muted,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
+                            _OutlineMetaChip(
+                              label: child.topicTags.take(2).join(' / '),
+                              color: AppTheme.subtle,
                             ),
                         ],
                       ),
@@ -713,6 +736,30 @@ class _BlockTile extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _OutlineMetaChip extends StatelessWidget {
+  const _OutlineMetaChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: color,
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
       ),
     );
   }
@@ -749,44 +796,53 @@ class _LearningCenterPanel extends StatelessWidget {
     final highlightedBlock = highlightedChild == null
         ? null
         : state.blockForId(highlightedChild!.blockId);
-    return SectionCard(
-      padding: const EdgeInsets.all(20),
-      child: ListView(
+    final children = [
+      Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '当前知识点：  ${block?.title ?? '等待同步'}',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-              const StatusPill(label: '学习模式'),
-              const SizedBox(width: 12),
-              StatusPill(
-                label: '已掌握 ${_masteryFor(block)}%',
-                color: const Color(0xFF16A34A),
-              ),
-            ],
+          Expanded(
+            child: Text(
+              '当前知识点：  ${block?.title ?? '等待同步'}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ),
-          const SizedBox(height: 18),
-          _VideoStage(
-            courseId: courseId,
-            state: state,
-            block: highlightedBlock ?? block,
-            player: player,
-            onTogglePlay: onTogglePlay,
-            onSeek: onSeek,
-            onRetryPlayback: onRetryPlayback,
-          ),
-          const SizedBox(height: 18),
-          _ContentPanel(
-            state: state,
-            block: block,
-            onGenerateBlock: onGenerateBlock,
-            onCitationTap: onCitationTap,
+          const StatusPill(label: '学习模式'),
+          const SizedBox(width: 12),
+          StatusPill(
+            label: '已掌握 ${_masteryFor(block)}%',
+            color: const Color(0xFF16A34A),
           ),
         ],
+      ),
+      const SizedBox(height: 18),
+      _VideoStage(
+        courseId: courseId,
+        state: state,
+        block: highlightedBlock ?? block,
+        player: player,
+        onTogglePlay: onTogglePlay,
+        onSeek: onSeek,
+        onRetryPlayback: onRetryPlayback,
+      ),
+      const SizedBox(height: 18),
+      _ContentPanel(
+        state: state,
+        block: block,
+        onGenerateBlock: onGenerateBlock,
+        onCitationTap: onCitationTap,
+      ),
+    ];
+    return SectionCard(
+      padding: const EdgeInsets.all(20),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (!constraints.hasBoundedHeight) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children,
+            );
+          }
+          return ListView(children: children);
+        },
       ),
     );
   }
@@ -835,22 +891,36 @@ class _VideoStageState extends ConsumerState<_VideoStage> {
   Object? _initializationError;
   int? _pendingSeekTargetSec;
   bool? _pendingPlayState;
+  int? _lastOverlayBlockId;
+  Timer? _titleOverlayCollapseTimer;
+  Timer? _contextOverlayCollapseTimer;
+  bool _titleOverlayExpanded = true;
+  bool _contextOverlayExpanded = true;
 
   @override
   void initState() {
     super.initState();
+    _lastOverlayBlockId = widget.block?.blockId;
+    _scheduleOverlayCollapse();
     _syncControllerWithPlayback();
   }
 
   @override
   void didUpdateWidget(covariant _VideoStage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final nextBlockId = widget.block?.blockId;
+    if (nextBlockId != _lastOverlayBlockId) {
+      _lastOverlayBlockId = nextBlockId;
+      _expandOverlaysTemporarily();
+    }
     _syncControllerWithPlayback();
     _applyDesiredControllerState();
   }
 
   @override
   void dispose() {
+    _titleOverlayCollapseTimer?.cancel();
+    _contextOverlayCollapseTimer?.cancel();
     _disposeController();
     super.dispose();
   }
@@ -1006,6 +1076,70 @@ class _VideoStageState extends ConsumerState<_VideoStage> {
       positionSec: nextPositionSec,
       isPlaying: controller.isPlaying,
     );
+    unawaited(
+      ref.read(handoutProvider.notifier).prefetchNextBlockNearPosition(
+            courseId: widget.courseId,
+            positionSec: nextPositionSec,
+          ),
+    );
+  }
+
+  void _expandOverlaysTemporarily() {
+    _titleOverlayCollapseTimer?.cancel();
+    _contextOverlayCollapseTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _titleOverlayExpanded = true;
+        _contextOverlayExpanded = true;
+      });
+    } else {
+      _titleOverlayExpanded = true;
+      _contextOverlayExpanded = true;
+    }
+    _scheduleOverlayCollapse();
+  }
+
+  void _scheduleOverlayCollapse() {
+    _scheduleTitleOverlayCollapse();
+    _scheduleContextOverlayCollapse();
+  }
+
+  void _scheduleTitleOverlayCollapse() {
+    _titleOverlayCollapseTimer?.cancel();
+    _titleOverlayCollapseTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _titleOverlayExpanded = false;
+      });
+    });
+  }
+
+  void _scheduleContextOverlayCollapse() {
+    _contextOverlayCollapseTimer?.cancel();
+    _contextOverlayCollapseTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _contextOverlayExpanded = false;
+      });
+    });
+  }
+
+  void _toggleTitleOverlay() {
+    _titleOverlayCollapseTimer?.cancel();
+    setState(() {
+      _titleOverlayExpanded = !_titleOverlayExpanded;
+    });
+  }
+
+  void _toggleContextOverlay() {
+    _contextOverlayCollapseTimer?.cancel();
+    setState(() {
+      _contextOverlayExpanded = !_contextOverlayExpanded;
+    });
   }
 
   @override
@@ -1045,15 +1179,24 @@ class _VideoStageState extends ConsumerState<_VideoStage> {
             child: _VideoTitleOverlay(
               title: block == null ? '等待讲义块同步播放位置' : block.title,
               subtitle: block?.summary ?? '选择讲义块后同步播放定位、来源引用与追问上下文。',
+              isExpanded: _titleOverlayExpanded,
+              onToggle: _toggleTitleOverlay,
             ),
           ),
           if (showContextBoard)
             Positioned(
               right: 22,
               bottom: 78,
-              width: 280,
-              height: 172,
-              child: _VideoContextBoard(block: block),
+              width: _contextOverlayExpanded ? 280 : 168,
+              height: _contextOverlayExpanded ? 148 : 44,
+              child: _VideoContextBoard(
+                block: block,
+                status: block == null
+                    ? null
+                    : widget.state.effectiveBlockStatus(block.blockId),
+                isExpanded: _contextOverlayExpanded,
+                onToggle: _toggleContextOverlay,
+              ),
             ),
           Positioned(
             left: 22,
@@ -1246,10 +1389,14 @@ class _VideoTitleOverlay extends StatelessWidget {
   const _VideoTitleOverlay({
     required this.title,
     required this.subtitle,
+    required this.isExpanded,
+    required this.onToggle,
   });
 
   final String title;
   final String subtitle;
+  final bool isExpanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -1260,30 +1407,65 @@ class _VideoTitleOverlay extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+            Expanded(
+              child: AnimatedCrossFade(
+                firstChild: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                secondChild: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        height: 1.3,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+                crossFadeState: isExpanded
+                    ? CrossFadeState.showSecond
+                    : CrossFadeState.showFirst,
+                duration: const Duration(milliseconds: 180),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white70,
-                height: 1.3,
-                fontSize: 13,
+            const SizedBox(width: 6),
+            IconButton(
+              tooltip: isExpanded ? '收起标题浮层' : '展开标题浮层',
+              onPressed: onToggle,
+              visualDensity: VisualDensity.compact,
+              color: Colors.white70,
+              icon: Icon(
+                isExpanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
               ),
             ),
           ],
@@ -1369,49 +1551,92 @@ class _VideoStatusOverlay extends StatelessWidget {
 class _VideoContextBoard extends StatelessWidget {
   const _VideoContextBoard({
     required this.block,
+    required this.status,
+    required this.isExpanded,
+    required this.onToggle,
   });
 
   final HandoutBlockModel? block;
+  final String? status;
+  final bool isExpanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final block = this.block;
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(isExpanded ? 12 : 6),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
-      child: block == null
-          ? const Center(
-              child: Text(
-                '等待播放位置同步到讲义块',
-                style: TextStyle(color: Colors.white70),
-              ),
+      child: block == null || !isExpanded
+          ? Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    block == null
+                        ? '等待同步'
+                        : '${_statusLabel(status ?? block.status)} · ${_formatSec(block.startSec)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: isExpanded ? '收起讲义块信息' : '展开讲义块信息',
+                  onPressed: onToggle,
+                  visualDensity: VisualDensity.compact,
+                  color: Colors.white70,
+                  icon: Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_up,
+                  ),
+                ),
+              ],
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _statusLabel(block.status),
-                  style: const TextStyle(
-                    color: Color(0xFFA7F3D0),
-                    fontWeight: FontWeight.w800,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _statusLabel(status ?? block.status),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFA7F3D0),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '收起讲义块信息',
+                      onPressed: onToggle,
+                      visualDensity: VisualDensity.compact,
+                      color: Colors.white70,
+                      icon: const Icon(Icons.keyboard_arrow_down),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
                 Text(
                   block.summary.isEmpty ? block.title : block.summary,
-                  maxLines: 7,
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
-                    height: 1.55,
-                    fontSize: 14,
+                    height: 1.35,
+                    fontSize: 13,
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(height: 8),
                 Text(
                   '${_formatSec(block.startSec)}-${_formatSec(block.endSec)}',
                   style: const TextStyle(
@@ -1465,17 +1690,22 @@ class _ContentPanel extends StatelessWidget {
                 else ...[
                   _BlockContent(
                     block: block,
-                    isGeneratingBlock: state.blockGenerateRequest.isLoading,
+                    status: state.effectiveBlockStatus(block.blockId),
+                    isGeneratingBlock: state.isBlockGenerating(block.blockId),
                     onGenerateBlock: onGenerateBlock,
                   ),
-                  if (state.blockGenerateRequest.hasError) ...[
+                  if (state
+                      .blockGenerateRequestFor(block.blockId)
+                      .hasError) ...[
                     const SizedBox(height: 12),
                     AppErrorView(
-                      message: '生成当前块失败：${state.blockGenerateRequest.error}',
+                      message:
+                          '生成当前块失败：${state.blockGenerateRequestFor(block.blockId).error}',
                     ),
                   ],
                   const SizedBox(height: 14),
                   _CitationList(
+                    block: block,
                     citations: block.citations,
                     onTap: onCitationTap,
                   ),
@@ -1537,17 +1767,19 @@ class _TabHeader extends StatelessWidget {
 class _BlockContent extends StatelessWidget {
   const _BlockContent({
     required this.block,
+    required this.status,
     required this.isGeneratingBlock,
     required this.onGenerateBlock,
   });
 
   final HandoutBlockModel block;
+  final String status;
   final bool isGeneratingBlock;
   final VoidCallback? onGenerateBlock;
 
   @override
   Widget build(BuildContext context) {
-    if (block.status == 'failed') {
+    if (status == 'failed') {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1561,12 +1793,12 @@ class _BlockContent extends StatelessWidget {
         ],
       );
     }
-    if (block.status != 'ready') {
+    if (status != 'ready') {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '该讲义块状态为${_statusLabel(block.status)}，正文生成后会展示结构化讲义内容。',
+            '该讲义块状态为${_statusLabel(status)}，正文生成后会展示结构化讲义内容。',
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
@@ -1628,16 +1860,19 @@ class _BlockContent extends StatelessWidget {
 
 class _CitationList extends StatelessWidget {
   const _CitationList({
+    this.block,
     required this.citations,
     required this.onTap,
   });
 
+  final HandoutBlockModel? block;
   final List<CitationModel> citations;
   final ValueChanged<CitationModel>? onTap;
 
   @override
   Widget build(BuildContext context) {
-    if (citations.isEmpty) {
+    final displayCitations = _displayCitations();
+    if (displayCitations.isEmpty) {
       return const Text('暂无引用。');
     }
     return Container(
@@ -1667,7 +1902,7 @@ class _CitationList extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: citations
+            children: displayCitations
                 .map(
                   (citation) => SourceChip(
                     icon: _citationIcon(citation),
@@ -1680,6 +1915,43 @@ class _CitationList extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  List<CitationModel> _displayCitations() {
+    final block = this.block;
+    if (block == null) {
+      return citations;
+    }
+    var videoCitationCount = 0;
+    final nonVideoCitations = <CitationModel>[];
+    for (final citation in citations) {
+      if (citation.startSec != null || citation.endSec != null) {
+        videoCitationCount++;
+      } else {
+        nonVideoCitations.add(citation);
+      }
+    }
+    if (videoCitationCount < 2) {
+      return citations;
+    }
+    return [
+      CitationModel(
+        resourceId: _firstVideoResourceId(citations),
+        refLabel: '视频',
+        startSec: block.startSec,
+        endSec: block.endSec,
+      ),
+      ...nonVideoCitations,
+    ];
+  }
+
+  int _firstVideoResourceId(List<CitationModel> citations) {
+    for (final citation in citations) {
+      if (citation.startSec != null || citation.endSec != null) {
+        return citation.resourceId;
+      }
+    }
+    return block?.blockId ?? 0;
   }
 }
 
@@ -1775,18 +2047,27 @@ class _RightStudyPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        _QaPanel(
-          state: state,
-          selectedBlock: selectedBlock,
-          controller: controller,
-          onCitationTap: onCitationTap,
-          onSubmit: onSubmit,
-        ),
-        const SizedBox(height: 16),
-        _RelatedStudyPanel(selectedBlock: selectedBlock),
-      ],
+    final children = [
+      _QaPanel(
+        state: state,
+        selectedBlock: selectedBlock,
+        controller: controller,
+        onCitationTap: onCitationTap,
+        onSubmit: onSubmit,
+      ),
+      const SizedBox(height: 16),
+      _RelatedStudyPanel(selectedBlock: selectedBlock),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (!constraints.hasBoundedHeight) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          );
+        }
+        return ListView(children: children);
+      },
     );
   }
 }
@@ -2086,5 +2367,19 @@ String _statusLabel(String status) {
     'draft' => '草稿',
     'superseded' => '已被替换',
     _ => '状态待确认',
+  };
+}
+
+Color _statusColor(String status) {
+  return switch (status) {
+    'ready' => const Color(0xFF16A34A),
+    'pending' => AppTheme.muted,
+    'generating' => AppTheme.brandBlue,
+    'failed' => const Color(0xFFDC2626),
+    'outline_ready' => const Color(0xFF16A34A),
+    'partial_success' => const Color(0xFFB45309),
+    'draft' => AppTheme.subtle,
+    'superseded' => AppTheme.subtle,
+    _ => const Color(0xFFB45309),
   };
 }
