@@ -142,6 +142,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('分钟'), findsOneWidget);
+
     final saveButton = find.widgetWithText(FilledButton, '保存问询答案');
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
