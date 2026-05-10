@@ -53,7 +53,8 @@ void main() {
           'outlineKey': 'outline-1',
           'title': '极限与连续',
           'summary': '先抓必考定义和题型',
-          'status': 'ready',
+          'status': 'pending',
+          'generationStatus': 'ready',
           'contentMd': '### 极限与连续',
           'startSec': 120,
           'endSec': 360,
@@ -81,7 +82,8 @@ void main() {
     final blockStatus = HandoutBlockStatusModel.fromJson({
       'blockId': 4002,
       'outlineKey': 'outline-2',
-      'status': 'generating',
+      'status': 'pending',
+      'generationStatus': 'generating',
       'startSec': 180,
       'endSec': 360,
     });
@@ -100,6 +102,13 @@ void main() {
       'generationStatus': 'pending',
       'prefetchBlockId': 4003,
     });
+    final legacyCurrentBlock = CurrentHandoutBlockModel.fromJson({
+      'blockId': 4002,
+      'outlineKey': 'outline-2',
+      'startSec': 180,
+      'endSec': 360,
+      'status': 'ready',
+    });
 
     final section = outline.items.single;
     final firstChild = section.children.first;
@@ -112,14 +121,18 @@ void main() {
     expect(outline.outlineUsedFallback, isTrue);
     expect(outline.outlineIssues.single, contains('降级分组'));
     expect(blocks.items.single.citations.single.locatorText, 'PDF 第 2 页');
+    expect(blocks.items.single.status, 'ready');
+    expect(blocks.items.single.generationStatus, 'ready');
     expect(blocks.items.single.containsPosition(120, isLast: false), isTrue);
     expect(blocks.items.single.containsPosition(360, isLast: false), isFalse);
     expect(blocks.items.single.containsPosition(360, isLast: true), isTrue);
     expect(status.isTerminal, isTrue);
     expect(blockStatus.status, 'generating');
+    expect(blockStatus.generationStatus, 'generating');
     expect(readyGenerateResult.entity, isNull);
     expect(readyGenerateResult.blockStatus?.status, 'ready');
     expect(currentBlock.prefetchBlockId, 4003);
+    expect(legacyCurrentBlock.generationStatus, 'ready');
   });
 
   test('QA model keeps answer citations only', () {

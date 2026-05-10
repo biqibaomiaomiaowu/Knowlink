@@ -178,21 +178,27 @@ class HandoutBlockStatusModel {
     required this.blockId,
     required this.outlineKey,
     required this.status,
+    String? generationStatus,
     required this.startSec,
     required this.endSec,
-  });
+  }) : generationStatus = generationStatus ?? status;
 
   final int blockId;
   final String outlineKey;
   final String status;
+  final String generationStatus;
   final int startSec;
   final int endSec;
 
   factory HandoutBlockStatusModel.fromJson(Map<String, dynamic> json) {
+    final generationStatus =
+        json['generationStatus'] as String? ?? json['status'] as String?;
+    final status = generationStatus ?? 'pending';
     return HandoutBlockStatusModel(
       blockId: json['blockId'] as int,
       outlineKey: json['outlineKey'] as String,
-      status: json['status'] as String,
+      status: status,
+      generationStatus: generationStatus,
       startSec: json['startSec'] as int? ?? 0,
       endSec: json['endSec'] as int? ?? 0,
     );
@@ -232,23 +238,29 @@ class CurrentHandoutBlockModel {
     required this.startSec,
     required this.endSec,
     required this.generationStatus,
+    String? status,
     this.prefetchBlockId,
-  });
+  }) : status = status ?? generationStatus;
 
   final int blockId;
   final String outlineKey;
   final int startSec;
   final int endSec;
+  final String status;
   final String generationStatus;
   final int? prefetchBlockId;
 
   factory CurrentHandoutBlockModel.fromJson(Map<String, dynamic> json) {
+    final generationStatus =
+        json['generationStatus'] as String? ?? json['status'] as String?;
+    final status = json['status'] as String? ?? generationStatus ?? 'pending';
     return CurrentHandoutBlockModel(
       blockId: json['blockId'] as int,
       outlineKey: json['outlineKey'] as String,
       startSec: json['startSec'] as int? ?? 0,
       endSec: json['endSec'] as int? ?? 0,
-      generationStatus: json['generationStatus'] as String? ?? 'pending',
+      generationStatus: generationStatus ?? status,
+      status: status,
       prefetchBlockId: json['prefetchBlockId'] as int?,
     );
   }
@@ -388,7 +400,9 @@ class HandoutOutlineChildModel {
       startSec: json['startSec'] as int? ?? 0,
       endSec: json['endSec'] as int? ?? 0,
       sortNo: json['sortNo'] as int? ?? 0,
-      generationStatus: json['generationStatus'] as String? ?? 'pending',
+      generationStatus: json['generationStatus'] as String? ??
+          json['status'] as String? ??
+          'pending',
       sourceSegmentKeys:
           (json['sourceSegmentKeys'] as List<dynamic>? ?? const [])
               .map((item) => item as String)
@@ -427,19 +441,21 @@ class HandoutBlockModel {
     required this.title,
     required this.summary,
     required this.status,
+    String? generationStatus,
     required this.contentMd,
     required this.startSec,
     required this.endSec,
     required this.citations,
     this.pageFrom,
     this.pageTo,
-  });
+  }) : generationStatus = generationStatus ?? status;
 
   final int blockId;
   final String outlineKey;
   final String title;
   final String summary;
   final String status;
+  final String generationStatus;
   final String? contentMd;
   final int startSec;
   final int endSec;
@@ -455,14 +471,16 @@ class HandoutBlockModel {
   }
 
   factory HandoutBlockModel.fromJson(Map<String, dynamic> json) {
+    final generationStatus =
+        json['generationStatus'] as String? ?? json['status'] as String?;
+    final status = generationStatus ?? 'pending';
     return HandoutBlockModel(
       blockId: json['blockId'] as int,
       outlineKey: json['outlineKey'] as String,
       title: json['title'] as String,
       summary: json['summary'] as String? ?? '',
-      status: json['status'] as String? ??
-          json['generationStatus'] as String? ??
-          'pending',
+      status: status,
+      generationStatus: generationStatus,
       contentMd: json['contentMd'] as String?,
       startSec: json['startSec'] as int? ?? 0,
       endSec: json['endSec'] as int? ?? 0,
