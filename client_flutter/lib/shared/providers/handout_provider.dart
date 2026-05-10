@@ -372,12 +372,6 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     required String courseId,
     required int positionSec,
   }) async {
-    unawaited(
-      prefetchNextBlockNearPosition(
-        courseId: courseId,
-        positionSec: positionSec,
-      ),
-    );
     final requestId = ++_currentBlockRequestId;
     state = state.copyWith(currentBlock: const AsyncLoading());
     try {
@@ -398,6 +392,15 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
       state = state.copyWith(
         currentBlock: AsyncData(current),
       );
+      final prefetchBlockId = current.prefetchBlockId;
+      if (prefetchBlockId != null) {
+        unawaited(
+          prefetchBlockById(
+            courseId: courseId,
+            blockId: prefetchBlockId,
+          ),
+        );
+      }
     } catch (error, stackTrace) {
       if (!_shouldApplyCurrentBlock(requestId, courseId)) {
         return;
@@ -421,16 +424,32 @@ class HandoutController extends AutoDisposeNotifier<HandoutState> {
     if (nextChild == null) {
       return;
     }
-    final status = state.effectiveBlockStatus(nextChild.blockId);
+    await prefetchBlockById(
+      courseId: courseId,
+      blockId: nextChild.blockId,
+    );
+  }
+
+  Future<void> prefetchBlockById({
+    required String? courseId,
+    required int blockId,
+  }) async {
+    if (courseId == null || !_isCurrentCourse(courseId)) {
+      return;
+    }
+    if (state.outline.valueOrNull?.childForBlockId(blockId) == null) {
+      return;
+    }
+    final status = state.effectiveBlockStatus(blockId);
     if (status != 'pending') {
       return;
     }
-    final key = '$courseId:${nextChild.blockId}';
+    final key = '$courseId:$blockId';
     if (!_prefetchedBlockKeys.add(key)) {
       return;
     }
     final accepted = await generateBlock(
-      nextChild.blockId,
+      blockId,
       courseId: courseId,
     );
     if (!accepted) {

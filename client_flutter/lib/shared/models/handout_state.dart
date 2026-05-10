@@ -91,7 +91,7 @@ class HandoutState {
     if (request != null && request.isLoading) {
       return 'generating';
     }
-    final requestStatus = request?.valueOrNull?.blockStatus?.status;
+    final requestStatus = request?.valueOrNull?.blockStatus?.generationStatus;
     if (requestStatus == 'ready' ||
         requestStatus == 'generating' ||
         requestStatus == 'failed') {
@@ -156,12 +156,16 @@ class HandoutState {
     required int thresholdSec,
   }) {
     final children = outlineChildren;
-    for (final child in children) {
-      if (positionSec >= child.startSec) {
+    for (var index = 0; index < children.length - 1; index++) {
+      final child = children[index];
+      if (!child.containsPosition(positionSec, isLast: false)) {
         continue;
       }
-      final distance = child.startSec - positionSec;
-      return distance <= thresholdSec ? child : null;
+      final distanceToEnd = child.endSec - positionSec;
+      if (distanceToEnd < 0 || distanceToEnd > thresholdSec) {
+        return null;
+      }
+      return children[index + 1];
     }
     return null;
   }

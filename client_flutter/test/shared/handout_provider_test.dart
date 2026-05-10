@@ -1302,6 +1302,66 @@ void main() {
     expect(fakeApiClient.generateBlockCalls, 0);
   });
 
+  test('block generationStatus wins over stale status from latest blocks',
+      () async {
+    final fakeApiClient = _BlocksGenerationStatusWinsFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+
+    final state = container.read(handoutProvider);
+    expect(state.blocks.valueOrNull!.items[1].status, 'generating');
+    expect(state.blocks.valueOrNull!.items[1].generationStatus, 'generating');
+    expect(state.effectiveBlockStatus(4002), 'generating');
+
+    await container.read(handoutProvider.notifier).generateBlock(
+          4002,
+          courseId: '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    expect(fakeApiClient.generateBlockCalls, 0);
+  });
+
+  test('current-block prefetchBlockId prefetches that pending block', () async {
+    final fakeApiClient = _CurrentBlockPrefetchFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final subscription = container.listen(handoutProvider, (_, __) {});
+    addTearDown(subscription.close);
+
+    await container.read(handoutProvider.notifier).load(
+          '101',
+          pollInterval: Duration.zero,
+          maxAttempts: 1,
+        );
+    await container
+        .read(handoutProvider.notifier)
+        .syncCurrentBlockFromPosition(courseId: '101', positionSec: 200);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(fakeApiClient.generatedBlockIds, [4002]);
+    expect(
+      container.read(handoutProvider).currentBlock.valueOrNull?.prefetchBlockId,
+      4002,
+    );
+  });
+
   test('playhead near next pending block prefetches it once', () async {
     final fakeApiClient = _PrefetchBlockFakeApiClient();
     final container = ProviderContainer(
@@ -1414,7 +1474,8 @@ void main() {
     }
   });
 
-  test('playhead prefetch works in gaps before the next block', () async {
+  test('playhead prefetch does not run in gaps after the current block',
+      () async {
     final fakeApiClient = _PrefetchBlockFakeApiClient(
       firstEndSec: 320,
       nextStartSec: 360,
@@ -1440,7 +1501,7 @@ void main() {
           positionSec: 330,
         );
 
-    expect(fakeApiClient.generatedBlockIds, [4002]);
+    expect(fakeApiClient.generatedBlockIds, isEmpty);
   });
 
   test('block refresh clears selection when selected child leaves outline',
@@ -2476,6 +2537,82 @@ class _OutlineReadyBlockPendingFakeApiClient
   }
 }
 
+class _BlocksGenerationStatusWinsFakeApiClient
+    extends _HandoutProviderFakeApiClient {
+  var generateBlockCalls = 0;
+
+  @override
+  Future<HandoutBlocksModel> fetchLatestHandoutBlocks(String courseId) async {
+    return HandoutBlocksModel.fromJson({
+      'items': [
+        _readyBlockJson(),
+        {
+          'blockId': 4002,
+          'outlineKey': 'outline-2',
+          'title': '集合的表示方法',
+          'summary': '从列举法过渡到描述法',
+          'status': 'pending',
+          'generationStatus': 'generating',
+          'contentMd': null,
+          'startSec': 360,
+          'endSec': 540,
+          'citations': [],
+        },
+      ],
+    });
+  }
+
+  @override
+  Future<HandoutBlockGenerateResultModel> generateHandoutBlock({
+    required int blockId,
+    required String idempotencyKey,
+  }) async {
+    generateBlockCalls++;
+    return HandoutBlockGenerateResultModel.fromJson({
+      'blockId': blockId,
+      'outlineKey': 'outline-2',
+      'status': 'generating',
+      'startSec': 360,
+      'endSec': 540,
+    });
+  }
+}
+
+class _CurrentBlockPrefetchFakeApiClient extends _HandoutProviderFakeApiClient {
+  final generatedBlockIds = <int>[];
+
+  @override
+  Future<CurrentHandoutBlockModel> fetchCurrentHandoutBlock({
+    required String courseId,
+    required int currentSec,
+  }) async {
+    return const CurrentHandoutBlockModel(
+      blockId: 4001,
+      outlineKey: 'outline-1',
+      startSec: 120,
+      endSec: 360,
+      generationStatus: 'ready',
+      prefetchBlockId: 4002,
+    );
+  }
+
+  @override
+  Future<HandoutBlockGenerateResultModel> generateHandoutBlock({
+    required int blockId,
+    required String idempotencyKey,
+  }) async {
+    generatedBlockIds.add(blockId);
+    return HandoutBlockGenerateResultModel.fromJson({
+      'blockId': blockId,
+      'outlineKey': 'outline-2',
+      'status': 'pending',
+      'generationStatus': 'generating',
+      'startSec': 360,
+      'endSec': 540,
+    });
+  }
+}
+
 class _PrefetchBlockFakeApiClient extends _HandoutProviderFakeApiClient {
   _PrefetchBlockFakeApiClient({
     this.nextStatus = 'pending',
@@ -2545,6 +2682,7 @@ class _PrefetchBlockFakeApiClient extends _HandoutProviderFakeApiClient {
           'title': '集合的表示方法',
           'summary': '从列举法过渡到描述法',
           'status': nextStatus,
+          'generationStatus': nextStatus,
           'contentMd': nextStatus == 'ready' ? '### 集合的表示方法' : null,
           'startSec': nextStartSec,
           'endSec': 540,
