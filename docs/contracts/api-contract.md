@@ -1085,6 +1085,22 @@ stub 阶段约束：
 
 ### `POST /api/v1/courses/{courseId}/quizzes/generate`
 
+请求可省略；省略时默认 `questionCountLevel = medium`：
+
+```json
+{
+  "questionCountLevel": "medium"
+}
+```
+
+说明：
+
+- `questionCountLevel` 可取 `small`、`medium`、`large`。
+- `small` 表示后端实时生成 1-3 题；`medium` 表示 3-5 题；`large` 表示 5-10 题。
+- 前端只提交档位，不提交精确题数；响应仍以实际 `questionCount` 和 `questions` 为准。
+- 测验题目由 DeepSeek 官方 API 实时生成，使用 `deepseek-v4-flash`、thinking enabled、`reasoning_effort=high`，并只允许基于当前课程的 active handout ready blocks 与当前 parse run segments 出题。
+- DeepSeek 未配置、超时、坏 JSON、题数不在档位范围、引用未知 block / segment 或 schema 校验失败时，异步任务失败，不回退模板题。
+
 响应结构与其他异步生成接口一致，`entity.type = quiz`。
 
 ### `GET /api/v1/quizzes/{quizId}`
