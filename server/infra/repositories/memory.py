@@ -89,13 +89,26 @@ class MemoryScaffoldRepository:
         return None
 
     def get_handout(self, handout_version_id: int) -> dict[str, Any] | None:
-        return self.store.handouts.get(handout_version_id)
+        handout = self.store.handouts.get(handout_version_id)
+        if handout is not None:
+            _sync_memory_handout_statuses(handout)
+        return handout
 
     def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
-        return self.store.get_latest_handout(course_id)
+        handout = self.store.get_latest_handout(course_id)
+        if handout is not None:
+            _sync_memory_handout_statuses(handout)
+        return handout
 
     def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
-        return self.store.get_latest_outline(course_id)
+        handout = self.store.get_latest_handout(course_id)
+        if handout is None:
+            return None
+        _sync_memory_handout_statuses(handout)
+        outline = handout.get("outline")
+        if isinstance(outline, dict):
+            return outline
+        return None
 
     def get_block_jump_target(self, block_id: int) -> dict[str, Any] | None:
         for handout in self.store.handouts.values():
@@ -133,7 +146,7 @@ class MemoryScaffoldRepository:
                         "entity": {"type": "handout_block", "id": block_id},
                     }, None
                 task_id = self.store.next_id("task")
-                block["status"] = "generating"
+                _set_memory_block_status(handout, block, "generating")
                 block["taskId"] = task_id
                 payload = {
                     "courseId": next(
@@ -161,6 +174,7 @@ class MemoryScaffoldRepository:
                         "blockId": block_id,
                         "outlineKey": block["outlineKey"],
                         "status": block["status"],
+                        "generationStatus": block["status"],
                         "startSec": block.get("startSec"),
                         "endSec": block.get("endSec"),
                     }
@@ -179,16 +193,16 @@ class MemoryScaffoldRepository:
             is_last = index == len(blocks) - 1
             if start_sec <= current_sec < end_sec or (is_last and current_sec == end_sec):
                 prefetch_block_id = None
-                if end_sec - current_sec <= 15:
-                    for next_block in blocks[index + 1:]:
-                        if next_block["status"] == "pending":
-                            prefetch_block_id = next_block["blockId"]
-                            break
+                if end_sec - current_sec <= 30 and index + 1 < len(blocks):
+                    next_block = blocks[index + 1]
+                    if next_block["status"] == "pending":
+                        prefetch_block_id = next_block["blockId"]
                 return {
                     "blockId": block["blockId"],
                     "outlineKey": block["outlineKey"],
                     "startSec": start_sec,
                     "endSec": end_sec,
+                    "status": block["status"],
                     "generationStatus": block["status"],
                     "prefetchBlockId": prefetch_block_id,
                 }
@@ -245,3 +259,39 @@ class MemoryScaffoldRepository:
 
     def update_progress(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.store.update_progress(course_id, payload)
+
+
+def _sync_memory_handout_statuses(handout: dict[str, Any]) -> None:
+    blocks_by_id = {
+        block.get("blockId"): block
+        for block in handout.get("blocks", [])
+        if isinstance(block, dict)
+    }
+    for block in blocks_by_id.values():
+        status = str(block.get("status") or block.get("generationStatus") or "pending")
+        block["status"] = status
+        block["generationStatus"] = status
+
+    outline = handout.get("outline")
+    if not isinstance(outline, dict):
+        return
+    for section in outline.get("items", []):
+        if not isinstance(section, dict):
+            continue
+        children = section.get("children")
+        if not isinstance(children, list):
+            continue
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            block = blocks_by_id.get(child.get("blockId"))
+            if block is None:
+                continue
+            child["generationStatus"] = block["status"]
+            child["sourceSegmentKeys"] = list(block.get("sourceSegmentKeys") or [])
+
+
+def _set_memory_block_status(handout: dict[str, Any], block: dict[str, Any], status: str) -> None:
+    block["status"] = status
+    block["generationStatus"] = status
+    _sync_memory_handout_statuses(handout)

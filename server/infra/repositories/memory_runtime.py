@@ -205,6 +205,7 @@ class RuntimeStore:
                     "title": block_title,
                     "summary": "按定义、题型和考试应用整理的知识块",
                     "status": "pending",
+                    "generationStatus": "pending",
                     "contentMd": None,
                     "startSec": start_sec,
                     "endSec": end_sec,

@@ -26,7 +26,8 @@ JSON 格式固定为：
 2. sourceSegmentKeys 只能来自当前 outline item 的 video_caption segments。
 3. citations 必须引用输入中的 segmentKey；视频 citation 必须落在 outline item 时间范围内。
 4. 每个 citation 只能使用一种定位：pageNo、slideNo、anchorKey、或 startSec/endSec。
-5. contentMd 使用中文 Markdown，先解释本段核心概念，再给出简短例子或学习提醒。
+5. 如果输入包含与本段相关的 PDF/PPT/DOCX supplemental segments，选择 1-3 条文档 citation；你只需要选择 segmentKey/refLabel，pageNo/slideNo/anchorKey 由服务端按输入 segment 反查校验。
+6. contentMd 使用中文 Markdown，先解释本段核心概念，再给出简短例子或学习提醒。
 """
 
 
@@ -333,7 +334,7 @@ def normalize_handout_block_payload(
         citations,
         outline_item=outline_item,
         source_segments=context.source_segments,
-        source_segment_keys=source_segment_keys,
+        supplemental_segments=context.supplemental_segments,
     )
 
     return {
@@ -366,15 +367,23 @@ def fallback_handout_block(
         summary=summary,
         preferences=preferences,
     )
+    source_segment_keys = [segment["segmentKey"] for segment in context.source_segments]
+    citations = _fallback_citations(outline_item=outline_item, context=context)
+    citations = _ensure_source_video_citation(
+        citations,
+        outline_item=outline_item,
+        source_segments=context.source_segments,
+        supplemental_segments=context.supplemental_segments,
+    )
     return {
         "outlineKey": _stable_key(str(outline_item.get("outlineKey") or "outline")),
         "title": title,
         "summary": summary,
         "contentMd": content_md,
         "estimatedMinutes": _estimated_minutes(None, content_md),
-        "sourceSegmentKeys": [segment["segmentKey"] for segment in context.source_segments],
+        "sourceSegmentKeys": source_segment_keys,
         "knowledgePoints": knowledge_points,
-        "citations": _fallback_citations(outline_item=outline_item, context=context),
+        "citations": citations,
     }
 
 
@@ -446,9 +455,9 @@ def _rank_supplemental_segments(segments: Sequence[Mapping[str, Any]], *, query_
             continue
         compact = text.lower()
         score = sum(1 for keyword in keywords if keyword in compact)
-        if score == 0:
-            score = 1
-        scored.append((-score, int(segment.get("orderNo") or index + 1), dict(segment)))
+        ranked_segment = dict(segment)
+        ranked_segment["_supplementalScore"] = score
+        scored.append((-score, int(segment.get("orderNo") or index + 1), ranked_segment))
     return [item[2] for item in sorted(scored, key=lambda item: (item[0], item[1], item[2]["segmentKey"]))]
 
 
@@ -497,6 +506,8 @@ def _adjacent_video_segments(
 
 def _keywords(text: str) -> set[str]:
     tokens = set(re.findall(r"[A-Za-z0-9_]{3,}|[\u4e00-\u9fff]{2,}", text.lower()))
+    for chinese_run in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        tokens.update(chinese_run[index : index + 2] for index in range(0, len(chinese_run) - 1))
     return {token for token in tokens if len(token) >= 2}
 
 
@@ -778,37 +789,105 @@ def _ensure_source_video_citation(
     *,
     outline_item: Mapping[str, Any],
     source_segments: Sequence[Mapping[str, Any]],
-    source_segment_keys: Sequence[str],
+    supplemental_segments: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    source_key_set = set(source_segment_keys)
     source_video_segments = [
         segment
         for segment in source_segments
-        if segment.get("segmentType") == "video_caption" and segment.get("segmentKey") in source_key_set
+        if segment.get("segmentType") == "video_caption"
     ]
     if not source_video_segments:
         return citations
 
-    source_video_key_set = {segment["segmentKey"] for segment in source_video_segments}
-    if any(citation.get("segmentKey") in source_video_key_set for citation in citations):
-        return citations
-
-    citation = _citation_from_segment(
-        source_video_segments[0],
-        raw_item={},
-        outline_start=_as_int(outline_item.get("startSec")),
-        outline_end=_as_int(outline_item.get("endSec")),
+    doc_citations = [
+        citation
+        for citation in citations
+        if "startSec" not in citation and "endSec" not in citation
+    ][:3]
+    if not doc_citations:
+        fallback_doc = _fallback_document_citation(supplemental_segments)
+        if fallback_doc is not None:
+            doc_citations = [fallback_doc]
+    block_video_citation = _block_range_video_citation(
+        outline_item=outline_item,
+        source_video_segments=source_video_segments,
     )
-    if citation is None:
-        return citations
-    return [citation, *citations]
+    if block_video_citation is None:
+        return doc_citations or citations
+
+    return [block_video_citation, *doc_citations]
+
+
+def _fallback_document_citation(segments: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    for segment in segments:
+        if segment.get("segmentType") == "video_caption":
+            continue
+        if not _supplemental_segment_is_relevant(segment):
+            continue
+        citation = _citation_from_segment(
+            segment,
+            raw_item={},
+            outline_start=None,
+            outline_end=None,
+        )
+        if citation is not None:
+            return citation
+    return None
+
+
+def _block_range_video_citation(
+    *,
+    outline_item: Mapping[str, Any],
+    source_video_segments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    first_segment = source_video_segments[0] if source_video_segments else None
+    if first_segment is None:
+        return None
+
+    resource_id = _as_positive_int(first_segment.get("resourceId"))
+    if resource_id is None:
+        return None
+
+    outline_start = _as_int(outline_item.get("startSec"))
+    outline_end = _as_int(outline_item.get("endSec"))
+    start_sec = outline_start
+    end_sec = outline_end
+    if start_sec is None:
+        start_sec = min(
+            (value for value in (_as_int(segment.get("startSec")) for segment in source_video_segments) if value is not None),
+            default=None,
+        )
+    if end_sec is None:
+        end_sec = max(
+            (value for value in (_as_int(segment.get("endSec")) for segment in source_video_segments) if value is not None),
+            default=None,
+        )
+    if start_sec is None or end_sec is None or end_sec <= start_sec:
+        return None
+
+    citation: dict[str, Any] = {
+        "resourceId": resource_id,
+        "segmentKey": first_segment["segmentKey"],
+        "startSec": start_sec,
+        "endSec": end_sec,
+        "refLabel": f"视频 {start_sec:02d}s-{end_sec:02d}s",
+    }
+    segment_id = _as_positive_int(first_segment.get("segmentId"))
+    if segment_id is not None:
+        citation["segmentId"] = segment_id
+    return citation
 
 
 def _fallback_citations(*, outline_item: Mapping[str, Any], context: HandoutBlockContext) -> list[dict[str, Any]]:
     outline_start = _as_int(outline_item.get("startSec"))
     outline_end = _as_int(outline_item.get("endSec"))
     citations: list[dict[str, Any]] = []
-    for segment in [*context.source_segments[:2], *context.supplemental_segments[:3]]:
+    supplemental_segments = [
+        segment
+        for segment in context.supplemental_segments
+        if _supplemental_segment_is_relevant(segment)
+    ][:3]
+    for segment in [*context.source_segments[:1], *supplemental_segments]:
         citation = _citation_from_segment(
             segment,
             raw_item={},
@@ -820,6 +899,11 @@ def _fallback_citations(*, outline_item: Mapping[str, Any], context: HandoutBloc
     if not citations:
         raise ValueError("handout block needs at least one segment with resourceId and locator for citation")
     return citations
+
+
+def _supplemental_segment_is_relevant(segment: Mapping[str, Any]) -> bool:
+    score = _as_int(segment.get("_supplementalScore"))
+    return score is None or score > 0
 
 
 def _citation_segment(

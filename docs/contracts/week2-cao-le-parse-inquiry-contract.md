@@ -232,7 +232,7 @@
 
 生成约束：
 
-- 用户点击 child 目录项时，可将对应 block 从 `pending` 置为 `generating` 并触发生成；播放进入当前 child 时间段时可自动触发当前段；距离当前 child 结束 `15` 秒以内可预生成下一段。
+- 用户点击 child 目录项时，可将对应 block 从 `pending` 置为 `generating` 并触发生成；播放进入当前 child 时间段时可自动触发当前段；距离当前 child 结束 `30` 秒以内，且紧邻下一段仍为 `pending` 时，可预生成下一段。
 - 单段生成输入只允许包含当前时间段 ASR 文本、相邻上下文、用户偏好，以及与该段相关的 PDF/PPTX/DOCX 片段。
 - 单段生成默认控制在 `120` 秒内；超时后该 block 标记 `failed` 或保留短摘要，允许用户稍后重试。
 - block 引用不得跨课程，不得引用未进入当前 active parse run 的 segment；视频引用必须落在该 outline child item 的 `startSec/endSec` 范围内。

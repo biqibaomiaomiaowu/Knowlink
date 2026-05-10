@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 import re
 from typing import Any, TypeVar
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -704,16 +704,18 @@ class SqlAlchemyRuntimeRepository:
         if current is None:
             return None
         prefetch_block_id = None
-        if current.end_sec is not None and current.end_sec - current_sec <= 15:
-            for block in blocks:
-                if block.sort_no > current.sort_no and block.status == "pending":
-                    prefetch_block_id = block.id
-                    break
+        if current.end_sec is not None and current.end_sec - current_sec <= 30:
+            current_index = blocks.index(current)
+            if current_index + 1 < len(blocks):
+                next_block = blocks[current_index + 1]
+                if next_block.status == "pending":
+                    prefetch_block_id = next_block.id
         return {
             "blockId": current.id,
             "outlineKey": current.outline_key,
             "startSec": current.start_sec,
             "endSec": current.end_sec,
+            "status": current.status,
             "generationStatus": current.status,
             "prefetchBlockId": prefetch_block_id,
         }
@@ -738,6 +740,32 @@ class SqlAlchemyRuntimeRepository:
         if current_task is not None:
             return _async_trigger_dict(current_task, "handout_block", block.id), None
 
+        claim = self.session.execute(
+            update(HandoutBlock)
+            .where(
+                HandoutBlock.id == block.id,
+                HandoutBlock.status.in_(("pending", "failed")),
+            )
+            .values(status="generating")
+            .execution_options(synchronize_session=False)
+        )
+        if (claim.rowcount or 0) != 1:
+            self.session.flush()
+            self.session.expire_all()
+            block = self._get_active_handout_block(block_id)
+            if block is None:
+                return None
+            if block.status == "ready":
+                return _handout_block_status_dict(block), None
+            current_task = self._current_handout_block_task(block)
+            if current_task is not None:
+                return _async_trigger_dict(current_task, "handout_block", block.id), None
+            if block.status == "generating":
+                return _handout_block_status_dict(block), None
+        else:
+            block.status = "generating"
+
+        block.status = "generating"
         payload = {
             "courseId": version.course_id,
             "handoutVersionId": version.id,
@@ -755,7 +783,6 @@ class SqlAlchemyRuntimeRepository:
             payload_json=payload,
         )
         self.session.add(task)
-        block.status = "generating"
         course.pipeline_stage = "handout"
         course.pipeline_status = "running"
         course.updated_at = utcnow()
@@ -1910,7 +1937,7 @@ class SqlAlchemyRuntimeRepository:
                 AsyncTask.task_type == "handout_block_generate",
                 AsyncTask.target_type == "handout_block",
                 AsyncTask.target_id == block.id,
-                AsyncTask.status.in_(("queued", "running")),
+                AsyncTask.status.in_(("queued", "running", "retrying")),
             )
             .order_by(AsyncTask.id.desc())
         ).first()
@@ -2119,7 +2146,7 @@ class SqlAlchemyRuntimeRepository:
                 continue
             if segment.id not in candidate_segment_ids:
                 continue
-            locator = _locator_for_handout_ref(raw_item, segment)
+            locator = _locator_for_handout_ref(raw_item, segment, block=block)
             if not locator:
                 continue
             resource_id = _as_positive_int(_payload_value(raw_item, "resourceId", "resource_id")) or segment.resource_id
@@ -2618,6 +2645,7 @@ def _handout_block_dict(block: HandoutBlock) -> dict[str, Any]:
         "title": block.title,
         "summary": block.summary,
         "status": block.status,
+        "generationStatus": block.status,
         "contentMd": block.content_md,
         "startSec": block.start_sec,
         "endSec": block.end_sec,
@@ -2632,6 +2660,7 @@ def _handout_block_status_dict(block: HandoutBlock) -> dict[str, Any]:
         "blockId": block.id,
         "outlineKey": block.outline_key,
         "status": block.status,
+        "generationStatus": block.status,
         "startSec": block.start_sec,
         "endSec": block.end_sec,
     }
@@ -2923,7 +2952,12 @@ def _segment_id_from_source_key(value: str) -> int | None:
     return int(raw_id)
 
 
-def _locator_for_handout_ref(raw_item: dict[str, Any], segment: CourseSegment) -> dict[str, Any]:
+def _locator_for_handout_ref(
+    raw_item: dict[str, Any],
+    segment: CourseSegment,
+    *,
+    block: HandoutBlock | None = None,
+) -> dict[str, Any]:
     raw_locator = _raw_locator(raw_item)
     if _locator_group_count(raw_locator) > 1:
         return {}
@@ -2946,14 +2980,29 @@ def _locator_for_handout_ref(raw_item: dict[str, Any], segment: CourseSegment) -
             or raw_end is None
             or segment_start is None
             or segment_end is None
-            or raw_start < segment_start
-            or raw_end > segment_end
             or raw_end <= raw_start
         ):
             return {}
-        return {"startSec": raw_start, "endSec": raw_end}
+        if raw_start >= segment_start and raw_end <= segment_end:
+            return {"startSec": raw_start, "endSec": raw_end}
+        if (
+            block is not None
+            and segment.id == _first_source_segment_id(block)
+            and raw_start == _as_outline_int(block.start_sec)
+            and raw_end == _as_outline_int(block.end_sec)
+        ):
+            return {"startSec": raw_start, "endSec": raw_end}
+        return {}
 
     return segment_locator
+
+
+def _first_source_segment_id(block: HandoutBlock) -> int | None:
+    for source_key in block.source_segment_keys_json or []:
+        segment_id = _segment_id_from_source_key(str(source_key))
+        if segment_id is not None:
+            return segment_id
+    return None
 
 
 def _segment_locator(segment: CourseSegment) -> dict[str, Any]:
