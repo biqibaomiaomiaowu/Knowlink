@@ -34,28 +34,24 @@
 | 范围 | 当前仓库状态 | 依据 |
 |---|---|---|
 | FastAPI app / router 骨架 | 已落地 | `server/app.py`、`server/api/app_factory.py`、`server/api/router.py` 与 `server/api/routers/*.py` 已存在 |
-| 领域 service + 仓储协议 + 内存态 demo | 已落地 | `server/domain/services/*.py`、`server/domain/repositories/interfaces.py`、`server/infra/repositories/memory.py`、`memory_runtime.py` |
-| 推荐、创建课程、上传、解析、问询、讲义、QA、测验、复习接口 | scaffold 已覆盖；推荐和确认入课已完成 Week 1 本地 smoke | `server/tests/test_api.py` 与 `server/tests/test_scaffold_consistency.py` 覆盖主链路 smoke、幂等和展示字段 |
+| 领域 service + 仓储协议 + 运行时仓储 | 已落地 | `server/domain/services/*.py`、`server/domain/repositories/interfaces.py`、`server/infra/repositories/sqlalchemy.py`；内存态 demo 适配器仍保留为 scaffold / 测试路径 |
+| 推荐、创建课程、上传、解析、问询、讲义、QA、测验、复习接口 | 第一版主链路已覆盖 | `server/tests/test_api.py`、`server/tests/test_scaffold_consistency.py` 与 runtime wiring 测试覆盖主链路 smoke、幂等和展示字段 |
 | AI / parse contract 与引用约束 | 已落地 | `schemas/ai/*.schema.json`、`schemas/parse/normalized_document.schema.json`，并由 `server/tests/test_contract_freeze.py` 覆盖 |
 | B 站预留接口 | 已实现 `501` stub | `server/api/routers/bilibili.py`、`server/domain/services/bilibili.py`，并由 `test_api.py`、`test_contract_freeze.py` 校验 |
-| Flutter 路由、页面、provider 骨架 | scaffold 已覆盖；推荐页 Week 1 本地联调已跑通 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位 |
-| Flutter 自动化测试 | 已覆盖启动 smoke + course flow provider 语义 | `client_flutter/test/smoke_test.dart` 与 `client_flutter/test/shared/course_flow_providers_test.dart` |
-| 基础四表 SQLAlchemy model 与 Alembic 初始化迁移 | 已接纳 | `courses`、`course_resources`、`parse_runs`、`async_tasks` 四表已在 `server/infra/db/models/` 与 `alembic/versions/1b319cfadeb3_init_tables.py` 覆盖 |
-| `async_tasks` 任务骨架 | Week 1 scaffold 已完成 | 已有表模型、任务 payload、worker / scheduler 占位和内存态异步返回结构；真实状态流转进入 Week 2 |
-| PostgreSQL / Redis / MinIO / Worker 真实运行时 | Week 1 scaffold 已完成，真实接入进入 Week 2 | 数据库 model 与初始迁移已接纳；完整 SQLAlchemy 持久化仓储、Redis、MinIO、Dramatiq Worker 仍未接通 |
+| Flutter 路由、页面、provider | 第一版主链路已承接 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位 |
+| Flutter 自动化测试 | 已覆盖启动 smoke、course flow provider 和 Week 4 页面 / provider 语义 | `client_flutter/test/` 下 smoke、provider、quiz、review、home 等测试 |
+| SQLAlchemy model 与 Alembic 迁移 | 第一版业务表已覆盖 | 课程、资源、解析、讲义、QA、测验、掌握度、复习和学习进度相关 model / migration 已进入运行时 |
+| `async_tasks` 与 worker | 第一版异步运行时已接通 | parse、handout、quiz、review 等任务通过 task payload、Dramatiq worker 和 dispatcher 接线 |
+| PostgreSQL / Redis / MinIO / Worker 真实运行时 | 第一版已接通 | 本地运行时已覆盖 SQLAlchemy 持久化仓储、MinIO 上传 / 读取、Redis / Dramatiq worker、scheduler 与聚合 read model |
 
 FastAPI 当前默认允许本地 Flutter Web origin；MinIO 本地默认使用全局 `MINIO_API_CORS_ALLOW_ORIGIN=*`，生产环境可通过 `KNOWLINK_CORS_ALLOW_ORIGINS` 和 `KNOWLINK_MINIO_CORS_ALLOW_ORIGIN` 显式收紧。
 
-## 5. 当前未接通的部分
+## 5. 首版完成说明
 
-- 以下内容不作为 Week 1 验收缺口，统一进入 Week 2 起的真实接入范围。
-- 完整 SQLAlchemy 持久化仓储仍未接通，当前 service/repository 仍使用内存态 demo 适配器
-- 基础四表之外的业务表尚未落库，包括解析产物、讲义、QA、测验、掌握度和复习任务相关表
-- Redis / MinIO 真实读写
-- Dramatiq broker 和真实 worker 消费
-- `async_tasks` 真实状态流转与子任务消费
-- OCR / ASR / LLM provider 接入
-- 推荐页之外的 Flutter 页面真实数据接线和交互打磨
+- 截至 2026-05-12，KnowLink 第一版 MVP 已完成，固定主链路为 `上传 -> 解析 -> 问询 -> 讲义 -> QA -> 测验 -> 复习`。
+- 第 2、3、4 周中 `TEAM_DIVISION.md` 归杨彩艺 owner 的后端运行时、接口、DB、worker 与联调类任务，首版收口阶段由曹乐代为完成；该说明只记录实际执行过程，不改变 owner 边界。
+- 内存态 demo 适配器仍保留，用于 scaffold、轻量测试和无外部依赖演示；真实联调与首版完成口径以 SQLAlchemy 运行时仓储、MinIO、Redis / Dramatiq 和聚合 read model 为准。
+- 首版之后的工作不再是补齐主链路，而是围绕稳定性、真机展示、失败恢复、数据质量和非 MVP 功能继续增强。
 
 ## 6. Schema / Contract 变更流
 
