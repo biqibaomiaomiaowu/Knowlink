@@ -6,12 +6,11 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 
 ### 1.1 当前仓库状态
 
-- 当前仓库已调整为“可让组员并行开工的骨架版”，不是“真实基础设施已全量接通”的完成版。
-- 已就位：`router -> service -> repository` 依赖方向、`memory` demo 适配器、AI pipeline 占位、解析器占位、任务 payload、worker / scheduler 占位、Flutter `qa` 独立页面与 course-flow 状态骨架。
-- 已接纳：`courses`、`course_resources`、`parse_runs`、`async_tasks` 四张基础表的 SQLAlchemy model 与 Alembic 初始化迁移。
-- 第 1 周基础设施交付口径是 scaffold：本地编排、配置、基础迁移、仓储协议、内存态 demo 和任务占位已完成。
-- 占位未接通：完整 SQLAlchemy 持久化仓储、基础四表之外的业务表、Redis/MinIO 真正读写、Dramatiq broker、真实 worker 消费、OCR/ASR/LLM Provider；这些进入第 2 周起的真实接入范围。
-- 文档中的 MVP 承诺表示“接口与模块边界冻结”，具体实现状态以 README 和 [docs/development-scaffold.md](./docs/development-scaffold.md) 为准。
+- 截至 2026-05-12，KnowLink 第一版 MVP 已完成，单用户、单课程、单次学习闭环已跑通。
+- 已就位：`router -> service -> repository` 依赖方向、SQLAlchemy 运行时仓储、Redis / MinIO / Dramatiq worker、AI / parse 策略入口、Flutter 主链路页面与 course-flow 状态。
+- 第一版已覆盖 `上传 -> 解析 -> 问询 -> 讲义 -> QA -> 测验 -> 复习`，并保留内存态 demo 适配器作为 scaffold / 测试路径。
+- 文档中的 MVP 承诺已从“接口与模块边界冻结”推进到“首版主链路完成”；具体实现状态以 README 和 [docs/development-scaffold.md](./docs/development-scaffold.md) 为准。
+- 进度说明：第 2、3、4 周中 `TEAM_DIVISION.md` 归杨彩艺 owner 的后端运行时、接口、DB、worker 与联调类任务，首版收口阶段由曹乐代为完成；该说明不改变 owner 边界。
 - 曹乐 owner 的 Week 1 冻结项与固定联调资料集基线以 [docs/contracts/week1-cao-le-freeze.md](./docs/contracts/week1-cao-le-freeze.md) 和 [docs/demo-assets-baseline.md](./docs/demo-assets-baseline.md) 为准。
 
 ---
@@ -63,7 +62,7 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 
 ### 2.6 比赛展示映射
 
-| 策划书页面 | Flutter Route | 主要接口/数据承接 | 当前骨架状态 |
+| 策划书页面 | Flutter Route | 主要接口/数据承接 | 当前首版状态 |
 |---|---|---|---|
 | 首页 | `/` | `GET /api/v1/home/dashboard` | 已有 route，dashboard 已承接最近学习、复习任务、今日推荐知识点、学习统计 |
 | 自主导入页 | `/import` | 上传链路与资源清单接口 | 已有 route，资料类型承接 `mp4/pdf/pptx/docx` |
@@ -426,19 +425,19 @@ README.md
 - `learning_ready`：已有可用讲义版本，允许学习。
 - `failed`：课程不可用，需要人工处理或重新导入。
 
-当前骨架已覆盖的状态迁移：
+第一版已覆盖的状态迁移：
 
 | 触发事件 | 当前课程状态变化 | 当前仓库口径 |
 |---|---|---|
 | `POST /api/v1/courses` | `draft / idle / idle` | 已在 `server/infra/repositories/memory_runtime.py` 与 `server/tests/test_api.py` 覆盖 |
-| `POST /api/v1/courses/{courseId}/resources/upload-complete` | 课程级状态暂不变更；资源记录进入 `ingestStatus=ready`、`validationStatus=passed`、`processingStatus=pending` | 当前 scaffold 只把“资源已就绪”落在 `course_resources`，还没有单独推进到课程级 `resource_ready / upload / succeeded` |
+| `POST /api/v1/courses/{courseId}/resources/upload-complete` | 资源记录进入 `ingestStatus=ready`、`validationStatus=passed`、`processingStatus=pending`，课程可进入解析前置状态 | 已在上传、资源校验、MinIO 直传和解析前置检查中覆盖 |
 | `POST /api/v1/courses/{courseId}/parse/start` | `draft / idle / idle -> inquiry_ready / parse / succeeded`，并更新 `active_parse_run_id` | 已在 `parse/start`、`pipeline-status` 及相关 pytest 中覆盖 |
 | `POST /api/v1/courses/{courseId}/handouts/generate` | `inquiry_ready / parse / succeeded -> learning_ready / handout / succeeded`，并更新 `active_handout_version_id` | 已在 handout 生成、blocks、jump-target、QA 链路中覆盖 |
 
 补充说明：
 
 - `resource_ready`、`upload`、`queued`、`running`、`partial_success`、`archived`、`failed` 仍然是冻结 contract 的合法状态枚举。
-- 当前内存态 scaffold 还没有把这些中间态和失败态接成完整运行时状态机，因此文档中的状态全集与“当前已覆盖迁移”需要分开理解。
+- 内存态 scaffold 仍保留简化同步路径；首版真实联调以 SQLAlchemy 运行时、异步任务和聚合 read model 为准。
 
 ## 8.2 解析版本线
 
@@ -1370,7 +1369,7 @@ Redis 缓存建议：
 - 单课程内问答、测验、复习
 - 真正承诺打通的输入范围为 `MP4 + PDF + PPTX + DOCX`，`SRT` 作为可选加速输入
 
-必须完成：
+截至 2026-05-12，以下首版范围已完成：
 
 - `course_catalog`
 - `courses`、`course_resources`、`parse_runs`、`async_tasks`

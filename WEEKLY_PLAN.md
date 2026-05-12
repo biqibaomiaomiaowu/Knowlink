@@ -223,6 +223,7 @@
 - 解析产物验收结果：`course_segments=178`，包含 `video_caption`、`pdf_page_text`、`ppt_slide_text`、`docx_block_text` 和 `image_caption`；`vector_documents=178`。
 - API 验收结果：`GET /api/v1/courses/<courseId>/pipeline-status` 返回 `lifecycleStatus=inquiry_ready`、`pipelineStatus=succeeded`、`progressPct=100`、`nextAction=enter_inquiry`，五个解析步骤均为 `succeeded`。
 - 边界说明：本次 Week 2 验收确认上传、解析、向量化和问询入口已跑通；讲义生成、QA、测验和复习仍按第 3、4 周计划继续接入。
+- 代完成说明：第 2 周中 `TEAM_DIVISION.md` 归杨彩艺 owner 的上传、解析运行时、SQLAlchemy 仓储、MinIO / Redis / Dramatiq 接线和联调修复任务，首版收口阶段由曹乐代为完成；该说明只记录实际执行过程，不改变 owner 边界。
 
 ## 5. 第 3 周：讲义、联动、问答链路
 
@@ -295,6 +296,14 @@
 - QA 回答的引用能跳到正确资源。
 - 第 3 周周末必须录制一版“问询 -> 讲义 -> 提问”的完整演示视频。
 
+### 5.7 2026-05-10 验收记录
+
+- 第 3 周主链路已跑通：`问询 -> 生成讲义 -> 讲义阅读 -> 跳视频/页码 -> 围绕当前块问答`。
+- 讲义验收结果：课程可生成 outline-ready 讲义版本，讲义块可按需生成正文、摘要、知识点和引用，`handout_block_refs` 可追溯到当前 active parse run 的合法片段。
+- 联动验收结果：讲义块 jump-target 可返回视频时间戳或文档定位；视频播放 URL 通过独立 playback 接口生成浏览器可用的 MinIO public presign URL。
+- QA 验收结果：当前块提问可返回 answer、引用和跳转位置，`qa_message_refs` 只记录 assistant 引用，并避免旧 parse run / 旧 handout version 串入当前读模型。
+- 代完成说明：第 3 周中 `TEAM_DIVISION.md` 归杨彩艺 owner 的讲义运行时、QA 运行时、DB / worker / repository 接线和 stale-pointer hardening 任务，首版收口阶段由曹乐代为完成；该说明只记录实际执行过程，不改变 owner 边界。
+
 ## 6. 第 4 周：测验、复习、首页聚合与最终联调
 
 ### 6.1 本周目标
@@ -359,6 +368,16 @@
   - 复习
 - 比赛演示脚本、录屏和答辩顺序确定。
 - 截止 2026-05-17 前不再新增非 MVP 功能。
+
+### 6.7 2026-05-12 第一版最终验收记录
+
+- 第 4 周链路已全部跑通，KnowLink 第一版 MVP 已完成。
+- 固定资料集主路径已收口为：`上传 -> 解析 -> 问询 -> 讲义 -> QA -> 测验 -> 复习`。
+- 测验验收结果：测验可按题量档位生成 1-3 / 3-5 / 5-10 道单选题，题目限定在当前课程 active handout ready blocks 与当前 parse run segments 内，提交后返回分数、逐题结果、解释和 `masteryDelta`。
+- 复习验收结果：作答后可更新 `mastery_records`，生成或刷新 `review_task_runs` / `review_tasks`，复习页展示 Top3 任务，并支持回看讲义块、视频片段或再练入口。
+- 首页与进度验收结果：首页可聚合最近学习、Top3 复习任务、今日推荐知识点和学习统计；最近学习位置通过 `GET/POST /api/v1/courses/{courseId}/progress` 读写。
+- 首版演示材料：比赛演示路径、讲解顺序和验收清单以 `docs/week4-demo-runbook.md` 为准；录屏产物不纳入仓库。
+- 代完成说明：第 4 周中 `TEAM_DIVISION.md` 归杨彩艺 owner 的测验 / 复习运行时、首页聚合、最近学习进度、DB / worker / repository 接线和联调修复任务，首版收口阶段由曹乐代为完成；该说明只记录实际执行过程，不改变 owner 边界。
 
 ## 7. 每周站会最少要确认的 5 件事
 
