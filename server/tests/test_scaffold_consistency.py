@@ -387,7 +387,7 @@ def test_scaffold_structure_and_docs_are_aligned():
         ROOT / "alembic/versions/1b319cfadeb3_init_tables.py",
         ROOT / "client_flutter/lib/features/qa/qa_page.dart",
         ROOT / "client_flutter/test/shared/course_flow_providers_test.dart",
-        ROOT / "docs/development-scaffold.md",
+        ROOT / "docs/engineering/development-scaffold.md",
     ]
     for path in required_paths:
         assert path.exists(), f"missing scaffold path: {path}"
@@ -407,9 +407,9 @@ def test_scaffold_structure_and_docs_are_aligned():
         assert "runtime_store" not in source, f"router still depends on runtime store: {router_path}"
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "docs/v1/architecture.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/contracts/api-contract.md").read_text(encoding="utf-8")
-    scaffold = (ROOT / "docs/development-scaffold.md").read_text(encoding="utf-8")
+    scaffold = (ROOT / "docs/engineering/development-scaffold.md").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     pubspec = (ROOT / "client_flutter/pubspec.yaml").read_text(encoding="utf-8")
     architecture_scaffold = architecture.split("### 7.1 后端", 1)[1].split("---", 1)[0]

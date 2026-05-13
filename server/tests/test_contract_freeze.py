@@ -11,6 +11,15 @@ from server.schemas.common import AsyncEntity
 
 
 ROOT = Path(__file__).resolve().parents[2]
+ARCHITECTURE_DOC = "docs/v1/architecture.md"
+TEAM_DIVISION_DOC = "docs/v1/team-division.md"
+WEEKLY_PLAN_DOC = "docs/v1/weekly-plan.md"
+SCAFFOLD_DOC = "docs/engineering/development-scaffold.md"
+DEMO_ASSETS_BASELINE_DOC = "docs/v1/demo-assets-baseline.md"
+DEMO_ASSETS_FIRST_EDITION_DOC = "docs/v1/demo-assets-first-edition.md"
+DEMO_ASSETS_BASELINE_NAV_LINK = "v1/demo-assets-baseline.md"
+DEMO_ASSETS_FIRST_EDITION_NAV_LINK = "v1/demo-assets-first-edition.md"
+DOCS_NAV_DOC = "docs/README.md"
 
 
 def load_text(relative_path: str) -> str:
@@ -29,13 +38,15 @@ def build_validator(relative_path: str) -> Draft202012Validator:
 
 def test_week1_freeze_docs_are_linked_from_readme_and_contract():
     readme = load_text("README.md")
+    docs_nav = load_text(DOCS_NAV_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
 
     assert "docs/contracts/week1-cao-le-freeze.md" in readme
-    assert "docs/demo-assets-baseline.md" in readme
-    assert "docs/demo-assets-first-edition.md" in readme
+    assert "docs/README.md" in readme
+    assert DEMO_ASSETS_BASELINE_NAV_LINK in docs_nav
+    assert DEMO_ASSETS_FIRST_EDITION_NAV_LINK in docs_nav
     assert "week1-cao-le-freeze.md" in api_contract
-    assert "../demo-assets-baseline.md" in api_contract
+    assert "../v1/demo-assets-baseline.md" in api_contract
 
 
 def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
@@ -68,7 +79,7 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
 def test_week2_video_outline_lazy_handout_semantics_are_frozen():
     api_contract = load_text("docs/contracts/api-contract.md")
     week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
-    weekly_plan = load_text("WEEKLY_PLAN.md")
+    weekly_plan = load_text(WEEKLY_PLAN_DOC)
     env_example = load_text(".env.example")
 
     for token in (
@@ -147,7 +158,7 @@ def test_latest_outline_read_model_requires_source_segment_keys():
 
 
 def test_knowledge_point_block_ownership_contract_is_frozen():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
 
     knowledge_points_section = week2_contract.split("### 1.3 `knowledge_points`", 1)[1].split(
@@ -228,9 +239,9 @@ def test_parse_contract_documents_quality_gate_and_vision_env_vars():
 
 
 def test_bilibili_reserved_contract_is_aligned_across_docs():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
-    team_division = load_text("TEAM_DIVISION.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
     error_codes = load_text("docs/contracts/error-codes.md")
 
@@ -247,8 +258,8 @@ def test_bilibili_reserved_contract_is_aligned_across_docs():
 
 def test_bilibili_stub_owner_is_consistent_across_collaboration_docs():
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
-    team_division = load_text("TEAM_DIVISION.md")
-    weekly_plan = load_text("WEEKLY_PLAN.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
+    weekly_plan = load_text(WEEKLY_PLAN_DOC)
 
     assert "由曹乐在第 2 周完成 stub 实现" not in freeze_doc
     assert "杨彩艺" in freeze_doc
@@ -278,7 +289,7 @@ def test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape(
 def test_course_resource_playback_contract_is_frozen():
     api_contract = load_text("docs/contracts/api-contract.md")
     error_codes = load_text("docs/contracts/error-codes.md")
-    team_division = load_text("TEAM_DIVISION.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
 
     playback_section = api_contract.split(
         "### `GET /api/v1/course-resources/{resourceId}/playback`", 1
@@ -306,7 +317,7 @@ def test_course_resource_playback_contract_is_frozen():
 
 
 def test_demo_token_and_statuses_are_consistent_across_docs():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
     env_example = load_text(".env.example")
@@ -358,7 +369,7 @@ def test_async_entity_accepts_bilibili_import_run():
 
 
 def test_lazy_handout_block_async_and_status_contract_are_frozen():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
 
     for text in (architecture, api_contract):
@@ -376,7 +387,7 @@ def test_lazy_handout_block_async_and_status_contract_are_frozen():
 
 
 def test_handout_version_status_semantics_are_frozen():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
 
     for text in (architecture, api_contract):
@@ -402,13 +413,13 @@ def test_freeze_doc_tracks_seed_titles_and_fixed_manual_course_title():
 
 def test_collaboration_docs_expose_change_flow_and_priority_matrices():
     readme = load_text("README.md")
-    team_division = load_text("TEAM_DIVISION.md")
-    scaffold = load_text("docs/development-scaffold.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
+    scaffold = load_text(SCAFFOLD_DOC)
 
     assert "文档优先级矩阵" in readme
     assert "api-contract.md" in readme
-    assert "ARCHITECTURE.md" in readme
-    assert "TEAM_DIVISION.md" in readme
+    assert ARCHITECTURE_DOC in readme
+    assert TEAM_DIVISION_DOC in readme
 
     assert "Schema / Contract 变更流程" in team_division
     assert "文档优先级矩阵" in team_division
@@ -1693,7 +1704,7 @@ def test_normalized_document_schema_rejects_garbled_text_content(bad_text: str):
 
 
 def test_demo_asset_baseline_covers_fixed_joint_test_set():
-    baseline_doc = load_text("docs/demo-assets-baseline.md")
+    baseline_doc = load_text(DEMO_ASSETS_BASELINE_DOC)
 
     for token in (
         "knowlink-demo-main.mp4",
@@ -1708,7 +1719,7 @@ def test_demo_asset_baseline_covers_fixed_joint_test_set():
 
 
 def test_first_edition_manifest_matches_first_edition_doc():
-    first_edition_doc = load_text("docs/demo-assets-first-edition.md")
+    first_edition_doc = load_text(DEMO_ASSETS_FIRST_EDITION_DOC)
     manifest = load_json("server/seeds/demo_assets_manifest.json")
 
     assert manifest["assetSetId"] == "first-edition-what-is-set"
