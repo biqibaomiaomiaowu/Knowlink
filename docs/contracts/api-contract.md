@@ -1,6 +1,6 @@
 # KnowLink API Contract
 
-本文件冻结 MVP 阶段前后端共享的请求字段、响应字段、异步返回结构和 demo 鉴权策略。曹乐 owner 的 Week 1 冻结项与固定联调资料集基线见 [week1-cao-le-freeze.md](./week1-cao-le-freeze.md) 和 [../demo-assets-baseline.md](../demo-assets-baseline.md)；Week 2 解析与问询业务 contract 见 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md)。若与其他文档冲突，以本文件为准。
+本文件冻结第一版（V1/MVP）前后端共享的请求字段、响应字段、异步返回结构和 demo 鉴权策略。曹乐 owner 的 Week 1 冻结项与固定联调资料集基线见 [week1-cao-le-freeze.md](./week1-cao-le-freeze.md) 和 [../v1/demo-assets-baseline.md](../v1/demo-assets-baseline.md)；Week 2 解析与问询业务 contract 见 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md)。若与其他 V1 文档冲突，以本文件为准。V2 功能范围、负责人分工和验收口径以根目录 [docs/v2/phase-plan.md](../v2/phase-plan.md) 为准；V2 进入实现前必须同步更新本文件或新增 V2 contract 文档，不能用本文的 V1 stub 口径否定 V2 计划。
 
 ## 1. 通用约定
 
@@ -38,7 +38,28 @@
 - 曹乐负责的解析产物字段说明、解析步骤映射、`pipeline-status` 进度 / 状态 / 失败 / `partial_success` 语义，以及问询题到 `learning_preferences` 的映射，以 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md) 为验收入口。
 - 本文件中的 API 示例只展示接口形态；解析产物和问询落库的业务含义以 Week 2 冻结入口为准。
 
-### 1.3 核心状态枚举
+### 1.3 V2 contract 过渡口径
+
+- `docs/v2/phase-plan.md` 是第二版的规划和责任口径，不直接等同于已实现 API。
+- V2 新增或重做 B站真实导入、知识图谱、实时流式输出、主观题自动判卷时，必须先补充对应 API / DTO / schema / 错误码 contract，再实施代码。
+- V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示当前第一版实现状态。
+- V2 状态拼写统一使用 `canceled`，不使用 `cancelled`。外部资料或旧 spec 中出现 `cancelled` 时，进入 API contract 前统一归一化为 `canceled`。
+- V2 B站导入细分状态建议映射到现有 `async_tasks.status`：
+
+| `bilibili_import_run.status` | `async_tasks.status` | 说明 |
+|---|---|---|
+| `pending`、`waiting_download` | `queued` | 等待元数据、排队或等待用户确认 |
+| `fetching_metadata`、`downloading`、`merging`、`uploading` | `running` | 任务正在执行 |
+| `imported` | `succeeded` | 已创建课程资源 |
+| `failed` | `failed` | 不可恢复失败 |
+| `recoverable` | `failed` | 可恢复失败，响应中必须带可重试原因 |
+| `canceled` | `canceled` | 用户或系统取消 |
+
+- V2 实时输出默认复用 `async_tasks.id` 作为任务真相源；SSE 订阅优先使用 `/api/v1/async-tasks/{taskId}/events`，若后续增加 `/api/v1/tasks` 聚合层，只能作为 `async_tasks` 的只读适配层。
+- V2 知识图谱需要补充 graph read model contract，至少冻结节点、边、证据引用、置信度、审核状态和跳转目标。
+- V2 主观题判卷需要补充主观题 schema、attempt/grading API、判卷状态、评分结果、证据引用和低置信度人审字段。
+
+### 1.4 核心状态枚举
 
 - `lifecycleStatus`: `draft` `resource_ready` `inquiry_ready` `learning_ready` `archived` `failed`
 - `pipelineStage`: `idle` `upload` `parse` `inquiry` `handout`
@@ -382,9 +403,9 @@
 }
 ```
 
-### B 站导入预留接口
+### B 站导入预留接口（V1/MVP）
 
-以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 contract，但当前服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。
+以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 contract 以本文件 1.3 的过渡口径和后续补充的 V2 API 章节为准。
 
 stub 阶段约束：
 
@@ -404,9 +425,9 @@ stub 阶段约束：
 
 说明：
 
-- stub 阶段会保留上述 `requestBody` 结构，但暂不收紧为必填校验；鉴权通过后统一返回 `501`。
+- V1 stub 阶段会保留上述 `requestBody` 结构，但暂不收紧为必填校验；鉴权通过后统一返回 `501`。
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -420,15 +441,15 @@ stub 阶段约束：
 }
 ```
 
-约束：
+V1 约束：
 
 - 第一版只冻结单个公开视频链接，不覆盖番剧、合集、收藏夹和批量导入。
 - 支持范围只包含标准视频页链接、`BV` 链接和 `b23.tv` 短链。
-- 未来接通后，该异步导入实体类型固定为 `bilibili_import_run`。
+- V2 接通后，该异步导入实体类型固定为 `bilibili_import_run`，范围按 `docs/v2/phase-plan.md` 扩展到单视频、多 P、合集、番剧。
 
 ### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -447,7 +468,7 @@ stub 阶段约束：
 
 ### `GET /api/v1/bilibili-import-runs/{importRunId}/status`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -464,7 +485,7 @@ stub 阶段约束：
 
 ### `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -480,7 +501,7 @@ stub 阶段约束：
 
 ### `POST /api/v1/bilibili/auth/qr/sessions`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -493,7 +514,7 @@ stub 阶段约束：
 
 ### `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -506,7 +527,7 @@ stub 阶段约束：
 
 ### `GET /api/v1/bilibili/auth/session`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -518,7 +539,7 @@ stub 阶段约束：
 
 ### `DELETE /api/v1/bilibili/auth/session`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -526,7 +547,7 @@ stub 阶段约束：
 }
 ```
 
-当前未实现阶段统一返回：
+V1 当前未实现阶段统一返回：
 
 ```json
 {
@@ -1021,6 +1042,19 @@ stub 阶段约束：
 }
 ```
 
+## 7A. V2 知识图谱 contract 待冻结
+
+V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知识图谱时，必须先补充 graph read model contract，至少包含：
+
+- 课程级图谱读取入口，例如 `GET /api/v1/courses/{courseId}/knowledge-graph`。
+- 子图或路径读取入口，例如围绕知识点、讲义块、题目或复习任务查询局部图谱。
+- 节点字段：稳定 `nodeId`、`nodeType`、`title`、`summary`、`mastery`、`confidence`、`sourceRefs`。
+- 边字段：稳定 `edgeId`、`edgeType`、`sourceNodeId`、`targetNodeId`、`weight`、`evidenceRefs`、`reviewStatus`。
+- 跳转字段：能回到讲义块、视频时间戳、PDF 页码、PPT 页码或 DOCX anchor。
+- 审核字段：AI 生成边和人工确认边必须可区分。
+
+在该 contract 冻结前，图谱生成、图谱查询包装、推荐增强和判卷证据链不得各自扩写不同字段。
+
 ## 8. 问答、测验、复习
 
 ### `POST /api/v1/qa/messages`
@@ -1146,6 +1180,13 @@ stub 阶段约束：
 `selectedOption` 的 contract 值是稳定选项 key：`A` / `B` / `C` / `D`。题目响应中的
 `options` 数组按该顺序对应四个选项；后端会兼容精确匹配的完整选项文本并归一化为 key，
 但前端不应依赖提交完整文本。
+
+V2 主观题判卷说明：
+
+- V1 `POST /api/v1/quizzes/{quizId}/attempts` 只冻结客观题提交，`selectedOption` 不得被复用为主观题答案。
+- V2 主观题需要新增或扩展 contract 来表达 `questionType`、`textAnswer`、`rubric`、`gradingRunId`、判卷状态、分项分数、证据引用、置信度和 `needsHumanReview`。
+- V2 判卷若走异步，必须继续使用 `async_tasks.id` 作为任务真相源，并明确 attempt 与 grading run 的对应关系。
+- 在上述 contract 冻结前，后端、前端和 AI schema 不得各自扩写主观题字段。
 
 响应 `data`：
 

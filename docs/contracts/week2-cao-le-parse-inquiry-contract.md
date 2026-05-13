@@ -5,7 +5,7 @@
 - 适用时间：2026-04-27 至 2026-05-03
 - 适用范围：`course_segments`、`handout_outline`、`handout_blocks`、`knowledge_points`、`segment_knowledge_points`、`knowledge_point_evidences`、`vector_documents` 的产物语义；解析步骤映射；解析聚合状态；问询答案落入 `learning_preferences` 的字段规则
 - 不包含：表迁移、API DTO 实现、worker provider 接入、Flutter 页面改动
-- owner 口径：字段业务含义和解析输出结构由曹乐冻结；接口、任务和落库实现仍按 [TEAM_DIVISION.md](../../TEAM_DIVISION.md) 执行
+- owner 口径：字段业务含义和解析输出结构由曹乐冻结；V1 接口、任务和落库实现仍按 [docs/v1/team-division.md](../v1/team-division.md) 执行。V2 任务的 owner、阶段计划和验收口径以 [docs/v2/phase-plan.md](../v2/phase-plan.md) 为准。
 
 若本文件与 Week 1 冻结稿冲突，以本文件对 Week 2 解析与问询链路的补充为准；引用定位规则仍沿用 [api-contract.md](./api-contract.md) 第 1 节。
 

@@ -5,7 +5,7 @@
 - 适用时间：2026-04-20 至 2026-04-26
 - 适用范围：只覆盖曹乐冻结的业务语义、状态枚举、AI/解析 contract、推荐规则和 demo 基线
 - 不包含：migration 落表、FastAPI router/service 实现、Flutter 页面接线
-- owner 口径说明：本文件中的 owner 只表示业务 contract owner；`router/service` stub 实现 owner 以 [TEAM_DIVISION.md](../../TEAM_DIVISION.md) 为准，周次排期与交付节奏以 [WEEKLY_PLAN.md](../../WEEKLY_PLAN.md) 为准
+- owner 口径说明：本文件中的 owner 只表示 V1 业务 contract owner；`router/service` stub 实现 owner 以 [docs/v1/team-division.md](../v1/team-division.md) 为准，周次排期与交付节奏以 [docs/v1/weekly-plan.md](../v1/weekly-plan.md) 为准。V2 任务以 [docs/v2/phase-plan.md](../v2/phase-plan.md) 为准。
 
 ## 1. 核心表语义
 
@@ -20,7 +20,7 @@
 | `quizzes` | 测验版本入口；题目结构由 AI schema 定义，后端实现不得自行扩写题型字段 |
 | `review_task_runs` | 复习重算版本入口；重算原因、生成数量和状态语义先冻结，再由后端落库实现 |
 
-字段全集与索引仍以 [ARCHITECTURE.md](../../ARCHITECTURE.md) 第 10 节为准，主负责人仍以 [TEAM_DIVISION.md](../../TEAM_DIVISION.md) 的 owner 表为准；本文件只负责冻结业务含义和验收口径。
+字段全集与索引仍以 [docs/v1/architecture.md](../v1/architecture.md) 第 10 节为准，V1 主负责人仍以 [docs/v1/team-division.md](../v1/team-division.md) 的 owner 表为准；本文件只负责冻结业务含义和验收口径。V2 主负责人以 [docs/v2/phase-plan.md](../v2/phase-plan.md) 为准。
 
 ## 2. 核心状态枚举
 
@@ -86,7 +86,7 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
 
 ## 6. 固定联调资料集
 
-固定资料集规范见 [../demo-assets-baseline.md](../demo-assets-baseline.md)。
+固定资料集规范见 [../v1/demo-assets-baseline.md](../v1/demo-assets-baseline.md)。
 
 - 每周联调默认使用 `1 mp4 + 1 pdf + 1 pptx + 1 docx`
 - `srt` 是可选辅助输入，不单独构成联调通过条件
@@ -103,7 +103,7 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
 
 ## 8. 第 1 周接口预留 / 第 2 周 stub 实现（业务语义冻结）
 
-- 以下内容在第 1 周先完成接口与错误码预留，在第 2 周完成当前 `501` stub 实现。
+- 以下内容在第 1 周先完成接口与错误码预留，在第 2 周完成当前 `501` stub 实现；本节仅适用于 V1，不适用于 V2 真实 B站导入。
 - 第 1 周验收范围只包含路径、命名、错误码和状态语义冻结，不要求接口已可访问。
 - B 站单视频导入接口和扫码登录接口由杨彩艺在第 2 周按曹乐第 1 周冻结的 contract 完成 `501` stub 实现。
 - 当前仅预留以下路径，不接通真实下载实现：
@@ -115,5 +115,5 @@ Week 1 允许出现的推荐理由文案只有以下 6 条：
   - `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
   - `GET /api/v1/bilibili/auth/session`
   - `DELETE /api/v1/bilibili/auth/session`
-- 当前统一错误码为 `bilibili.not_implemented`，用于明确表达“contract 已冻结、能力未接通”。
+- V1 当前统一错误码为 `bilibili.not_implemented`，用于明确表达“contract 已冻结、能力未接通”。
 - `POST /api/v1/courses/{courseId}/resources/imports/bilibili` 在 stub 阶段也统一走该 `501` 契约，不因 body 校验差异返回 `422`，但 OpenAPI 中仍保留 `videoUrl` 字段。
