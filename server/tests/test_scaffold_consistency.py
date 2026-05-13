@@ -428,9 +428,10 @@ def test_scaffold_structure_and_docs_are_aligned():
     assert "快应用工程实现" in architecture
     assert "文档优先级矩阵" in readme
     assert "当前完成度矩阵" in scaffold
-    assert "基础四表 SQLAlchemy model 与 Alembic 初始化迁移" in scaffold
-    assert "已接纳" in scaffold
-    assert "完整 SQLAlchemy 持久化仓储仍未接通" in scaffold
+    assert "SQLAlchemy model 与 Alembic 迁移" in scaffold
+    assert "第一版业务表已覆盖" in scaffold
+    assert "第一版已接通" in scaffold
+    assert "内存态 demo 适配器仍保留" in scaffold
     assert "server/schemas/api.py" not in architecture_scaffold
     assert "app_factory.py" in architecture_scaffold
     assert "router.py" in architecture_scaffold
