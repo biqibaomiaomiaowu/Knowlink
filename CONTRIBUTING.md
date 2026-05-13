@@ -72,7 +72,7 @@ docs(docs): 补充 review task 完成接口说明
 | `ai` | `server/ai/**` AI pipeline、生成策略、schema 对接 |
 | `parsers` | `server/parsers/**` 文档解析、归一化、抽取流程 |
 | `flutter` | `client_flutter/**` 页面、Provider、路由、主题、网络层 |
-| `docs` | `README.md`、`ARCHITECTURE.md`、`docs/**`、`TEAM_DIVISION.md` 等文档 |
+| `docs` | `README.md`、`docs/v1/**`、`docs/v2/**`、`docs/contracts/**`、`docs/engineering/**`、`docs/research/**` 等文档 |
 | `repo` | 仓库级配置，例如 `.env.example`、`pyproject.toml`、`docker-compose.yml` |
 
 选择规则：
