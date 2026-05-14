@@ -333,39 +333,34 @@ def _message_content_to_text(content: Any) -> str:
 def _parse_model_content(content: str, *, default_asset_id: str | None) -> list[VisionAssetResult]:
     json_text = _extract_json_object(content)
     if json_text is None:
-        text = content.strip()
-        if default_asset_id is not None and text:
-            return [VisionAssetResult(asset_id=default_asset_id, segment_type="image_caption", text=text)]
-        return []
+        raise RuntimeError("vivo multimodal response is not JSON")
 
     try:
         payload = json.loads(json_text)
-    except json.JSONDecodeError:
-        text = content.strip()
-        if default_asset_id is not None and text:
-            return [VisionAssetResult(asset_id=default_asset_id, segment_type="image_caption", text=text)]
-        return []
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"vivo multimodal response has invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("vivo multimodal response schema invalid: JSON must be an object")
 
     segments = payload.get("segments")
-    if isinstance(segments, list):
-        results: list[VisionAssetResult] = []
-        for item in segments:
-            if not isinstance(item, dict):
-                continue
-            asset_id = item.get("assetId") or item.get("asset_id") or default_asset_id
-            segment_type = item.get("segmentType") or item.get("type")
-            text = item.get("textContent") or item.get("text")
-            if (
-                isinstance(asset_id, str)
-                and asset_id.strip()
-                and segment_type in ("ocr_text", "formula", "image_caption")
-                and isinstance(text, str)
-                and text.strip()
-            ):
-                results.append(VisionAssetResult(asset_id=asset_id.strip(), segment_type=segment_type, text=text))
-        return results
+    if not isinstance(segments, list):
+        raise RuntimeError("vivo multimodal response schema invalid: segments must be a list")
 
-    return []
+    results: list[VisionAssetResult] = []
+    for index, item in enumerate(segments, start=1):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"vivo multimodal response schema invalid: segments[{index}] must be an object")
+        asset_id = item.get("assetId") or item.get("asset_id") or default_asset_id
+        segment_type = item.get("segmentType") or item.get("type")
+        text = item.get("textContent") or item.get("text")
+        if not isinstance(asset_id, str) or not asset_id.strip():
+            raise RuntimeError(f"vivo multimodal response schema invalid: segments[{index}].assetId is required")
+        if segment_type not in ("ocr_text", "formula", "image_caption"):
+            raise RuntimeError(f"vivo multimodal response schema invalid: segments[{index}].segmentType is invalid")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError(f"vivo multimodal response schema invalid: segments[{index}].textContent is required")
+        results.append(VisionAssetResult(asset_id=asset_id.strip(), segment_type=segment_type, text=text))
+    return results
 
 
 def _extract_json_object(text: str) -> str | None:

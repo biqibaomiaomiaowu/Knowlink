@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from server.domain.repositories import (
+    AsyncTaskRepository,
     CourseRepository,
     HandoutRepository,
     IdempotencyRepository,
     TaskDispatcher,
 )
+from server.domain.services.async_tasks import (
+    enqueue_or_fail_if_missing_dispatcher,
+    ensure_async_task_for_trigger,
+    raise_async_task_binding_failed,
+    refresh_enqueue_failure_status,
+    resolve_async_tasks,
+)
 from server.domain.services.errors import ServiceError
+from server.domain.services.idempotency import async_trigger_matches_course, run_scoped_idempotent
 from server.ai.handout_lazy import HandoutOutlineClient, generate_handout_outline
 
 
@@ -19,12 +28,14 @@ class HandoutService:
         idempotency: IdempotencyRepository,
         task_dispatcher: TaskDispatcher | None = None,
         outline_client: HandoutOutlineClient | None = None,
+        async_tasks: AsyncTaskRepository | None = None,
     ) -> None:
         self.courses = courses
         self.handouts = handouts
         self.idempotency = idempotency
         self.task_dispatcher = task_dispatcher
         self.outline_client = outline_client
+        self.async_tasks = resolve_async_tasks(async_tasks, handouts)
 
     def generate_handout(self, *, course_id: int, idempotency_key: str | None) -> dict[str, object]:
         course = self._ensure_course(course_id)
@@ -48,21 +59,72 @@ class HandoutService:
                 error_code=error_code,
                 error_message=error_message,
             )
-            task_id = _int_value(trigger.get("taskId"))
-            payload = {
-                "courseId": course_id,
-                "handoutVersionId": _entity_id(trigger),
-                "sourceParseRunId": course.get("activeParseRunId"),
-            }
-            if task_id is not None and payload["handoutVersionId"] is not None and _should_enqueue_trigger(trigger):
+            if _should_enqueue_trigger(trigger):
+                task_id = _int_value(trigger.get("taskId"))
+                if task_id is None:
+                    raise_async_task_binding_failed(
+                        self.async_tasks,
+                        task_id=None,
+                        message="Async task trigger did not include a task id.",
+                    )
+                handout_version_id = _entity_id(trigger)
+                if handout_version_id is None:
+                    raise_async_task_binding_failed(
+                        self.async_tasks,
+                        task_id=task_id,
+                        message="Async task trigger did not include a handout version id.",
+                    )
+                payload = {
+                    "courseId": course_id,
+                    "handoutVersionId": handout_version_id,
+                    "sourceParseRunId": course.get("activeParseRunId"),
+                }
+                trigger, task_id = ensure_async_task_for_trigger(
+                    self.async_tasks,
+                    trigger,
+                    course_id=course_id,
+                    task_type="handout_generate",
+                    payload=payload,
+                    target_type="handout_version",
+                    target_id=handout_version_id,
+                    parse_run_id=_int_value(course.get("activeParseRunId")),
+                    allow_create=True,
+                )
+                if task_id is None:
+                    raise_async_task_binding_failed(
+                        self.async_tasks,
+                        task_id=None,
+                        message="Async task trigger could not be bound.",
+                    )
                 enqueue_request = (task_id, payload)
             created_response = trigger
             return trigger
 
-        result = self.idempotency.run_idempotent("handouts.generate", idempotency_key, factory)
-        if self.task_dispatcher is not None and enqueue_request is not None and result is created_response:
+        result = run_scoped_idempotent(
+            self.idempotency,
+            action=f"handouts.generate:{course_id}",
+            key=idempotency_key,
+            factory=factory,
+            legacy_action="handouts.generate",
+            legacy_matches=lambda legacy: async_trigger_matches_course(
+                legacy,
+                course_id=course_id,
+                entity_type="handout_version",
+                task_type="handout_generate",
+                async_tasks=self.async_tasks,
+                target_type="handout_version",
+            ),
+        )
+        if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request
-            self.task_dispatcher.enqueue_handout_generate(task_id=task_id, payload=payload)
+            enqueue_or_fail_if_missing_dispatcher(
+                self.async_tasks,
+                task_id=task_id,
+                dispatcher=self.task_dispatcher,
+                enqueue=lambda: self.task_dispatcher.enqueue_handout_generate(task_id=task_id, payload=payload),
+            )
+        if isinstance(result, dict) and self.async_tasks is not None:
+            return refresh_enqueue_failure_status(self.async_tasks, result)
         return result
 
     def _build_outline_for_course(
@@ -182,7 +244,38 @@ class HandoutService:
                     error_code="qa.block_not_found",
                     status_code=404,
                 )
-            response, enqueue_request = prepared
+            response, prepared_enqueue_request = prepared
+            if prepared_enqueue_request is not None:
+                task_id, payload = prepared_enqueue_request
+                course_id = _int_value(payload.get("courseId"))
+                block_target_id = _int_value(payload.get("handoutBlockId")) or block_id
+                if self.async_tasks is not None:
+                    response, task_id = ensure_async_task_for_trigger(
+                        self.async_tasks,
+                        response,
+                        course_id=course_id,
+                        task_type="handout_block_generate",
+                        payload=payload,
+                        target_type="handout_block",
+                        target_id=block_target_id,
+                        parse_run_id=_int_value(payload.get("sourceParseRunId")),
+                        allow_create=True,
+                    )
+                if task_id is not None:
+                    enqueue_request = (task_id, payload)
+            else:
+                block_target_id = _entity_id(response) or block_id
+                response, task_id = ensure_async_task_for_trigger(
+                    self.async_tasks,
+                    response,
+                    course_id=None,
+                    task_type="handout_block_generate",
+                    payload={"handoutBlockId": block_target_id},
+                    target_type="handout_block",
+                    target_id=block_target_id,
+                )
+                if task_id is None and current_status is not None:
+                    response = current_status
             created_response = response
             return response
 
@@ -191,9 +284,16 @@ class HandoutService:
             idempotency_key,
             factory,
         )
-        if self.task_dispatcher is not None and enqueue_request is not None and result is created_response:
+        if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request
-            self.task_dispatcher.enqueue_handout_block_generate(task_id=task_id, payload=payload)
+            enqueue_or_fail_if_missing_dispatcher(
+                self.async_tasks,
+                task_id=task_id,
+                dispatcher=self.task_dispatcher,
+                enqueue=lambda: self.task_dispatcher.enqueue_handout_block_generate(task_id=task_id, payload=payload),
+            )
+        if isinstance(result, dict) and self.async_tasks is not None:
+            return refresh_enqueue_failure_status(self.async_tasks, result)
         return result
 
     def get_block_status(self, *, block_id: int) -> dict[str, object]:

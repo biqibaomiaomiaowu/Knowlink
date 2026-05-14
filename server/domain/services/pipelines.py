@@ -12,7 +12,13 @@ from server.domain.repositories import (
     ResourceRepository,
     TaskDispatcher,
 )
+from server.domain.services.async_tasks import (
+    enqueue_or_mark_failed,
+    mark_task_enqueue_failed,
+    refresh_enqueue_failure_status,
+)
 from server.domain.services.errors import ServiceError
+from server.domain.services.idempotency import async_trigger_matches_course, run_scoped_idempotent
 
 
 PIPELINE_STEPS = [
@@ -41,6 +47,8 @@ TASK_TYPE_TO_STEP = {
     "embed": "vectorize",
     "vectorize": "vectorize",
 }
+
+RETRYABLE_TASK_STATUSES = {"failed", "queued"}
 
 INITIAL_TASK_TYPE_BY_STEP = {
     "resource_validate": "resource_validate",
@@ -165,14 +173,36 @@ class PipelineService:
             enqueue_request = (root_task_id, payload)
             return created_response
 
-        result = self.idempotency.run_idempotent(
-            "pipelines.parse_start",
-            idempotency_key,
-            factory,
+        result = run_scoped_idempotent(
+            self.idempotency,
+            action=f"pipelines.parse_start:{course_id}",
+            key=idempotency_key,
+            factory=factory,
+            legacy_action="pipelines.parse_start",
+            legacy_matches=lambda legacy: async_trigger_matches_course(
+                legacy,
+                course_id=course_id,
+                entity_type="parse_run",
+                task_type="parse_pipeline",
+                async_tasks=self.async_tasks,
+                target_type="parse_run",
+            ),
         )
         if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request
-            self.task_dispatcher.enqueue_parse_pipeline(task_id=task_id, payload=payload)
+            enqueue_or_mark_failed(
+                self.async_tasks,
+                task_id=task_id,
+                enqueue=lambda: self.task_dispatcher.enqueue_parse_pipeline(task_id=task_id, payload=payload),
+                on_failure=lambda exc: self._mark_parse_tree_enqueue_failed(
+                    course_id=course_id,
+                    parse_run_id=_int_value(payload, "parseRunId", "parse_run_id"),
+                    root_task_id=task_id,
+                    exc=exc,
+                ),
+            )
+        if isinstance(result, dict):
+            return refresh_enqueue_failure_status(self.async_tasks, result)
         return result
 
     def get_parse_run(self, *, parse_run_id: int) -> dict[str, object]:
@@ -244,11 +274,63 @@ class PipelineService:
                 error_code="pipeline.task_not_found",
                 status_code=404,
             )
-        updated = self.async_tasks.update_async_task(task_id, status="queued", progress_pct=0) or task
-        if _task_type(updated) == "parse_pipeline":
-            payload = _dict_value(updated, "payloadJson", "payload_json", "payload")
-            self.task_dispatcher.enqueue_parse_pipeline(task_id=task_id, payload=payload)
+        raw_status = _raw_task_status(task)
+        if raw_status not in RETRYABLE_TASK_STATUSES:
+            raise ServiceError(
+                message=f"Async task in status {raw_status!r} cannot be retried.",
+                error_code="pipeline.task_not_retryable",
+                status_code=409,
+            )
+        task_type = _task_type(task)
+        enqueue = self._retry_enqueue_callable(task_type=task_type, task_id=task_id, task=task)
+        if enqueue is None:
+            raise ServiceError(
+                message=f"Async task type {task_type!r} cannot be retried.",
+                error_code="pipeline.task_retry_unsupported",
+                status_code=409,
+            )
+        updated = _call_with_supported_kwargs(
+            self.async_tasks.update_async_task,
+            task_id=task_id,
+            status="queued",
+            progress_pct=0,
+            clear_error=True,
+        )
+        if updated is None:
+            raise ServiceError(
+                message="Async task could not be updated for retry.",
+                error_code="pipeline.task_retry_stale",
+                status_code=409,
+            )
+        payload = _dict_value(updated, "payloadJson", "payload_json", "payload")
+        enqueue_or_mark_failed(
+            self.async_tasks,
+            task_id=task_id,
+            enqueue=lambda: enqueue(payload),
+        )
         return {"taskId": task_id, "status": "queued", "nextAction": "poll"}
+
+    def _retry_enqueue_callable(
+        self,
+        *,
+        task_type: str | None,
+        task_id: int,
+        task: dict[str, Any],
+    ) -> Callable[[dict[str, Any]], None] | None:
+        if task_type == "parse_pipeline":
+            return lambda payload: self.task_dispatcher.enqueue_parse_pipeline(task_id=task_id, payload=payload)
+        if task_type == "handout_generate":
+            return lambda payload: self.task_dispatcher.enqueue_handout_generate(task_id=task_id, payload=payload)
+        if task_type == "handout_block_generate":
+            return lambda payload: self.task_dispatcher.enqueue_handout_block_generate(task_id=task_id, payload=payload)
+        if task_type == "quiz_generate":
+            return lambda payload: self.task_dispatcher.enqueue_quiz_generate(task_id=task_id, payload=payload)
+        if task_type == "review_refresh":
+            return lambda payload: self.task_dispatcher.enqueue_review_refresh(task_id=task_id, payload=payload)
+        parent_task_id = _int_value(task, "parentTaskId", "parent_task_id")
+        if parent_task_id is not None:
+            return None
+        return None
 
     def _ensure_course(self, course_id: int) -> dict[str, object]:
         course = self.courses.get_course(course_id)
@@ -331,6 +413,23 @@ class PipelineService:
                 parent_task_id=root_task_id,
                 step_code=code,
             )
+
+    def _mark_parse_tree_enqueue_failed(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None,
+        root_task_id: int,
+        exc: Exception,
+    ) -> None:
+        if parse_run_id is None:
+            return
+        tasks = self._list_async_tasks(course_id=course_id, parse_run_id=parse_run_id)
+        for task in tasks:
+            task_id = _int_value(task, "taskId", "task_id", "id")
+            if task_id is None or task_id == root_task_id or _task_status(task) == "skipped":
+                continue
+            mark_task_enqueue_failed(self.async_tasks, task_id=task_id, exc=exc)
 
     def _create_async_task(self, **kwargs: Any) -> dict[str, Any]:
         return _call_with_supported_kwargs(self.async_tasks.create_async_task, **kwargs)
@@ -698,6 +797,11 @@ def _task_status(task: dict[str, Any] | None) -> str:
     if status == "canceled":
         return "failed"
     return status if status in STEP_STATUSES else "queued"
+
+
+def _raw_task_status(task: dict[str, Any] | None) -> str:
+    value = _value(task, "status", default="queued")
+    return str(value)
 
 
 def _parse_run_status(parse_run: dict[str, Any]) -> str:

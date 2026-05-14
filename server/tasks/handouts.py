@@ -216,25 +216,31 @@ def _run_handout_block_generate_with_session(
     finished_at = utcnow()
     task.status = "succeeded"
     task.progress_pct = 100
+    generation_metadata = _generation_metadata_from_payload(payload)
     task.result_json = {
         "courseId": course.id,
         "handoutVersionId": version.id,
         "handoutBlockId": block.id,
         "status": "ready",
     }
+    if generation_metadata:
+        task.result_json["generationMetadata"] = generation_metadata
     task.finished_at = finished_at
     course.pipeline_stage = "handout"
     course.pipeline_status = "succeeded"
     course.last_error = None
     course.updated_at = finished_at
     session.commit()
-    return {
+    result = {
         "taskId": task.id,
         "courseId": course.id,
         "handoutVersionId": version.id,
         "handoutBlockId": block.id,
         "status": "ready",
     }
+    if generation_metadata:
+        result["generationMetadata"] = generation_metadata
+    return result
 
 
 def _terminal_block_task_result(
@@ -360,6 +366,17 @@ def _segment_payload(segment: CourseSegment) -> dict[str, Any]:
     }
 
 
+def _generation_metadata_from_payload(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    metadata = payload.get("generationMetadata") or payload.get("generation_metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    source = metadata.get("source")
+    reason = metadata.get("reason")
+    if source not in {"model", "fallback"} or not isinstance(reason, str) or not reason.strip():
+        return None
+    return {"source": source, "reason": reason.strip()}
+
+
 def _replace_handout_block_vector(
     session: Session,
     block: dict[str, Any],
@@ -367,13 +384,30 @@ def _replace_handout_block_vector(
     course: Course,
     version: HandoutVersion,
 ) -> None:
-    vector_block = {
-        **block,
-        "courseId": course.id,
-        "parseRunId": version.source_parse_run_id,
-        "handoutVersionId": version.id,
-        "handoutBlockId": block["blockId"],
-    }
+    stored_block = session.get(HandoutBlock, int(block["blockId"]))
+    if stored_block is not None and stored_block.handout_version_id == version.id:
+        vector_block = {
+            "courseId": course.id,
+            "parseRunId": version.source_parse_run_id,
+            "handoutVersionId": version.id,
+            "handoutBlockId": stored_block.id,
+            "blockId": stored_block.id,
+            "outlineKey": stored_block.outline_key,
+            "title": stored_block.title,
+            "summary": stored_block.summary,
+            "contentMd": stored_block.content_md,
+            "sourceSegmentKeys": list(stored_block.source_segment_keys_json or []),
+            "knowledgePoints": list(stored_block.knowledge_points_json or []),
+            "citations": list(stored_block.citations_json or []),
+        }
+    else:
+        vector_block = {
+            **block,
+            "courseId": course.id,
+            "parseRunId": version.source_parse_run_id,
+            "handoutVersionId": version.id,
+            "handoutBlockId": block["blockId"],
+        }
     inputs = build_vector_document_inputs(handout_block=vector_block)
     session.execute(
         delete(VectorDocument).where(

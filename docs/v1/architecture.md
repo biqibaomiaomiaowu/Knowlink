@@ -81,7 +81,7 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 ### 3.1 模块化单体优先
 
 - API、异步任务、AI 编排、解析逻辑在一个代码仓内维护。
-- 运行时拆成 `api`、`worker`、`scheduler` 三个进程，而不是拆服务。
+- 运行时默认拆成 `api`、`worker` 两类进程；`scheduler` 仅保留显式启用入口，当前不作为默认生产进程。
 - 只有在吞吐量、团队规模或租户复杂度明显上升后再考虑服务拆分。
 
 ### 3.2 异步优先
@@ -153,14 +153,14 @@ flowchart LR
 
 - `api`：对 Flutter 提供 REST API、签名上传、聚合状态查询。
 - `worker`：消费解析、讲义、测验、复习相关任务。
-- `scheduler`：定时重算复习任务、清理缓存、巡检超时任务。
+- `scheduler`：当前默认禁用；后续如接入定时重算复习任务、清理缓存或巡检超时任务，必须显式设置 `KNOWLINK_SCHEDULER_ENABLED=true`。
 - `postgres`：业务真相源与向量读模型。
 - `redis`：队列、幂等、缓存、分布式锁。
 - `minio`：原始文件、页面截图、字幕、导出 JSON/Markdown。
 
 ### 5.2 自建部署建议
 
-- 开发环境：`docker compose` 起 `api + worker + scheduler + postgres + redis + minio`。
+- 开发环境：默认 `docker compose` 起 `api + worker + postgres + redis + minio`；scheduler 不随默认 compose 启动。
 - 测试/生产环境：同一镜像多进程部署，最少分成 `api` 和 `worker` 两类副本。
 - 日志：JSON 结构化日志，贯穿 `requestId`、`courseId`、`parseRunId`、`taskId`。
 
@@ -473,7 +473,7 @@ README.md
 
 规则：
 
-- 当前仓库的第 1 周口径只冻结 `async_tasks` 状态枚举、表结构、payload 和 worker / scheduler 占位；内存态 scaffold 的同步产物生成不代表真实异步运行时。
+- 当前仓库的第 1 周口径只冻结 `async_tasks` 状态枚举、表结构、payload 和 worker / scheduler 占位；scheduler 当前为显式禁用入口，内存态 scaffold 的同步产物生成不代表真实异步运行时。
 - 真实任务状态流转、Dramatiq broker 与 worker 消费从第 2 周上传 / 解析链路开始接入。
 - `async_tasks` 同时承载根任务和子任务。
 - 每次异步触发接口返回的 `taskId` 固定指向根任务。

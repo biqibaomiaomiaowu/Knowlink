@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
+from datetime import datetime
 from typing import Any, TypeVar
 
 from server.infra.repositories.memory_runtime import RuntimeStore
@@ -16,6 +18,9 @@ class MemoryScaffoldRepository:
     def run_idempotent(self, action: str, key: str | None, factory: Callable[[], T]) -> T:
         return self.store.run_idempotent(action, key, factory)
 
+    def get_idempotency_result(self, action: str, key: str | None) -> Any | None:
+        return self.store.get_idempotency_result(action, key)
+
     def create_course(
         self,
         *,
@@ -24,6 +29,7 @@ class MemoryScaffoldRepository:
         goal_text: str,
         preferred_style: str,
         catalog_id: str | None = None,
+        exam_at: datetime | None = None,
     ) -> dict[str, Any]:
         return self.store.create_course(
             title=title,
@@ -31,6 +37,7 @@ class MemoryScaffoldRepository:
             goal_text=goal_text,
             preferred_style=preferred_style,
             catalog_id=catalog_id,
+            exam_at=exam_at,
         )
 
     def list_recent_courses(self) -> list[dict[str, Any]]:
@@ -47,6 +54,9 @@ class MemoryScaffoldRepository:
 
     def get_resource(self, resource_id: int) -> dict[str, Any] | None:
         return self.store.get_resource(resource_id)
+
+    def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]:
+        return {}
 
     def delete_resource(self, course_id: int, resource_id: int) -> bool:
         resources = self.store.list_resources(course_id)
@@ -92,13 +102,15 @@ class MemoryScaffoldRepository:
         handout = self.store.handouts.get(handout_version_id)
         if handout is not None:
             _sync_memory_handout_statuses(handout)
-        return handout
+            return _memory_public_handout(handout)
+        return None
 
     def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
         handout = self.store.get_latest_handout(course_id)
         if handout is not None:
             _sync_memory_handout_statuses(handout)
-        return handout
+            return _memory_public_handout(handout)
+        return None
 
     def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
         handout = self.store.get_latest_handout(course_id)
@@ -158,6 +170,17 @@ class MemoryScaffoldRepository:
                     "handoutBlockId": block_id,
                     "sourceParseRunId": handout.get("sourceParseRunId"),
                 }
+                self.store.register_async_task(
+                    task_id=task_id,
+                    course_id=payload["courseId"],
+                    task_type="handout_block_generate",
+                    status="queued",
+                    progress_pct=0,
+                    payload_json=payload,
+                    parse_run_id=payload["sourceParseRunId"],
+                    target_type="handout_block",
+                    target_id=block_id,
+                )
                 return {
                     "taskId": task_id,
                     "status": "queued",
@@ -166,11 +189,44 @@ class MemoryScaffoldRepository:
                 }, (task_id, payload)
         return None
 
+    def save_handout_block_result(
+        self,
+        block_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        for handout in self.store.handouts.values():
+            for block in handout["blocks"]:
+                if block["blockId"] != block_id:
+                    continue
+                generation_metadata = _generation_metadata_from_payload(payload)
+                block["title"] = str(payload.get("title") or block["title"])
+                block["summary"] = str(payload.get("summary") or block["summary"])
+                block["contentMd"] = str(payload.get("contentMd") or payload.get("content_md") or "")
+                block["knowledgePoints"] = list(payload.get("knowledgePoints") or payload.get("knowledge_points") or [])
+                block["citations"] = [
+                    dict(citation)
+                    for citation in payload.get("citations", [])
+                    if isinstance(citation, Mapping)
+                ]
+                if generation_metadata:
+                    block["generationMetadata"] = generation_metadata
+                else:
+                    block.pop("generationMetadata", None)
+                _set_memory_block_status(handout, block, "ready")
+                handout["readyBlocks"] = sum(
+                    1 for item in handout["blocks"] if item.get("status") == "ready"
+                )
+                handout["pendingBlocks"] = sum(
+                    1 for item in handout["blocks"] if item.get("status") != "ready"
+                )
+                return _memory_public_block(block)
+        return None
+
     def get_handout_block_status(self, block_id: int) -> dict[str, Any] | None:
         for handout in self.store.handouts.values():
             for block in handout["blocks"]:
                 if block["blockId"] == block_id:
-                    return {
+                    payload = {
                         "blockId": block_id,
                         "outlineKey": block["outlineKey"],
                         "status": block["status"],
@@ -178,6 +234,9 @@ class MemoryScaffoldRepository:
                         "startSec": block.get("startSec"),
                         "endSec": block.get("endSec"),
                     }
+                    if block.get("generationMetadata"):
+                        payload["generationMetadata"] = dict(block["generationMetadata"])
+                    return payload
         return None
 
     def get_current_handout_block(self, course_id: int, current_sec: int) -> dict[str, Any] | None:
@@ -235,11 +294,65 @@ class MemoryScaffoldRepository:
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None:
         return self.store.quizzes.get(quiz_id)
 
-    def submit_quiz(self, quiz_id: int, answers: Sequence[dict[str, Any]] | None = None) -> dict[str, Any]:
-        return self.store.submit_quiz(quiz_id, answers or [])
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
+        return self.store.get_quiz_submission_context(quiz_id)
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self.store.save_quiz_attempt_result(
+            quiz_id,
+            quiz_attempt_result=quiz_attempt_result,
+            mastery_updates=list(mastery_updates),
+        )
 
     def next_task_id(self) -> int:
         return self.store.next_id("task")
+
+    def create_async_task(
+        self,
+        *,
+        course_id: int,
+        task_type: str,
+        status: str = "queued",
+        progress_pct: int = 0,
+        payload_json: dict[str, Any] | None = None,
+        parse_run_id: int | None = None,
+        parent_task_id: int | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
+        step_code: str | None = None,
+    ) -> dict[str, Any]:
+        return self.store.create_async_task(
+            course_id=course_id,
+            task_type=task_type,
+            status=status,
+            progress_pct=progress_pct,
+            payload_json=payload_json,
+            parse_run_id=parse_run_id,
+            parent_task_id=parent_task_id,
+            target_type=target_type,
+            target_id=target_id,
+            step_code=step_code,
+        )
+
+    def get_async_task(self, task_id: int) -> dict[str, Any] | None:
+        return self.store.get_async_task(task_id)
+
+    def list_async_tasks(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.store.list_async_tasks(course_id=course_id, parse_run_id=parse_run_id)
+
+    def update_async_task(self, task_id: int, **changes: Any) -> dict[str, Any] | None:
+        return self.store.update_async_task(task_id, **changes)
 
     def create_review_run(self, course_id: int) -> dict[str, Any]:
         return self.store.create_review_run(course_id)
@@ -300,3 +413,47 @@ def _set_memory_block_status(handout: dict[str, Any], block: dict[str, Any], sta
     block["status"] = status
     block["generationStatus"] = status
     _sync_memory_handout_statuses(handout)
+
+
+def _memory_public_handout(handout: dict[str, Any]) -> dict[str, Any]:
+    payload = deepcopy(handout)
+    payload["blocks"] = [
+        _memory_public_block(block)
+        for block in handout.get("blocks", [])
+        if isinstance(block, dict)
+    ]
+    return payload
+
+
+def _memory_public_block(block: dict[str, Any]) -> dict[str, Any]:
+    payload = deepcopy(block)
+    payload["citations"] = [
+        _memory_public_citation(citation)
+        for citation in block.get("citations", [])
+        if isinstance(citation, Mapping)
+    ]
+    return payload
+
+
+def _memory_public_citation(ref: Mapping[str, Any]) -> dict[str, Any]:
+    citation = {
+        "resourceId": ref.get("resourceId"),
+        "refLabel": ref.get("refLabel"),
+        "pageNo": ref.get("pageNo"),
+        "slideNo": ref.get("slideNo"),
+        "anchorKey": ref.get("anchorKey"),
+        "startSec": ref.get("startSec"),
+        "endSec": ref.get("endSec"),
+    }
+    return {key: value for key, value in citation.items() if value not in (None, "", [])}
+
+
+def _generation_metadata_from_payload(payload: Mapping[str, Any]) -> dict[str, str] | None:
+    raw = payload.get("generationMetadata") or payload.get("generation_metadata")
+    if not isinstance(raw, Mapping):
+        return None
+    source = raw.get("source")
+    reason = raw.get("reason")
+    if source not in {"model", "fallback"} or not isinstance(reason, str) or not reason.strip():
+        return None
+    return {"source": str(source), "reason": reason.strip()}

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import os
 import hashlib
+import json
+import os
 import tempfile
 from collections.abc import Callable, Mapping
+from functools import lru_cache
+from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+import jsonschema
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from server.ai.embedding import get_configured_embedding_client
@@ -29,6 +33,8 @@ from server.parsers import parse_resource
 
 DOCUMENT_RESOURCE_TYPES = {"pdf", "pptx", "docx"}
 VIDEO_RESOURCE_TYPES = {"mp4", "srt"}
+PIPELINE_TERMINAL_STATUSES = {"succeeded", "partial_success", "failed", "canceled"}
+PIPELINE_SUCCESS_STATUSES = {"succeeded", "partial_success"}
 STEP_CODES = [
     "resource_validate",
     "caption_extract",
@@ -87,6 +93,14 @@ def _run_with_session(
     course = _require_model(session, Course, course_id, "course.not_found")
     _validate_message_consistency(root_task=root_task, parse_run=parse_run, course=course)
     step_tasks = _step_tasks(session, course_id=course_id, parse_run_id=parse_run_id, root_task_id=task_id)
+    if _should_return_existing_pipeline_result(root_task=root_task, parse_run=parse_run):
+        return _existing_pipeline_result(
+            session=session,
+            root_task=root_task,
+            parse_run=parse_run,
+            course=course,
+        )
+    _discard_parse_run_artifacts(session=session, parse_run_id=parse_run_id)
     resources = list(
         session.scalars(
             select(CourseResource)
@@ -161,20 +175,49 @@ def _run_with_session(
     summary["issues"].extend(parse_failures)
     summary["segmentCount"] = len(parsed_segments)
 
-    if parsed_segments:
-        _finish_step(
-            step_tasks.get("knowledge_extract"),
-            status="succeeded",
-            progress_pct=100,
-            result_json={"mode": "caption_timeline_ready" if caption_segments else "document_fallback", "segmentCount": len(parsed_segments)},
+    schema_invalid_failure = _failure_with_code(parse_failures, "parse.schema_invalid")
+    if schema_invalid_failure is not None:
+        error_message = _failure_message(
+            schema_invalid_failure,
+            default="Parser returned schema-invalid normalized_document.",
         )
-    else:
+        if _failure_with_code(caption_failures, "parse.schema_invalid") is not None:
+            _finish_step(
+                step_tasks.get("caption_extract"),
+                status="failed",
+                progress_pct=100,
+                error_code="parse.schema_invalid",
+                error_message=error_message,
+            )
+        if _failure_with_code(document_failures, "parse.schema_invalid") is not None:
+            _finish_step(
+                step_tasks.get("document_parse"),
+                status="failed",
+                progress_pct=100,
+                error_code="parse.schema_invalid",
+                error_message=error_message,
+            )
+        _mark_resources_failed_for_schema_invalid(
+            resources=[resource for resource, _path in valid_resources],
+            parse_run_id=parse_run_id,
+            error_message=error_message,
+        )
+        _discard_parse_run_artifacts(session=session, parse_run_id=parse_run_id)
+        summary["segmentCount"] = 0
+        summary["vectorDocumentCount"] = 0
         _finish_step(
             step_tasks.get("knowledge_extract"),
             status="failed",
             progress_pct=100,
-            error_code="parse.segment_empty",
-            error_message="Parsing produced no active segment.",
+            error_code="parse.schema_invalid",
+            error_message=error_message,
+        )
+        _finish_step(
+            step_tasks.get("vectorize"),
+            status="failed",
+            progress_pct=100,
+            error_code="parse.schema_invalid",
+            error_message="Vectorization was skipped because parser output failed schema validation.",
         )
         return _finish_pipeline(
             session=session,
@@ -183,8 +226,36 @@ def _run_with_session(
             root_task=root_task,
             status="failed",
             summary=summary,
-            error_code="parse.segment_empty",
-            error_message="Parsing produced no active segment.",
+            error_code="parse.schema_invalid",
+            error_message=error_message,
+        )
+
+    if parsed_segments:
+        _finish_step(
+            step_tasks.get("knowledge_extract"),
+            status="succeeded",
+            progress_pct=100,
+            result_json={"mode": "caption_timeline_ready" if caption_segments else "document_fallback", "segmentCount": len(parsed_segments)},
+        )
+    else:
+        error_code = _first_failure_code(parse_failures, default="parse.segment_empty")
+        error_message = _first_failure_message(parse_failures, default="Parsing produced no active segment.")
+        _finish_step(
+            step_tasks.get("knowledge_extract"),
+            status="failed",
+            progress_pct=100,
+            error_code=error_code,
+            error_message=error_message,
+        )
+        return _finish_pipeline(
+            session=session,
+            course=course,
+            parse_run=parse_run,
+            root_task=root_task,
+            status="failed",
+            summary=summary,
+            error_code=error_code,
+            error_message=error_message,
         )
 
     vector_status, vector_count, vector_issue = _vectorize_segments(
@@ -252,6 +323,21 @@ def _parse_resource_group(
             continue
 
         document = getattr(result, "normalized_document", None) or {}
+        schema_issues = _normalized_document_schema_issues(document, expected_resource_type=resource.resource_type)
+        if schema_issues:
+            message = schema_issues[0]["message"]
+            resource.processing_status = "failed"
+            resource.last_error = f"schema invalid: {message}"
+            failures.append(
+                {
+                    "code": "parse.schema_invalid",
+                    "resourceId": resource.id,
+                    "message": message,
+                    "issues": schema_issues,
+                }
+            )
+            continue
+
         raw_segments = document.get("segments") or []
         if not isinstance(raw_segments, list) or not raw_segments:
             resource.processing_status = "failed"
@@ -309,8 +395,10 @@ def _parse_resource_group(
         status=status,
         progress_pct=100,
         result_json={"segmentCount": len(created_segments)} if created_segments else None,
-        error_code="parse.failed" if status == "failed" else None,
-        error_message="No resource in this step parsed successfully." if status == "failed" else None,
+        error_code=_first_failure_code(failures, default="parse.failed") if status == "failed" else None,
+        error_message=_first_failure_message(failures, default="No resource in this step parsed successfully.")
+        if status == "failed"
+        else None,
     )
     session.commit()
     return created_segments, failures
@@ -438,6 +526,84 @@ def _finish_pipeline(
     return {"taskId": root_task.id, "courseId": course.id, "parseRunId": parse_run.id, "status": status, **summary}
 
 
+def _should_return_existing_pipeline_result(*, root_task: AsyncTask, parse_run: ParseRun) -> bool:
+    root_status = str(root_task.status or "")
+    parse_run_status = str(parse_run.status or "")
+    if root_status in PIPELINE_TERMINAL_STATUSES:
+        return True
+    return parse_run_status in PIPELINE_SUCCESS_STATUSES
+
+
+def _existing_pipeline_result(
+    *,
+    session: Session,
+    root_task: AsyncTask,
+    parse_run: ParseRun,
+    course: Course,
+) -> dict[str, Any]:
+    status = str(parse_run.status if parse_run.status in PIPELINE_TERMINAL_STATUSES else root_task.status)
+    summary = (
+        _coerce_pipeline_summary(parse_run.summary_json)
+        or _coerce_pipeline_summary(root_task.result_json)
+        or _existing_artifact_summary(session=session, course_id=course.id, parse_run_id=parse_run.id)
+    )
+    return {"taskId": root_task.id, "courseId": course.id, "parseRunId": parse_run.id, "status": status, **summary}
+
+
+def _coerce_pipeline_summary(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    summary = dict(payload)
+    summary.setdefault("resourceCount", 0)
+    summary.setdefault("segmentCount", 0)
+    summary.setdefault("vectorDocumentCount", 0)
+    issues = summary.get("issues")
+    summary["issues"] = issues if isinstance(issues, list) else []
+    return summary
+
+
+def _existing_artifact_summary(*, session: Session, course_id: int, parse_run_id: int) -> dict[str, Any]:
+    resource_count = len(
+        session.scalars(select(CourseResource.id).where(CourseResource.course_id == course_id)).all()
+    )
+    segment_count = len(
+        session.scalars(select(CourseSegment.id).where(CourseSegment.parse_run_id == parse_run_id)).all()
+    )
+    vector_count = len(
+        session.scalars(select(VectorDocument.id).where(VectorDocument.parse_run_id == parse_run_id)).all()
+    )
+    return {
+        "resourceCount": resource_count,
+        "segmentCount": segment_count,
+        "vectorDocumentCount": vector_count,
+        "issues": [],
+    }
+
+
+def _discard_parse_run_artifacts(*, session: Session, parse_run_id: int) -> None:
+    session.execute(
+        delete(VectorDocument).where(
+            VectorDocument.parse_run_id == parse_run_id,
+            VectorDocument.owner_type == "segment",
+        )
+    )
+    session.execute(delete(CourseSegment).where(CourseSegment.parse_run_id == parse_run_id))
+    session.flush()
+
+
+def _mark_resources_failed_for_schema_invalid(
+    *,
+    resources: list[CourseResource],
+    parse_run_id: int,
+    error_message: str,
+) -> None:
+    for resource in resources:
+        resource.processing_status = "failed"
+        resource.last_error = f"schema invalid: {error_message}"
+        if resource.last_parse_run_id == parse_run_id:
+            resource.last_parse_run_id = None
+
+
 def _validate_resources(
     *,
     resources: list[CourseResource],
@@ -479,13 +645,21 @@ def _resolve_object_key(object_key: str, *, base_dir: Path, object_storage: Obje
 
 
 def _download_object_to_worker_cache(object_key: str, *, object_storage: ObjectStorage) -> Path | None:
+    cache_path = _worker_cache_path(object_key)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    download_to_file = getattr(object_storage, "download_object_to_file", None)
+    if callable(download_to_file):
+        try:
+            download_to_file(object_key, cache_path)
+        except ObjectStorageError:
+            return None
+        return cache_path
+
     try:
         content = object_storage.read_object_bytes(object_key)
     except ObjectStorageError:
         return None
 
-    cache_path = _worker_cache_path(object_key)
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_bytes(content)
     return cache_path
 
@@ -578,6 +752,86 @@ def _segment_dict(segment: CourseSegment, *, resource_type: str) -> dict[str, An
         "tokenCount": segment.token_count,
         "isActive": segment.is_active,
     }
+
+
+def _normalized_document_schema_issues(document: Any, *, expected_resource_type: str) -> list[dict[str, Any]]:
+    errors = sorted(_normalized_document_validator().iter_errors(document), key=lambda item: list(item.absolute_path))
+    issues = [
+        {
+            "code": "parse.schema_invalid",
+            "path": _json_path(error.absolute_path),
+            "message": error.message,
+        }
+        for error in errors
+    ]
+    if isinstance(document, Mapping):
+        actual_resource_type = document.get("resourceType")
+        if isinstance(actual_resource_type, str) and actual_resource_type != expected_resource_type:
+            issues.append(
+                {
+                    "code": "parse.schema_invalid",
+                    "path": "$.resourceType",
+                    "message": f"resourceType {actual_resource_type!r} does not match resource type {expected_resource_type!r}",
+                }
+            )
+    return issues
+
+
+@lru_cache(maxsize=1)
+def _normalized_document_validator() -> jsonschema.Draft202012Validator:
+    schema_text = (
+        importlib_resources.files("schemas.parse")
+        .joinpath("normalized_document.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    schema = json.loads(schema_text)
+    jsonschema.Draft202012Validator.check_schema(schema)
+    return jsonschema.Draft202012Validator(schema)
+
+
+def _json_path(parts: Any) -> str:
+    path = "$"
+    for part in parts:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        else:
+            path += f".{part}"
+    return path
+
+
+def _first_failure_code(failures: list[dict[str, Any]], *, default: str) -> str:
+    for failure in failures:
+        code = failure.get("code")
+        if code:
+            return str(code)
+    return default
+
+
+def _failure_with_code(failures: list[dict[str, Any]], code: str) -> dict[str, Any] | None:
+    for failure in failures:
+        if failure.get("code") == code:
+            return failure
+    return None
+
+
+def _failure_message(failure: dict[str, Any], *, default: str) -> str:
+    message = failure.get("message")
+    if message:
+        return str(message)
+    issues = failure.get("issues")
+    if isinstance(issues, list) and issues:
+        first_issue = issues[0]
+        if isinstance(first_issue, Mapping) and first_issue.get("message"):
+            return str(first_issue["message"])
+    return default
+
+
+def _first_failure_message(failures: list[dict[str, Any]], *, default: str) -> str:
+    for failure in failures:
+        message = _failure_message(failure, default="")
+        if message:
+            return message
+    return default
 
 
 def _required_int(payload: Mapping[str, Any], *keys: str) -> int:

@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from server.domain.services.pipelines import PipelineService
+from server.domain.services.quizzes import QuizService
+from server.infra.repositories.memory import MemoryScaffoldRepository
+from server.infra.repositories.memory_runtime import RuntimeStore
+from server.schemas.requests import SubmitQuizRequest
 from server.tests.test_api import AUTH_HEADERS, create_manual_course, request, upload_ready_pdf
 
 
@@ -47,6 +53,83 @@ def _post_parse_start(course_id: int, idempotency_key: str) -> tuple[int, dict[s
             headers=AUTH_HEADERS | {"idempotency-key": idempotency_key},
         )
     )
+
+
+class _NoopReviewDispatcher:
+    def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _ = task_id, payload
+
+
+def _submit_quiz_with_service(repo, quiz_id: int, *, question_id: int, selected_option: str) -> dict[str, Any]:
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=_NoopReviewDispatcher(),
+        async_tasks=repo,
+    )
+    return service.submit_quiz(
+        quiz_id=quiz_id,
+        payload=SubmitQuizRequest(
+            answers=[
+                {
+                    "questionId": question_id,
+                    "selectedOption": selected_option,
+                }
+            ],
+        ),
+    )
+
+
+def test_memory_handout_block_generation_metadata_persists_to_read_models():
+    repo = MemoryScaffoldRepository(RuntimeStore())
+    course = repo.create_course(
+        title="Memory metadata 课程",
+        entry_type="manual_import",
+        goal_text="验证内存讲义块 metadata",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    handout, _, blocks = repo.create_handout(course_id)
+    generation_metadata = {"source": "fallback", "reason": "model_unavailable"}
+
+    saved = repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "极限定义",
+            "summary": "理解极限定义。",
+            "contentMd": "极限定义需要同时关注自变量趋近和函数值趋近。",
+            "knowledgePoints": [{"knowledgePointKey": "kp-limit", "displayName": "极限"}],
+            "citations": [
+                {
+                    "resourceId": 501,
+                    "segmentId": 101,
+                    "segmentKey": "mp4-c1",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "refLabel": "视频 00:00-01:00",
+                }
+            ],
+            "generationMetadata": generation_metadata,
+        },
+    )
+
+    assert saved["generationMetadata"] == generation_metadata
+    for read_model in (
+        repo.get_handout(handout["handoutVersionId"])["blocks"][0],
+        repo.get_latest_handout(course_id)["blocks"][0],
+        repo.get_handout_block_status(blocks[0]["blockId"]),
+    ):
+        assert read_model["generationMetadata"] == generation_metadata
+    public_citation = repo.get_latest_handout(course_id)["blocks"][0]["citations"][0]
+    assert "segmentId" not in public_citation
+    assert "segmentKey" not in public_citation
+    internal_block = repo.store.handouts[handout["handoutVersionId"]]["blocks"][0]
+    assert internal_block["citations"][0]["segmentId"] == 101
+    assert internal_block["citations"][0]["segmentKey"] == "mp4-c1"
+    qa_context = repo.get_qa_context(course_id, blocks[0]["blockId"])
+    assert qa_context["currentBlock"]["citations"][0]["segmentId"] == 101
+    assert qa_context["currentBlock"]["citations"][0]["segmentKey"] == "mp4-c1"
 
 
 def test_app_import_keeps_basic_scaffold_without_worker_side_effects():
@@ -113,6 +196,111 @@ print(json.dumps({
     assert payload["worker_imported"] is False
     assert payload["broker_imported"] is False
     assert payload["dramatiq_imported"] is False
+
+
+def test_task_dispatcher_defaults_to_dramatiq_and_rejects_unknown_queue(monkeypatch):
+    from server.tasks.dispatcher import DramatiqTaskDispatcher, NoopTaskDispatcher, build_task_dispatcher
+
+    monkeypatch.delenv("KNOWLINK_TASK_QUEUE", raising=False)
+    assert isinstance(build_task_dispatcher(), DramatiqTaskDispatcher)
+
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "noop")
+    assert isinstance(build_task_dispatcher(), NoopTaskDispatcher)
+
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "unknown")
+    with pytest.raises(RuntimeError, match="Unsupported KNOWLINK_TASK_QUEUE"):
+        build_task_dispatcher()
+
+
+def test_settings_reject_unknown_task_queue_at_startup(monkeypatch):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "unknown")
+
+    try:
+        with pytest.raises(RuntimeError, match="Unsupported KNOWLINK_TASK_QUEUE"):
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_production_like_settings_reject_insecure_auth_and_minio_defaults(monkeypatch):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_ENV", "production")
+    monkeypatch.setenv("KNOWLINK_STORAGE_BACKEND", "minio")
+    monkeypatch.setenv("KNOWLINK_DEMO_TOKEN", "knowlink-demo-token")
+    monkeypatch.setenv("KNOWLINK_MINIO_ACCESS_KEY", "minioadmin")
+    monkeypatch.setenv("KNOWLINK_MINIO_SECRET_KEY", "minioadmin")
+
+    try:
+        with pytest.raises(RuntimeError) as exc_info:
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+    message = str(exc_info.value)
+    assert "KNOWLINK_DEMO_TOKEN" in message
+    assert "KNOWLINK_MINIO_ACCESS_KEY" in message
+    assert "KNOWLINK_MINIO_SECRET_KEY" in message
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("KNOWLINK_TASK_QUEUE", "noop"),
+        ("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "memory"),
+        ("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "demo"),
+        ("KNOWLINK_STORAGE_BACKEND", "demo"),
+        ("KNOWLINK_STORAGE_BACKEND", "fake"),
+        ("KNOWLINK_STORAGE_BACKEND", "memory"),
+        ("KNOWLINK_STORAGE_BACKEND", "local"),
+        ("KNOWLINK_STORAGE_BACKEND", "disabled"),
+    ],
+)
+def test_production_like_settings_reject_lossy_runtime_modes(monkeypatch, name: str, value: str):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_ENV", "production")
+    monkeypatch.setenv("KNOWLINK_DEMO_TOKEN", "production-token")
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "dramatiq")
+    monkeypatch.setenv("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "sql")
+    monkeypatch.setenv("KNOWLINK_STORAGE_BACKEND", "minio")
+    monkeypatch.setenv("KNOWLINK_MINIO_ACCESS_KEY", "production-access")
+    monkeypatch.setenv("KNOWLINK_MINIO_SECRET_KEY", "production-secret")
+    monkeypatch.setenv(name, value)
+
+    try:
+        with pytest.raises(RuntimeError) as exc_info:
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+    message = str(exc_info.value)
+    assert name in message
+    assert value in message
+
+
+def test_development_settings_still_allow_explicit_noop_memory_and_demo_modes(monkeypatch):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_ENV", "development")
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "noop")
+    monkeypatch.setenv("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "memory")
+    monkeypatch.setenv("KNOWLINK_STORAGE_BACKEND", "demo")
+
+    try:
+        settings = get_settings()
+    finally:
+        get_settings.cache_clear()
+
+    assert settings.task_queue == "noop"
+    assert settings.runtime_repository_backend == "memory"
+    assert settings.storage_backend == "demo"
 
 
 def test_dramatiq_default_actor_path_resolves_parse_pipeline_actor():
@@ -271,6 +459,7 @@ asyncio.run(main())
     env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
     env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'runtime.sqlite3'}"
     env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    env["KNOWLINK_TASK_QUEUE"] = "noop"
     env.pop("KNOWLINK_REPOSITORY_BACKEND", None)
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -303,6 +492,7 @@ from server.infra.db.base import Base
 from server.infra.db.session import create_session, get_engine
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tests.test_api import AUTH_HEADERS, request
+from server.tests.test_runtime_wiring_contract import _submit_quiz_with_service
 
 Base.metadata.create_all(get_engine())
 
@@ -379,6 +569,7 @@ asyncio.run(main())
     env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
     env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'handout.sqlite3'}"
     env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    env["KNOWLINK_TASK_QUEUE"] = "noop"
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=ROOT,
@@ -752,6 +943,7 @@ asyncio.run(main())
     env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
     env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'quiz.sqlite3'}"
     env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    env["KNOWLINK_TASK_QUEUE"] = "noop"
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=ROOT,
@@ -1119,6 +1311,7 @@ from server.infra.db.base import Base
 from server.infra.db.session import create_session, get_engine
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tests.test_api import AUTH_HEADERS, request
+from server.tests.test_runtime_wiring_contract import _submit_quiz_with_service
 
 Base.metadata.create_all(get_engine())
 
@@ -1251,7 +1444,13 @@ try:
             }
         ],
     )
-    attempt = repo.submit_quiz(quiz["quizId"], [{"questionKey": "q1-dashboard", "selectedOption": "A"}])
+    first_question_id = repo.get_quiz(quiz["quizId"])["questions"][0]["questionId"]
+    attempt = _submit_quiz_with_service(
+        repo,
+        quiz["quizId"],
+        question_id=first_question_id,
+        selected_option="A",
+    )
     review_run_id = attempt["reviewTaskRunId"]
     repo.save_review_task_run_result(
         review_run_id,
@@ -1552,6 +1751,7 @@ from server.infra.db.base import Base
 from server.infra.db.session import create_session, get_engine
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tasks.reviews import run_review_refresh
+from server.tests.test_runtime_wiring_contract import _submit_quiz_with_service
 
 Base.metadata.create_all(get_engine())
 
@@ -1684,7 +1884,13 @@ try:
             }
         ],
     )
-    attempt = repo.submit_quiz(quiz["quizId"], [{"questionKey": "q1-review", "selectedOption": "A"}])
+    first_question_id = repo.get_quiz(quiz["quizId"])["questions"][0]["questionId"]
+    attempt = _submit_quiz_with_service(
+        repo,
+        quiz["quizId"],
+        question_id=first_question_id,
+        selected_option="A",
+    )
     old_run_id = attempt["reviewTaskRunId"]
     tables = Base.metadata.tables
     old_task_id = session.execute(

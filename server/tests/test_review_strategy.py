@@ -114,6 +114,17 @@ def test_review_tasks_rank_by_final_priority_after_importance_bonus_before_top3(
     assert review_payload["tasks"][0]["priorityScore"] == 73
 
 
+def test_review_tasks_schema_allows_empty_payload_when_no_traceable_evidence():
+    review_payload = generate_review_tasks(
+        {"masteryDelta": [_mastery_update("kp-missing", priority=90)]},
+        quiz_payload={"quizType": "chapter_review", "questions": []},
+        handout_blocks=[],
+    )
+
+    assert review_payload == {"tasks": []}
+    REVIEW_VALIDATOR.validate(review_payload)
+
+
 def test_review_task_refs_are_written_only_when_source_evidence_can_be_traced():
     quiz_payload = _generate_quiz_payload()
     attempt = grade_quiz_attempt(

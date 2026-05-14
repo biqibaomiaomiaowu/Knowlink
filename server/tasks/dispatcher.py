@@ -225,11 +225,17 @@ class DramatiqTaskDispatcher:
         return getattr(module, attr_name)
 
 
-def build_task_dispatcher() -> NoopTaskDispatcher | DramatiqTaskDispatcher:
-    queue_mode = os.getenv("KNOWLINK_TASK_QUEUE", "noop").lower()
+def build_task_dispatcher(queue_mode: str | None = None) -> NoopTaskDispatcher | DramatiqTaskDispatcher:
+    queue_mode = (queue_mode or os.getenv("KNOWLINK_TASK_QUEUE", "dramatiq")).strip().lower()
     if queue_mode == "dramatiq":
         return DramatiqTaskDispatcher()
-    return NoopTaskDispatcher()
+    if queue_mode == "noop":
+        LOGGER.warning("Using explicit noop task dispatcher; async work will not leave this process.")
+        return NoopTaskDispatcher()
+    raise RuntimeError(
+        f"Unsupported KNOWLINK_TASK_QUEUE: {queue_mode!r}. "
+        "Use 'dramatiq' for runtime workers or explicit 'noop' for local tests/dev."
+    )
 
 
 def _log_enqueue(task_type: str, *, task_id: int, payload: dict[str, Any], adapter: str) -> None:

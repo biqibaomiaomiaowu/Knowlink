@@ -21,6 +21,7 @@ class CourseService:
                     entry_type=payload.entry_type,
                     goal_text=payload.goal_text,
                     preferred_style=payload.preferred_style,
+                    exam_at=payload.exam_at,
                 )
             }
 

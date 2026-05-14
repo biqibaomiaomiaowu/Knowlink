@@ -12,13 +12,14 @@ from sqlalchemy.pool import StaticPool
 import server.infra.db.models  # noqa: F401
 from server.api.deps import get_qa_service
 from server.app import app
-from server.domain.services import HandoutService, QaService
+from server.domain.services import QaService
 from server.infra.db.base import Base
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tests.test_api import AUTH_HEADERS, request
 from server.tests.test_handout_outline_runtime import (
     _create_course_with_active_video_segments,
     _create_course_with_overlapping_caption_segments,
+    _handout_service,
 )
 
 
@@ -33,6 +34,7 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
         )
 
         assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
         assert result["citations"] == [
             {"resourceId": pdf_segment["resourceId"], "refLabel": "PDF 第 1 页", "pageNo": 1}
         ]
@@ -59,6 +61,7 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
 
         messages = service.get_session_messages(session_id=result["sessionId"])
         assert [item["role"] for item in messages["items"]] == ["user", "assistant"]
+        assert messages["items"][1]["generationMetadata"] == result["generationMetadata"]
         assert messages["items"][1]["citations"] == result["citations"]
     finally:
         session.close()
@@ -166,7 +169,7 @@ def test_sql_qa_uses_active_adjacent_handout_block_vector_content():
     try:
         course_id, _ = _create_course_with_overlapping_caption_segments(repo)
         parse_run_id = repo.get_course(course_id)["activeParseRunId"]
-        handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        handout_service = _handout_service(repo)
         handout_service.generate_handout(course_id=course_id, idempotency_key=None)
         blocks = repo.get_latest_handout(course_id)["blocks"]
         current_block, adjacent_block = blocks[0], blocks[1]
@@ -217,7 +220,7 @@ def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
     try:
         course_id, _ = _create_course_with_three_blocks(repo)
         parse_run_id = repo.get_course(course_id)["activeParseRunId"]
-        handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        handout_service = _handout_service(repo)
         handout_service.generate_handout(course_id=course_id, idempotency_key=None)
         blocks = repo.get_latest_handout(course_id)["blocks"]
         for block in blocks:
@@ -262,7 +265,7 @@ def test_sql_qa_session_messages_hide_old_handout_version_after_regenerate():
         result = service.create_message(
             payload=_Payload(course_id=course_id, handout_block_id=block_id, question="集合的定义是什么？")
         )
-        HandoutService(courses=repo, handouts=repo, idempotency=repo).generate_handout(
+        _handout_service(repo).generate_handout(
             course_id=course_id,
             idempotency_key=None,
         )
@@ -418,7 +421,7 @@ def _ready_block_with_pdf_ref(repo: SqlAlchemyRuntimeRepository) -> tuple[int, i
             }
         ],
     )[0]
-    handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+    handout_service = _handout_service(repo)
     handout_service.generate_handout(course_id=course_id, idempotency_key=None)
     block = repo.get_latest_handout(course_id)["blocks"][0]
     repo.save_handout_block_result(

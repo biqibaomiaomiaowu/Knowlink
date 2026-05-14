@@ -75,7 +75,7 @@ def _get_memory_task_repository() -> InMemoryAsyncTaskRepository:
 
 @lru_cache
 def _get_task_dispatcher():
-    return build_task_dispatcher()
+    return build_task_dispatcher(get_settings().task_queue)
 
 
 @lru_cache
@@ -134,7 +134,10 @@ async def get_task_dispatcher(
     repo=Depends(get_week2_runtime_repository),
     async_tasks=Depends(get_async_task_repository),
 ):
-    if isinstance(async_tasks, InMemoryAsyncTaskRepository):
+    if isinstance(async_tasks, InMemoryAsyncTaskRepository) or (
+        isinstance(repo, MemoryScaffoldRepository)
+        and _supports_async_task_repository(async_tasks)
+    ):
         return InMemoryTaskDispatcher(parse_runs=repo, async_tasks=async_tasks)
     return _get_task_dispatcher()
 
@@ -200,6 +203,7 @@ async def get_inquiry_service(
 
 async def get_handout_service(
     repo=Depends(get_week2_runtime_repository),
+    async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> HandoutService:
     return HandoutService(
@@ -207,6 +211,7 @@ async def get_handout_service(
         handouts=repo,
         idempotency=repo,
         task_dispatcher=task_dispatcher,
+        async_tasks=async_tasks,
     )
 
 
@@ -218,16 +223,30 @@ async def get_qa_service(
 
 async def get_quiz_service(
     repo=Depends(get_week2_runtime_repository),
+    async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> QuizService:
-    return QuizService(courses=repo, quizzes=repo, idempotency=repo, task_dispatcher=task_dispatcher)
+    return QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=task_dispatcher,
+        async_tasks=async_tasks,
+    )
 
 
 async def get_review_service(
     repo=Depends(get_week2_runtime_repository),
+    async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> ReviewService:
-    return ReviewService(courses=repo, reviews=repo, idempotency=repo, task_dispatcher=task_dispatcher)
+    return ReviewService(
+        courses=repo,
+        reviews=repo,
+        idempotency=repo,
+        task_dispatcher=task_dispatcher,
+        async_tasks=async_tasks,
+    )
 
 
 async def get_progress_service(

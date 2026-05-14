@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any, Protocol, TypeVar
 
 
@@ -8,6 +9,8 @@ T = TypeVar("T")
 
 
 class IdempotencyRepository(Protocol):
+    def get_idempotency_result(self, action: str, key: str | None) -> Any | None: ...
+
     def run_idempotent(self, action: str, key: str | None, factory: Callable[[], T]) -> T: ...
 
 
@@ -20,6 +23,7 @@ class CourseRepository(Protocol):
         goal_text: str,
         preferred_style: str,
         catalog_id: str | None = None,
+        exam_at: datetime | None = None,
     ) -> dict[str, Any]: ...
 
     def list_recent_courses(self) -> list[dict[str, Any]]: ...
@@ -33,6 +37,8 @@ class ResourceRepository(Protocol):
     def list_resources(self, course_id: int) -> list[dict[str, Any]]: ...
 
     def get_resource(self, resource_id: int) -> dict[str, Any] | None: ...
+
+    def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]: ...
 
     def delete_resource(self, course_id: int, resource_id: int) -> bool: ...
 
@@ -77,7 +83,9 @@ class AsyncTaskRepository(Protocol):
         status: str | None = None,
         progress_pct: int | None = None,
         payload_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
         error_message: str | None = None,
+        clear_error: bool = False,
     ) -> dict[str, Any] | None: ...
 
 
@@ -163,7 +171,15 @@ class QuizRepository(Protocol):
 
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None: ...
 
-    def submit_quiz(self, quiz_id: int, answers: Sequence[dict[str, Any]]) -> dict[str, Any]: ...
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None: ...
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]: ...
 
 
 class ReviewRepository(Protocol):

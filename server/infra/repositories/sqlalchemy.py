@@ -10,8 +10,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server.parsers.base import clean_text
-from server.ai.quiz_strategy import grade_quiz_attempt
-from server.ai.review_strategy import build_mastery_record_updates
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
     AsyncTask,
@@ -109,6 +107,19 @@ class SqlAlchemyRuntimeRepository:
         finally:
             self._idempotency_depth -= 1
 
+    def get_idempotency_result(self, action: str, key: str | None) -> Any | None:
+        if not key:
+            return None
+        existing = self.session.scalar(
+            select(IdempotencyRecord).where(
+                IdempotencyRecord.action == action,
+                IdempotencyRecord.key == key,
+            )
+        )
+        if existing is None:
+            return None
+        return existing.result_json
+
     def create_course(
         self,
         *,
@@ -117,6 +128,7 @@ class SqlAlchemyRuntimeRepository:
         goal_text: str,
         preferred_style: str,
         catalog_id: str | None = None,
+        exam_at: datetime | None = None,
     ) -> dict[str, Any]:
         course = Course(
             user_id=self.user_id,
@@ -124,6 +136,7 @@ class SqlAlchemyRuntimeRepository:
             entry_type=entry_type,
             catalog_id=catalog_id,
             goal_text=goal_text,
+            exam_at=_normalize_utc_datetime(exam_at),
             preferred_style=preferred_style,
             lifecycle_status="draft",
             pipeline_stage="idle",
@@ -195,6 +208,34 @@ class SqlAlchemyRuntimeRepository:
         if resource is None:
             return None
         return _resource_dict(resource)
+
+    def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]:
+        resource_exists = self.session.scalar(
+            select(CourseResource.id).where(
+                CourseResource.course_id == course_id,
+                CourseResource.id == resource_id,
+            )
+        )
+        if resource_exists is None:
+            return {}
+
+        checks = (
+            ("asyncTasks", AsyncTask, AsyncTask.resource_id),
+            ("courseSegments", CourseSegment, CourseSegment.resource_id),
+            ("vectorDocuments", VectorDocument, VectorDocument.resource_id),
+            ("handoutBlockRefs", HandoutBlockRef, HandoutBlockRef.resource_id),
+            ("qaMessageRefs", QaMessageRef, QaMessageRef.resource_id),
+            ("quizQuestionRefs", QuizQuestionRef, QuizQuestionRef.resource_id),
+            ("reviewTaskRefs", ReviewTaskRef, ReviewTaskRef.resource_id),
+            ("userProgressVideo", UserCourseProgress, UserCourseProgress.last_video_resource_id),
+            ("userProgressDocument", UserCourseProgress, UserCourseProgress.last_doc_resource_id),
+        )
+        blockers: dict[str, int] = {}
+        for name, model, column in checks:
+            count = self.session.scalar(select(func.count()).select_from(model).where(column == resource_id)) or 0
+            if count:
+                blockers[name] = int(count)
+        return blockers
 
     def delete_resource(self, course_id: int, resource_id: int) -> bool:
         result = self.session.execute(
@@ -327,6 +368,9 @@ class SqlAlchemyRuntimeRepository:
         task = self.session.get(AsyncTask, task_id)
         if task is None:
             return None
+        if changes.pop("clear_error", False):
+            task.error_code = None
+            task.error_message = None
         for attr, value in _async_task_changes(changes).items():
             setattr(task, attr, value)
         self._commit_or_flush()
@@ -401,7 +445,7 @@ class SqlAlchemyRuntimeRepository:
             "goal_type": str(answer_values.get("goal_type") or "final_review"),
             "self_level": str(answer_values.get("mastery_level") or "intermediate"),
             "time_budget_minutes": int(answer_values.get("time_budget_minutes") or 60),
-            "exam_at": course.exam_at if course is not None else None,
+            "exam_at": _normalize_utc_datetime(course.exam_at) if course is not None else None,
             "preferred_style": str(
                 answer_values.get("handout_style")
                 or (course.preferred_style if course is not None else "balanced")
@@ -811,6 +855,7 @@ class SqlAlchemyRuntimeRepository:
         if version is None:
             return None
 
+        generation_metadata = _generation_metadata_from_response(payload)
         normalized_refs = self._normalize_handout_block_refs(block=block, version=version, payload=payload)
         block.title = str(_payload_value(payload, "title", default=block.title))
         block.summary = str(_payload_value(payload, "summary", default=block.summary))
@@ -818,10 +863,8 @@ class SqlAlchemyRuntimeRepository:
         block.status = "ready"
         block.source_segment_keys_json = list(block.source_segment_keys_json or [])
         block.knowledge_points_json = list(_payload_value(payload, "knowledgePoints", "knowledge_points", default=[]) or [])
-        block.citations_json = [
-            _public_citation_from_ref(ref)
-            for ref in normalized_refs
-        ]
+        block.citations_json = [_json_ready(ref) for ref in normalized_refs]
+        block.generation_metadata_json = _json_ready(generation_metadata) if generation_metadata else None
 
         self.session.execute(delete(HandoutBlockRef).where(HandoutBlockRef.handout_block_id == block.id))
         for ref in normalized_refs:
@@ -845,7 +888,10 @@ class SqlAlchemyRuntimeRepository:
 
         self._refresh_handout_version_status(version)
         self._commit_or_flush()
-        return _handout_block_dict(block)
+        result = _handout_block_dict(block)
+        if generation_metadata:
+            result["generationMetadata"] = generation_metadata
+        return result
 
     def create_vector_document(
         self,
@@ -964,6 +1010,7 @@ class SqlAlchemyRuntimeRepository:
             raise RuntimeError("Cannot save QA exchange for stale or invalid context.")
 
         now = utcnow()
+        generation_metadata = _generation_metadata_from_response(response)
         qa_session = QaSession(
             user_id=self.user_id,
             course_id=course_id,
@@ -976,6 +1023,7 @@ class SqlAlchemyRuntimeRepository:
                 "activeHandoutVersionId": handout_version_id,
                 "handoutBlockId": handout_block_id,
                 "candidateCount": candidate_count,
+                "generationMetadata": generation_metadata,
             },
             message_count=0,
             last_message_at=now,
@@ -1027,13 +1075,16 @@ class SqlAlchemyRuntimeRepository:
         qa_session.last_message_at = now
         self._commit_or_flush()
         citations = [] if response.get("answerType") == "insufficient_evidence" else list(response.get("citations") or [])
-        return {
+        result = {
             "sessionId": qa_session.id,
             "messageId": assistant_message.id,
             "answerMd": response["answerMd"],
             "answerType": response.get("answerType"),
             "citations": citations,
         }
+        if generation_metadata:
+            result["generationMetadata"] = generation_metadata
+        return result
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         qa_session = self.session.scalar(
@@ -1055,7 +1106,8 @@ class SqlAlchemyRuntimeRepository:
             .where(QaMessage.session_id == session_id)
             .order_by(QaMessage.created_at.asc(), QaMessage.id.asc())
         ).all()
-        return [self._qa_message_dict(message) for message in messages]
+        generation_metadata = _generation_metadata_from_response(qa_session.context_snapshot_json or {})
+        return [self._qa_message_dict(message, generation_metadata=generation_metadata) for message in messages]
 
     def create_quiz(
         self,
@@ -1210,7 +1262,30 @@ class SqlAlchemyRuntimeRepository:
         self._commit_or_flush()
         return self.get_quiz(quiz.id)
 
-    def submit_quiz(self, quiz_id: int, answers: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
+        quiz = self._get_active_quiz_model(quiz_id)
+        if quiz is None:
+            return None
+        questions = self.session.scalars(
+            select(QuizQuestion)
+            .where(QuizQuestion.quiz_id == quiz.id)
+            .order_by(QuizQuestion.sort_no.asc(), QuizQuestion.id.asc())
+        ).all()
+        return {
+            "quizPayload": {
+                "quizType": quiz.quiz_type,
+                "questions": [_quiz_question_private_dict(question) for question in questions],
+            },
+            "masteryRecords": self._list_mastery_record_dicts(course_id=quiz.course_id),
+        }
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
         quiz = self._get_active_quiz_model(quiz_id)
         if quiz is None:
             raise ValueError(f"Quiz {quiz_id} was not found.")
@@ -1219,16 +1294,8 @@ class SqlAlchemyRuntimeRepository:
             .where(QuizQuestion.quiz_id == quiz.id)
             .order_by(QuizQuestion.sort_no.asc(), QuizQuestion.id.asc())
         ).all()
-        quiz_payload = {
-            "quizType": quiz.quiz_type,
-            "questions": [_quiz_question_private_dict(question) for question in questions],
-        }
-        result = grade_quiz_attempt(quiz_payload, answers)
-        mastery_updates = build_mastery_record_updates(
-            result,
-            existing_records=self._list_mastery_record_dicts(course_id=quiz.course_id),
-        )
-
+        result = dict(quiz_attempt_result)
+        mastery_updates = list(mastery_updates)
         attempt = QuizAttempt(
             user_id=self.user_id,
             course_id=quiz.course_id,
@@ -2032,7 +2099,7 @@ class SqlAlchemyRuntimeRepository:
             ).all()
         )
 
-    def _qa_message_dict(self, message: QaMessage) -> dict[str, Any]:
+    def _qa_message_dict(self, message: QaMessage, *, generation_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         refs = []
         if message.role == "assistant":
             ref_rows = self.session.scalars(
@@ -2041,7 +2108,7 @@ class SqlAlchemyRuntimeRepository:
                 .order_by(QaMessageRef.sort_no.asc(), QaMessageRef.id.asc())
             ).all()
             refs = [_qa_public_citation(row) for row in ref_rows]
-        return {
+        payload = {
             "sessionId": message.session_id,
             "messageId": message.id,
             "role": message.role,
@@ -2050,6 +2117,9 @@ class SqlAlchemyRuntimeRepository:
             "answerType": message.answer_type,
             "citations": refs,
         }
+        if message.role == "assistant" and generation_metadata:
+            payload["generationMetadata"] = generation_metadata
+        return payload
 
     def _resource_type(self, resource_id: int) -> str | None:
         resource = self.session.get(CourseResource, resource_id)
@@ -2303,6 +2373,7 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "entryType": course.entry_type,
         "catalogId": course.catalog_id,
         "goalText": course.goal_text,
+        "examAt": _normalize_utc_datetime(course.exam_at),
         "preferredStyle": course.preferred_style,
         "lifecycleStatus": course.lifecycle_status,
         "pipelineStage": course.pipeline_stage,
@@ -2311,6 +2382,14 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "activeHandoutVersionId": course.active_handout_version_id,
         "updatedAt": course.updated_at,
     }
+
+
+def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _resource_dict(resource: CourseResource) -> dict[str, Any]:
@@ -2643,8 +2722,19 @@ def _handout_outline_dict(
     }
 
 
+LEGACY_HANDOUT_BLOCK_GENERATION_METADATA = {"source": "fallback", "reason": "legacy_unknown"}
+
+
+def _handout_block_generation_metadata(block: HandoutBlock) -> dict[str, Any] | None:
+    if block.generation_metadata_json:
+        return dict(block.generation_metadata_json)
+    if block.status == "ready":
+        return dict(LEGACY_HANDOUT_BLOCK_GENERATION_METADATA)
+    return None
+
+
 def _handout_block_dict(block: HandoutBlock) -> dict[str, Any]:
-    return {
+    payload = {
         "blockId": block.id,
         "handoutVersionId": block.handout_version_id,
         "outlineKey": block.outline_key,
@@ -2657,12 +2747,16 @@ def _handout_block_dict(block: HandoutBlock) -> dict[str, Any]:
         "endSec": block.end_sec,
         "sourceSegmentKeys": list(block.source_segment_keys_json or []),
         "knowledgePoints": block.knowledge_points_json or [],
-        "citations": block.citations_json or [],
+        "citations": [_public_citation_from_ref(citation) for citation in block.citations_json or []],
     }
+    generation_metadata = _handout_block_generation_metadata(block)
+    if generation_metadata:
+        payload["generationMetadata"] = generation_metadata
+    return payload
 
 
 def _handout_block_status_dict(block: HandoutBlock) -> dict[str, Any]:
-    return {
+    payload = {
         "blockId": block.id,
         "outlineKey": block.outline_key,
         "status": block.status,
@@ -2670,13 +2764,15 @@ def _handout_block_status_dict(block: HandoutBlock) -> dict[str, Any]:
         "startSec": block.start_sec,
         "endSec": block.end_sec,
     }
+    generation_metadata = _handout_block_generation_metadata(block)
+    if generation_metadata:
+        payload["generationMetadata"] = generation_metadata
+    return payload
 
 
 def _public_citation_from_ref(ref: dict[str, Any]) -> dict[str, Any]:
     citation = {
         "resourceId": ref.get("resourceId"),
-        "segmentId": ref.get("segmentId"),
-        "segmentKey": ref.get("segmentKey"),
         "refLabel": ref.get("refLabel"),
         "pageNo": ref.get("pageNo"),
         "slideNo": ref.get("slideNo"),
@@ -2698,6 +2794,17 @@ def _qa_public_citation(ref: QaMessageRef) -> dict[str, Any]:
         "endSec": ref.end_sec,
     }
     return {key: value for key, value in citation.items() if value not in (None, "", [])}
+
+
+def _generation_metadata_from_response(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    metadata = _payload_value(payload, "generationMetadata", "generation_metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    source = metadata.get("source")
+    reason = metadata.get("reason")
+    if source not in {"model", "fallback"} or not isinstance(reason, str) or not reason.strip():
+        return None
+    return {"source": source, "reason": reason.strip()}
 
 
 def _vector_document_dict(document: VectorDocument) -> dict[str, Any]:

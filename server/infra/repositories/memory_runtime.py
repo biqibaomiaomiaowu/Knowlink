@@ -41,6 +41,7 @@ class RuntimeStore:
     qa_sessions: dict[int, dict[str, Any]] = field(default_factory=dict)
     review_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
     review_tasks: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    async_tasks: dict[int, dict[str, Any]] = field(default_factory=dict)
     progress: dict[int, dict[str, Any]] = field(default_factory=dict)
 
     def next_id(self, key: str) -> int:
@@ -60,6 +61,12 @@ class RuntimeStore:
             self.idempotency[slot] = value
         return value
 
+    def get_idempotency_result(self, action: str, key: str | None):
+        if not key:
+            return None
+        with self.lock:
+            return self.idempotency.get((action, key))
+
     def create_course(
         self,
         *,
@@ -68,6 +75,7 @@ class RuntimeStore:
         goal_text: str,
         preferred_style: str,
         catalog_id: str | None = None,
+        exam_at: datetime | None = None,
     ) -> dict[str, Any]:
         course_id = self.next_id("course")
         course = {
@@ -76,6 +84,7 @@ class RuntimeStore:
             "entryType": entry_type,
             "catalogId": catalog_id,
             "goalText": goal_text,
+            "examAt": exam_at,
             "preferredStyle": preferred_style,
             "lifecycleStatus": "draft",
             "pipelineStage": "idle",
@@ -141,6 +150,17 @@ class RuntimeStore:
         course["pipelineStatus"] = "succeeded"
         course["activeParseRunId"] = parse_run_id
         course["updatedAt"] = utcnow()
+        self.register_async_task(
+            task_id=task_id,
+            course_id=course_id,
+            task_type="parse_pipeline",
+            status="queued",
+            progress_pct=0,
+            payload_json={"courseId": course_id, "parseRunId": parse_run_id},
+            parse_run_id=parse_run_id,
+            target_type="parse_run",
+            target_id=parse_run_id,
+        )
         return run, {
             "taskId": task_id,
             "status": "queued",
@@ -269,6 +289,22 @@ class RuntimeStore:
         course["pipelineStage"] = "handout"
         course["pipelineStatus"] = "succeeded"
         course["updatedAt"] = utcnow()
+        payload = {
+            "courseId": course_id,
+            "handoutVersionId": handout_version_id,
+            "sourceParseRunId": handout["sourceParseRunId"],
+        }
+        self.register_async_task(
+            task_id=task_id,
+            course_id=course_id,
+            task_type="handout_generate",
+            status="queued",
+            progress_pct=0,
+            payload_json=payload,
+            parse_run_id=handout["sourceParseRunId"],
+            target_type="handout_version",
+            target_id=handout_version_id,
+        )
         return handout, {
             "taskId": task_id,
             "status": "queued",
@@ -360,6 +396,9 @@ class RuntimeStore:
         user_message_id = self.next_id("qa_message")
         assistant_message_id = self.next_id("qa_message")
         citations = [] if response.get("answerType") == "insufficient_evidence" else list(response.get("citations") or [])
+        generation_metadata = response.get("generationMetadata")
+        if not isinstance(generation_metadata, dict):
+            generation_metadata = None
         payload = {
             "sessionId": session_id,
             "messageId": assistant_message_id,
@@ -367,6 +406,8 @@ class RuntimeStore:
             "answerType": response.get("answerType"),
             "citations": citations,
         }
+        if generation_metadata:
+            payload["generationMetadata"] = generation_metadata
         self.qa_sessions[session_id] = {
             "context": {
                 "courseId": context.get("courseId"),
@@ -374,6 +415,7 @@ class RuntimeStore:
                 "activeHandoutVersionId": context.get("activeHandoutVersionId"),
                 "handoutBlockId": context.get("handoutBlockId"),
                 "candidateCount": candidate_count,
+                "generationMetadata": generation_metadata,
             },
             "messages": [
                 {
@@ -505,6 +547,20 @@ class RuntimeStore:
             "questions": [],
         }
         self.quizzes[quiz_id] = quiz
+        self.register_async_task(
+            task_id=task_id,
+            course_id=course_id,
+            task_type="quiz_generate",
+            status="queued",
+            progress_pct=0,
+            payload_json={
+                "courseId": course_id,
+                "quizId": quiz_id,
+                "questionCountLevel": question_count_level,
+            },
+            target_type="quiz",
+            target_id=quiz_id,
+        )
         return quiz, {
             "taskId": task_id,
             "status": "queued",
@@ -513,25 +569,36 @@ class RuntimeStore:
             "payload": {"questionCountLevel": question_count_level},
         }
 
-    def submit_quiz(self, quiz_id: int, answers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        _ = answers
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
+        quiz = self.quizzes.get(quiz_id)
+        if quiz is None:
+            return None
+        return {
+            "quizPayload": {
+                "quizType": quiz.get("quizType", "chapter_review"),
+                "questions": list(quiz.get("questions", [])),
+            },
+            "masteryRecords": [],
+        }
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        _ = mastery_updates
         attempt_id = self.next_id("attempt")
         review_run = self.create_review_run(self.quizzes[quiz_id]["courseId"])
         return {
             "attemptId": attempt_id,
-            "score": 100,
-            "totalScore": 100,
-            "accuracy": 1.0,
+            "score": int(quiz_attempt_result.get("score", 0)),
+            "totalScore": int(quiz_attempt_result.get("totalScore", 0)),
+            "accuracy": float(quiz_attempt_result.get("accuracy", 0.0)),
             "reviewTaskRunId": review_run["reviewTaskRunId"],
-            "masteryDelta": [
-                {"knowledgePoint": "极限定义", "delta": 0.2, "status": "improved"},
-                {"knowledgePoint": "导数几何意义", "delta": 0.1, "status": "stable"},
-            ],
-            "recommendedReviewAction": {
-                "type": "revisit_block",
-                "targetBlockId": 4001,
-                "reason": "建议先回看易错知识块，再进入下一轮练习。",
-            },
+            "masteryDelta": list(quiz_attempt_result.get("masteryDelta", [])),
+            "recommendedReviewAction": quiz_attempt_result.get("recommendedReviewAction"),
         }
 
     def create_review_run(self, course_id: int) -> dict[str, Any]:
@@ -574,6 +641,103 @@ class RuntimeStore:
         self.review_runs[review_run_id] = run
         self.review_tasks[course_id] = tasks
         return run
+
+    def create_async_task(
+        self,
+        *,
+        course_id: int,
+        task_type: str,
+        status: str = "queued",
+        progress_pct: int = 0,
+        payload_json: dict[str, Any] | None = None,
+        parse_run_id: int | None = None,
+        parent_task_id: int | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
+        step_code: str | None = None,
+    ) -> dict[str, Any]:
+        task_id = self.next_id("task")
+        return self.register_async_task(
+            task_id=task_id,
+            course_id=course_id,
+            task_type=task_type,
+            status=status,
+            progress_pct=progress_pct,
+            payload_json=payload_json,
+            parse_run_id=parse_run_id,
+            parent_task_id=parent_task_id,
+            target_type=target_type,
+            target_id=target_id,
+            step_code=step_code,
+        )
+
+    def register_async_task(
+        self,
+        *,
+        task_id: int,
+        course_id: int,
+        task_type: str,
+        status: str = "queued",
+        progress_pct: int = 0,
+        payload_json: dict[str, Any] | None = None,
+        parse_run_id: int | None = None,
+        parent_task_id: int | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
+        step_code: str | None = None,
+    ) -> dict[str, Any]:
+        task = {
+            "taskId": task_id,
+            "courseId": course_id,
+            "parseRunId": parse_run_id,
+            "taskType": task_type,
+            "status": status,
+            "progressPct": progress_pct,
+            "payloadJson": payload_json or {},
+            "parentTaskId": parent_task_id,
+            "targetType": target_type,
+            "targetId": target_id,
+            "stepCode": step_code,
+            "errorCode": None,
+            "errorMessage": None,
+        }
+        self.async_tasks[task_id] = task
+        return task
+
+    def get_async_task(self, task_id: int) -> dict[str, Any] | None:
+        return self.async_tasks.get(task_id)
+
+    def list_async_tasks(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return [
+            task
+            for task in self.async_tasks.values()
+            if task["courseId"] == course_id
+            and (parse_run_id is None or task["parseRunId"] == parse_run_id)
+        ]
+
+    def update_async_task(self, task_id: int, **changes: Any) -> dict[str, Any] | None:
+        task = self.async_tasks.get(task_id)
+        if task is None:
+            return None
+        if changes.get("clear_error"):
+            task["errorCode"] = None
+            task["errorMessage"] = None
+        if "status" in changes and changes["status"] is not None:
+            task["status"] = changes["status"]
+        if "progress_pct" in changes and changes["progress_pct"] is not None:
+            task["progressPct"] = changes["progress_pct"]
+        if "payload_json" in changes and changes["payload_json"] is not None:
+            task["payloadJson"] = changes["payload_json"]
+        if "error_code" in changes and changes["error_code"] is not None:
+            task["errorCode"] = changes["error_code"]
+        if "error_message" in changes and changes["error_message"] is not None:
+            task["errorMessage"] = changes["error_message"]
+        return task
 
     def list_review_tasks(self, course_id: int) -> list[dict[str, Any]]:
         if course_id not in self.review_tasks:

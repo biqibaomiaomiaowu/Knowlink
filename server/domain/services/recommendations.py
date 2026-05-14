@@ -6,6 +6,7 @@ from pathlib import Path
 
 from server.domain.repositories import CourseRepository, IdempotencyRepository
 from server.domain.services.errors import ServiceError
+from server.domain.services.idempotency import recommendation_result_matches_catalog, run_scoped_idempotent
 from server.schemas.common import ResourceManifestItem
 from server.schemas.responses import RecommendationCard
 from server.schemas.requests import ConfirmRecommendationRequest, RecommendationRequest
@@ -124,14 +125,18 @@ class RecommendationFlowService:
                 goal_text=payload.goal_text,
                 preferred_style=payload.preferred_style,
                 catalog_id=catalog_id,
+                exam_at=payload.exam_at,
             )
             return {
                 "course": course,
                 "createdFromCatalogId": catalog_id,
             }
 
-        return self.idempotency.run_idempotent(
-            "recommendation.confirm",
-            idempotency_key,
-            factory,
+        return run_scoped_idempotent(
+            self.idempotency,
+            action=f"recommendation.confirm:{catalog_id}",
+            key=idempotency_key,
+            factory=factory,
+            legacy_action="recommendation.confirm",
+            legacy_matches=lambda result: recommendation_result_matches_catalog(result, catalog_id=catalog_id),
         )

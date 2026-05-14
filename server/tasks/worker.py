@@ -13,6 +13,13 @@ from server.tasks.quizzes import run_quiz_generate
 from server.tasks.reviews import run_review_refresh
 
 
+def _validate_worker_startup_settings() -> None:
+    get_settings()
+
+
+_validate_worker_startup_settings()
+
+
 @dramatiq.actor(queue_name=get_dramatiq_queue_name())
 def parse_pipeline(message: dict[str, Any]) -> None:
     run_parse_pipeline(message, object_storage=build_object_storage(get_settings()))

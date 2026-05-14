@@ -28,7 +28,7 @@ def test_sql_handout_generate_persists_latest_outline_and_api_read_model():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, segment_keys = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
 
         trigger = service.generate_handout(course_id=course_id, idempotency_key=None)
         handout_version_id = trigger["entity"]["id"]
@@ -100,12 +100,7 @@ def test_sql_handout_generate_uses_semantic_outline_client_and_document_context(
             ],
         )
         outline_client = _SemanticOutlineClient()
-        service = HandoutService(
-            courses=repo,
-            handouts=repo,
-            idempotency=repo,
-            outline_client=outline_client,
-        )
+        service = _handout_service(repo, outline_client=outline_client)
 
         trigger = service.generate_handout(course_id=course_id, idempotency_key=None)
         handout_version_id = trigger["entity"]["id"]
@@ -134,12 +129,7 @@ def test_sql_handout_generate_falls_back_and_records_invalid_outline_issues():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, segment_keys = _create_course_with_active_video_segments(repo)
-        service = HandoutService(
-            courses=repo,
-            handouts=repo,
-            idempotency=repo,
-            outline_client=_InvalidTimelineOutlineClient(),
-        )
+        service = _handout_service(repo, outline_client=_InvalidTimelineOutlineClient())
 
         service.generate_handout(course_id=course_id, idempotency_key=None)
 
@@ -202,7 +192,7 @@ def test_handout_generate_worker_finishes_root_task_without_generating_blocks():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         trigger = service.generate_handout(course_id=course_id, idempotency_key=None)
         handout_version_id = trigger["entity"]["id"]
 
@@ -239,7 +229,7 @@ def test_handout_generate_worker_rejects_old_parse_run_after_reparse():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         trigger = service.generate_handout(course_id=course_id, idempotency_key=None)
         old_handout_version_id = trigger["entity"]["id"]
         old_parse_run_id = repo.get_course(course_id)["activeParseRunId"]
@@ -301,7 +291,7 @@ def test_sql_ready_handout_block_persists_content_and_normalized_refs():
                 }
             ],
         )
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
 
@@ -338,8 +328,6 @@ def test_sql_ready_handout_block_persists_content_and_normalized_refs():
         assert saved["citations"] == [
             {
                 "resourceId": pdf_resource["resourceId"],
-                "segmentId": pdf_segments[0]["segmentId"],
-                "segmentKey": pdf_segments[0]["segmentKey"],
                 "refLabel": "模型给错页码时以 segment 为准",
                 "pageNo": 2,
             }
@@ -420,7 +408,7 @@ def test_sql_ready_handout_block_refs_normalize_ppt_and_docx_locators():
                 }
             ],
         )
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
 
@@ -452,15 +440,11 @@ def test_sql_ready_handout_block_refs_normalize_ppt_and_docx_locators():
         assert saved["citations"] == [
             {
                 "resourceId": ppt_resource["resourceId"],
-                "segmentId": ppt_segments[0]["segmentId"],
-                "segmentKey": ppt_segments[0]["segmentKey"],
                 "refLabel": "模型给错 slide 时以 segment 为准",
                 "slideNo": 6,
             },
             {
                 "resourceId": docx_resource["resourceId"],
-                "segmentId": docx_segments[0]["segmentId"],
-                "segmentKey": docx_segments[0]["segmentKey"],
                 "refLabel": "模型给错 anchor 时以 segment 为准",
                 "anchorKey": docx_segments[0]["segmentKey"],
             },
@@ -509,7 +493,7 @@ def test_sql_ready_handout_block_refs_reject_non_candidate_segments_and_untruste
                 }
             ],
         )
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
 
@@ -544,7 +528,7 @@ def test_sql_ready_handout_block_refs_accept_block_range_video_citation_on_first
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
         first_segment_id = int(str(block["sourceSegmentKeys"][0]).removeprefix("segment-"))
@@ -577,8 +561,6 @@ def test_sql_ready_handout_block_refs_accept_block_range_video_citation_on_first
         assert saved["citations"] == [
             {
                 "resourceId": first_segment["resource_id"],
-                "segmentId": first_segment_id,
-                "segmentKey": block["sourceSegmentKeys"][0],
                 "refLabel": "视频全段",
                 "startSec": block["startSec"],
                 "endSec": block["endSec"],
@@ -593,7 +575,7 @@ def test_sql_ready_handout_block_result_rejects_old_version_block():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         old_block_id = repo.get_latest_handout(course_id)["blocks"][0]["blockId"]
         service.generate_handout(course_id=course_id, idempotency_key=None)
@@ -616,7 +598,7 @@ def test_latest_handout_requires_active_version_not_latest_created_fallback():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
 
         courses = Base.metadata.tables["courses"]
@@ -637,7 +619,7 @@ def test_active_handout_reads_reject_stale_parse_run_pointer():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         handout_version_id = repo.get_course(course_id)["activeHandoutVersionId"]
         block_id = repo.get_latest_handout(course_id)["blocks"][0]["blockId"]
@@ -831,6 +813,7 @@ def test_ready_handout_block_generate_returns_status_without_requeue():
         )
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
+        generation_metadata = {"source": "model", "reason": "test"}
         repo.save_handout_block_result(
             block["blockId"],
             {
@@ -840,6 +823,7 @@ def test_ready_handout_block_generate_returns_status_without_requeue():
                 "sourceSegmentKeys": block["sourceSegmentKeys"],
                 "knowledgePoints": [],
                 "citations": [],
+                "generationMetadata": generation_metadata,
             },
         )
 
@@ -852,6 +836,7 @@ def test_ready_handout_block_generate_returns_status_without_requeue():
             "generationStatus": "ready",
             "startSec": block["startSec"],
             "endSec": block["endSec"],
+            "generationMetadata": generation_metadata,
         }
     finally:
         session.close()
@@ -871,6 +856,7 @@ def test_same_idempotency_key_returns_ready_status_after_block_generation_finish
         )
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
+        generation_metadata = {"source": "model", "reason": "test"}
 
         first = service.generate_block(block_id=block["blockId"], idempotency_key="same-key")
         assert first["status"] == "queued"
@@ -887,6 +873,7 @@ def test_same_idempotency_key_returns_ready_status_after_block_generation_finish
                 "sourceSegmentKeys": block["sourceSegmentKeys"],
                 "knowledgePoints": [],
                 "citations": [],
+                "generationMetadata": generation_metadata,
             },
         )
         repeat = service.generate_block(block_id=block["blockId"], idempotency_key="same-key")
@@ -898,6 +885,7 @@ def test_same_idempotency_key_returns_ready_status_after_block_generation_finish
             "generationStatus": "ready",
             "startSec": block["startSec"],
             "endSec": block["endSec"],
+            "generationMetadata": generation_metadata,
         }
         assert len(dispatcher.block_calls) == 1
     finally:
@@ -909,7 +897,7 @@ def test_current_block_matches_boundaries_and_prefetches_next_pending_block():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_overlapping_caption_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         blocks = repo.get_latest_handout(course_id)["blocks"]
 
@@ -976,7 +964,7 @@ def test_jump_target_prefers_handout_block_ref_doc_locator_and_keeps_video_time(
             parse_run_id=parse_run_id,
             segments=[{"segmentType": "pdf_page_text", "orderNo": 10, "textContent": "集合定义补充。", "pageNo": 4}],
         )[0]
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
         repo.save_handout_block_result(
@@ -1013,7 +1001,7 @@ def test_ready_handout_jump_target_video_resource_can_resolve_playback_url():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        handout_service = _handout_service(repo)
         handout_service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
         saved = repo.save_handout_block_result(
@@ -1073,7 +1061,7 @@ def test_handout_block_worker_generates_one_block_refs_and_vector_document():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
         trigger, _ = repo.prepare_handout_block_generation(block["blockId"])
@@ -1116,7 +1104,8 @@ def test_handout_block_worker_generates_one_block_refs_and_vector_document():
         saved_block = repo.get_latest_handout(course_id)["blocks"][0]
         assert saved_block["status"] == "ready"
         assert saved_block["contentMd"].startswith("## 集合定义")
-        assert saved_block["citations"][0]["segmentId"] == source_segment_id
+        assert "segmentId" not in saved_block["citations"][0]
+        assert "segmentKey" not in saved_block["citations"][0]
 
         vector_documents = Base.metadata.tables["vector_documents"]
         vector_row = session.execute(
@@ -1128,6 +1117,7 @@ def test_handout_block_worker_generates_one_block_refs_and_vector_document():
         assert vector_row["course_id"] == course_id
         assert vector_row["handout_version_id"] == repo.get_course(course_id)["activeHandoutVersionId"]
         assert "集合定义" in vector_row["content_text"]
+        assert vector_row["metadata_json"]["citationSegmentKeys"] == [source_segment_key]
     finally:
         session.close()
         engine.dispose()
@@ -1137,7 +1127,7 @@ def test_handout_block_worker_duplicate_delivery_does_not_rerun_ready_block():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
         trigger, _ = repo.prepare_handout_block_generation(block["blockId"])
@@ -1195,7 +1185,7 @@ def test_old_version_block_status_and_jump_target_are_not_visible():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         old_block_id = repo.get_latest_handout(course_id)["blocks"][0]["blockId"]
         service.generate_handout(course_id=course_id, idempotency_key=None)
@@ -1211,7 +1201,7 @@ def test_handout_block_worker_failure_refreshes_version_status_counts():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
         trigger, _ = repo.prepare_handout_block_generation(block["blockId"])
@@ -1245,7 +1235,7 @@ def test_handout_block_worker_rejects_old_parse_run_after_reparse():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
         old_handout_version_id = repo.get_course(course_id)["activeHandoutVersionId"]
@@ -1303,7 +1293,7 @@ def test_latest_handout_blocks_read_active_version_only_after_regenerate():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_active_video_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
 
         first = service.generate_handout(course_id=course_id, idempotency_key=None)
         first_block_id = repo.get_latest_handout(course_id)["blocks"][0]["blockId"]
@@ -1323,7 +1313,7 @@ def test_sql_handout_generate_merges_cross_group_caption_overlap():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, segment_keys = _create_course_with_overlapping_caption_segments(repo)
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
 
         service.generate_handout(course_id=course_id, idempotency_key=None)
 
@@ -1356,7 +1346,7 @@ def test_latest_outline_returns_404_without_active_handout():
             goal_text="验证无 active handout",
             preferred_style="balanced",
         )
-        service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        service = _handout_service(repo)
 
         with _override_handout_service(service):
             status, body = asyncio.run(
@@ -1768,3 +1758,8 @@ class _RecordingHandoutDispatcher:
 
     def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
         self.block_calls.append({"taskId": task_id, "payload": payload})
+
+
+def _handout_service(repo: Any, **kwargs: Any) -> HandoutService:
+    kwargs.setdefault("task_dispatcher", _RecordingHandoutDispatcher())
+    return HandoutService(courses=repo, handouts=repo, idempotency=repo, **kwargs)
