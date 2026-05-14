@@ -11,6 +11,8 @@ from typing import Any
 
 from server.domain.services.pipelines import PipelineService
 from server.domain.services.quizzes import QuizService
+from server.infra.repositories.memory import MemoryScaffoldRepository
+from server.infra.repositories.memory_runtime import RuntimeStore
 from server.schemas.requests import SubmitQuizRequest
 from server.tests.test_api import AUTH_HEADERS, create_manual_course, request, upload_ready_pdf
 
@@ -75,6 +77,57 @@ def _submit_quiz_with_service(repo, quiz_id: int, *, question_id: int, selected_
             ],
         ),
     )
+
+
+def test_memory_handout_block_generation_metadata_persists_to_read_models():
+    repo = MemoryScaffoldRepository(RuntimeStore())
+    course = repo.create_course(
+        title="Memory metadata 课程",
+        entry_type="manual_import",
+        goal_text="验证内存讲义块 metadata",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    handout, _, blocks = repo.create_handout(course_id)
+    generation_metadata = {"source": "fallback", "reason": "model_unavailable"}
+
+    saved = repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "极限定义",
+            "summary": "理解极限定义。",
+            "contentMd": "极限定义需要同时关注自变量趋近和函数值趋近。",
+            "knowledgePoints": [{"knowledgePointKey": "kp-limit", "displayName": "极限"}],
+            "citations": [
+                {
+                    "resourceId": 501,
+                    "segmentId": 101,
+                    "segmentKey": "mp4-c1",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "refLabel": "视频 00:00-01:00",
+                }
+            ],
+            "generationMetadata": generation_metadata,
+        },
+    )
+
+    assert saved["generationMetadata"] == generation_metadata
+    for read_model in (
+        repo.get_handout(handout["handoutVersionId"])["blocks"][0],
+        repo.get_latest_handout(course_id)["blocks"][0],
+        repo.get_handout_block_status(blocks[0]["blockId"]),
+    ):
+        assert read_model["generationMetadata"] == generation_metadata
+    public_citation = repo.get_latest_handout(course_id)["blocks"][0]["citations"][0]
+    assert "segmentId" not in public_citation
+    assert "segmentKey" not in public_citation
+    internal_block = repo.store.handouts[handout["handoutVersionId"]]["blocks"][0]
+    assert internal_block["citations"][0]["segmentId"] == 101
+    assert internal_block["citations"][0]["segmentKey"] == "mp4-c1"
+    qa_context = repo.get_qa_context(course_id, blocks[0]["blockId"])
+    assert qa_context["currentBlock"]["citations"][0]["segmentId"] == 101
+    assert qa_context["currentBlock"]["citations"][0]["segmentKey"] == "mp4-c1"
 
 
 def test_app_import_keeps_basic_scaffold_without_worker_side_effects():

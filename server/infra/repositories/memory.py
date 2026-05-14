@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, TypeVar
 
@@ -98,13 +99,15 @@ class MemoryScaffoldRepository:
         handout = self.store.handouts.get(handout_version_id)
         if handout is not None:
             _sync_memory_handout_statuses(handout)
-        return handout
+            return _memory_public_handout(handout)
+        return None
 
     def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
         handout = self.store.get_latest_handout(course_id)
         if handout is not None:
             _sync_memory_handout_statuses(handout)
-        return handout
+            return _memory_public_handout(handout)
+        return None
 
     def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
         handout = self.store.get_latest_handout(course_id)
@@ -183,11 +186,44 @@ class MemoryScaffoldRepository:
                 }, (task_id, payload)
         return None
 
+    def save_handout_block_result(
+        self,
+        block_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        for handout in self.store.handouts.values():
+            for block in handout["blocks"]:
+                if block["blockId"] != block_id:
+                    continue
+                generation_metadata = _generation_metadata_from_payload(payload)
+                block["title"] = str(payload.get("title") or block["title"])
+                block["summary"] = str(payload.get("summary") or block["summary"])
+                block["contentMd"] = str(payload.get("contentMd") or payload.get("content_md") or "")
+                block["knowledgePoints"] = list(payload.get("knowledgePoints") or payload.get("knowledge_points") or [])
+                block["citations"] = [
+                    dict(citation)
+                    for citation in payload.get("citations", [])
+                    if isinstance(citation, Mapping)
+                ]
+                if generation_metadata:
+                    block["generationMetadata"] = generation_metadata
+                else:
+                    block.pop("generationMetadata", None)
+                _set_memory_block_status(handout, block, "ready")
+                handout["readyBlocks"] = sum(
+                    1 for item in handout["blocks"] if item.get("status") == "ready"
+                )
+                handout["pendingBlocks"] = sum(
+                    1 for item in handout["blocks"] if item.get("status") != "ready"
+                )
+                return _memory_public_block(block)
+        return None
+
     def get_handout_block_status(self, block_id: int) -> dict[str, Any] | None:
         for handout in self.store.handouts.values():
             for block in handout["blocks"]:
                 if block["blockId"] == block_id:
-                    return {
+                    payload = {
                         "blockId": block_id,
                         "outlineKey": block["outlineKey"],
                         "status": block["status"],
@@ -195,6 +231,9 @@ class MemoryScaffoldRepository:
                         "startSec": block.get("startSec"),
                         "endSec": block.get("endSec"),
                     }
+                    if block.get("generationMetadata"):
+                        payload["generationMetadata"] = dict(block["generationMetadata"])
+                    return payload
         return None
 
     def get_current_handout_block(self, course_id: int, current_sec: int) -> dict[str, Any] | None:
@@ -371,3 +410,47 @@ def _set_memory_block_status(handout: dict[str, Any], block: dict[str, Any], sta
     block["status"] = status
     block["generationStatus"] = status
     _sync_memory_handout_statuses(handout)
+
+
+def _memory_public_handout(handout: dict[str, Any]) -> dict[str, Any]:
+    payload = deepcopy(handout)
+    payload["blocks"] = [
+        _memory_public_block(block)
+        for block in handout.get("blocks", [])
+        if isinstance(block, dict)
+    ]
+    return payload
+
+
+def _memory_public_block(block: dict[str, Any]) -> dict[str, Any]:
+    payload = deepcopy(block)
+    payload["citations"] = [
+        _memory_public_citation(citation)
+        for citation in block.get("citations", [])
+        if isinstance(citation, Mapping)
+    ]
+    return payload
+
+
+def _memory_public_citation(ref: Mapping[str, Any]) -> dict[str, Any]:
+    citation = {
+        "resourceId": ref.get("resourceId"),
+        "refLabel": ref.get("refLabel"),
+        "pageNo": ref.get("pageNo"),
+        "slideNo": ref.get("slideNo"),
+        "anchorKey": ref.get("anchorKey"),
+        "startSec": ref.get("startSec"),
+        "endSec": ref.get("endSec"),
+    }
+    return {key: value for key, value in citation.items() if value not in (None, "", [])}
+
+
+def _generation_metadata_from_payload(payload: Mapping[str, Any]) -> dict[str, str] | None:
+    raw = payload.get("generationMetadata") or payload.get("generation_metadata")
+    if not isinstance(raw, Mapping):
+        return None
+    source = raw.get("source")
+    reason = raw.get("reason")
+    if source not in {"model", "fallback"} or not isinstance(reason, str) or not reason.strip():
+        return None
+    return {"source": str(source), "reason": reason.strip()}

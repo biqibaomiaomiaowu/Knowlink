@@ -127,6 +127,7 @@ EXPECTED_RUNTIME_TABLE_COLUMNS = {
         "source_segment_keys_json",
         "knowledge_points_json",
         "citations_json",
+        "generation_metadata_json",
     },
     "handout_block_refs": {
         "handout_block_id",
@@ -665,6 +666,131 @@ def test_sql_repository_normalizes_non_utc_exam_at_to_utc_for_sqlite_round_trip(
     ).scalar_one()
     assert isinstance(row_exam_at, datetime)
     assert row_exam_at.replace(tzinfo=timezone.utc) == expected_utc
+
+    session.close()
+    engine.dispose()
+
+
+def test_sql_handout_block_generation_metadata_persists_to_read_models():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite handout metadata 课程",
+        entry_type="manual_import",
+        goal_text="验证讲义块生成元数据持久化",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/metadata.pdf",
+            "originalName": "metadata.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:metadata",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "极限定义",
+                "textContent": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "plainText": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "pageNo": 2,
+                "orderNo": 1,
+                "tokenCount": 20,
+            }
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    generation_metadata = {"source": "fallback", "reason": "model_unavailable"}
+    handout, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "SQLite metadata 讲义",
+            "summary": "用于讲义块 metadata 验收。",
+            "items": [
+                {
+                    "outlineKey": "section-1",
+                    "title": "极限定义",
+                    "summary": "理解极限定义。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-1",
+                            "title": "极限定义",
+                            "summary": "理解极限定义。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                            "topicTags": ["极限"],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    saved = repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "极限定义",
+            "summary": "理解极限定义。",
+            "contentMd": "极限定义需要同时关注自变量趋近和函数值趋近。",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit-metadata",
+                    "displayName": "极限定义",
+                    "description": "同时关注自变量趋近和函数值趋近。",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentId": segments[0]["segmentId"],
+                    "segmentKey": segment_key,
+                    "pageNo": 2,
+                    "refLabel": "PDF 第 2 页",
+                }
+            ],
+            "generationMetadata": generation_metadata,
+        },
+    )
+
+    assert saved["generationMetadata"] == generation_metadata
+    for read_model in (
+        repo.get_handout(handout["handoutVersionId"])["blocks"][0],
+        repo.get_latest_handout(course_id)["blocks"][0],
+        repo.get_handout_block_status(blocks[0]["blockId"]),
+    ):
+        assert read_model["generationMetadata"] == generation_metadata
+    public_citation = repo.get_latest_handout(course_id)["blocks"][0]["citations"][0]
+    assert "segmentId" not in public_citation
+    assert "segmentKey" not in public_citation
+    handout_blocks = Base.metadata.tables["handout_blocks"]
+    internal_citations = session.execute(
+        sa.select(handout_blocks.c.citations_json).where(handout_blocks.c.id == blocks[0]["blockId"])
+    ).scalar_one()
+    assert internal_citations[0]["segmentId"] == segments[0]["segmentId"]
+    assert internal_citations[0]["segmentKey"] == segment_key
+    qa_context = repo.get_qa_context(course_id, blocks[0]["blockId"])
+    assert qa_context["currentBlock"]["citations"][0]["segmentId"] == segments[0]["segmentId"]
+    assert qa_context["currentBlock"]["citations"][0]["segmentKey"] == segment_key
 
     session.close()
     engine.dispose()

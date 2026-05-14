@@ -92,6 +92,7 @@ class HandoutBlock(CamelModel):
     slide_no: int | None = None
     anchor_key: str | None = None
     citations: list[Citation]
+    generation_metadata: dict[str, object] | None = None
 
 
 class HandoutOutlineChild(CamelModel):
@@ -158,7 +159,9 @@ class QaMessageData(CamelModel):
     session_id: int
     message_id: int
     answer_md: str
+    answer_type: str | None = None
     citations: list[Citation]
+    generation_metadata: dict[str, object] | None = None
 
 
 class QuizQuestion(CamelModel):

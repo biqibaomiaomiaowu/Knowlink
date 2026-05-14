@@ -34,6 +34,7 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
         )
 
         assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
         assert result["citations"] == [
             {"resourceId": pdf_segment["resourceId"], "refLabel": "PDF 第 1 页", "pageNo": 1}
         ]
@@ -60,6 +61,7 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
 
         messages = service.get_session_messages(session_id=result["sessionId"])
         assert [item["role"] for item in messages["items"]] == ["user", "assistant"]
+        assert messages["items"][1]["generationMetadata"] == result["generationMetadata"]
         assert messages["items"][1]["citations"] == result["citations"]
     finally:
         session.close()

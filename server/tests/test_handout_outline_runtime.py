@@ -328,8 +328,6 @@ def test_sql_ready_handout_block_persists_content_and_normalized_refs():
         assert saved["citations"] == [
             {
                 "resourceId": pdf_resource["resourceId"],
-                "segmentId": pdf_segments[0]["segmentId"],
-                "segmentKey": pdf_segments[0]["segmentKey"],
                 "refLabel": "模型给错页码时以 segment 为准",
                 "pageNo": 2,
             }
@@ -442,15 +440,11 @@ def test_sql_ready_handout_block_refs_normalize_ppt_and_docx_locators():
         assert saved["citations"] == [
             {
                 "resourceId": ppt_resource["resourceId"],
-                "segmentId": ppt_segments[0]["segmentId"],
-                "segmentKey": ppt_segments[0]["segmentKey"],
                 "refLabel": "模型给错 slide 时以 segment 为准",
                 "slideNo": 6,
             },
             {
                 "resourceId": docx_resource["resourceId"],
-                "segmentId": docx_segments[0]["segmentId"],
-                "segmentKey": docx_segments[0]["segmentKey"],
                 "refLabel": "模型给错 anchor 时以 segment 为准",
                 "anchorKey": docx_segments[0]["segmentKey"],
             },
@@ -567,8 +561,6 @@ def test_sql_ready_handout_block_refs_accept_block_range_video_citation_on_first
         assert saved["citations"] == [
             {
                 "resourceId": first_segment["resource_id"],
-                "segmentId": first_segment_id,
-                "segmentKey": block["sourceSegmentKeys"][0],
                 "refLabel": "视频全段",
                 "startSec": block["startSec"],
                 "endSec": block["endSec"],
@@ -1106,7 +1098,8 @@ def test_handout_block_worker_generates_one_block_refs_and_vector_document():
         saved_block = repo.get_latest_handout(course_id)["blocks"][0]
         assert saved_block["status"] == "ready"
         assert saved_block["contentMd"].startswith("## 集合定义")
-        assert saved_block["citations"][0]["segmentId"] == source_segment_id
+        assert "segmentId" not in saved_block["citations"][0]
+        assert "segmentKey" not in saved_block["citations"][0]
 
         vector_documents = Base.metadata.tables["vector_documents"]
         vector_row = session.execute(
@@ -1118,6 +1111,7 @@ def test_handout_block_worker_generates_one_block_refs_and_vector_document():
         assert vector_row["course_id"] == course_id
         assert vector_row["handout_version_id"] == repo.get_course(course_id)["activeHandoutVersionId"]
         assert "集合定义" in vector_row["content_text"]
+        assert vector_row["metadata_json"]["citationSegmentKeys"] == [source_segment_key]
     finally:
         session.close()
         engine.dispose()

@@ -396,6 +396,9 @@ class RuntimeStore:
         user_message_id = self.next_id("qa_message")
         assistant_message_id = self.next_id("qa_message")
         citations = [] if response.get("answerType") == "insufficient_evidence" else list(response.get("citations") or [])
+        generation_metadata = response.get("generationMetadata")
+        if not isinstance(generation_metadata, dict):
+            generation_metadata = None
         payload = {
             "sessionId": session_id,
             "messageId": assistant_message_id,
@@ -403,6 +406,8 @@ class RuntimeStore:
             "answerType": response.get("answerType"),
             "citations": citations,
         }
+        if generation_metadata:
+            payload["generationMetadata"] = generation_metadata
         self.qa_sessions[session_id] = {
             "context": {
                 "courseId": context.get("courseId"),
@@ -410,6 +415,7 @@ class RuntimeStore:
                 "activeHandoutVersionId": context.get("activeHandoutVersionId"),
                 "handoutBlockId": context.get("handoutBlockId"),
                 "candidateCount": candidate_count,
+                "generationMetadata": generation_metadata,
             },
             "messages": [
                 {

@@ -209,15 +209,18 @@ def generate_block_qa_response(
     )
     answer_candidates = _relevant_candidates(question, candidates)
     if not answer_candidates:
-        return insufficient_evidence_response()
+        return insufficient_evidence_response(source="fallback", reason="no_candidate_evidence")
 
     if client is not None:
         try:
-            return _normalize_qa_response_payload(client.generate_answer(question, answer_candidates), candidates=answer_candidates)
+            return _normalize_qa_response_payload(
+                client.generate_answer(question, answer_candidates),
+                candidates=answer_candidates,
+            )
         except Exception:
-            return _fallback_qa_response(answer_candidates)
+            return _fallback_qa_response(answer_candidates, reason="model_error")
 
-    return _fallback_qa_response(answer_candidates)
+    return _fallback_qa_response(answer_candidates, reason="model_unavailable")
 
 
 def build_block_scoped_qa_candidates(
@@ -365,11 +368,12 @@ def build_block_scoped_qa_candidates(
     return [_replace_rank(candidate, index) for index, candidate in enumerate(candidates, start=1)]
 
 
-def insufficient_evidence_response() -> dict[str, Any]:
+def insufficient_evidence_response(*, source: str = "fallback", reason: str = "no_candidate_evidence") -> dict[str, Any]:
     return {
         "answerMd": "当前讲义块和课程资料中的证据不足，暂时不能可靠回答这个问题。",
         "answerType": "insufficient_evidence",
         "citations": [],
+        "generationMetadata": _generation_metadata(source=source, reason=reason),
     }
 
 
@@ -472,9 +476,14 @@ def _normalize_qa_response_payload(payload: Mapping[str, Any], *, candidates: Se
         answer_type = "direct_answer"
     answer_md = clean_text(str(payload.get("answerMd") or payload.get("answer_md") or ""))
     if not answer_md:
-        return insufficient_evidence_response()
+        return insufficient_evidence_response(source="model", reason="empty_answer")
     if answer_type == "insufficient_evidence":
-        return {"answerMd": answer_md, "answerType": answer_type, "citations": []}
+        return {
+            "answerMd": answer_md,
+            "answerType": answer_type,
+            "citations": [],
+            "generationMetadata": _generation_metadata(source="model", reason="insufficient_evidence"),
+        }
 
     candidate_by_identity = _candidate_by_identity(candidates)
     candidate_citations_by_public_identity = _candidate_citations_by_public_identity(candidates)
@@ -511,20 +520,30 @@ def _normalize_qa_response_payload(payload: Mapping[str, Any], *, candidates: Se
         citations.append(citation)
 
     if not citations:
-        return insufficient_evidence_response()
-    return {"answerMd": answer_md, "answerType": answer_type, "citations": citations}
+        return insufficient_evidence_response(source="model", reason="citation_rejected")
+    return {
+        "answerMd": answer_md,
+        "answerType": answer_type,
+        "citations": citations,
+        "generationMetadata": _generation_metadata(source="model", reason="model_response"),
+    }
 
 
-def _fallback_qa_response(candidates: Sequence[QaEvidenceCandidate]) -> dict[str, Any]:
+def _fallback_qa_response(candidates: Sequence[QaEvidenceCandidate], *, reason: str) -> dict[str, Any]:
     if not candidates:
-        return insufficient_evidence_response()
+        return insufficient_evidence_response(source="fallback", reason="no_candidate_evidence")
     top = candidates[0]
     answer_text = _truncate(top.content_text, 180)
     return {
         "answerMd": f"根据{top.ref_label}，{answer_text}",
         "answerType": "direct_answer",
         "citations": [top.to_qa_citation()],
+        "generationMetadata": _generation_metadata(source="fallback", reason=reason),
     }
+
+
+def _generation_metadata(*, source: str, reason: str) -> dict[str, str]:
+    return {"source": source, "reason": reason}
 
 
 def _candidate_from_evidence(

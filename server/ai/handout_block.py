@@ -104,12 +104,18 @@ def generate_handout_block(
                 preferences=preferences,
             )
         except Exception:
-            pass
+            return fallback_handout_block(
+                outline_item,
+                context=context,
+                preferences=preferences,
+                reason="model_error",
+            )
 
     return fallback_handout_block(
         outline_item,
         context=context,
         preferences=preferences,
+        reason="model_unavailable",
     )
 
 
@@ -346,6 +352,7 @@ def normalize_handout_block_payload(
         "sourceSegmentKeys": source_segment_keys,
         "knowledgePoints": knowledge_points,
         "citations": citations,
+        "generationMetadata": _generation_metadata(source="model", reason="model_response"),
     }
 
 
@@ -354,6 +361,7 @@ def fallback_handout_block(
     *,
     context: HandoutBlockContext,
     preferences: Mapping[str, Any] | None = None,
+    reason: str = "model_unavailable",
 ) -> dict[str, Any]:
     title = clean_text(str(outline_item.get("title") or "")) or "讲义片段"
     summary = clean_text(str(outline_item.get("summary") or "")) or _truncate(
@@ -384,7 +392,12 @@ def fallback_handout_block(
         "sourceSegmentKeys": source_segment_keys,
         "knowledgePoints": knowledge_points,
         "citations": citations,
+        "generationMetadata": _generation_metadata(source="fallback", reason=reason),
     }
+
+
+def _generation_metadata(*, source: str, reason: str) -> dict[str, str]:
+    return {"source": source, "reason": reason}
 
 
 def citation_segment_keys(block: Mapping[str, Any]) -> list[str]:

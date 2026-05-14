@@ -71,6 +71,7 @@ class HandoutBlock(Base, TimestampMixin):
     source_segment_keys_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False)
     knowledge_points_json: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True)
     citations_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False)
+    generation_metadata_json: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
 
 
 class HandoutBlockRef(Base, TimestampMixin):

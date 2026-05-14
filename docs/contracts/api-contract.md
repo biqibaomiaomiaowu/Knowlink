@@ -16,6 +16,7 @@
   - 每条 citation 必须且只能带一组合法定位字段：`pageNo` / `slideNo` / `anchorKey` / `startSec+endSec`
   - handout block / jump-target 可以同时暴露视频时间与文档跳转信息，但这些字段不能混在同一条 citation 里
   - 每条 normalized segment 也必须且只能带与 `resourceType` 匹配的定位字段
+  - API public citations 只暴露 `resourceId`、`refLabel` 和 locator 字段；`segmentId` / `segmentKey` 仅作为服务端反查、落库和 AI 策略内部 identity，不出现在 public citation 响应中
 - 以下写接口必须支持 `Idempotency-Key`：
   - `POST /api/v1/courses`
   - `POST /api/v1/recommendations/{catalogId}/confirm`
@@ -935,6 +936,10 @@ V1 当前未实现阶段统一返回：
   "endSec": 360,
   "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
   "knowledgePoints": [],
+  "generationMetadata": {
+    "source": "model",
+    "reason": "model_response"
+  },
   "citations": [
     {
       "resourceId": 501,
@@ -949,6 +954,8 @@ V1 当前未实现阶段统一返回：
 
 - `slideNo`：PPTX slide 引用
 - `anchorKey`：DOCX heading / anchor 引用
+- `items[*].generationMetadata` 是已生成 block 的必返元数据，`source` 取值为 `model` 或 `fallback`，`reason` 用于区分真实模型生成、模型异常 fallback、本地 fallback 等来源。
+- `items[*].citations[]` 是 public citation，只暴露 `resourceId`、`refLabel` 与 locator 字段；`segmentId` / `segmentKey` 不出现在 public response 中。
 
 未生成 block 可返回：
 
@@ -1081,6 +1088,10 @@ V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知
   "messageId": 6002,
   "answerMd": "定义控制了题型的判断边界。",
   "answerType": "direct_answer",
+  "generationMetadata": {
+    "source": "model",
+    "reason": "model_response"
+  },
   "citations": [
     {
       "resourceId": 501,
@@ -1096,6 +1107,7 @@ V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知
 - `answerType` 取值为 `direct_answer`、`clarification`、`insufficient_evidence`。
 - Doubao / vivo QA 接入只影响服务端回答生成策略，不改变前端请求字段、接口路径或 citations 结构。
 - `citations` 只能来自服务端当前候选证据反查；`insufficient_evidence` 时固定为空数组。
+- `generationMetadata.source` 取值为 `model` 或 `fallback`；本地 fallback、模型异常 fallback 或证据不足拒答必须带明确 `reason`，调用方不得把 fallback 当成真实模型答案。
 
 ### `GET /api/v1/qa/sessions/{sessionId}/messages`
 
@@ -1109,6 +1121,10 @@ V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知
       "messageId": 6002,
       "answerMd": "定义控制了题型的判断边界。",
       "answerType": "direct_answer",
+      "generationMetadata": {
+        "source": "model",
+        "reason": "model_response"
+      },
       "citations": [
         {
           "resourceId": 501,

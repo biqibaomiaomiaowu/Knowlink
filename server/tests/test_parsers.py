@@ -1632,7 +1632,7 @@ def test_vivo_vision_client_uses_batch_multimodal_chat_request(monkeypatch):
     ]
 
 
-def test_vivo_vision_client_falls_back_to_image_caption_for_plain_response(monkeypatch):
+def test_vivo_vision_client_rejects_plain_response_instead_of_caption_fallback(monkeypatch):
     class FakeResponse:
         def __enter__(self):
             return self
@@ -1653,15 +1653,71 @@ def test_vivo_vision_client_falls_back_to_image_caption_for_plain_response(monke
         base_url="https://example.invalid/v1",
         model="Doubao-Seed-2.0-mini",
     )
-    results = client.analyze_image(
-        b"png-bytes",
-        mime_type="image/png",
-        resource_type="pptx",
-        location={"slideNo": 3},
-        hint="pptx_shape_visual",
+    with pytest.raises(RuntimeError, match="response is not JSON"):
+        client.analyze_image(
+            b"png-bytes",
+            mime_type="image/png",
+            resource_type="pptx",
+            location={"slideNo": 3},
+            hint="pptx_shape_visual",
+        )
+
+
+def test_vivo_vision_client_rejects_schema_invalid_segments(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "segments": [
+                                            {
+                                                "assetId": "pdf-p1",
+                                                "segmentType": "unknown",
+                                                "textContent": "无效类型不能静默丢弃。",
+                                            }
+                                        ]
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            }
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+
+    client = VivoVisionClient(
+        app_id="2026764332",
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-mini",
     )
 
-    assert results == [VisionResult(segment_type="image_caption", text="这是一张集合关系图。")]
+    with pytest.raises(RuntimeError, match="schema invalid"):
+        client.analyze_images(
+            [
+                VisualAsset(
+                    asset_id="pdf-p1",
+                    image_bytes=b"png-bytes",
+                    mime_type="image/png",
+                    location={"pageNo": 1},
+                    hint="pdf_page_visual",
+                )
+            ],
+            resource_type="pdf",
+        )
 
 
 def test_vivo_vision_client_retries_multi_image_errors_as_single_requests(monkeypatch):

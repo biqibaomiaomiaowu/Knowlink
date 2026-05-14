@@ -8,6 +8,7 @@ from jsonschema.exceptions import ValidationError
 
 from server.ai.handout_lazy import outline_timeline_issues
 from server.schemas.common import AsyncEntity
+from server.schemas.responses import HandoutBlock as HandoutBlockResponse
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -155,6 +156,18 @@ def test_latest_outline_read_model_requires_source_segment_keys():
     assert "`items[*].children[*].sourceSegmentKeys` 是 API read model 必返字段" in outline_section
     assert "大标题没有 `blockId`" in outline_section
     assert "前端可忽略展示" in outline_section
+
+
+def test_latest_blocks_contract_exposes_generation_metadata_and_public_citations():
+    api_contract = load_text("docs/contracts/api-contract.md")
+
+    blocks_section = api_contract.split(
+        "### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`", 1
+    )[1].split("### `POST /api/v1/handout-blocks/{blockId}/generate`", 1)[0]
+
+    assert '"generationMetadata": {' in blocks_section
+    assert "`items[*].generationMetadata`" in blocks_section
+    assert "`segmentId` / `segmentKey`" in blocks_section
 
 
 def test_knowledge_point_block_ownership_contract_is_frozen():
@@ -488,6 +501,7 @@ def test_collaboration_docs_expose_change_flow_and_priority_matrices():
                     {"resourceId": 503, "refLabel": "DOCX 积分部分", "anchorKey": "section-integral"},
                     {"resourceId": 504, "refLabel": "视频 02:00-04:00", "startSec": 120, "endSec": 240},
                 ],
+                "generationMetadata": {"source": "model", "reason": "model_response"},
             },
         ),
     ],
@@ -844,6 +858,7 @@ def test_handout_block_schema_accepts_valid_lazy_block_payload():
                 "pageNo": 1,
             },
         ],
+        "generationMetadata": {"source": "model", "reason": "model_response"},
     }
 
     assert "ready handout block" in schema["description"]
@@ -930,6 +945,69 @@ def test_handout_block_schema_rejects_invalid_lazy_block_payloads(payload: dict)
     ("schema_path", "payload"),
     [
         (
+            "schemas/ai/handout_block.schema.json",
+            {
+                "outlineKey": "outline-1",
+                "title": "集合的基本概念",
+                "summary": "介绍集合、元素和属于关系",
+                "contentMd": "### 集合的基本概念\n集合由确定对象组成。",
+                "estimatedMinutes": 6,
+                "sourceSegmentKeys": ["mp4-c1"],
+                "knowledgePoints": [
+                    {
+                        "knowledgePointKey": "kp-set-basic",
+                        "displayName": "集合",
+                        "description": "集合是确定对象组成的整体。",
+                        "difficultyLevel": "beginner",
+                        "importanceScore": 90,
+                        "sortNo": 1,
+                    }
+                ],
+                "citations": [
+                    {
+                        "resourceId": 501,
+                        "segmentKey": "mp4-c1",
+                        "refLabel": "视频 00:00-03:00",
+                        "startSec": 0,
+                        "endSec": 180,
+                    }
+                ],
+            },
+        ),
+        (
+            "schemas/ai/qa_response.schema.json",
+            {
+                "answerMd": "回答内容",
+                "answerType": "direct_answer",
+                "citations": [{"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}],
+            },
+        ),
+    ],
+)
+def test_phase4_ai_schemas_reject_missing_generation_metadata(schema_path: str, payload: dict):
+    with pytest.raises(ValidationError):
+        build_validator(schema_path).validate(payload)
+
+
+def test_handout_block_response_dto_exposes_generation_metadata_alias():
+    payload = HandoutBlockResponse(
+        blockId=4001,
+        handoutVersionId=3001,
+        outlineKey="outline-1",
+        title="极限与连续",
+        summary="先抓必考定义和题型",
+        status="ready",
+        generationMetadata={"source": "fallback", "reason": "model_unavailable"},
+        citations=[],
+    ).model_dump(by_alias=True)
+
+    assert payload["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
+
+
+@pytest.mark.parametrize(
+    ("schema_path", "payload"),
+    [
+        (
             "schemas/ai/quiz_generation.schema.json",
             {
                 "quizType": "exam_drill",
@@ -1000,6 +1078,10 @@ def test_handout_block_schema_rejects_invalid_lazy_block_payloads(payload: dict)
                     }
                 ],
             },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {"tasks": []},
         ),
     ],
 )
@@ -1150,10 +1232,6 @@ def test_quiz_schema_accepts_live_generation_question_count_bounds():
         (
             "schemas/ai/review_tasks.schema.json",
             {},
-        ),
-        (
-            "schemas/ai/review_tasks.schema.json",
-            {"tasks": []},
         ),
         (
             "schemas/ai/review_tasks.schema.json",

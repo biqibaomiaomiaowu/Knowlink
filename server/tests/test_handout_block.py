@@ -25,6 +25,7 @@ def test_fallback_handout_block_uses_known_segments_and_validates_schema(monkeyp
 
     HANDOUT_BLOCK_VALIDATOR.validate(block)
     assert block["outlineKey"] == "outline-1"
+    assert block["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
     assert block["sourceSegmentKeys"] == ["mp4-c1", "mp4-c2"]
     assert block["knowledgePoints"][0]["knowledgePointKey"] == "kp-outline-1-1"
     assert {citation["segmentKey"] for citation in block["citations"]}.issubset(
