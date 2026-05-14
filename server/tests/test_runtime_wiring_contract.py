@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from server.domain.services.pipelines import PipelineService
 from server.domain.services.quizzes import QuizService
 from server.infra.repositories.memory import MemoryScaffoldRepository
@@ -196,6 +198,55 @@ print(json.dumps({
     assert payload["dramatiq_imported"] is False
 
 
+def test_task_dispatcher_defaults_to_dramatiq_and_rejects_unknown_queue(monkeypatch):
+    from server.tasks.dispatcher import DramatiqTaskDispatcher, NoopTaskDispatcher, build_task_dispatcher
+
+    monkeypatch.delenv("KNOWLINK_TASK_QUEUE", raising=False)
+    assert isinstance(build_task_dispatcher(), DramatiqTaskDispatcher)
+
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "noop")
+    assert isinstance(build_task_dispatcher(), NoopTaskDispatcher)
+
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "unknown")
+    with pytest.raises(RuntimeError, match="Unsupported KNOWLINK_TASK_QUEUE"):
+        build_task_dispatcher()
+
+
+def test_settings_reject_unknown_task_queue_at_startup(monkeypatch):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "unknown")
+
+    try:
+        with pytest.raises(RuntimeError, match="Unsupported KNOWLINK_TASK_QUEUE"):
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_production_like_settings_reject_insecure_auth_and_minio_defaults(monkeypatch):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_ENV", "production")
+    monkeypatch.setenv("KNOWLINK_STORAGE_BACKEND", "minio")
+    monkeypatch.setenv("KNOWLINK_DEMO_TOKEN", "knowlink-demo-token")
+    monkeypatch.setenv("KNOWLINK_MINIO_ACCESS_KEY", "minioadmin")
+    monkeypatch.setenv("KNOWLINK_MINIO_SECRET_KEY", "minioadmin")
+
+    try:
+        with pytest.raises(RuntimeError) as exc_info:
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+    message = str(exc_info.value)
+    assert "KNOWLINK_DEMO_TOKEN" in message
+    assert "KNOWLINK_MINIO_ACCESS_KEY" in message
+    assert "KNOWLINK_MINIO_SECRET_KEY" in message
+
+
 def test_dramatiq_default_actor_path_resolves_parse_pipeline_actor():
     from server.tasks.dispatcher import DramatiqTaskDispatcher
 
@@ -352,6 +403,7 @@ asyncio.run(main())
     env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
     env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'runtime.sqlite3'}"
     env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    env["KNOWLINK_TASK_QUEUE"] = "noop"
     env.pop("KNOWLINK_REPOSITORY_BACKEND", None)
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -461,6 +513,7 @@ asyncio.run(main())
     env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
     env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'handout.sqlite3'}"
     env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    env["KNOWLINK_TASK_QUEUE"] = "noop"
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=ROOT,
@@ -834,6 +887,7 @@ asyncio.run(main())
     env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
     env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'quiz.sqlite3'}"
     env["KNOWLINK_STORAGE_BACKEND"] = "demo"
+    env["KNOWLINK_TASK_QUEUE"] = "noop"
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=ROOT,

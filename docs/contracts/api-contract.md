@@ -27,6 +27,9 @@
   - `POST /api/v1/courses/{courseId}/quizzes/generate`
   - `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
 - 带路径参数的课程接口一律以 path 中的 `courseId` 为准；请求体不再重复传同义 `courseId`，`POST /api/v1/qa/messages` 是唯一例外。
+- Docker / runtime 默认任务队列为 `KNOWLINK_TASK_QUEUE=dramatiq`；`noop` dispatcher 只允许通过显式设置 `KNOWLINK_TASK_QUEUE=noop` 用于本地测试或开发，不得作为运行时默认。未知 `KNOWLINK_TASK_QUEUE` 值必须启动失败。
+- `KNOWLINK_ENV=production` / `prod` / `staging` 时，demo 鉴权 token 和 MinIO 默认凭据必须启动前 fail-fast；本地 `development` / test 仍可使用 `.env.example` 的 demo 默认值。
+- scheduler 当前没有真实生产定时任务，默认 `KNOWLINK_SCHEDULER_ENABLED=false`，且默认 compose 不启动 scheduler 服务；如需手动运行，必须显式启用该环境变量。
 
 ### 1.1 Week 1 冻结入口
 
@@ -404,6 +407,11 @@
 }
 ```
 
+错误：
+
+- `404 resource.not_found`：资源不存在或不属于当前课程
+- `409 resource.has_dependents`：资源已被解析段落、向量文档、讲义引用、QA 引用、测验引用、复习引用或学习进度等后端产物引用；当前接口不做级联删除，需先清理或重建依赖产物后再删除资源
+
 ### B 站导入预留接口（V1/MVP）
 
 以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 contract 以本文件 1.3 的过渡口径和后续补充的 V2 API 章节为准。
@@ -684,6 +692,16 @@ V1 当前未实现阶段统一返回：
 说明：
 
 - 这是后端和演示排障用辅助接口，不作为页面主流程依赖。
+- 只有 `failed`、`queued` 状态可通过该接口重新入队；`succeeded`、`canceled`、`retrying` 或未知状态不得重试。
+- 重新入队前会把任务状态重置为 `queued`、清空旧错误并将 `progressPct` 置 0；如果 enqueue 失败，任务会被标记为 `failed` 且写入 `async_task.enqueue_failed`，客户端可继续展示重试入口。
+
+错误：
+
+- `404 pipeline.task_not_found`：任务不存在
+- `409 pipeline.task_not_retryable`：任务当前状态不可重试
+- `409 pipeline.task_retry_unsupported`：任务类型不支持该 retry 接口
+- `409 pipeline.task_retry_stale`：任务状态重置为 `queued` 时发现记录已变化或不可写
+- `503 async_task.enqueue_failed`：任务创建或 retry 时写入成功但派发到队列失败；响应代表后端未能把任务交给 dispatcher / broker，任务记录会保留失败原因
 
 ## 7. 问询与讲义
 

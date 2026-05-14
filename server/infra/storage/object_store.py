@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
+from pathlib import Path
 from typing import Protocol
 from urllib.parse import SplitResult, urlunsplit
 
@@ -56,6 +57,8 @@ class ObjectStorage(Protocol):
     def stat_object(self, object_key: str) -> ObjectStat: ...
 
     def read_object_bytes(self, object_key: str) -> bytes: ...
+
+    def download_object_to_file(self, object_key: str, destination_path: str | Path) -> None: ...
 
 
 class MinioObjectStorage:
@@ -168,6 +171,18 @@ class MinioObjectStorage:
             release_conn = getattr(response, "release_conn", None)
             if callable(release_conn):
                 release_conn()
+
+    def download_object_to_file(self, object_key: str, destination_path: str | Path) -> None:
+        path = Path(destination_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.client.fget_object(self.bucket_name, object_key, str(path))
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchObject"}:
+                raise ObjectNotFoundError(object_key) from exc
+            raise ObjectStorageUnavailable("Failed to download object") from exc
+        except Exception as exc:  # pragma: no cover - defensive adapter boundary.
+            raise ObjectStorageUnavailable("Failed to download object") from exc
 
 
 def _checksum_from_metadata(metadata: Mapping[str, str]) -> str | None:
@@ -302,6 +317,11 @@ class DemoObjectStorage:
 
     def read_object_bytes(self, object_key: str) -> bytes:
         return b""
+
+    def download_object_to_file(self, object_key: str, destination_path: str | Path) -> None:
+        path = Path(destination_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"")
 
 
 def build_object_storage(settings) -> ObjectStorage | None:

@@ -209,6 +209,34 @@ class SqlAlchemyRuntimeRepository:
             return None
         return _resource_dict(resource)
 
+    def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]:
+        resource_exists = self.session.scalar(
+            select(CourseResource.id).where(
+                CourseResource.course_id == course_id,
+                CourseResource.id == resource_id,
+            )
+        )
+        if resource_exists is None:
+            return {}
+
+        checks = (
+            ("asyncTasks", AsyncTask, AsyncTask.resource_id),
+            ("courseSegments", CourseSegment, CourseSegment.resource_id),
+            ("vectorDocuments", VectorDocument, VectorDocument.resource_id),
+            ("handoutBlockRefs", HandoutBlockRef, HandoutBlockRef.resource_id),
+            ("qaMessageRefs", QaMessageRef, QaMessageRef.resource_id),
+            ("quizQuestionRefs", QuizQuestionRef, QuizQuestionRef.resource_id),
+            ("reviewTaskRefs", ReviewTaskRef, ReviewTaskRef.resource_id),
+            ("userProgressVideo", UserCourseProgress, UserCourseProgress.last_video_resource_id),
+            ("userProgressDocument", UserCourseProgress, UserCourseProgress.last_doc_resource_id),
+        )
+        blockers: dict[str, int] = {}
+        for name, model, column in checks:
+            count = self.session.scalar(select(func.count()).select_from(model).where(column == resource_id)) or 0
+            if count:
+                blockers[name] = int(count)
+        return blockers
+
     def delete_resource(self, course_id: int, resource_id: int) -> bool:
         result = self.session.execute(
             delete(CourseResource).where(

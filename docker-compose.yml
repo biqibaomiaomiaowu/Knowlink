@@ -83,22 +83,6 @@ services:
       redis:
         condition: service_started
 
-  scheduler:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
-    command: python -m server.tasks.scheduler
-    env_file:
-      - .env
-    volumes:
-       - .:/workspace
-    working_dir: /workspace
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_started
-
   postgres:
     image: pgvector/pgvector:pg16
     environment:

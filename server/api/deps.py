@@ -75,7 +75,7 @@ def _get_memory_task_repository() -> InMemoryAsyncTaskRepository:
 
 @lru_cache
 def _get_task_dispatcher():
-    return build_task_dispatcher()
+    return build_task_dispatcher(get_settings().task_queue)
 
 
 @lru_cache

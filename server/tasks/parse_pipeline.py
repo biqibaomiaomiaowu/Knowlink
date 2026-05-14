@@ -639,13 +639,21 @@ def _resolve_object_key(object_key: str, *, base_dir: Path, object_storage: Obje
 
 
 def _download_object_to_worker_cache(object_key: str, *, object_storage: ObjectStorage) -> Path | None:
+    cache_path = _worker_cache_path(object_key)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    download_to_file = getattr(object_storage, "download_object_to_file", None)
+    if callable(download_to_file):
+        try:
+            download_to_file(object_key, cache_path)
+        except ObjectStorageError:
+            return None
+        return cache_path
+
     try:
         content = object_storage.read_object_bytes(object_key)
     except ObjectStorageError:
         return None
 
-    cache_path = _worker_cache_path(object_key)
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_bytes(content)
     return cache_path
 

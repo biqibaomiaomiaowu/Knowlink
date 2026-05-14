@@ -82,6 +82,34 @@ print(json.dumps({
     }
 
 
+def test_worker_import_fails_fast_for_insecure_production_settings():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import server.tasks.worker",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=os.environ
+        | {
+            "KNOWLINK_ENV": "production",
+            "KNOWLINK_STORAGE_BACKEND": "minio",
+            "KNOWLINK_DEMO_TOKEN": "knowlink-demo-token",
+            "KNOWLINK_MINIO_ACCESS_KEY": "minioadmin",
+            "KNOWLINK_MINIO_SECRET_KEY": "minioadmin",
+            "KNOWLINK_TASK_QUEUE": "dramatiq",
+        },
+    )
+
+    assert result.returncode != 0
+    assert "Insecure production settings" in result.stderr
+    assert "KNOWLINK_DEMO_TOKEN" in result.stderr
+    assert "KNOWLINK_MINIO_ACCESS_KEY" in result.stderr
+    assert "KNOWLINK_MINIO_SECRET_KEY" in result.stderr
+
+
 def test_parse_pipeline_actor_invokes_runner_without_broker_send(monkeypatch):
     from server.tasks import worker
 
@@ -439,6 +467,25 @@ def test_compose_worker_uses_dramatiq_cli_and_queue_env():
     assert compose.count("KNOWLINK_TASK_QUEUE: dramatiq") >= 2
     assert compose.count("KNOWLINK_DRAMATIQ_QUEUE: parse_pipeline") >= 2
     assert "KNOWLINK_PARSE_PIPELINE_ACTOR: server.tasks.worker:parse_pipeline" in compose
+
+
+def test_default_compose_does_not_start_placeholder_scheduler():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "\n  scheduler:" not in compose
+    assert "command: python -m server.tasks.scheduler" not in compose
+
+
+def test_scheduler_contract_is_disabled_by_default():
+    from server.tasks.scheduler import build_scheduler_contract
+
+    contract = build_scheduler_contract({})
+
+    assert contract == {
+        "enabled": False,
+        "jobs": [],
+        "message": "KnowLink scheduler is disabled. Set KNOWLINK_SCHEDULER_ENABLED=true to run scheduled jobs.",
+    }
 
 
 def test_compose_real_env_path_runs_migration_and_minio_bucket_init_before_api():

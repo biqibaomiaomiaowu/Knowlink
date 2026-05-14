@@ -20,6 +20,7 @@
 
 - `course.not_found`: 课程不存在
 - `resource.not_found`: 资源不存在
+- `resource.has_dependents`: 资源已被后端解析产物、引用或学习进度依赖，当前不能安全删除
 - `resource.invalid_payload`: 上传完成回调字段不完整
 - `resource.not_video`: 资源不是可播放视频
 - `resource.playback_unavailable`: 播放地址生成失败
@@ -70,8 +71,13 @@
 
 ## Pipeline
 
+- `async_task.enqueue_failed`: 异步任务记录已创建或准备重试，但派发到 dispatcher / broker 失败
 - `pipeline.not_ready`: 当前课程状态不允许发起解析
 - `pipeline.parse_run_not_found`: 解析版本不存在
+- `pipeline.task_not_found`: 异步任务不存在
+- `pipeline.task_not_retryable`: 异步任务当前状态不可重试
+- `pipeline.task_retry_unsupported`: 异步任务类型不支持 retry 接口
+- `pipeline.task_retry_stale`: 异步任务重试前状态更新失败，通常表示记录已变化或不可写
 
 ## Inquiry And Handout
 

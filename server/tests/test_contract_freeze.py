@@ -375,6 +375,44 @@ def test_demo_token_and_statuses_are_consistent_across_docs():
     assert "`bilibili_import_run`" in api_contract
 
 
+def test_phase5_runtime_defaults_and_resource_delete_contract_are_documented():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    error_codes = load_text("docs/contracts/error-codes.md")
+    env_example = load_text(".env.example")
+    readme = load_text("README.md")
+
+    assert "KNOWLINK_TASK_QUEUE=dramatiq" in env_example
+    assert "KNOWLINK_SCHEDULER_ENABLED=false" in env_example
+    assert "KNOWLINK_ENV=development" in env_example
+    assert "`409 resource.has_dependents`" in api_contract
+    assert "resource.has_dependents" in error_codes
+    assert "scheduler 默认禁用" in readme
+    assert "Dramatiq worker 和 scheduler" not in readme
+
+
+def test_phase5_async_enqueue_and_retry_errors_are_documented():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    error_codes = load_text("docs/contracts/error-codes.md")
+
+    expected_errors = (
+        "async_task.enqueue_failed",
+        "pipeline.task_not_found",
+        "pipeline.task_not_retryable",
+        "pipeline.task_retry_unsupported",
+        "pipeline.task_retry_stale",
+    )
+    for error_code in expected_errors:
+        assert error_code in api_contract
+        assert error_code in error_codes
+
+    assert "`503 async_task.enqueue_failed`" in api_contract
+    assert "`POST /api/v1/async-tasks/{taskId}/retry`" in api_contract
+    assert "只有 `failed`、`queued` 状态可通过该接口重新入队" in api_contract
+    assert "`retrying` 等可重试任务" not in api_contract
+    assert "任务状态重置为 `queued` 时发现记录已变化或不可写" in api_contract
+    assert "任务状态更新为 retry 时" not in api_contract
+
+
 def test_async_entity_accepts_bilibili_import_run():
     entity = AsyncEntity(type="bilibili_import_run", id=9101)
     assert entity.type == "bilibili_import_run"

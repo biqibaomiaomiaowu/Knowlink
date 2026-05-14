@@ -6,6 +6,9 @@ from functools import lru_cache
 from pathlib import Path
 
 
+SUPPORTED_TASK_QUEUES = {"dramatiq", "noop"}
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -28,12 +31,14 @@ class Settings:
     cors_allow_origins: tuple[str, ...]
     course_catalog_path: Path
     runtime_repository_backend: str
+    task_queue: str
+    scheduler_enabled: bool
 
 
 @lru_cache
 def get_settings() -> Settings:
     base_dir = Path(__file__).resolve().parents[1]
-    return Settings(
+    settings = Settings(
         app_name=os.getenv("KNOWLINK_APP_NAME", "KnowLink API"),
         env=os.getenv("KNOWLINK_ENV", "development"),
         host=os.getenv("KNOWLINK_HOST", "0.0.0.0"),
@@ -66,7 +71,39 @@ def get_settings() -> Settings:
         ),
         course_catalog_path=base_dir / "seeds" / "course_catalog.json",
         runtime_repository_backend=os.getenv("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "memory"),
+        task_queue=os.getenv("KNOWLINK_TASK_QUEUE", "dramatiq"),
+        scheduler_enabled=_env_bool("KNOWLINK_SCHEDULER_ENABLED", False),
     )
+    _validate_task_queue(settings)
+    _validate_runtime_hardening(settings)
+    return settings
+
+
+def _validate_task_queue(settings: Settings) -> None:
+    queue_mode = settings.task_queue.strip().lower()
+    if queue_mode in SUPPORTED_TASK_QUEUES:
+        return
+    supported = ", ".join(sorted(SUPPORTED_TASK_QUEUES))
+    raise RuntimeError(f"Unsupported KNOWLINK_TASK_QUEUE: {settings.task_queue!r}. Supported values: {supported}.")
+
+
+def _validate_runtime_hardening(settings: Settings) -> None:
+    if settings.env.strip().lower() not in {"production", "prod", "staging"}:
+        return
+
+    insecure_names: list[str] = []
+    if settings.demo_token.strip() in {"", "knowlink-demo-token"}:
+        insecure_names.append("KNOWLINK_DEMO_TOKEN")
+
+    if settings.storage_backend.strip().lower() == "minio":
+        if settings.minio_access_key.strip() in {"", "minioadmin"}:
+            insecure_names.append("KNOWLINK_MINIO_ACCESS_KEY")
+        if settings.minio_secret_key.strip() in {"", "minioadmin"}:
+            insecure_names.append("KNOWLINK_MINIO_SECRET_KEY")
+
+    if insecure_names:
+        joined = ", ".join(insecure_names)
+        raise RuntimeError(f"Insecure production settings: {joined} must not use demo/default values.")
 
 
 def _env_bool(name: str, default: bool) -> bool:

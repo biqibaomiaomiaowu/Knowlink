@@ -122,6 +122,16 @@ class ResourceService:
 
     def delete_resource(self, *, course_id: int, resource_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
+        blockers_getter = getattr(self.resources, "get_resource_delete_blockers", None)
+        if callable(blockers_getter):
+            blockers = blockers_getter(course_id, resource_id)
+            if blockers:
+                summary = ", ".join(f"{name}={count}" for name, count in sorted(blockers.items()))
+                raise ServiceError(
+                    message=f"Resource has dependent backend artifacts and cannot be deleted safely: {summary}.",
+                    error_code="resource.has_dependents",
+                    status_code=409,
+                )
         deleted = self.resources.delete_resource(course_id, resource_id)
         if not deleted:
             raise ServiceError(

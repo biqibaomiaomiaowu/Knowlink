@@ -41,6 +41,17 @@ class _FakeObjectStorage:
         return self.objects[object_key]
 
 
+class _StreamingFakeObjectStorage(_FakeObjectStorage):
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        super().__init__(objects)
+        self.download_calls: list[tuple[str, Path]] = []
+
+    def download_object_to_file(self, object_key: str, destination_path: str | Path) -> None:
+        path = Path(destination_path)
+        self.download_calls.append((object_key, path))
+        path.write_bytes(self.objects[object_key])
+
+
 def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Path):
     session_factory = _session_factory()
     session = session_factory()
@@ -548,6 +559,62 @@ def test_parse_pipeline_runner_downloads_raw_object_key_from_object_storage(
     assert result["status"] == "succeeded"
     assert storage.read_calls == [object_key]
     assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 1
+
+
+def test_parse_pipeline_runner_streams_raw_object_key_to_worker_cache_when_supported(
+    monkeypatch,
+    tmp_path: Path,
+):
+    object_key = "raw/1/101/temp/pdf/streamed.pdf"
+    missing_local_path = tmp_path / "local-missing" / "streamed.pdf"
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(
+        session,
+        missing_local_path,
+        resource_type="pdf",
+        object_key=object_key,
+    )
+    missing_local_path.unlink()
+    storage = _StreamingFakeObjectStorage({object_key: b"%PDF-1.4 streamed object"})
+    monkeypatch.setenv("KNOWLINK_WORKER_CACHE_DIR", str(tmp_path / "worker-cache"))
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        resolved_path = Path(file_path)
+        assert resource_type == "pdf"
+        assert resolved_path.is_file()
+        assert resolved_path.read_bytes() == b"%PDF-1.4 streamed object"
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-p1",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "对象存储支持文件下载时不经过整对象内存缓冲。",
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=lambda: _FakeEmbeddingClient(),
+        object_storage=storage,
+        base_dir=tmp_path,
+    )
+
+    assert result["status"] == "succeeded"
+    assert storage.read_calls == []
+    assert len(storage.download_calls) == 1
+    assert storage.download_calls[0][0] == object_key
+    assert storage.download_calls[0][1].is_file()
 
 
 def _session_factory():
