@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 import server.infra.db.models
 from server.infra.db.base import Base
-from server.infra.db.models import AsyncTask, Course, CourseResource, HandoutVersion, ParseRun, VectorDocument
+from server.infra.db.models import AsyncTask, Course, CourseResource, CourseSegment, HandoutVersion, ParseRun, VectorDocument
 from server.tasks.parse_pipeline import run_parse_pipeline
 
 
@@ -23,7 +23,11 @@ class _FakeParserResult:
 
 
 class _FakeEmbeddingClient:
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
     def embed_texts(self, sentences):
+        self.calls.append(list(sentences))
         return [[float(index), float(len(sentence))] for index, sentence in enumerate(sentences, start=1)]
 
 
@@ -81,6 +85,273 @@ def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Pa
     assert session.get(ParseRun, message["parseRunId"]).status == "succeeded"
     assert session.get(AsyncTask, message["taskId"]).status == "succeeded"
     assert _step_statuses(session, message["parseRunId"])["vectorize"] == "succeeded"
+
+
+def test_parse_pipeline_duplicate_completed_message_does_not_append_artifacts(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "lecture.pdf", resource_type="pdf")
+    parse_calls: list[str] = []
+    embedding_clients: list[_FakeEmbeddingClient] = []
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        parse_calls.append(resource_type)
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-p1",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "集合是确定对象组成的整体。",
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    def embedding_factory():
+        client = _FakeEmbeddingClient()
+        embedding_clients.append(client)
+        return client
+
+    first_result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=embedding_factory,
+        base_dir=tmp_path,
+    )
+    second_result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=embedding_factory,
+        base_dir=tmp_path,
+    )
+
+    assert first_result["status"] == "succeeded"
+    assert second_result["status"] == "succeeded"
+    assert second_result["segmentCount"] == 1
+    assert second_result["vectorDocumentCount"] == 1
+    assert parse_calls == ["pdf"]
+    assert len(embedding_clients) == 1
+    assert embedding_clients[0].calls == [["集合是确定对象组成的整体。"]]
+    assert session.scalar(sa.select(sa.func.count()).select_from(CourseSegment)) == 1
+    assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 1
+
+
+def test_parse_pipeline_rejects_schema_invalid_normalized_document(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "lecture.pdf", resource_type="pdf")
+    embedding_clients: list[_FakeEmbeddingClient] = []
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-p1",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "缺少页码的 PDF 片段不能进入持久化。",
+                        "orderNo": 1,
+                        "unexpected": "schema drift",
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    def embedding_factory():
+        client = _FakeEmbeddingClient()
+        embedding_clients.append(client)
+        return client
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=embedding_factory,
+        base_dir=tmp_path,
+    )
+
+    assert result["status"] == "failed"
+    assert any(issue["code"] == "parse.schema_invalid" for issue in result["issues"])
+    assert session.scalar(sa.select(sa.func.count()).select_from(CourseSegment)) == 0
+    assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 0
+    assert embedding_clients == []
+
+    resource = session.scalar(sa.select(CourseResource).where(CourseResource.course_id == message["courseId"]))
+    assert resource.processing_status == "failed"
+    assert resource.last_error
+    assert "schema" in resource.last_error
+    assert session.get(ParseRun, message["parseRunId"]).status == "failed"
+    root_task = session.get(AsyncTask, message["taskId"])
+    assert root_task.status == "failed"
+    assert root_task.error_code == "parse.schema_invalid"
+    document_task = session.scalar(
+        sa.select(AsyncTask).where(AsyncTask.parse_run_id == message["parseRunId"], AsyncTask.step_code == "document_parse")
+    )
+    assert document_task.status == "failed"
+    assert document_task.error_code == "parse.schema_invalid"
+
+
+def test_parse_pipeline_schema_invalid_mixed_resources_fails_without_vectorizing(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "invalid.pdf", resource_type="pdf")
+    _add_course_resource(session, message["courseId"], tmp_path / "valid.pdf", resource_type="pdf", sort_order=1)
+    embedding_clients: list[_FakeEmbeddingClient] = []
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        if Path(file_path).name == "invalid.pdf":
+            return _FakeParserResult(
+                status="succeeded",
+                normalized_document={
+                    "resourceType": "pdf",
+                    "segments": [
+                        {
+                            "segmentKey": "pdf-invalid",
+                            "segmentType": "pdf_page_text",
+                            "textContent": "缺少页码的 PDF 片段不能进入向量化。",
+                            "orderNo": 1,
+                        }
+                    ],
+                },
+                issues=[],
+            )
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-valid",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "另一个资源虽然有效，也不能在 schema invalid 后继续向量化。",
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    def embedding_factory():
+        client = _FakeEmbeddingClient()
+        embedding_clients.append(client)
+        return client
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=embedding_factory,
+        base_dir=tmp_path,
+    )
+
+    assert result["status"] == "failed"
+    assert any(issue["code"] == "parse.schema_invalid" for issue in result["issues"])
+    assert result["segmentCount"] == 0
+    assert session.scalar(sa.select(sa.func.count()).select_from(CourseSegment)) == 0
+    assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 0
+    assert embedding_clients == []
+    assert session.get(ParseRun, message["parseRunId"]).status == "failed"
+    assert session.get(AsyncTask, message["taskId"]).status == "failed"
+    document_task = session.scalar(
+        sa.select(AsyncTask).where(AsyncTask.parse_run_id == message["parseRunId"], AsyncTask.step_code == "document_parse")
+    )
+    assert document_task.status == "failed"
+    assert document_task.error_code == "parse.schema_invalid"
+    resources = {
+        resource.original_name: resource
+        for resource in session.scalars(
+            sa.select(CourseResource).where(CourseResource.course_id == message["courseId"])
+        )
+    }
+    assert resources["invalid.pdf"].processing_status == "failed"
+    assert resources["invalid.pdf"].last_parse_run_id is None
+    assert resources["valid.pdf"].processing_status == "failed"
+    assert resources["valid.pdf"].last_parse_run_id is None
+
+
+def test_parse_pipeline_retry_after_failed_parse_run_reexecutes_when_root_requeued(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "lecture.pdf", resource_type="pdf")
+    parse_calls: list[str] = []
+
+    def invalid_parse(resource_type: str, file_path: str | Path):
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-invalid",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "第一次解析失败。",
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    first_result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=invalid_parse,
+        embedding_client_factory=lambda: _FakeEmbeddingClient(),
+        base_dir=tmp_path,
+    )
+    assert first_result["status"] == "failed"
+
+    root_task = session.get(AsyncTask, message["taskId"])
+    root_task.status = "queued"
+    root_task.progress_pct = 0
+    root_task.error_code = None
+    root_task.error_message = None
+    root_task.result_json = None
+    session.commit()
+
+    def valid_parse(resource_type: str, file_path: str | Path):
+        parse_calls.append(resource_type)
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-valid",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "重试后解析成功。",
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    second_result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=valid_parse,
+        embedding_client_factory=lambda: _FakeEmbeddingClient(),
+        base_dir=tmp_path,
+    )
+
+    assert second_result["status"] == "succeeded"
+    assert parse_calls == ["pdf"]
+    assert session.scalar(sa.select(sa.func.count()).select_from(CourseSegment)) == 1
+    assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 1
 
 
 def test_parse_pipeline_success_clears_stale_active_handout_version(tmp_path: Path):
@@ -359,6 +630,34 @@ def _seed_parse_run(
         )
     session.commit()
     return {"taskId": root_task.id, "courseId": course.id, "parseRunId": parse_run.id}
+
+
+def _add_course_resource(
+    session: Session,
+    course_id: int,
+    object_path: Path,
+    *,
+    resource_type: str,
+    sort_order: int,
+) -> CourseResource:
+    object_path.parent.mkdir(parents=True, exist_ok=True)
+    object_path.write_bytes(b"%PDF-1.4 test")
+    resource = CourseResource(
+        course_id=course_id,
+        resource_type=resource_type,
+        object_key=str(object_path),
+        original_name=object_path.name,
+        mime_type="application/pdf",
+        size_bytes=object_path.stat().st_size,
+        checksum=f"sha256:{object_path.name}",
+        ingest_status="ready",
+        validation_status="passed",
+        processing_status="pending",
+        sort_order=sort_order,
+    )
+    session.add(resource)
+    session.commit()
+    return resource
 
 
 def _step_statuses(session: Session, parse_run_id: int) -> dict[str, str]:
