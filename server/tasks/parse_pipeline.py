@@ -100,6 +100,7 @@ def _run_with_session(
             parse_run=parse_run,
             course=course,
         )
+    _discard_parse_run_artifacts(session=session, parse_run_id=parse_run_id)
     resources = list(
         session.scalars(
             select(CourseResource)
@@ -580,7 +581,12 @@ def _existing_artifact_summary(*, session: Session, course_id: int, parse_run_id
 
 
 def _discard_parse_run_artifacts(*, session: Session, parse_run_id: int) -> None:
-    session.execute(delete(VectorDocument).where(VectorDocument.parse_run_id == parse_run_id))
+    session.execute(
+        delete(VectorDocument).where(
+            VectorDocument.parse_run_id == parse_run_id,
+            VectorDocument.owner_type == "segment",
+        )
+    )
     session.execute(delete(CourseSegment).where(CourseSegment.parse_run_id == parse_run_id))
     session.flush()
 

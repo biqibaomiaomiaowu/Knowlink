@@ -247,6 +247,62 @@ def test_production_like_settings_reject_insecure_auth_and_minio_defaults(monkey
     assert "KNOWLINK_MINIO_SECRET_KEY" in message
 
 
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("KNOWLINK_TASK_QUEUE", "noop"),
+        ("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "memory"),
+        ("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "demo"),
+        ("KNOWLINK_STORAGE_BACKEND", "demo"),
+        ("KNOWLINK_STORAGE_BACKEND", "fake"),
+        ("KNOWLINK_STORAGE_BACKEND", "memory"),
+        ("KNOWLINK_STORAGE_BACKEND", "local"),
+        ("KNOWLINK_STORAGE_BACKEND", "disabled"),
+    ],
+)
+def test_production_like_settings_reject_lossy_runtime_modes(monkeypatch, name: str, value: str):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_ENV", "production")
+    monkeypatch.setenv("KNOWLINK_DEMO_TOKEN", "production-token")
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "dramatiq")
+    monkeypatch.setenv("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "sql")
+    monkeypatch.setenv("KNOWLINK_STORAGE_BACKEND", "minio")
+    monkeypatch.setenv("KNOWLINK_MINIO_ACCESS_KEY", "production-access")
+    monkeypatch.setenv("KNOWLINK_MINIO_SECRET_KEY", "production-secret")
+    monkeypatch.setenv(name, value)
+
+    try:
+        with pytest.raises(RuntimeError) as exc_info:
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+    message = str(exc_info.value)
+    assert name in message
+    assert value in message
+
+
+def test_development_settings_still_allow_explicit_noop_memory_and_demo_modes(monkeypatch):
+    from server.config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("KNOWLINK_ENV", "development")
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "noop")
+    monkeypatch.setenv("KNOWLINK_RUNTIME_REPOSITORY_BACKEND", "memory")
+    monkeypatch.setenv("KNOWLINK_STORAGE_BACKEND", "demo")
+
+    try:
+        settings = get_settings()
+    finally:
+        get_settings.cache_clear()
+
+    assert settings.task_queue == "noop"
+    assert settings.runtime_repository_backend == "memory"
+    assert settings.storage_backend == "demo"
+
+
 def test_dramatiq_default_actor_path_resolves_parse_pipeline_actor():
     from server.tasks.dispatcher import DramatiqTaskDispatcher
 

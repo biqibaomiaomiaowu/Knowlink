@@ -155,6 +155,113 @@ def test_parse_pipeline_duplicate_completed_message_does_not_append_artifacts(tm
     assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 1
 
 
+def test_parse_pipeline_redelivery_of_running_parse_run_replaces_partial_artifacts(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "lecture.pdf", resource_type="pdf")
+    resource = session.scalar(sa.select(CourseResource).where(CourseResource.course_id == message["courseId"]))
+    assert resource is not None
+
+    root_task = session.get(AsyncTask, message["taskId"])
+    parse_run = session.get(ParseRun, message["parseRunId"])
+    root_task.status = "running"
+    parse_run.status = "running"
+    stale_segment = CourseSegment(
+        course_id=message["courseId"],
+        resource_id=resource.id,
+        parse_run_id=message["parseRunId"],
+        segment_type="pdf_page_text",
+        text_content="崩溃前已经提交的旧片段。",
+        plain_text="崩溃前已经提交的旧片段。",
+        page_no=1,
+        order_no=1,
+        token_count=10,
+        is_active=True,
+    )
+    session.add(stale_segment)
+    session.flush()
+    session.add(
+        VectorDocument(
+            course_id=message["courseId"],
+            parse_run_id=message["parseRunId"],
+            owner_type="segment",
+            owner_id=stale_segment.id,
+            resource_id=resource.id,
+            content_text=stale_segment.text_content,
+            metadata_json={"segmentKey": f"segment:{stale_segment.id}", "source": "stale"},
+            embedding=[0.0, 0.0],
+        )
+    )
+    session.add(
+        VectorDocument(
+            course_id=message["courseId"],
+            parse_run_id=message["parseRunId"],
+            handout_version_id=123,
+            owner_type="handout_block",
+            owner_id=456,
+            content_text="同一 parse run 后续生成的讲义向量不能被 parse 重跑清理。",
+            metadata_json={"handoutVersionId": 123, "outlineKey": "legacy-block"},
+            embedding=None,
+        )
+    )
+    session.commit()
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        assert resource_type == "pdf"
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-redelivery",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "重投递后重新生成的片段。",
+                        "pageNo": 2,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=lambda: _FakeEmbeddingClient(),
+        base_dir=tmp_path,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["segmentCount"] == 1
+    assert result["vectorDocumentCount"] == 1
+    session.expire_all()
+    segments = session.scalars(
+        sa.select(CourseSegment).where(CourseSegment.parse_run_id == message["parseRunId"])
+    ).all()
+    segment_vectors = session.scalars(
+        sa.select(VectorDocument).where(
+            VectorDocument.parse_run_id == message["parseRunId"],
+            VectorDocument.owner_type == "segment",
+        )
+    ).all()
+    handout_vectors = session.scalars(
+        sa.select(VectorDocument).where(
+            VectorDocument.parse_run_id == message["parseRunId"],
+            VectorDocument.owner_type == "handout_block",
+        )
+    ).all()
+    assert [segment.text_content for segment in segments] == ["重投递后重新生成的片段。"]
+    assert len(segment_vectors) == 1
+    assert segment_vectors[0].owner_id == segments[0].id
+    assert [vector.content_text for vector in handout_vectors] == [
+        "同一 parse run 后续生成的讲义向量不能被 parse 重跑清理。"
+    ]
+    assert session.get(ParseRun, message["parseRunId"]).status == "succeeded"
+    assert session.get(AsyncTask, message["taskId"]).status == "succeeded"
+
+
 def test_parse_pipeline_rejects_schema_invalid_normalized_document(tmp_path: Path):
     session_factory = _session_factory()
     session = session_factory()

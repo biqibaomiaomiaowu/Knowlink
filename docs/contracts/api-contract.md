@@ -28,7 +28,7 @@
   - `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
 - 带路径参数的课程接口一律以 path 中的 `courseId` 为准；请求体不再重复传同义 `courseId`，`POST /api/v1/qa/messages` 是唯一例外。
 - Docker / runtime 默认任务队列为 `KNOWLINK_TASK_QUEUE=dramatiq`；`noop` dispatcher 只允许通过显式设置 `KNOWLINK_TASK_QUEUE=noop` 用于本地测试或开发，不得作为运行时默认。未知 `KNOWLINK_TASK_QUEUE` 值必须启动失败。
-- `KNOWLINK_ENV=production` / `prod` / `staging` 时，demo 鉴权 token 和 MinIO 默认凭据必须启动前 fail-fast；本地 `development` / test 仍可使用 `.env.example` 的 demo 默认值。
+- `KNOWLINK_ENV=production` / `prod` / `staging` 时，demo 鉴权 token、MinIO 默认凭据、`KNOWLINK_TASK_QUEUE=noop`、非 `sql` 的 `KNOWLINK_RUNTIME_REPOSITORY_BACKEND`，以及 `demo` / `fake` / `memory` / `local` / `disabled` 等非持久化或禁用型 `KNOWLINK_STORAGE_BACKEND` 必须启动前 fail-fast；本地 `development` / test 仍可使用 `.env.example` 的 demo 默认值。
 - scheduler 当前没有真实生产定时任务，默认 `KNOWLINK_SCHEDULER_ENABLED=false`，且默认 compose 不启动 scheduler 服务；如需手动运行，必须显式启用该环境变量。
 
 ### 1.1 Week 1 冻结入口

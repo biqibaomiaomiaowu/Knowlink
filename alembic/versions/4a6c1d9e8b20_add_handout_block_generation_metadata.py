@@ -27,6 +27,14 @@ def upgrade() -> None:
         "handout_blocks",
         sa.Column("generation_metadata_json", JSON_TYPE, nullable=True),
     )
+    op.execute(
+        """
+        UPDATE handout_blocks
+        SET generation_metadata_json = '{"source": "fallback", "reason": "legacy_unknown"}'
+        WHERE status = 'ready'
+          AND generation_metadata_json IS NULL
+        """
+    )
 
 
 def downgrade() -> None:

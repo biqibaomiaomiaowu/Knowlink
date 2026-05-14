@@ -7,6 +7,8 @@ from pathlib import Path
 
 
 SUPPORTED_TASK_QUEUES = {"dramatiq", "noop"}
+PRODUCTION_LIKE_ENVS = {"production", "prod", "staging"}
+UNSAFE_PRODUCTION_STORAGE_BACKENDS = {"", "demo", "disabled", "fake", "local", "memory", "none"}
 
 
 @dataclass(frozen=True)
@@ -88,14 +90,25 @@ def _validate_task_queue(settings: Settings) -> None:
 
 
 def _validate_runtime_hardening(settings: Settings) -> None:
-    if settings.env.strip().lower() not in {"production", "prod", "staging"}:
+    if settings.env.strip().lower() not in PRODUCTION_LIKE_ENVS:
         return
 
     insecure_names: list[str] = []
+    task_queue = settings.task_queue.strip().lower()
+    runtime_backend = settings.runtime_repository_backend.strip().lower()
+    storage_backend = settings.storage_backend.strip().lower()
+
     if settings.demo_token.strip() in {"", "knowlink-demo-token"}:
         insecure_names.append("KNOWLINK_DEMO_TOKEN")
 
-    if settings.storage_backend.strip().lower() == "minio":
+    if task_queue == "noop":
+        insecure_names.append(f"KNOWLINK_TASK_QUEUE={task_queue}")
+    if runtime_backend != "sql":
+        insecure_names.append(f"KNOWLINK_RUNTIME_REPOSITORY_BACKEND={runtime_backend}")
+    if storage_backend in UNSAFE_PRODUCTION_STORAGE_BACKENDS:
+        insecure_names.append(f"KNOWLINK_STORAGE_BACKEND={storage_backend}")
+
+    if storage_backend == "minio":
         if settings.minio_access_key.strip() in {"", "minioadmin"}:
             insecure_names.append("KNOWLINK_MINIO_ACCESS_KEY")
         if settings.minio_secret_key.strip() in {"", "minioadmin"}:
@@ -103,7 +116,9 @@ def _validate_runtime_hardening(settings: Settings) -> None:
 
     if insecure_names:
         joined = ", ".join(insecure_names)
-        raise RuntimeError(f"Insecure production settings: {joined} must not use demo/default values.")
+        raise RuntimeError(
+            f"Insecure production settings: {joined} must not use demo/default or data-loss-prone values."
+        )
 
 
 def _env_bool(name: str, default: bool) -> bool:

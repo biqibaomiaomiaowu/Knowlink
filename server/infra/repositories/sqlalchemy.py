@@ -2722,6 +2722,17 @@ def _handout_outline_dict(
     }
 
 
+LEGACY_HANDOUT_BLOCK_GENERATION_METADATA = {"source": "fallback", "reason": "legacy_unknown"}
+
+
+def _handout_block_generation_metadata(block: HandoutBlock) -> dict[str, Any] | None:
+    if block.generation_metadata_json:
+        return dict(block.generation_metadata_json)
+    if block.status == "ready":
+        return dict(LEGACY_HANDOUT_BLOCK_GENERATION_METADATA)
+    return None
+
+
 def _handout_block_dict(block: HandoutBlock) -> dict[str, Any]:
     payload = {
         "blockId": block.id,
@@ -2738,8 +2749,9 @@ def _handout_block_dict(block: HandoutBlock) -> dict[str, Any]:
         "knowledgePoints": block.knowledge_points_json or [],
         "citations": [_public_citation_from_ref(citation) for citation in block.citations_json or []],
     }
-    if block.generation_metadata_json:
-        payload["generationMetadata"] = dict(block.generation_metadata_json)
+    generation_metadata = _handout_block_generation_metadata(block)
+    if generation_metadata:
+        payload["generationMetadata"] = generation_metadata
     return payload
 
 
@@ -2752,8 +2764,9 @@ def _handout_block_status_dict(block: HandoutBlock) -> dict[str, Any]:
         "startSec": block.start_sec,
         "endSec": block.end_sec,
     }
-    if block.generation_metadata_json:
-        payload["generationMetadata"] = dict(block.generation_metadata_json)
+    generation_metadata = _handout_block_generation_metadata(block)
+    if generation_metadata:
+        payload["generationMetadata"] = generation_metadata
     return payload
 
 

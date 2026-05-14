@@ -813,6 +813,7 @@ def test_ready_handout_block_generate_returns_status_without_requeue():
         )
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
+        generation_metadata = {"source": "model", "reason": "test"}
         repo.save_handout_block_result(
             block["blockId"],
             {
@@ -822,6 +823,7 @@ def test_ready_handout_block_generate_returns_status_without_requeue():
                 "sourceSegmentKeys": block["sourceSegmentKeys"],
                 "knowledgePoints": [],
                 "citations": [],
+                "generationMetadata": generation_metadata,
             },
         )
 
@@ -834,6 +836,7 @@ def test_ready_handout_block_generate_returns_status_without_requeue():
             "generationStatus": "ready",
             "startSec": block["startSec"],
             "endSec": block["endSec"],
+            "generationMetadata": generation_metadata,
         }
     finally:
         session.close()
@@ -853,6 +856,7 @@ def test_same_idempotency_key_returns_ready_status_after_block_generation_finish
         )
         service.generate_handout(course_id=course_id, idempotency_key=None)
         block = repo.get_latest_handout(course_id)["blocks"][0]
+        generation_metadata = {"source": "model", "reason": "test"}
 
         first = service.generate_block(block_id=block["blockId"], idempotency_key="same-key")
         assert first["status"] == "queued"
@@ -869,6 +873,7 @@ def test_same_idempotency_key_returns_ready_status_after_block_generation_finish
                 "sourceSegmentKeys": block["sourceSegmentKeys"],
                 "knowledgePoints": [],
                 "citations": [],
+                "generationMetadata": generation_metadata,
             },
         )
         repeat = service.generate_block(block_id=block["blockId"], idempotency_key="same-key")
@@ -880,6 +885,7 @@ def test_same_idempotency_key_returns_ready_status_after_block_generation_finish
             "generationStatus": "ready",
             "startSec": block["startSec"],
             "endSec": block["endSec"],
+            "generationMetadata": generation_metadata,
         }
         assert len(dispatcher.block_calls) == 1
     finally:

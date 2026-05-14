@@ -796,6 +796,109 @@ def test_sql_handout_block_generation_metadata_persists_to_read_models():
     engine.dispose()
 
 
+def test_sql_legacy_ready_handout_block_without_metadata_returns_fallback_marker():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite legacy metadata 课程",
+        entry_type="manual_import",
+        goal_text="验证旧 ready 讲义块 metadata 兼容",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/legacy.pdf",
+            "originalName": "legacy.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:legacy",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "旧讲义块",
+                "textContent": "旧数据在 metadata 字段上线前已经处于 ready。",
+                "plainText": "旧数据在 metadata 字段上线前已经处于 ready。",
+                "pageNo": 1,
+                "orderNo": 1,
+                "tokenCount": 18,
+            }
+        ],
+    )
+    handout, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "Legacy metadata 讲义",
+            "summary": "用于旧数据 metadata 兼容。",
+            "items": [
+                {
+                    "outlineKey": "section-1",
+                    "title": "旧讲义块",
+                    "summary": "旧数据兼容。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-legacy",
+                            "title": "旧讲义块",
+                            "summary": "旧数据兼容。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segments[0]["segmentKey"]],
+                            "topicTags": ["兼容"],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    expected = {"source": "fallback", "reason": "legacy_unknown"}
+    handout_versions = Base.metadata.tables["handout_versions"]
+    handout_blocks = Base.metadata.tables["handout_blocks"]
+    session.execute(
+        sa.update(handout_versions)
+        .where(handout_versions.c.id == handout["handoutVersionId"])
+        .values(status="ready", ready_blocks=1, pending_blocks=0)
+    )
+    session.execute(
+        sa.update(handout_blocks)
+        .where(handout_blocks.c.id == blocks[0]["blockId"])
+        .values(
+            status="ready",
+            content_md="旧数据在 metadata 字段上线前已经处于 ready。",
+            knowledge_points_json=[],
+            citations_json=[],
+            generation_metadata_json=None,
+        )
+    )
+    session.commit()
+
+    for read_model in (
+        repo.get_handout(handout["handoutVersionId"])["blocks"][0],
+        repo.get_latest_handout(course_id)["blocks"][0],
+        repo.get_handout_block_status(blocks[0]["blockId"]),
+    ):
+        assert read_model["generationMetadata"] == expected
+
+    session.close()
+    engine.dispose()
+
+
 def test_import_collection_ignores_comments_and_string_literals():
     imported = _imported_modules_from_source(
         '''
