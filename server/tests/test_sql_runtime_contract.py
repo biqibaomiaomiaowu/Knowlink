@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import pkgutil
 import re
+import textwrap
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +18,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from server.domain.services.pipelines import PipelineService
+from server.domain.services.quizzes import QuizService
 from server.infra.db.base import Base
+from server.schemas.requests import SubmitQuizRequest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -338,6 +343,18 @@ def _migration_text() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted(versions_dir.glob("*.py")))
 
 
+def _imported_modules_from_source(source: str) -> set[str]:
+    imported: set[str] = set()
+    tree = ast.parse(textwrap.dedent(source))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported.add(node.module)
+            imported.update(f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*")
+    return imported
+
+
 def _value(entity: Any, *names: str) -> Any:
     if isinstance(entity, dict):
         for name in names:
@@ -429,6 +446,12 @@ def _build_sqlite_repository(repository_cls: type[Any]):
         f"Could not instantiate {repository_cls.__module__}.{repository_cls.__name__} "
         f"with a SQLite sync session/engine. Errors: {errors}"
     )
+
+
+def _assert_same_datetime(actual: Any, expected: datetime) -> None:
+    assert isinstance(actual, datetime)
+    comparable = actual if actual.tzinfo is not None else actual.replace(tzinfo=timezone.utc)
+    assert comparable == expected
 
 
 def test_week2_runtime_models_and_migrations_expose_key_fields():
@@ -586,11 +609,104 @@ def test_sync_sql_repository_closes_course_resource_parse_task_and_inquiry_on_sq
     engine.dispose()
 
 
+def test_sql_repository_create_course_persists_exam_at_and_returns_it():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    exam_at = datetime(2026, 6, 20, 1, 30, tzinfo=timezone.utc)
+
+    course = repo.create_course(
+        title="SQLite examAt 课程",
+        entry_type="manual_import",
+        goal_text="验证考试时间持久化",
+        preferred_style="exam",
+        exam_at=exam_at,
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+
+    _assert_same_datetime(_value(course, "examAt", "exam_at"), exam_at)
+    courses = Base.metadata.tables.get("courses")
+    assert courses is not None
+    row_exam_at = session.execute(
+        sa.select(courses.c.exam_at).where(courses.c.id == course_id)
+    ).scalar_one()
+    _assert_same_datetime(row_exam_at, exam_at)
+
+    session.close()
+    engine.dispose()
+
+
+def test_sql_repository_normalizes_non_utc_exam_at_to_utc_for_sqlite_round_trip():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    exam_at = datetime(2026, 6, 20, 9, 30, tzinfo=timezone(timedelta(hours=8)))
+    expected_utc = datetime(2026, 6, 20, 1, 30, tzinfo=timezone.utc)
+
+    course = repo.create_course(
+        title="SQLite examAt 非 UTC 课程",
+        entry_type="manual_import",
+        goal_text="验证考试时间时区归一化",
+        preferred_style="exam",
+        exam_at=exam_at,
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+
+    returned_exam_at = _value(course, "examAt", "exam_at")
+    assert returned_exam_at == expected_utc
+    assert returned_exam_at.tzinfo is timezone.utc
+
+    fetched_exam_at = _value(repo.get_course(course_id), "examAt", "exam_at")
+    assert fetched_exam_at == expected_utc
+    assert fetched_exam_at.tzinfo is timezone.utc
+
+    courses = Base.metadata.tables.get("courses")
+    assert courses is not None
+    row_exam_at = session.execute(
+        sa.select(courses.c.exam_at).where(courses.c.id == course_id)
+    ).scalar_one()
+    assert isinstance(row_exam_at, datetime)
+    assert row_exam_at.replace(tzinfo=timezone.utc) == expected_utc
+
+    session.close()
+    engine.dispose()
+
+
+def test_import_collection_ignores_comments_and_string_literals():
+    imported = _imported_modules_from_source(
+        '''
+        # import server.ai.quiz_strategy
+        text = "server.ai.review_strategy"
+        import server.infra.repositories.sqlalchemy as sql_repo
+        from server.ai import quiz_strategy
+        from server.ai.review_strategy import build_mastery_record_updates
+        '''
+    )
+
+    assert "server.infra.repositories.sqlalchemy" in imported
+    assert "server.ai.quiz_strategy" in imported
+    assert "server.ai.review_strategy" in imported
+
+
+def test_sql_repository_does_not_import_quiz_or_review_strategy_layers():
+    imported = _imported_modules_from_source(
+        (ROOT / "server" / "infra" / "repositories" / "sqlalchemy.py").read_text(encoding="utf-8")
+    )
+    forbidden = {"server.ai.quiz_strategy", "server.ai.review_strategy"}
+
+    assert not {
+        module
+        for module in imported
+        if any(module == name or module.startswith(f"{name}.") for name in forbidden)
+    }
+
+
 class _RecordingDispatcher:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        self.calls.append({"taskId": task_id, "payload": payload})
+
+    def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
         self.calls.append({"taskId": task_id, "payload": payload})
 
 
@@ -649,6 +765,179 @@ def test_pipeline_service_sql_parse_start_enqueues_once_and_persists_complete_pa
         sa.select(async_tasks).where(async_tasks.c.id == first["taskId"])
     ).mappings().one()
     assert task_row["payload_json"] == dispatcher.calls[0]["payload"]
+
+    session.close()
+    engine.dispose()
+
+
+def test_quiz_service_sql_submit_persists_attempt_and_review_refresh_task():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite quiz submit",
+        entry_type="manual_import",
+        goal_text="验证 submit_quiz service 负责判分",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/quiz-submit.pdf",
+            "originalName": "quiz-submit.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:quiz-submit",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "极限定义",
+                "textContent": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "plainText": "极限定义需要同时关注自变量趋近和函数值趋近。",
+                "pageNo": 2,
+                "orderNo": 1,
+                "tokenCount": 20,
+            }
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    _, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "SQLite quiz submit 讲义",
+            "summary": "用于测验提交验收。",
+            "items": [
+                {
+                    "outlineKey": "section-1",
+                    "title": "极限定义",
+                    "summary": "理解极限定义。",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-1",
+                            "title": "极限定义",
+                            "summary": "理解极限定义。",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                            "topicTags": ["极限"],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "极限定义",
+            "summary": "理解极限定义。",
+            "contentMd": "极限定义需要同时关注自变量趋近和函数值趋近。",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit-submit",
+                    "displayName": "极限定义",
+                    "description": "同时关注自变量趋近和函数值趋近。",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": segment_key,
+                    "pageNo": 2,
+                    "refLabel": "PDF 第 2 页",
+                }
+            ],
+        },
+    )
+    quiz, _ = repo.create_quiz(course_id)
+    repo.save_quiz_generation_result(
+        quiz["quizId"],
+        {
+            "quizType": "chapter_review",
+            "questions": [
+                {
+                    "questionKey": "q1-submit",
+                    "questionType": "single_choice",
+                    "stemMd": "极限定义关注什么？",
+                    "options": ["A. 自变量趋近与函数值趋近", "B. 只关注面积", "C. 只关注常数", "D. 只关注符号"],
+                    "correctAnswer": "A",
+                    "explanationMd": "依据当前讲义块。",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-limit-submit",
+                    "knowledgePointName": "极限定义",
+                    "sourceBlockKey": str(blocks[0]["blockId"]),
+                    "sourceSegmentKeys": [segment_key],
+                }
+            ],
+        },
+        [],
+    )
+    first_question = repo.get_quiz(quiz["quizId"])["questions"][0]
+    dispatcher = _RecordingDispatcher()
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+        async_tasks=repo,
+    )
+
+    result = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest(
+            answers=[
+                {
+                    "questionId": first_question["questionId"],
+                    "selectedOption": "A",
+                }
+            ],
+        ),
+    )
+
+    assert result["score"] == 1
+    assert result["totalScore"] == 1
+    attempts = Base.metadata.tables.get("quiz_attempts")
+    async_tasks = Base.metadata.tables.get("async_tasks")
+    assert attempts is not None
+    assert async_tasks is not None
+    attempt_row = session.execute(
+        sa.select(attempts).where(attempts.c.id == result["attemptId"])
+    ).mappings().one()
+    assert attempt_row["score"] == 1
+    refresh_task = session.execute(
+        sa.select(async_tasks).where(
+            async_tasks.c.task_type == "review_refresh",
+            async_tasks.c.target_id == result["reviewTaskRunId"],
+        )
+    ).mappings().one()
+    assert refresh_task["payload_json"] == {
+        "courseId": course_id,
+        "reviewTaskRunId": result["reviewTaskRunId"],
+    }
+    assert dispatcher.calls == [
+        {
+            "taskId": refresh_task["id"],
+            "payload": refresh_task["payload_json"],
+        }
+    ]
 
     session.close()
     engine.dispose()

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from server.schemas.base import CamelModel
+
+
+def _require_timezone_aware(value: datetime | None) -> datetime | None:
+    if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+        raise ValueError("examAt must include a timezone offset.")
+    return value
 
 
 class RecommendationRequest(CamelModel):
@@ -15,12 +21,22 @@ class RecommendationRequest(CamelModel):
     exam_at: datetime | None = None
     preferred_style: Literal["balanced", "exam", "detailed", "quick"] = "balanced"
 
+    @field_validator("exam_at")
+    @classmethod
+    def _exam_at_must_include_timezone(cls, value: datetime | None) -> datetime | None:
+        return _require_timezone_aware(value)
+
 
 class ConfirmRecommendationRequest(CamelModel):
     goal_text: str
     exam_at: datetime | None = None
     preferred_style: Literal["balanced", "exam", "detailed", "quick"] = "balanced"
     title_override: str | None = None
+
+    @field_validator("exam_at")
+    @classmethod
+    def _exam_at_must_include_timezone(cls, value: datetime | None) -> datetime | None:
+        return _require_timezone_aware(value)
 
 
 class CreateCourseRequest(CamelModel):
@@ -29,6 +45,11 @@ class CreateCourseRequest(CamelModel):
     goal_text: str
     exam_at: datetime | None = None
     preferred_style: Literal["balanced", "exam", "detailed", "quick"] = "balanced"
+
+    @field_validator("exam_at")
+    @classmethod
+    def _exam_at_must_include_timezone(cls, value: datetime | None) -> datetime | None:
+        return _require_timezone_aware(value)
 
 
 class UploadInitRequest(CamelModel):
@@ -57,7 +78,7 @@ class BilibiliImportRequest(CamelModel):
 
 class InquiryAnswerItem(CamelModel):
     key: str
-    value: str | int
+    value: Any
 
 
 class InquiryAnswersRequest(CamelModel):

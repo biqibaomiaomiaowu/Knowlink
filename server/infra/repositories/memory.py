@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any, TypeVar
 
 from server.infra.repositories.memory_runtime import RuntimeStore
@@ -16,6 +17,9 @@ class MemoryScaffoldRepository:
     def run_idempotent(self, action: str, key: str | None, factory: Callable[[], T]) -> T:
         return self.store.run_idempotent(action, key, factory)
 
+    def get_idempotency_result(self, action: str, key: str | None) -> Any | None:
+        return self.store.get_idempotency_result(action, key)
+
     def create_course(
         self,
         *,
@@ -24,6 +28,7 @@ class MemoryScaffoldRepository:
         goal_text: str,
         preferred_style: str,
         catalog_id: str | None = None,
+        exam_at: datetime | None = None,
     ) -> dict[str, Any]:
         return self.store.create_course(
             title=title,
@@ -31,6 +36,7 @@ class MemoryScaffoldRepository:
             goal_text=goal_text,
             preferred_style=preferred_style,
             catalog_id=catalog_id,
+            exam_at=exam_at,
         )
 
     def list_recent_courses(self) -> list[dict[str, Any]]:
@@ -246,8 +252,21 @@ class MemoryScaffoldRepository:
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None:
         return self.store.quizzes.get(quiz_id)
 
-    def submit_quiz(self, quiz_id: int, answers: Sequence[dict[str, Any]] | None = None) -> dict[str, Any]:
-        return self.store.submit_quiz(quiz_id, answers or [])
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
+        return self.store.get_quiz_submission_context(quiz_id)
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self.store.save_quiz_attempt_result(
+            quiz_id,
+            quiz_attempt_result=quiz_attempt_result,
+            mastery_updates=list(mastery_updates),
+        )
 
     def next_task_id(self) -> int:
         return self.store.next_id("task")

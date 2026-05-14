@@ -18,6 +18,7 @@ from server.domain.services.async_tasks import (
     refresh_enqueue_failure_status,
 )
 from server.domain.services.errors import ServiceError
+from server.domain.services.idempotency import async_trigger_matches_course, run_scoped_idempotent
 
 
 PIPELINE_STEPS = [
@@ -172,10 +173,20 @@ class PipelineService:
             enqueue_request = (root_task_id, payload)
             return created_response
 
-        result = self.idempotency.run_idempotent(
-            "pipelines.parse_start",
-            idempotency_key,
-            factory,
+        result = run_scoped_idempotent(
+            self.idempotency,
+            action=f"pipelines.parse_start:{course_id}",
+            key=idempotency_key,
+            factory=factory,
+            legacy_action="pipelines.parse_start",
+            legacy_matches=lambda legacy: async_trigger_matches_course(
+                legacy,
+                course_id=course_id,
+                entity_type="parse_run",
+                task_type="parse_pipeline",
+                async_tasks=self.async_tasks,
+                target_type="parse_run",
+            ),
         )
         if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request

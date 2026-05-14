@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from server.domain.services.pipelines import PipelineService
+from server.domain.services.quizzes import QuizService
+from server.schemas.requests import SubmitQuizRequest
 from server.tests.test_api import AUTH_HEADERS, create_manual_course, request, upload_ready_pdf
 
 
@@ -46,6 +48,32 @@ def _post_parse_start(course_id: int, idempotency_key: str) -> tuple[int, dict[s
             f"/api/v1/courses/{course_id}/parse/start",
             headers=AUTH_HEADERS | {"idempotency-key": idempotency_key},
         )
+    )
+
+
+class _NoopReviewDispatcher:
+    def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _ = task_id, payload
+
+
+def _submit_quiz_with_service(repo, quiz_id: int, *, question_id: int, selected_option: str) -> dict[str, Any]:
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=_NoopReviewDispatcher(),
+        async_tasks=repo,
+    )
+    return service.submit_quiz(
+        quiz_id=quiz_id,
+        payload=SubmitQuizRequest(
+            answers=[
+                {
+                    "questionId": question_id,
+                    "selectedOption": selected_option,
+                }
+            ],
+        ),
     )
 
 
@@ -303,6 +331,7 @@ from server.infra.db.base import Base
 from server.infra.db.session import create_session, get_engine
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tests.test_api import AUTH_HEADERS, request
+from server.tests.test_runtime_wiring_contract import _submit_quiz_with_service
 
 Base.metadata.create_all(get_engine())
 
@@ -1119,6 +1148,7 @@ from server.infra.db.base import Base
 from server.infra.db.session import create_session, get_engine
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tests.test_api import AUTH_HEADERS, request
+from server.tests.test_runtime_wiring_contract import _submit_quiz_with_service
 
 Base.metadata.create_all(get_engine())
 
@@ -1251,7 +1281,13 @@ try:
             }
         ],
     )
-    attempt = repo.submit_quiz(quiz["quizId"], [{"questionKey": "q1-dashboard", "selectedOption": "A"}])
+    first_question_id = repo.get_quiz(quiz["quizId"])["questions"][0]["questionId"]
+    attempt = _submit_quiz_with_service(
+        repo,
+        quiz["quizId"],
+        question_id=first_question_id,
+        selected_option="A",
+    )
     review_run_id = attempt["reviewTaskRunId"]
     repo.save_review_task_run_result(
         review_run_id,
@@ -1552,6 +1588,7 @@ from server.infra.db.base import Base
 from server.infra.db.session import create_session, get_engine
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tasks.reviews import run_review_refresh
+from server.tests.test_runtime_wiring_contract import _submit_quiz_with_service
 
 Base.metadata.create_all(get_engine())
 
@@ -1684,7 +1721,13 @@ try:
             }
         ],
     )
-    attempt = repo.submit_quiz(quiz["quizId"], [{"questionKey": "q1-review", "selectedOption": "A"}])
+    first_question_id = repo.get_quiz(quiz["quizId"])["questions"][0]["questionId"]
+    attempt = _submit_quiz_with_service(
+        repo,
+        quiz["quizId"],
+        question_id=first_question_id,
+        selected_option="A",
+    )
     old_run_id = attempt["reviewTaskRunId"]
     tables = Base.metadata.tables
     old_task_id = session.execute(

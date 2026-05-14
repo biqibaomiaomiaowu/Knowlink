@@ -61,6 +61,12 @@ class RuntimeStore:
             self.idempotency[slot] = value
         return value
 
+    def get_idempotency_result(self, action: str, key: str | None):
+        if not key:
+            return None
+        with self.lock:
+            return self.idempotency.get((action, key))
+
     def create_course(
         self,
         *,
@@ -69,6 +75,7 @@ class RuntimeStore:
         goal_text: str,
         preferred_style: str,
         catalog_id: str | None = None,
+        exam_at: datetime | None = None,
     ) -> dict[str, Any]:
         course_id = self.next_id("course")
         course = {
@@ -77,6 +84,7 @@ class RuntimeStore:
             "entryType": entry_type,
             "catalogId": catalog_id,
             "goalText": goal_text,
+            "examAt": exam_at,
             "preferredStyle": preferred_style,
             "lifecycleStatus": "draft",
             "pipelineStage": "idle",
@@ -555,25 +563,36 @@ class RuntimeStore:
             "payload": {"questionCountLevel": question_count_level},
         }
 
-    def submit_quiz(self, quiz_id: int, answers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        _ = answers
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
+        quiz = self.quizzes.get(quiz_id)
+        if quiz is None:
+            return None
+        return {
+            "quizPayload": {
+                "quizType": quiz.get("quizType", "chapter_review"),
+                "questions": list(quiz.get("questions", [])),
+            },
+            "masteryRecords": [],
+        }
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        _ = mastery_updates
         attempt_id = self.next_id("attempt")
         review_run = self.create_review_run(self.quizzes[quiz_id]["courseId"])
         return {
             "attemptId": attempt_id,
-            "score": 100,
-            "totalScore": 100,
-            "accuracy": 1.0,
+            "score": int(quiz_attempt_result.get("score", 0)),
+            "totalScore": int(quiz_attempt_result.get("totalScore", 0)),
+            "accuracy": float(quiz_attempt_result.get("accuracy", 0.0)),
             "reviewTaskRunId": review_run["reviewTaskRunId"],
-            "masteryDelta": [
-                {"knowledgePoint": "极限定义", "delta": 0.2, "status": "improved"},
-                {"knowledgePoint": "导数几何意义", "delta": 0.1, "status": "stable"},
-            ],
-            "recommendedReviewAction": {
-                "type": "revisit_block",
-                "targetBlockId": 4001,
-                "reason": "建议先回看易错知识块，再进入下一轮练习。",
-            },
+            "masteryDelta": list(quiz_attempt_result.get("masteryDelta", [])),
+            "recommendedReviewAction": quiz_attempt_result.get("recommendedReviewAction"),
         }
 
     def create_review_run(self, course_id: int) -> dict[str, Any]:

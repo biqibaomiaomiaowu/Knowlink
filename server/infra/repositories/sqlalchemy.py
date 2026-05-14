@@ -10,8 +10,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server.parsers.base import clean_text
-from server.ai.quiz_strategy import grade_quiz_attempt
-from server.ai.review_strategy import build_mastery_record_updates
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
     AsyncTask,
@@ -109,6 +107,19 @@ class SqlAlchemyRuntimeRepository:
         finally:
             self._idempotency_depth -= 1
 
+    def get_idempotency_result(self, action: str, key: str | None) -> Any | None:
+        if not key:
+            return None
+        existing = self.session.scalar(
+            select(IdempotencyRecord).where(
+                IdempotencyRecord.action == action,
+                IdempotencyRecord.key == key,
+            )
+        )
+        if existing is None:
+            return None
+        return existing.result_json
+
     def create_course(
         self,
         *,
@@ -117,6 +128,7 @@ class SqlAlchemyRuntimeRepository:
         goal_text: str,
         preferred_style: str,
         catalog_id: str | None = None,
+        exam_at: datetime | None = None,
     ) -> dict[str, Any]:
         course = Course(
             user_id=self.user_id,
@@ -124,6 +136,7 @@ class SqlAlchemyRuntimeRepository:
             entry_type=entry_type,
             catalog_id=catalog_id,
             goal_text=goal_text,
+            exam_at=_normalize_utc_datetime(exam_at),
             preferred_style=preferred_style,
             lifecycle_status="draft",
             pipeline_stage="idle",
@@ -404,7 +417,7 @@ class SqlAlchemyRuntimeRepository:
             "goal_type": str(answer_values.get("goal_type") or "final_review"),
             "self_level": str(answer_values.get("mastery_level") or "intermediate"),
             "time_budget_minutes": int(answer_values.get("time_budget_minutes") or 60),
-            "exam_at": course.exam_at if course is not None else None,
+            "exam_at": _normalize_utc_datetime(course.exam_at) if course is not None else None,
             "preferred_style": str(
                 answer_values.get("handout_style")
                 or (course.preferred_style if course is not None else "balanced")
@@ -1213,7 +1226,30 @@ class SqlAlchemyRuntimeRepository:
         self._commit_or_flush()
         return self.get_quiz(quiz.id)
 
-    def submit_quiz(self, quiz_id: int, answers: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
+        quiz = self._get_active_quiz_model(quiz_id)
+        if quiz is None:
+            return None
+        questions = self.session.scalars(
+            select(QuizQuestion)
+            .where(QuizQuestion.quiz_id == quiz.id)
+            .order_by(QuizQuestion.sort_no.asc(), QuizQuestion.id.asc())
+        ).all()
+        return {
+            "quizPayload": {
+                "quizType": quiz.quiz_type,
+                "questions": [_quiz_question_private_dict(question) for question in questions],
+            },
+            "masteryRecords": self._list_mastery_record_dicts(course_id=quiz.course_id),
+        }
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
         quiz = self._get_active_quiz_model(quiz_id)
         if quiz is None:
             raise ValueError(f"Quiz {quiz_id} was not found.")
@@ -1222,16 +1258,8 @@ class SqlAlchemyRuntimeRepository:
             .where(QuizQuestion.quiz_id == quiz.id)
             .order_by(QuizQuestion.sort_no.asc(), QuizQuestion.id.asc())
         ).all()
-        quiz_payload = {
-            "quizType": quiz.quiz_type,
-            "questions": [_quiz_question_private_dict(question) for question in questions],
-        }
-        result = grade_quiz_attempt(quiz_payload, answers)
-        mastery_updates = build_mastery_record_updates(
-            result,
-            existing_records=self._list_mastery_record_dicts(course_id=quiz.course_id),
-        )
-
+        result = dict(quiz_attempt_result)
+        mastery_updates = list(mastery_updates)
         attempt = QuizAttempt(
             user_id=self.user_id,
             course_id=quiz.course_id,
@@ -2306,6 +2334,7 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "entryType": course.entry_type,
         "catalogId": course.catalog_id,
         "goalText": course.goal_text,
+        "examAt": _normalize_utc_datetime(course.exam_at),
         "preferredStyle": course.preferred_style,
         "lifecycleStatus": course.lifecycle_status,
         "pipelineStage": course.pipeline_stage,
@@ -2314,6 +2343,14 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "activeHandoutVersionId": course.active_handout_version_id,
         "updatedAt": course.updated_at,
     }
+
+
+def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _resource_dict(resource: CourseResource) -> dict[str, Any]:

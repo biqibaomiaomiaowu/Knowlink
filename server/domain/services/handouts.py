@@ -15,6 +15,7 @@ from server.domain.services.async_tasks import (
     resolve_async_tasks,
 )
 from server.domain.services.errors import ServiceError
+from server.domain.services.idempotency import async_trigger_matches_course, run_scoped_idempotent
 from server.ai.handout_lazy import HandoutOutlineClient, generate_handout_outline
 
 
@@ -99,7 +100,21 @@ class HandoutService:
             created_response = trigger
             return trigger
 
-        result = self.idempotency.run_idempotent("handouts.generate", idempotency_key, factory)
+        result = run_scoped_idempotent(
+            self.idempotency,
+            action=f"handouts.generate:{course_id}",
+            key=idempotency_key,
+            factory=factory,
+            legacy_action="handouts.generate",
+            legacy_matches=lambda legacy: async_trigger_matches_course(
+                legacy,
+                course_id=course_id,
+                entity_type="handout_version",
+                task_type="handout_generate",
+                async_tasks=self.async_tasks,
+                target_type="handout_version",
+            ),
+        )
         if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request
             enqueue_or_fail_if_missing_dispatcher(

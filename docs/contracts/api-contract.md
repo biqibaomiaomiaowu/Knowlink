@@ -735,7 +735,9 @@ V1 当前未实现阶段统一返回：
       "label": "本轮学习时间预算",
       "type": "number",
       "required": true,
-      "options": []
+      "options": [],
+      "minValue": 30,
+      "maxValue": 600
     },
     {
       "key": "handout_style",
@@ -780,6 +782,8 @@ V1 当前未实现阶段统一返回：
   ]
 }
 ```
+
+说明：`number` 类型题目当前仅用于 `time_budget_minutes`，服务端下发并强制校验 `minValue: 30`、`maxValue: 600`。
 
 ### `POST /api/v1/courses/{courseId}/inquiry/answers`
 

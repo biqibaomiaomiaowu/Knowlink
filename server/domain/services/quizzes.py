@@ -15,6 +15,9 @@ from server.domain.services.async_tasks import (
     resolve_async_tasks,
 )
 from server.domain.services.errors import ServiceError
+from server.domain.services.idempotency import async_trigger_matches_course, run_scoped_idempotent
+from server.ai.quiz_strategy import grade_quiz_attempt
+from server.ai.review_strategy import build_mastery_record_updates
 
 
 class QuizService:
@@ -94,7 +97,21 @@ class QuizService:
             created_response = trigger
             return trigger
 
-        result = self.idempotency.run_idempotent("quizzes.generate", idempotency_key, factory)
+        result = run_scoped_idempotent(
+            self.idempotency,
+            action=f"quizzes.generate:{course_id}",
+            key=idempotency_key,
+            factory=factory,
+            legacy_action="quizzes.generate",
+            legacy_matches=lambda legacy: async_trigger_matches_course(
+                legacy,
+                course_id=course_id,
+                entity_type="quiz",
+                task_type="quiz_generate",
+                async_tasks=self.async_tasks,
+                target_type="quiz",
+            ),
+        )
         if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request
             enqueue_or_fail_if_missing_dispatcher(
@@ -140,7 +157,35 @@ class QuizService:
                 status_code=409,
             )
         answers = payload.model_dump(by_alias=True, exclude_none=True).get("answers", [])
-        result = dict(self.quizzes.submit_quiz(quiz_id, answers))
+        context = self.quizzes.get_quiz_submission_context(quiz_id)
+        if context is None:
+            raise ServiceError(
+                message="Quiz was not found.",
+                error_code="quiz.not_found",
+                status_code=404,
+            )
+        quiz_payload = context.get("quizPayload")
+        if not isinstance(quiz_payload, dict):
+            raise ServiceError(
+                message="Quiz submission context was invalid.",
+                error_code="quiz.context_invalid",
+                status_code=500,
+            )
+        existing_records = context.get("masteryRecords", [])
+        if not isinstance(existing_records, list):
+            existing_records = []
+        quiz_attempt_result = grade_quiz_attempt(quiz_payload, answers)
+        mastery_updates = build_mastery_record_updates(
+            quiz_attempt_result,
+            existing_records=existing_records,
+        )
+        result = dict(
+            self.quizzes.save_quiz_attempt_result(
+                quiz_id,
+                quiz_attempt_result=quiz_attempt_result,
+                mastery_updates=mastery_updates,
+            )
+        )
         missing_refresh_task = object()
         refresh_task = result.pop("_reviewRefreshTask", missing_refresh_task)
         if refresh_task is not missing_refresh_task:

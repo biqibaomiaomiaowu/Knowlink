@@ -17,7 +17,11 @@ from server.domain.services.errors import ServiceError
 from server.domain.services.handouts import HandoutService
 from server.domain.services.pipelines import PipelineService
 from server.domain.services.quizzes import QuizService
+from server.domain.services.recommendations import RecommendationFlowService
+from server.domain.services.resources import ResourceService
 from server.domain.services.reviews import ReviewService
+from server.infra.storage import ObjectStat
+from server.schemas.requests import ConfirmRecommendationRequest, UploadCompleteRequest
 from server.tasks import InMemoryTaskDispatcher, NoopTaskDispatcher
 
 
@@ -382,6 +386,42 @@ class _QuizSubmitRepo:
         raise AssertionError("not used")
 
     def submit_quiz(self, quiz_id: int, answers) -> dict[str, Any]:
+        raise AssertionError("use QuizService grading path")
+
+    def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
+        if quiz_id != self.quiz["quizId"]:
+            return None
+        return {
+            "quizPayload": {
+                "quizType": "chapter_review",
+                "questions": [
+                    {
+                        "questionId": 1,
+                        "questionKey": "q1",
+                        "questionType": "single_choice",
+                        "stemMd": "1 + 1 = ?",
+                        "options": ["A. 2", "B. 3", "C. 4", "D. 5"],
+                        "correctAnswer": "A",
+                        "explanationMd": "基础加法。",
+                        "difficultyLevel": "easy",
+                        "knowledgePointKey": "kp-add",
+                        "knowledgePointName": "加法",
+                        "sourceBlockKey": "block-1",
+                        "sourceSegmentKeys": ["seg-1"],
+                    }
+                ],
+            },
+            "masteryRecords": [],
+        }
+
+    def save_quiz_attempt_result(
+        self,
+        quiz_id: int,
+        *,
+        quiz_attempt_result: dict[str, Any],
+        mastery_updates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        _ = mastery_updates
         self.next_review_run_id += 1
         self.next_task_id += 1
         payload = {
@@ -390,9 +430,9 @@ class _QuizSubmitRepo:
         }
         return {
             "attemptId": 8401,
-            "score": 100,
-            "totalScore": 100,
-            "accuracy": 1.0,
+            "score": quiz_attempt_result["score"],
+            "totalScore": quiz_attempt_result["totalScore"],
+            "accuracy": quiz_attempt_result["accuracy"],
             "reviewTaskRunId": self.next_review_run_id,
             "_reviewRefreshTask": {
                 "taskId": self.next_task_id,
@@ -403,7 +443,7 @@ class _QuizSubmitRepo:
 
 class _QuizSubmitPayload:
     def model_dump(self, **kwargs) -> dict[str, Any]:
-        return {"answers": [{"questionId": 1, "selectedOptionKeys": ["A"]}]}
+        return {"answers": [{"questionId": 1, "selectedOption": "A"}]}
 
 
 class _ReviewRepo:
@@ -903,6 +943,383 @@ class _UnverifiedAsyncTaskRepo(_SeparateAsyncTaskRepo):
             "targetId": target_id,
             "stepCode": step_code,
         }
+
+
+class _LegacyIdempotencyMixin:
+    def get_idempotency_result(self, action: str, key: str | None):
+        if key is None:
+            return None
+        return self.idempotency.get((action, key))
+
+
+class _LegacyPipelineRepo(_LegacyIdempotencyMixin, _PipelineRepo):
+    pass
+
+
+class _LegacyQuizRepo(_LegacyIdempotencyMixin, _QuizRepo):
+    pass
+
+
+class _LegacyReviewRepo(_LegacyIdempotencyMixin, _ReviewRepo):
+    pass
+
+
+class _LegacyHandoutRepo(_LegacyIdempotencyMixin, _HandoutRepo):
+    pass
+
+
+class _LegacyResourceRepo(_LegacyIdempotencyMixin):
+    def __init__(self) -> None:
+        self.idempotency: dict[tuple[str, str], dict[str, Any]] = {}
+        self.resources: list[dict[str, Any]] = []
+        self.next_resource_id = 600
+
+    def run_idempotent(self, action: str, key: str | None, factory):
+        if key is not None and (action, key) in self.idempotency:
+            return self.idempotency[(action, key)]
+        value = factory()
+        if key is not None:
+            self.idempotency[(action, key)] = value
+        return value
+
+    def get_course(self, course_id: int) -> dict[str, Any]:
+        return {"courseId": course_id}
+
+    def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        self.next_resource_id += 1
+        resource = {
+            "resourceId": self.next_resource_id,
+            "courseId": course_id,
+            "resourceType": payload["resourceType"],
+            "objectKey": payload["objectKey"],
+            "originalName": payload["originalName"],
+            "mimeType": payload["mimeType"],
+        }
+        self.resources.append(resource)
+        return resource
+
+    def list_resources(self, course_id: int) -> list[dict[str, Any]]:
+        return [item for item in self.resources if item["courseId"] == course_id]
+
+    def get_resource(self, resource_id: int) -> dict[str, Any] | None:
+        for resource in self.resources:
+            if resource["resourceId"] == resource_id:
+                return resource
+        return None
+
+    def delete_resource(self, course_id: int, resource_id: int) -> bool:
+        raise AssertionError("not used")
+
+
+class _LegacyResourceStorage:
+    def stat_object(self, object_key: str) -> ObjectStat:
+        return ObjectStat(size_bytes=1024, checksum="sha256:new", checksum_required=True)
+
+
+class _LegacyCourseRepo(_LegacyIdempotencyMixin):
+    def __init__(self) -> None:
+        self.idempotency: dict[tuple[str, str], dict[str, Any]] = {}
+        self.courses: list[dict[str, Any]] = []
+        self.next_course_id = 900
+
+    def run_idempotent(self, action: str, key: str | None, factory):
+        if key is not None and (action, key) in self.idempotency:
+            return self.idempotency[(action, key)]
+        value = factory()
+        if key is not None:
+            self.idempotency[(action, key)] = value
+        return value
+
+    def create_course(
+        self,
+        *,
+        title: str,
+        entry_type: str,
+        goal_text: str,
+        preferred_style: str,
+        catalog_id: str | None = None,
+        exam_at=None,
+    ) -> dict[str, Any]:
+        self.next_course_id += 1
+        course = {
+            "courseId": self.next_course_id,
+            "title": title,
+            "entryType": entry_type,
+            "goalText": goal_text,
+            "preferredStyle": preferred_style,
+            "catalogId": catalog_id,
+            "examAt": exam_at,
+        }
+        self.courses.append(course)
+        return course
+
+    def list_recent_courses(self) -> list[dict[str, Any]]:
+        return list(self.courses)
+
+    def get_course(self, course_id: int) -> dict[str, Any] | None:
+        for course in self.courses:
+            if course["courseId"] == course_id:
+                return course
+        return None
+
+
+class _LegacyCatalog:
+    def get_catalog_entry(self, catalog_id: str) -> dict[str, Any] | None:
+        entries = {
+            "math-final-01": {"catalogId": "math-final-01", "title": "高数期末课"},
+            "linear-final-01": {"catalogId": "linear-final-01", "title": "线代期末课"},
+        }
+        return entries.get(catalog_id)
+
+
+def _upload_payload(course_id: int, suffix: str) -> UploadCompleteRequest:
+    return UploadCompleteRequest(
+        resource_type="pdf",
+        object_key=f"raw/1/{course_id}/{suffix}.pdf",
+        original_name=f"{suffix}.pdf",
+        mime_type="application/pdf",
+        size_bytes=1024,
+        checksum="sha256:new",
+    )
+
+
+def test_legacy_unscoped_upload_complete_replays_only_for_matching_course():
+    repo = _LegacyResourceRepo()
+    service = ResourceService(
+        courses=repo,
+        resources=repo,
+        idempotency=repo,
+        storage=_LegacyResourceStorage(),
+    )
+    matching = {
+        "resourceId": 777,
+        "courseId": 11,
+        "resourceType": "pdf",
+        "objectKey": "raw/1/11/legacy.pdf",
+        "originalName": "legacy.pdf",
+        "mimeType": "application/pdf",
+    }
+    mismatched = matching | {"resourceId": 778, "courseId": 22}
+    repo.idempotency[("resources.upload_complete", "legacy-match")] = matching
+    repo.idempotency[("resources.upload_complete", "legacy-mismatch")] = mismatched
+
+    replayed = service.upload_complete(
+        course_id=11,
+        payload=_upload_payload(11, "new-match"),
+        idempotency_key="legacy-match",
+    )
+    created = service.upload_complete(
+        course_id=11,
+        payload=_upload_payload(11, "new-mismatch"),
+        idempotency_key="legacy-mismatch",
+    )
+
+    assert replayed == matching
+    assert repo.idempotency[("resources.upload_complete:11", "legacy-match")] == matching
+    assert created["courseId"] == 11
+    assert created["resourceId"] != mismatched["resourceId"]
+
+
+def test_legacy_unscoped_recommendation_confirm_replays_only_for_matching_catalog():
+    repo = _LegacyCourseRepo()
+    service = RecommendationFlowService(
+        catalog=_LegacyCatalog(),
+        courses=repo,
+        idempotency=repo,
+    )
+    matching = {
+        "course": {"courseId": 901, "catalogId": "math-final-01"},
+        "createdFromCatalogId": "math-final-01",
+    }
+    mismatched = {
+        "course": {"courseId": 902, "catalogId": "linear-final-01"},
+        "createdFromCatalogId": "linear-final-01",
+    }
+    repo.idempotency[("recommendation.confirm", "legacy-match")] = matching
+    repo.idempotency[("recommendation.confirm", "legacy-mismatch")] = mismatched
+    payload = ConfirmRecommendationRequest(goal_text="期末复习", preferred_style="exam")
+
+    replayed = service.confirm(
+        catalog_id="math-final-01",
+        payload=payload,
+        idempotency_key="legacy-match",
+    )
+    created = service.confirm(
+        catalog_id="math-final-01",
+        payload=payload,
+        idempotency_key="legacy-mismatch",
+    )
+
+    assert replayed == matching
+    assert repo.idempotency[("recommendation.confirm:math-final-01", "legacy-match")] == matching
+    assert created["createdFromCatalogId"] == "math-final-01"
+    assert created["course"]["courseId"] != mismatched["course"]["courseId"]
+
+
+def test_legacy_unscoped_parse_start_replays_matching_task_trigger():
+    repo = _LegacyPipelineRepo()
+    dispatcher = _RecordingDispatcher()
+    service = PipelineService(
+        courses=repo,
+        parse_runs=repo,
+        resources=repo,
+        async_tasks=repo,
+        task_dispatcher=dispatcher,
+        idempotency=repo,
+    )
+    stored = {
+        "taskId": 7701,
+        "status": "queued",
+        "nextAction": "poll",
+        "entity": {"type": "parse_run", "id": 9901},
+    }
+    repo.tasks[7701] = {
+        "taskId": 7701,
+        "courseId": 201,
+        "parseRunId": 9901,
+        "taskType": "parse_pipeline",
+        "status": "queued",
+        "progressPct": 0,
+        "payloadJson": {"courseId": 201, "parseRunId": 9901},
+        "targetType": "parse_run",
+        "targetId": 9901,
+    }
+    repo.idempotency[("pipelines.parse_start", "legacy-parse")] = stored
+
+    result = service.start_parse(course_id=201, idempotency_key="legacy-parse")
+
+    assert result == stored
+    assert repo.idempotency[("pipelines.parse_start:201", "legacy-parse")] == stored
+    assert dispatcher.calls == []
+
+
+def test_legacy_unscoped_handout_generate_replays_matching_task_trigger():
+    repo = _LegacyHandoutRepo()
+    dispatcher = _RecordingDispatcher()
+    service = HandoutService(
+        courses=repo,
+        handouts=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+        async_tasks=repo,
+    )
+    stored = {
+        "taskId": 8801,
+        "status": "queued",
+        "nextAction": "poll",
+        "entity": {"type": "handout_version", "id": 1801},
+    }
+    repo.tasks[8801] = {
+        "taskId": 8801,
+        "courseId": 501,
+        "parseRunId": 9501,
+        "taskType": "handout_generate",
+        "status": "queued",
+        "progressPct": 0,
+        "payloadJson": {"courseId": 501, "handoutVersionId": 1801, "sourceParseRunId": 9501},
+        "targetType": "handout_version",
+        "targetId": 1801,
+    }
+    repo.idempotency[("handouts.generate", "legacy-handout")] = stored
+
+    result = service.generate_handout(course_id=501, idempotency_key="legacy-handout")
+
+    assert result == stored
+    assert repo.idempotency[("handouts.generate:501", "legacy-handout")] == stored
+    assert dispatcher.calls == []
+
+
+def test_legacy_unscoped_quiz_generate_replays_only_for_matching_task_trigger():
+    repo = _LegacyQuizRepo()
+    dispatcher = _RecordingDispatcher()
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+        async_tasks=repo,
+    )
+    matching = {
+        "taskId": 9901,
+        "status": "queued",
+        "nextAction": "poll",
+        "entity": {"type": "quiz", "id": 8801},
+    }
+    mismatched = {
+        "taskId": 9902,
+        "status": "queued",
+        "nextAction": "poll",
+        "entity": {"type": "quiz", "id": 8802},
+    }
+    repo.tasks[9901] = {
+        "taskId": 9901,
+        "courseId": 301,
+        "taskType": "quiz_generate",
+        "status": "queued",
+        "progressPct": 0,
+        "payloadJson": {"courseId": 301, "quizId": 8801},
+        "targetType": "quiz",
+        "targetId": 8801,
+    }
+    repo.tasks[9902] = repo.tasks[9901] | {
+        "taskId": 9902,
+        "courseId": 999,
+        "payloadJson": {"courseId": 999, "quizId": 8802},
+        "targetId": 8802,
+    }
+    repo.idempotency[("quizzes.generate", "legacy-match")] = matching
+    repo.idempotency[("quizzes.generate", "legacy-mismatch")] = mismatched
+
+    replayed = service.generate_quiz(
+        course_id=301,
+        question_count_level="medium",
+        idempotency_key="legacy-match",
+    )
+    created = service.generate_quiz(
+        course_id=301,
+        question_count_level="medium",
+        idempotency_key="legacy-mismatch",
+    )
+
+    assert replayed == matching
+    assert repo.idempotency[("quizzes.generate:301", "legacy-match")] == matching
+    assert created["entity"]["id"] != mismatched["entity"]["id"]
+    assert dispatcher.calls == [("quiz_generate", created["taskId"], repo.tasks[created["taskId"]]["payloadJson"])]
+
+
+def test_legacy_unscoped_review_regenerate_replays_matching_task_trigger():
+    repo = _LegacyReviewRepo()
+    dispatcher = _RecordingDispatcher()
+    service = ReviewService(
+        courses=repo,
+        reviews=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+        async_tasks=repo,
+    )
+    stored = {
+        "taskId": 9903,
+        "status": "queued",
+        "nextAction": "poll",
+        "entity": {"type": "review_task_run", "id": 1803},
+    }
+    repo.tasks[9903] = {
+        "taskId": 9903,
+        "courseId": 401,
+        "taskType": "review_refresh",
+        "status": "queued",
+        "progressPct": 0,
+        "payloadJson": {"courseId": 401, "reviewTaskRunId": 1803},
+        "targetType": "review_task_run",
+        "targetId": 1803,
+    }
+    repo.idempotency[("reviews.regenerate", "legacy-review")] = stored
+
+    result = service.regenerate_review_tasks(course_id=401, idempotency_key="legacy-review")
+
+    assert result == stored
+    assert repo.idempotency[("reviews.regenerate:401", "legacy-review")] == stored
+    assert dispatcher.calls == []
 
 
 class _StaleUpdatePipelineRepo(_PipelineRepo):
@@ -1597,6 +2014,31 @@ def test_handout_block_create_real_async_task_when_async_repo_is_separate():
     assert task["taskType"] == "handout_block_generate"
     assert task["targetType"] == "handout_block"
     assert dispatcher.calls == [("handout_block_generate", result["taskId"], task["payloadJson"])]
+
+
+def test_handout_block_generate_replays_existing_old_scoped_idempotency_action():
+    repo = _HandoutRepo()
+    dispatcher = _RecordingDispatcher()
+    service = HandoutService(
+        courses=repo,
+        handouts=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+        async_tasks=repo,
+    )
+    stored_result = {
+        "taskId": 7777,
+        "status": "queued",
+        "nextAction": "poll",
+        "entity": {"type": "handout_block", "id": repo.block_id},
+    }
+    repo.idempotency[(f"handout_blocks.generate:{repo.block_id}", "legacy-block-key")] = stored_result
+
+    result = service.generate_block(block_id=repo.block_id, idempotency_key="legacy-block-key")
+
+    assert result == stored_result
+    assert repo.tasks == {}
+    assert dispatcher.calls == []
 
 
 def test_handout_block_generating_without_enqueue_request_does_not_create_tracking_task():
