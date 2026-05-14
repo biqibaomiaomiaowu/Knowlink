@@ -327,6 +327,9 @@ class SqlAlchemyRuntimeRepository:
         task = self.session.get(AsyncTask, task_id)
         if task is None:
             return None
+        if changes.pop("clear_error", False):
+            task.error_code = None
+            task.error_message = None
         for attr, value in _async_task_changes(changes).items():
             setattr(task, attr, value)
         self._commit_or_flush()

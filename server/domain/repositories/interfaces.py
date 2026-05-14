@@ -77,7 +77,9 @@ class AsyncTaskRepository(Protocol):
         status: str | None = None,
         progress_pct: int | None = None,
         payload_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
         error_message: str | None = None,
+        clear_error: bool = False,
     ) -> dict[str, Any] | None: ...
 
 

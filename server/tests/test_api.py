@@ -446,11 +446,12 @@ def test_review_regenerate_is_idempotent():
         headers=headers,
         expected_status=200,
         identity_getter=lambda body: (
-            body["data"]["entity"]["type"],
-            body["data"]["entity"]["id"],
+            "review_task_run",
+            body["data"]["reviewTaskRunId"],
         ),
     )
-    assert first["data"]["entity"]["type"] == "review_task_run"
+    assert first["data"]["status"] == "ready"
+    assert isinstance(first["data"]["reviewTaskRunId"], int)
 
 
 def test_delete_missing_resource_returns_not_found():

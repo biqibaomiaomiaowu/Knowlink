@@ -158,6 +158,17 @@ class MemoryScaffoldRepository:
                     "handoutBlockId": block_id,
                     "sourceParseRunId": handout.get("sourceParseRunId"),
                 }
+                self.store.register_async_task(
+                    task_id=task_id,
+                    course_id=payload["courseId"],
+                    task_type="handout_block_generate",
+                    status="queued",
+                    progress_pct=0,
+                    payload_json=payload,
+                    parse_run_id=payload["sourceParseRunId"],
+                    target_type="handout_block",
+                    target_id=block_id,
+                )
                 return {
                     "taskId": task_id,
                     "status": "queued",
@@ -240,6 +251,47 @@ class MemoryScaffoldRepository:
 
     def next_task_id(self) -> int:
         return self.store.next_id("task")
+
+    def create_async_task(
+        self,
+        *,
+        course_id: int,
+        task_type: str,
+        status: str = "queued",
+        progress_pct: int = 0,
+        payload_json: dict[str, Any] | None = None,
+        parse_run_id: int | None = None,
+        parent_task_id: int | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
+        step_code: str | None = None,
+    ) -> dict[str, Any]:
+        return self.store.create_async_task(
+            course_id=course_id,
+            task_type=task_type,
+            status=status,
+            progress_pct=progress_pct,
+            payload_json=payload_json,
+            parse_run_id=parse_run_id,
+            parent_task_id=parent_task_id,
+            target_type=target_type,
+            target_id=target_id,
+            step_code=step_code,
+        )
+
+    def get_async_task(self, task_id: int) -> dict[str, Any] | None:
+        return self.store.get_async_task(task_id)
+
+    def list_async_tasks(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.store.list_async_tasks(course_id=course_id, parse_run_id=parse_run_id)
+
+    def update_async_task(self, task_id: int, **changes: Any) -> dict[str, Any] | None:
+        return self.store.update_async_task(task_id, **changes)
 
     def create_review_run(self, course_id: int) -> dict[str, Any]:
         return self.store.create_review_run(course_id)

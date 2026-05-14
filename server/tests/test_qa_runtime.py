@@ -12,13 +12,14 @@ from sqlalchemy.pool import StaticPool
 import server.infra.db.models  # noqa: F401
 from server.api.deps import get_qa_service
 from server.app import app
-from server.domain.services import HandoutService, QaService
+from server.domain.services import QaService
 from server.infra.db.base import Base
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tests.test_api import AUTH_HEADERS, request
 from server.tests.test_handout_outline_runtime import (
     _create_course_with_active_video_segments,
     _create_course_with_overlapping_caption_segments,
+    _handout_service,
 )
 
 
@@ -166,7 +167,7 @@ def test_sql_qa_uses_active_adjacent_handout_block_vector_content():
     try:
         course_id, _ = _create_course_with_overlapping_caption_segments(repo)
         parse_run_id = repo.get_course(course_id)["activeParseRunId"]
-        handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        handout_service = _handout_service(repo)
         handout_service.generate_handout(course_id=course_id, idempotency_key=None)
         blocks = repo.get_latest_handout(course_id)["blocks"]
         current_block, adjacent_block = blocks[0], blocks[1]
@@ -217,7 +218,7 @@ def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
     try:
         course_id, _ = _create_course_with_three_blocks(repo)
         parse_run_id = repo.get_course(course_id)["activeParseRunId"]
-        handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+        handout_service = _handout_service(repo)
         handout_service.generate_handout(course_id=course_id, idempotency_key=None)
         blocks = repo.get_latest_handout(course_id)["blocks"]
         for block in blocks:
@@ -262,7 +263,7 @@ def test_sql_qa_session_messages_hide_old_handout_version_after_regenerate():
         result = service.create_message(
             payload=_Payload(course_id=course_id, handout_block_id=block_id, question="集合的定义是什么？")
         )
-        HandoutService(courses=repo, handouts=repo, idempotency=repo).generate_handout(
+        _handout_service(repo).generate_handout(
             course_id=course_id,
             idempotency_key=None,
         )
@@ -418,7 +419,7 @@ def _ready_block_with_pdf_ref(repo: SqlAlchemyRuntimeRepository) -> tuple[int, i
             }
         ],
     )[0]
-    handout_service = HandoutService(courses=repo, handouts=repo, idempotency=repo)
+    handout_service = _handout_service(repo)
     handout_service.generate_handout(course_id=course_id, idempotency_key=None)
     block = repo.get_latest_handout(course_id)["blocks"][0]
     repo.save_handout_block_result(

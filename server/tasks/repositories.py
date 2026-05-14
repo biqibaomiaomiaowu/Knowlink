@@ -41,6 +41,7 @@ class InMemoryAsyncTaskRepository:
                 "progressPct": progress_pct,
                 "payloadJson": payload_json or {},
                 "resultJson": None,
+                "errorCode": None,
                 "errorMessage": None,
                 "parentTaskId": parent_task_id,
                 "targetType": target_type,
@@ -79,18 +80,25 @@ class InMemoryAsyncTaskRepository:
         status: str | None = None,
         progress_pct: int | None = None,
         payload_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
         error_message: str | None = None,
+        clear_error: bool = False,
     ) -> dict[str, Any] | None:
         with self._lock:
             task = self._tasks.get(task_id)
             if task is None:
                 return None
+            if clear_error:
+                task["errorCode"] = None
+                task["errorMessage"] = None
             if status is not None:
                 task["status"] = status
             if progress_pct is not None:
                 task["progressPct"] = progress_pct
             if payload_json is not None:
                 task["payloadJson"] = payload_json
+            if error_code is not None:
+                task["errorCode"] = error_code
             if error_message is not None:
                 task["errorMessage"] = error_message
             task["updatedAt"] = _utcnow()
