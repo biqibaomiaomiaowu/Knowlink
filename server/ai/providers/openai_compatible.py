@@ -74,7 +74,7 @@ class OpenAICompatibleVisionJsonClient:
                     temperature=request.temperature,
                     timeout_sec=request.timeout_sec,
                     response_format={"type": "json_object"},
-                    metadata=None,
+                    metadata=request.metadata,
                 )
             )
             message = chat.invoke([HumanMessage(content=content)])
