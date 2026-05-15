@@ -350,7 +350,7 @@ def test_openai_compatible_vision_client_sends_data_urls_without_paths() -> None
             prompt="Describe this image",
             images=[VisionImage(mime_type="image/png", data=b"png-bytes", source_name="/tmp/local.png")],
             timeout_sec=23,
-            metadata={"max_tokens": 2048, "stream": False},
+            metadata={"max_tokens": 2048, "stream": False, "request_id": "vision-request-id"},
         )
     )
 
@@ -359,6 +359,7 @@ def test_openai_compatible_vision_client_sends_data_urls_without_paths() -> None
     assert created[0].kwargs["timeout"] == 23
     assert created[0].kwargs["max_tokens"] == 2048
     assert created[0].kwargs["streaming"] is False
+    assert created[0].kwargs["default_query"] == {"request_id": "vision-request-id"}
     assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
     [message] = created[0].invocations[0]
     assert isinstance(message, HumanMessage)

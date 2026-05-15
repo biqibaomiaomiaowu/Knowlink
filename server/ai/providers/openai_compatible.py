@@ -110,4 +110,7 @@ def _chat_kwargs(
         stream = metadata.get("stream")
         if isinstance(stream, bool):
             kwargs["streaming"] = stream
+        request_id = metadata.get("request_id")
+        if isinstance(request_id, str) and request_id.strip():
+            kwargs["default_query"] = {"request_id": request_id}
     return kwargs

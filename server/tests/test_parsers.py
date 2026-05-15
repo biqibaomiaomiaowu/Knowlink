@@ -1597,6 +1597,8 @@ def test_vivo_vision_client_uses_batch_multimodal_chat_request():
     assert request.timeout_sec == 20.0
     assert request.metadata["max_tokens"] == 2048
     assert request.metadata["stream"] is False
+    assert isinstance(request.metadata["request_id"], str)
+    assert request.metadata["request_id"]
     assert request.metadata["resource_type"] == "pdf"
     assert request.metadata["asset_labels"] == [
         '图片 1: assetId=pdf-p1; location={"pageNo": 1}; hint=pdf_page_visual',
@@ -1711,6 +1713,9 @@ def test_vivo_vision_client_retries_multi_image_errors_as_single_requests():
 
     assert len(ai_service.requests) == 3
     assert [len(request.images) for request in ai_service.requests] == [2, 1, 1]
+    request_ids = [request.metadata["request_id"] for request in ai_service.requests]
+    assert all(isinstance(request_id, str) and request_id for request_id in request_ids)
+    assert len(set(request_ids)) == 3
     assert results == [
         VisionAssetResult(asset_id="a1", segment_type="ocr_text", text="single ok"),
         VisionAssetResult(asset_id="a2", segment_type="ocr_text", text="single ok"),

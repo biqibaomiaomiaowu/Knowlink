@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -233,6 +234,7 @@ class VivoVisionClient:
             metadata={
                 "max_tokens": 2048,
                 "stream": False,
+                "request_id": str(uuid.uuid4()),
                 "resource_type": resource_type,
                 "asset_labels": [_asset_label(index, asset) for index, asset in enumerate(assets, start=1)],
             },
