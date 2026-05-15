@@ -8,7 +8,11 @@ from typing import Any, Literal, Mapping, Protocol, Sequence
 from server.ai.core.errors import AIOutputParseError
 from server.ai.core.types import ChatMessage, JsonChatRequest
 from server.ai.deepseek import get_configured_deepseek_chat_config
-from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
 from server.ai.service import AIService, get_default_ai_service
 from server.parsers.base import clean_text
 
@@ -296,10 +300,7 @@ def _default_ai_service_for_provider(provider: str) -> AIService | None:
 
 
 def _deepseek_base_url(base_url: str) -> str:
-    trimmed = base_url.rstrip("/")
-    if trimmed.endswith("/v1"):
-        return trimmed[:-3]
-    return trimmed
+    return normalize_deepseek_base_url(base_url) or "https://api.deepseek.com/v1"
 
 
 def _build_quiz_repair_context(

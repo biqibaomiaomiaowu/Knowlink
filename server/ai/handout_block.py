@@ -11,7 +11,11 @@ from typing import Any, Literal, Mapping, Protocol, Sequence
 from server.ai.core.errors import AIOutputParseError, fallback_reason_for_error
 from server.ai.core.types import ChatMessage, JsonChatRequest
 from server.ai.deepseek import get_configured_deepseek_chat_config
-from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
 from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleJsonClient
 from server.ai.service import AIService, get_default_ai_service
 from server.config.settings import load_root_dotenv
@@ -1210,10 +1214,7 @@ def _default_ai_service_for_provider(provider: str) -> AIService | None:
 
 
 def _deepseek_base_url(base_url: str) -> str:
-    trimmed = base_url.rstrip("/")
-    if trimmed.endswith("/v1"):
-        return trimmed[:-3]
-    return trimmed
+    return normalize_deepseek_base_url(base_url) or "https://api.deepseek.com/v1"
 
 
 def _first_present(payload: Mapping[str, Any], *keys: str) -> Any:

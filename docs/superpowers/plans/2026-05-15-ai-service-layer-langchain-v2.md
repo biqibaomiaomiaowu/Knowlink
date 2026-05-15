@@ -12,8 +12,8 @@
 
 ## 版本依据
 
-- 2026-05-15 通过 PyPI 核对当前版本：`langchain==1.3.0`、`langchain-core==1.4.0`、`langchain-openai==1.2.1`、`langchain-deepseek==1.0.1`、`python-dotenv==1.2.2`。
-- 依赖范围使用同一主版本内的下限约束：`langchain>=1.3,<2.0`、`langchain-core>=1.4,<2.0`、`langchain-openai>=1.2,<2.0`、`langchain-deepseek>=1.0,<2.0`、`openai>=2.26,<3.0`、`python-dotenv>=1.2,<2.0`。
+- 2026-05-15 通过 PyPI 核对当前版本：`langchain==1.3.1`、`langchain-core==1.4.0`、`langchain-openai==1.2.1`、`langchain-deepseek==1.0.1`、`python-dotenv==1.2.2`。
+- 依赖范围使用同一主版本内的下限约束：`langchain>=1.3.1,<2.0`、`langchain-core>=1.4,<2.0`、`langchain-openai>=1.2,<2.0`、`langchain-deepseek>=1.0,<2.0`、`openai>=2.26,<3.0`、`python-dotenv>=1.2,<2.0`。
 - `langchain-openai==1.2.1` 要求 `openai>=2.26,<3.0`，所以本轮保留 OpenAI SDK 依赖但升级到 2.x；仓库当前没有直接 `openai` SDK 调用，兼容风险由 LangChain provider 适配层测试覆盖。
 - PyPI 页面：`https://pypi.org/project/langchain/`、`https://pypi.org/project/langchain-core/`、`https://pypi.org/project/langchain-openai/`、`https://pypi.org/project/langchain-deepseek/`、`https://pypi.org/project/python-dotenv/`。
 
@@ -75,7 +75,7 @@ server/tests/test_parsers.py
 - [ ] 修改 `pyproject.toml` 的 `dependencies`，保留已有 `openai`，加入或更新以下条目：
 
 ```toml
-  "langchain>=1.3,<2.0",
+  "langchain>=1.3.1,<2.0",
   "langchain-core>=1.4,<2.0",
   "langchain-openai>=1.2,<2.0",
   "langchain-deepseek>=1.0,<2.0",

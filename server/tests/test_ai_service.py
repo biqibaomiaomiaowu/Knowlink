@@ -7,7 +7,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from server.ai.core import AIConfigurationError, ChatMessage, JsonChatRequest, VisionImage, VisionJsonRequest
 from server.ai.providers import vivo
-from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
 from server.ai.providers.deepseek_chat import _to_langchain_messages
 from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleJsonClient
 from server.ai.providers.openai_compatible import OpenAICompatibleVisionJsonClient
@@ -96,13 +100,28 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
     assert created[0].kwargs["max_tokens"] == 2048
     assert created[0].kwargs["reasoning_effort"] == "high"
     assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
-    assert created[0].kwargs.get("api_base") == "https://api.deepseek.com"
+    assert created[0].kwargs.get("api_base") == "https://api.deepseek.com/v1"
     assert [type(message) for message in created[0].invocations[0]] == [SystemMessage, AIMessage, HumanMessage]
     assert [message.content for message in created[0].invocations[0]] == [
         "system prompt",
         "previous answer",
         "question",
     ]
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("https://api.deepseek.com", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/v1", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/v1/", "https://api.deepseek.com/v1"),
+    ],
+)
+def test_normalize_deepseek_base_url(base_url: str | None, expected: str | None) -> None:
+    assert normalize_deepseek_base_url(base_url) == expected
 
 
 def test_deepseek_langchain_message_mapping_accepts_legacy_dict_messages() -> None:
@@ -423,6 +442,25 @@ def test_registry_only_registers_deepseek_when_api_key_exists(monkeypatch: pytes
     service = build_default_ai_service()
 
     assert "deepseek" in service.json_clients
+    client = service.json_clients["deepseek"]
+    assert isinstance(client, DeepSeekLangChainJsonClient)
+    assert client._config.base_url == "https://api.deepseek.com/v1"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://api.deepseek.com",
+        "https://api.deepseek.com/",
+        "https://api.deepseek.com/v1",
+        "https://api.deepseek.com/v1/",
+    ],
+)
+def test_deepseek_scoped_helpers_normalize_base_url(base_url: str) -> None:
+    from server.ai import handout_block, handout_lazy, qa_policy, quiz_strategy
+
+    for module in (handout_block, handout_lazy, qa_policy, quiz_strategy):
+        assert module._deepseek_base_url(base_url) == "https://api.deepseek.com/v1"
 
 
 def test_registry_loads_root_dotenv_before_reading_provider_env(

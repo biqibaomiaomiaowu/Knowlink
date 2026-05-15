@@ -41,6 +41,17 @@ _UNSUPPORTED_ERROR_MARKERS = (
 )
 
 
+def normalize_deepseek_base_url(base_url: str | None) -> str | None:
+    if base_url is None:
+        return None
+    trimmed = base_url.rstrip("/")
+    if not trimmed:
+        return None
+    if trimmed.endswith("/v1"):
+        return trimmed
+    return f"{trimmed}/v1"
+
+
 def _message_role_and_content(message: ChatMessage | Mapping[str, Any]) -> tuple[str, str]:
     if isinstance(message, Mapping):
         role = message.get("role", "user")
@@ -88,8 +99,9 @@ class DeepSeekLangChainJsonClient:
         reasoning_effort = request.metadata.get("reasoning_effort")
         if isinstance(reasoning_effort, str) and reasoning_effort in _SUPPORTED_REASONING_EFFORTS:
             kwargs["reasoning_effort"] = reasoning_effort
-        if self._config.base_url:
-            kwargs[_base_url_argument_name(self._chat_factory)] = self._config.base_url
+        base_url = normalize_deepseek_base_url(self._config.base_url)
+        if base_url:
+            kwargs[_base_url_argument_name(self._chat_factory)] = base_url
 
         try:
             message = self._invoke_chat(kwargs, request)

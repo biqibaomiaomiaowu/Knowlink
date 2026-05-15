@@ -3,7 +3,11 @@ from __future__ import annotations
 import os
 
 from server.ai.core.types import AIProviderName
-from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
 from server.ai.providers.openai_compatible import (
     OpenAICompatibleConfig,
     OpenAICompatibleJsonClient,
@@ -53,7 +57,7 @@ def _build_deepseek_client() -> DeepSeekLangChainJsonClient | None:
         DeepSeekLangChainConfig(
             api_key=api_key,
             model=_env_str("KNOWLINK_DEEPSEEK_MODEL", _DEFAULT_DEEPSEEK_MODEL),
-            base_url=_env_optional_str("KNOWLINK_DEEPSEEK_BASE_URL"),
+            base_url=normalize_deepseek_base_url(_env_optional_str("KNOWLINK_DEEPSEEK_BASE_URL")),
             timeout_sec=_env_float("KNOWLINK_DEEPSEEK_TIMEOUT_SEC", 30.0),
         )
     )

@@ -7,7 +7,11 @@ from typing import Any, Mapping
 from server.ai.core.errors import AIOutputParseError, AIProviderError
 from server.ai.core.json_output import message_content_to_text, parse_json_object
 from server.ai.core.types import ChatMessage, JsonChatRequest
-from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
 from server.config.settings import load_root_dotenv
 
 
@@ -122,10 +126,7 @@ def parse_chat_json_payload(payload: Mapping[str, Any], *, label: str) -> dict[s
 
 
 def _chat_base_url(base_url: str) -> str:
-    trimmed = base_url.rstrip("/")
-    if trimmed.endswith("/v1"):
-        return trimmed[:-3]
-    return trimmed
+    return normalize_deepseek_base_url(base_url) or f"{_DEFAULT_DEEPSEEK_BASE_URL}/v1"
 
 
 def _parse_error_message(error: AIOutputParseError, *, label: str) -> str:

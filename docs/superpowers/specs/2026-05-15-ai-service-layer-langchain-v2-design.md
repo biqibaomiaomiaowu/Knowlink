@@ -31,7 +31,7 @@
 
 引入 LangChain v1 相关依赖，使用 provider 拆分包：
 
-- `langchain>=1.3,<2.0`
+- `langchain>=1.3.1,<2.0`
 - `langchain-core>=1.4,<2.0`
 - `langchain-openai>=1.2,<2.0`
 - `langchain-deepseek>=1.0,<2.0`
