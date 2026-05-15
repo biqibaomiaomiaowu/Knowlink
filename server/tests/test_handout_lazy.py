@@ -1,5 +1,6 @@
 import json
 
+from server.ai.core.errors import AIProviderError
 from server.ai.core.types import AIModelResult
 from server.ai.handout_lazy import (
     DeepSeekHandoutOutlineClient,
@@ -14,6 +15,19 @@ from server.ai.handout_lazy import (
     outline_source_issues,
     outline_timeline_issues,
 )
+
+
+class FakeAIService:
+    def __init__(self, payload: dict | None = None, error: BaseException | None = None):
+        self.payload = payload if payload is not None else {}
+        self.error = error
+        self.requests = []
+
+    def complete_json(self, request):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return AIModelResult(text=json.dumps(self.payload, ensure_ascii=False), parsed_json=self.payload)
 
 
 def test_build_handout_outline_from_captions_sorts_pending_items_and_keeps_sources():
@@ -249,103 +263,64 @@ def test_configured_handout_outline_client_supports_deepseek_provider(monkeypatc
     assert isinstance(get_configured_handout_outline_client(), DeepSeekHandoutOutlineClient)
 
 
-def test_vivo_handout_outline_client_uses_chat_completions_and_normalizes_model_output(monkeypatch):
-    captured = {}
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": "```json\n"
-                                        + json.dumps(
-                                            {
-                                                "title": "集合论目录",
-                                                "summary": "按时间线学习集合概念。",
-                                                "items": [
-                                                    {
-                                                        "outlineKey": "set-concepts",
-                                                        "title": "集合概念",
-                                                        "summary": "理解集合和关系。",
-                                                        "startSec": 0,
-                                                        "endSec": 70,
-                                                        "sortNo": 1,
-                                                        "children": [
-                                                            {
-                                                                "outlineKey": "intro",
-                                                                "title": "集合基础",
-                                                                "summary": "认识集合。",
-                                                                "startSec": 0,
-                                                                "endSec": 30,
-                                                                "sortNo": 1,
-                                                                "generationStatus": "ready",
-                                                                "sourceSegmentKeys": ["mp4-c1"],
-                                                                "topicTags": ["集合", "集合"],
-                                                            },
-                                                            {
-                                                                "outlineKey": "relation",
-                                                                "title": "集合关系",
-                                                                "summary": "理解包含关系。",
-                                                                "startSec": 30,
-                                                                "endSec": 70,
-                                                                "sortNo": 2,
-                                                                "generationStatus": "pending",
-                                                                "sourceSegmentKeys": ["mp4-c2"],
-                                                            },
-                                                        ],
-                                                    }
-                                                ],
-                                            },
-                                            ensure_ascii=False,
-                                        )
-                                        + "\n```",
-                                    }
-                                ],
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["headers"] = dict(request.header_items())
-        captured["body"] = request.data.decode("utf-8")
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+def test_vivo_handout_outline_client_uses_ai_service_request_and_normalizes_model_output():
+    model_payload = {
+        "title": "集合论目录",
+        "summary": "按时间线学习集合概念。",
+        "items": [
+            {
+                "outlineKey": "set-concepts",
+                "title": "集合概念",
+                "summary": "理解集合和关系。",
+                "startSec": 0,
+                "endSec": 70,
+                "sortNo": 1,
+                "children": [
+                    {
+                        "outlineKey": "intro",
+                        "title": "集合基础",
+                        "summary": "认识集合。",
+                        "startSec": 0,
+                        "endSec": 30,
+                        "sortNo": 1,
+                        "generationStatus": "ready",
+                        "sourceSegmentKeys": ["mp4-c1"],
+                        "topicTags": ["集合", "集合"],
+                    },
+                    {
+                        "outlineKey": "relation",
+                        "title": "集合关系",
+                        "summary": "理解包含关系。",
+                        "startSec": 30,
+                        "endSec": 70,
+                        "sortNo": 2,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c2"],
+                    },
+                ],
+            }
+        ],
+    }
+    ai_service = FakeAIService(model_payload)
     client = VivoHandoutOutlineClient(
         app_key="fake-key",
         base_url="https://example.invalid/v1",
         model="Doubao-Seed-2.0-mini",
         timeout_sec=7,
+        ai_service=ai_service,
     )
 
     outline = client.generate_outline(_caption_segments(), title="集合论")
 
-    body = json.loads(captured["body"])
-    assert captured["url"].startswith("https://example.invalid/v1/chat/completions?request_id=")
-    assert captured["headers"]["Authorization"] == "Bearer fake-key"
-    assert captured["headers"]["Content-type"] == "application/json; charset=utf-8"
-    assert captured["timeout"] == 7
-    assert body["model"] == "Doubao-Seed-2.0-mini"
-    assert body["temperature"] == 0.1
-    assert body["stream"] is False
-    assert "sourceSegmentKeys" in body["messages"][0]["content"]
-    assert "video_caption segments" in body["messages"][1]["content"]
+    request = ai_service.requests[0]
+    assert request.provider == "vivo"
+    assert request.model == "Doubao-Seed-2.0-mini"
+    assert request.temperature == 0.1
+    assert request.timeout_sec == 7
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata == {"max_tokens": 2048, "stream": False}
+    assert "sourceSegmentKeys" in request.messages[0].content
+    assert "video_caption segments" in request.messages[1].content
     assert outline == {
         "title": "集合论目录",
         "summary": "按时间线学习集合概念。",
@@ -386,8 +361,7 @@ def test_vivo_handout_outline_client_uses_chat_completions_and_normalizes_model_
     }
 
 
-def test_deepseek_handout_outline_client_uses_langchain_json_client(monkeypatch):
-    captured = {}
+def test_deepseek_handout_outline_client_uses_ai_service_request():
     model_payload = {
         "title": "集合论目录",
         "summary": "按时间线学习集合概念。",
@@ -423,30 +397,19 @@ def test_deepseek_handout_outline_client_uses_langchain_json_client(monkeypatch)
         ],
     }
 
-    class FakeLangChainJsonClient:
-        def __init__(self, config):
-            captured["config"] = config
-
-        def complete_json(self, request):
-            captured["request"] = request
-            return AIModelResult(text=json.dumps(model_payload, ensure_ascii=False), parsed_json=model_payload)
-
-    monkeypatch.setattr("server.ai.deepseek.DeepSeekLangChainJsonClient", FakeLangChainJsonClient)
+    ai_service = FakeAIService(model_payload)
     client = DeepSeekHandoutOutlineClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         reasoning_effort="high",
         timeout_sec=7,
+        ai_service=ai_service,
     )
 
     outline = client.generate_outline(_caption_segments(), title="集合论")
 
-    assert captured["config"].api_key == "fake-deepseek-key"
-    assert captured["config"].model == "deepseek-v4-flash"
-    assert captured["config"].base_url == "https://api.deepseek.com"
-    assert captured["config"].timeout_sec == 7
-    request = captured["request"]
+    request = ai_service.requests[0]
     assert request.provider == "deepseek"
     assert request.model == "deepseek-v4-flash"
     assert request.timeout_sec == 7
@@ -464,9 +427,24 @@ def test_generate_handout_outline_falls_back_when_llm_fails():
     result = generate_handout_outline(_caption_segments(), client=FailingClient(), title="集合论")
 
     assert result.used_fallback is True
-    assert result.issues == ["outline.llm_failed"]
+    assert result.issues == ["outline.llm_failed", "outline.model_unavailable"]
     assert result.outline["title"] == "集合论"
     assert result.outline["items"][0]["children"][0]["sourceSegmentKeys"] == ["mp4-c1", "mp4-c2"]
+
+
+def test_generate_handout_outline_maps_ai_provider_error_to_issue():
+    client = VivoHandoutOutlineClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-mini",
+        timeout_sec=7,
+        ai_service=FakeAIService(error=AIProviderError("provider unavailable")),
+    )
+
+    result = generate_handout_outline(_caption_segments(), client=client, title="集合论")
+
+    assert result.used_fallback is True
+    assert result.issues == ["outline.llm_failed", "outline.model_provider_error"]
 
 
 def test_generate_handout_outline_falls_back_when_llm_timeline_is_invalid():

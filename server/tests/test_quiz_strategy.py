@@ -30,6 +30,19 @@ class FakeQuizClient:
         return self.payloads[index]
 
 
+class FakeAIService:
+    def __init__(self, payload: dict | None = None, error: BaseException | None = None):
+        self.payload = payload if payload is not None else {}
+        self.error = error
+        self.requests = []
+
+    def complete_json(self, request):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return AIModelResult(text=json.dumps(self.payload, ensure_ascii=False), parsed_json=self.payload)
+
+
 def _generate_quiz_payload() -> dict:
     return generate_quiz_payload(
         _handout_blocks(),
@@ -271,36 +284,20 @@ def test_quiz_prompt_context_excludes_blocks_without_source_segments():
     assert "block-empty" not in allowed_keys
 
 
-def test_deepseek_quiz_client_uses_langchain_json_client(monkeypatch):
-    captured = {}
-
-    class FakeLangChainJsonClient:
-        def __init__(self, config):
-            captured["config"] = config
-
-        def complete_json(self, request):
-            captured["request"] = request
-            return AIModelResult(
-                text=json.dumps(_model_payload(3), ensure_ascii=False),
-                parsed_json=_model_payload(3),
-            )
-
-    monkeypatch.setattr("server.ai.deepseek.DeepSeekLangChainJsonClient", FakeLangChainJsonClient)
+def test_deepseek_quiz_client_uses_ai_service_json_request():
+    ai_service = FakeAIService(_model_payload(3))
     client = DeepSeekQuizGenerationClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com/v1",
         model="deepseek-v4-flash",
         reasoning_effort="high",
         timeout_sec=12,
+        ai_service=ai_service,
     )
 
     payload = generate_quiz_payload(_handout_blocks(), segments=_segments(), client=client)
 
-    assert captured["config"].api_key == "fake-deepseek-key"
-    assert captured["config"].model == "deepseek-v4-flash"
-    assert captured["config"].base_url == "https://api.deepseek.com"
-    assert captured["config"].timeout_sec == 12
-    request = captured["request"]
+    request = ai_service.requests[0]
     assert request.provider == "deepseek"
     assert request.model == "deepseek-v4-flash"
     assert request.timeout_sec == 12
@@ -311,23 +308,17 @@ def test_deepseek_quiz_client_uses_langchain_json_client(monkeypatch):
     QUIZ_VALIDATOR.validate(payload)
 
 
-def test_deepseek_quiz_client_rejects_bad_json(monkeypatch):
-    class FakeLangChainJsonClient:
-        def __init__(self, config):
-            pass
-
-        def complete_json(self, request):
-            raise AIOutputParseError("model output does not contain a JSON object")
-
-    monkeypatch.setattr("server.ai.deepseek.DeepSeekLangChainJsonClient", FakeLangChainJsonClient)
+def test_deepseek_quiz_client_rejects_bad_json():
+    ai_service = FakeAIService(error=AIOutputParseError("model output does not contain a JSON object"))
     client = DeepSeekQuizGenerationClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         reasoning_effort="high",
+        ai_service=ai_service,
     )
 
-    with pytest.raises(RuntimeError, match="response is not JSON"):
+    with pytest.raises(AIOutputParseError, match="JSON object"):
         client.generate_quiz({"questionCountRange": {"min": 3, "max": 5}})
 
 

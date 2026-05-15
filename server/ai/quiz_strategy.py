@@ -5,7 +5,11 @@ import os
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
-from server.ai.deepseek import DeepSeekJsonChatClient, get_configured_deepseek_chat_config
+from server.ai.core.errors import AIOutputParseError
+from server.ai.core.types import ChatMessage, JsonChatRequest
+from server.ai.deepseek import get_configured_deepseek_chat_config
+from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.ai.service import AIService, get_default_ai_service
 from server.parsers.base import clean_text
 
 
@@ -76,21 +80,33 @@ class DeepSeekQuizGenerationClient:
         model: str,
         reasoning_effort: str,
         timeout_sec: float | None = None,
+        ai_service: AIService | None = None,
     ) -> None:
-        self._client = DeepSeekJsonChatClient(
+        self._model = model
+        self._reasoning_effort = reasoning_effort
+        self._timeout_sec = timeout_sec if timeout_sec is not None else _DEFAULT_QUIZ_TIMEOUT_SEC
+        self._ai_service = ai_service or _scoped_deepseek_ai_service(
             api_key=api_key,
             base_url=base_url,
             model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_sec=timeout_sec if timeout_sec is not None else _DEFAULT_QUIZ_TIMEOUT_SEC,
-            label="deepseek quiz",
+            timeout_sec=self._timeout_sec,
         )
 
     def generate_quiz(self, prompt_context: Mapping[str, Any]) -> dict[str, Any]:
-        return self._client.complete_json(
-            system_prompt=_QUIZ_SYSTEM_PROMPT,
-            user_prompt=_build_quiz_prompt(prompt_context),
-            max_tokens=8192,
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="deepseek",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_QUIZ_SYSTEM_PROMPT),
+                    ChatMessage(role="user", content=_build_quiz_prompt(prompt_context)),
+                ],
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 8192, "reasoning_effort": self._reasoning_effort},
+            ),
+            label="deepseek quiz",
         )
 
 
@@ -104,6 +120,7 @@ def get_configured_quiz_generation_client() -> QuizGenerationClient | None:
         model=config.model,
         reasoning_effort=config.reasoning_effort,
         timeout_sec=_env_float("KNOWLINK_DEEPSEEK_QUIZ_TIMEOUT_SEC", _DEFAULT_QUIZ_TIMEOUT_SEC),
+        ai_service=_default_ai_service_for_provider("deepseek"),
     )
 
 
@@ -242,6 +259,47 @@ def _build_quiz_prompt(prompt_context: Mapping[str, Any]) -> str:
         "除最终 JSON 外不要输出任何解释。\n\n"
         f"{json.dumps(prompt_context, ensure_ascii=False, separators=(',', ':'))}"
     )
+
+
+def _complete_model_json(ai_service: AIService, request: JsonChatRequest, *, label: str) -> dict[str, Any]:
+    result = ai_service.complete_json(request)
+    if isinstance(result.parsed_json, dict):
+        return result.parsed_json
+    raise AIOutputParseError(f"{label} JSON must be an object")
+
+
+def _scoped_deepseek_ai_service(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout_sec: float,
+) -> AIService:
+    return AIService(
+        json_clients={
+            "deepseek": DeepSeekLangChainJsonClient(
+                DeepSeekLangChainConfig(
+                    api_key=api_key,
+                    model=model,
+                    base_url=_deepseek_base_url(base_url),
+                    timeout_sec=timeout_sec,
+                )
+            )
+        },
+        vision_clients={},
+    )
+
+
+def _default_ai_service_for_provider(provider: str) -> AIService | None:
+    service = get_default_ai_service()
+    return service if provider in service.json_clients else None
+
+
+def _deepseek_base_url(base_url: str) -> str:
+    trimmed = base_url.rstrip("/")
+    if trimmed.endswith("/v1"):
+        return trimmed[:-3]
+    return trimmed
 
 
 def _build_quiz_repair_context(
