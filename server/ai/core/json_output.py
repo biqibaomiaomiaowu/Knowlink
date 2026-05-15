@@ -9,6 +9,7 @@ from server.ai.core.errors import AIOutputParseError
 
 
 _FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+_OUTER_FENCED_BLOCK_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.IGNORECASE | re.DOTALL)
 
 
 def message_content_to_text(content: Any) -> str:
@@ -71,12 +72,30 @@ def extract_json_object(text: str) -> str:
     raise AIOutputParseError("model output does not contain a complete JSON object")
 
 
+def _strip_outer_markdown_fence(text: str) -> str:
+    stripped = text.strip()
+    match = _OUTER_FENCED_BLOCK_RE.match(stripped)
+    if match is None:
+        return stripped
+    return match.group(1).strip()
+
+
+def _require_json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise AIOutputParseError("model output JSON root must be an object")
+    return value
+
+
 def parse_json_object(text: str) -> dict[str, Any]:
+    stripped = _strip_outer_markdown_fence(text)
+    try:
+        return _require_json_object(json.loads(stripped))
+    except json.JSONDecodeError:
+        pass
+
     json_text = extract_json_object(text)
     try:
         value = json.loads(json_text)
     except json.JSONDecodeError as exc:
         raise AIOutputParseError(f"model output contains invalid JSON: {exc}") from exc
-    if not isinstance(value, dict):
-        raise AIOutputParseError("model output JSON root must be an object")
-    return value
+    return _require_json_object(value)

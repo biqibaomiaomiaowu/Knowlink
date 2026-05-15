@@ -35,6 +35,11 @@ def test_array_root_raises_parse_error() -> None:
         parse_json_object("[1, 2, 3]")
 
 
+def test_array_root_with_nested_object_raises_parse_error() -> None:
+    with pytest.raises(AIOutputParseError):
+        parse_json_object('[{"answer": 42}]')
+
+
 def test_langchain_list_content_converts_to_text() -> None:
     content = [
         {"type": "text", "text": "first"},
