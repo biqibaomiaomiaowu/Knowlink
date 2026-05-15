@@ -36,7 +36,15 @@ class OpenAICompatibleJsonClient:
 
     def complete_json(self, request: JsonChatRequest) -> AIModelResult:
         try:
-            chat = self._chat_factory(**_chat_kwargs(self._config, request.temperature, request.response_format))
+            chat = self._chat_factory(
+                **_chat_kwargs(
+                    config=self._config,
+                    model=request.model,
+                    temperature=request.temperature,
+                    timeout_sec=request.timeout_sec,
+                    response_format=request.response_format,
+                )
+            )
             message = chat.invoke(_to_langchain_messages(request.messages))
         except Exception as exc:  # noqa: BLE001 - provider SDK errors are normalized at this boundary.
             raise AIProviderError(f"openai-compatible provider call failed: {exc}") from exc
@@ -58,7 +66,15 @@ class OpenAICompatibleVisionJsonClient:
     def complete_vision_json(self, request: VisionJsonRequest) -> AIModelResult:
         content = build_vision_content(request.prompt, request.images)
         try:
-            chat = self._chat_factory(**_chat_kwargs(self._config, request.temperature, {"type": "json_object"}))
+            chat = self._chat_factory(
+                **_chat_kwargs(
+                    config=self._config,
+                    model=request.model,
+                    temperature=request.temperature,
+                    timeout_sec=request.timeout_sec,
+                    response_format={"type": "json_object"},
+                )
+            )
             message = chat.invoke([HumanMessage(content=content)])
         except Exception as exc:  # noqa: BLE001 - provider SDK errors are normalized at this boundary.
             raise AIProviderError(f"openai-compatible vision provider call failed: {exc}") from exc
@@ -68,15 +84,20 @@ class OpenAICompatibleVisionJsonClient:
 
 
 def _chat_kwargs(
+    *,
     config: OpenAICompatibleConfig,
+    model: str,
     temperature: float,
+    timeout_sec: float,
     response_format: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    return {
-        "model": config.model,
+    kwargs: dict[str, Any] = {
+        "model": model or config.model,
         "api_key": config.api_key,
         "base_url": config.base_url,
         "temperature": temperature,
-        "timeout": config.timeout_sec,
-        "model_kwargs": {"response_format": response_format},
+        "timeout": timeout_sec or config.timeout_sec,
     }
+    if response_format:
+        kwargs["model_kwargs"] = {"response_format": response_format}
+    return kwargs

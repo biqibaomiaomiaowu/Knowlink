@@ -14,7 +14,6 @@ from server.ai.providers.openai_compatible import (
 from server.ai.service import AIService, JsonChatClient, VisionJsonClient
 
 
-_DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 _DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
 _DEFAULT_VIVO_BASE_URL = "https://api-ai.vivo.com.cn/v1"
 _DEFAULT_VIVO_TEXT_MODEL = "Doubao-Seed-2.0-pro"
@@ -53,7 +52,7 @@ def _build_deepseek_client() -> DeepSeekLangChainJsonClient | None:
         DeepSeekLangChainConfig(
             api_key=api_key,
             model=_env_str("KNOWLINK_DEEPSEEK_MODEL", _DEFAULT_DEEPSEEK_MODEL),
-            base_url=_env_str("KNOWLINK_DEEPSEEK_BASE_URL", _DEFAULT_DEEPSEEK_BASE_URL),
+            base_url=_env_optional_str("KNOWLINK_DEEPSEEK_BASE_URL"),
             timeout_sec=_env_float("KNOWLINK_DEEPSEEK_TIMEOUT_SEC", 30.0),
         )
     )
@@ -109,3 +108,8 @@ def _env_float(name: str, default: float) -> float:
 
 def _env_str(name: str, default: str) -> str:
     return os.getenv(name, default).strip() or default
+
+
+def _env_optional_str(name: str) -> str | None:
+    value = os.getenv(name, "").strip()
+    return value or None

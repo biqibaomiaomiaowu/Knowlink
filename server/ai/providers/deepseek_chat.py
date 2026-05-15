@@ -47,12 +47,13 @@ class DeepSeekLangChainJsonClient:
 
     def complete_json(self, request: JsonChatRequest) -> AIModelResult:
         kwargs: dict[str, Any] = {
-            "model": self._config.model,
+            "model": request.model or self._config.model,
             "api_key": self._config.api_key,
             "temperature": request.temperature,
-            "timeout": self._config.timeout_sec,
-            "model_kwargs": {"response_format": request.response_format},
+            "timeout": request.timeout_sec or self._config.timeout_sec,
         }
+        if request.response_format:
+            kwargs["model_kwargs"] = {"response_format": request.response_format}
         if self._config.base_url:
             kwargs[_base_url_argument_name(self._chat_factory)] = self._config.base_url
 

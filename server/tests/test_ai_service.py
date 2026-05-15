@@ -59,7 +59,7 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
     client = DeepSeekLangChainJsonClient(
         DeepSeekLangChainConfig(
             api_key="deepseek-key",
-            model="deepseek-v4-flash",
+            model="config-model",
             base_url="https://api.deepseek.com",
             timeout_sec=9,
         ),
@@ -69,13 +69,14 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
     result = client.complete_json(
         JsonChatRequest(
             provider="deepseek",
-            model="request-model-ignored",
+            model="request-model",
             messages=[
                 ChatMessage(role="system", content="system prompt"),
                 ChatMessage(role="assistant", content="previous answer"),
                 ChatMessage(role="user", content="question"),
             ],
             temperature=0.7,
+            timeout_sec=13,
             response_format={"type": "json_object"},
         )
     )
@@ -83,9 +84,9 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
     assert result.parsed_json == {"answer": 42}
     assert result.text == 'prefix {"answer": 42}'
     assert len(created) == 1
-    assert created[0].kwargs["model"] == "deepseek-v4-flash"
+    assert created[0].kwargs["model"] == "request-model"
     assert created[0].kwargs["api_key"] == "deepseek-key"
-    assert created[0].kwargs["timeout"] == 9
+    assert created[0].kwargs["timeout"] == 13
     assert created[0].kwargs["temperature"] == 0.7
     assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
     assert created[0].kwargs.get("api_base") == "https://api.deepseek.com"
@@ -97,7 +98,33 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
     ]
 
 
-def test_openai_compatible_json_client_passes_base_url_and_json_mode() -> None:
+def test_deepseek_langchain_client_omits_model_kwargs_when_response_format_is_none() -> None:
+    created: list[FakeChatModel] = []
+
+    def chat_factory(**kwargs: Any) -> FakeChatModel:
+        model = FakeChatModel('{"answer": 42}', **kwargs)
+        created.append(model)
+        return model
+
+    client = DeepSeekLangChainJsonClient(
+        DeepSeekLangChainConfig(api_key="deepseek-key", model="config-model"),
+        chat_factory=chat_factory,
+    )
+
+    client.complete_json(
+        JsonChatRequest(
+            provider="deepseek",
+            model="",
+            messages=[ChatMessage(role="user", content="question")],
+            response_format=None,
+        )
+    )
+
+    assert created[0].kwargs["model"] == "config-model"
+    assert "model_kwargs" not in created[0].kwargs
+
+
+def test_openai_compatible_json_client_passes_request_model_base_url_and_json_mode() -> None:
     created: list[FakeChatModel] = []
 
     def chat_factory(**kwargs: Any) -> FakeChatModel:
@@ -108,7 +135,7 @@ def test_openai_compatible_json_client_passes_base_url_and_json_mode() -> None:
     client = OpenAICompatibleJsonClient(
         OpenAICompatibleConfig(
             api_key="vivo-key",
-            model="Doubao-Seed-2.0-pro",
+            model="config-model",
             base_url="https://api-ai.vivo.com.cn/v1",
             timeout_sec=11,
         ),
@@ -118,17 +145,49 @@ def test_openai_compatible_json_client_passes_base_url_and_json_mode() -> None:
     result = client.complete_json(
         JsonChatRequest(
             provider="vivo",
-            model="request-model-ignored",
+            model="request-model",
             messages=[ChatMessage(role="user", content="question")],
+            timeout_sec=17,
             response_format={"type": "json_object"},
         )
     )
 
     assert result.parsed_json == {"answer": "ok"}
-    assert created[0].kwargs["model"] == "Doubao-Seed-2.0-pro"
+    assert created[0].kwargs["model"] == "request-model"
     assert created[0].kwargs["api_key"] == "vivo-key"
     assert created[0].kwargs["base_url"] == "https://api-ai.vivo.com.cn/v1"
+    assert created[0].kwargs["timeout"] == 17
     assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
+
+
+def test_openai_compatible_json_client_omits_model_kwargs_when_response_format_is_none() -> None:
+    created: list[FakeChatModel] = []
+
+    def chat_factory(**kwargs: Any) -> FakeChatModel:
+        model = FakeChatModel('{"answer": "ok"}', **kwargs)
+        created.append(model)
+        return model
+
+    client = OpenAICompatibleJsonClient(
+        OpenAICompatibleConfig(
+            api_key="vivo-key",
+            model="config-model",
+            base_url="https://api-ai.vivo.com.cn/v1",
+        ),
+        chat_factory=chat_factory,
+    )
+
+    client.complete_json(
+        JsonChatRequest(
+            provider="vivo",
+            model="",
+            messages=[ChatMessage(role="user", content="question")],
+            response_format=None,
+        )
+    )
+
+    assert created[0].kwargs["model"] == "config-model"
+    assert "model_kwargs" not in created[0].kwargs
 
 
 def test_image_to_data_url_rejects_non_image_mime() -> None:
@@ -151,8 +210,9 @@ def test_openai_compatible_vision_client_sends_data_urls_without_paths() -> None
     client = OpenAICompatibleVisionJsonClient(
         OpenAICompatibleConfig(
             api_key="vivo-key",
-            model="Doubao-Seed-2.0-mini",
+            model="config-model",
             base_url="https://api-ai.vivo.com.cn/v1",
+            timeout_sec=19,
         ),
         chat_factory=chat_factory,
     )
@@ -160,13 +220,17 @@ def test_openai_compatible_vision_client_sends_data_urls_without_paths() -> None
     result = client.complete_vision_json(
         VisionJsonRequest(
             provider="vivo",
-            model="vision-model",
+            model="request-vision-model",
             prompt="Describe this image",
             images=[VisionImage(mime_type="image/png", data=b"png-bytes", source_name="/tmp/local.png")],
+            timeout_sec=23,
         )
     )
 
     assert result.parsed_json == {"segments": []}
+    assert created[0].kwargs["model"] == "request-vision-model"
+    assert created[0].kwargs["timeout"] == 23
+    assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
     [message] = created[0].invocations[0]
     assert isinstance(message, HumanMessage)
     content = message.content
@@ -179,6 +243,7 @@ def test_openai_compatible_vision_client_sends_data_urls_without_paths() -> None
 
 def test_registry_only_registers_deepseek_when_api_key_exists(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("KNOWLINK_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("KNOWLINK_DEEPSEEK_BASE_URL", raising=False)
     monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_CHAT", raising=False)
     monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_VISION", raising=False)
     assert "deepseek" not in build_default_ai_service().json_clients
@@ -190,3 +255,17 @@ def test_registry_only_registers_deepseek_when_api_key_exists(monkeypatch: pytes
     service = build_default_ai_service()
 
     assert "deepseek" in service.json_clients
+
+
+def test_registry_does_not_override_deepseek_base_url_when_env_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KNOWLINK_DEEPSEEK_API_KEY", "deepseek-key")
+    monkeypatch.delenv("KNOWLINK_DEEPSEEK_BASE_URL", raising=False)
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_CHAT", raising=False)
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_VISION", raising=False)
+
+    client = build_default_ai_service().json_clients["deepseek"]
+
+    assert isinstance(client, DeepSeekLangChainJsonClient)
+    assert client._config.base_url is None
