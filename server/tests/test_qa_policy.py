@@ -347,7 +347,9 @@ def test_vivo_qa_answer_client_uses_ai_service_request_and_normalizes_json():
     assert request.temperature == 0.1
     assert request.timeout_sec == 7
     assert request.response_format == {"type": "json_object"}
-    assert request.metadata == {"max_tokens": 2048, "stream": False}
+    assert request.metadata["max_tokens"] == 2048
+    assert request.metadata["stream"] is False
+    assert request.metadata["request_id"]
     assert "evidenceCandidates" in request.messages[1].content
     assert response["answerType"] == "direct_answer"
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]

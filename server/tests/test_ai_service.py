@@ -15,6 +15,7 @@ from server.ai.providers.registry import build_default_ai_service
 from server.ai.providers.vivo import VivoLongAsrClient, VivoOcrClient
 from server.ai.providers.vision_chat import image_to_data_url
 from server.ai.service import AIService
+from server.config import settings as settings_module
 
 
 class FakeChatModel:
@@ -181,6 +182,41 @@ def test_deepseek_langchain_client_omits_model_kwargs_when_response_format_is_no
 
     assert created[0].kwargs["model"] == "config-model"
     assert "model_kwargs" not in created[0].kwargs
+
+
+def test_deepseek_langchain_client_retries_without_response_format_when_structured_output_is_unsupported() -> None:
+    created: list[FakeChatModel] = []
+
+    class UnsupportedStructuredOutputModel(FakeChatModel):
+        def invoke(self, messages: Sequence[Any]) -> AIMessage:
+            raise ValueError("response_format json_schema is not supported by this model")
+
+    def chat_factory(**kwargs: Any) -> FakeChatModel:
+        if "model_kwargs" in kwargs:
+            model = UnsupportedStructuredOutputModel(**kwargs)
+        else:
+            model = FakeChatModel('{"answer": 42}', **kwargs)
+        created.append(model)
+        return model
+
+    client = DeepSeekLangChainJsonClient(
+        DeepSeekLangChainConfig(api_key="deepseek-key", model="config-model"),
+        chat_factory=chat_factory,
+    )
+
+    result = client.complete_json(
+        JsonChatRequest(
+            provider="deepseek",
+            model="request-model",
+            messages=[ChatMessage(role="user", content="question")],
+            response_format={"type": "json_object"},
+        )
+    )
+
+    assert result.parsed_json == {"answer": 42}
+    assert len(created) == 2
+    assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
+    assert "model_kwargs" not in created[1].kwargs
 
 
 def test_openai_compatible_json_client_passes_request_model_base_url_and_json_mode() -> None:
@@ -384,6 +420,22 @@ def test_registry_only_registers_deepseek_when_api_key_exists(monkeypatch: pytes
     monkeypatch.setenv("KNOWLINK_DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("KNOWLINK_DEEPSEEK_MODEL", "deepseek-v4-flash")
     monkeypatch.setenv("KNOWLINK_DEEPSEEK_TIMEOUT_SEC", "12")
+    service = build_default_ai_service()
+
+    assert "deepseek" in service.json_clients
+
+
+def test_registry_loads_root_dotenv_before_reading_provider_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("KNOWLINK_DEEPSEEK_API_KEY=deepseek-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setattr(settings_module, "_DOTENV_PATH", dotenv_path)
+    monkeypatch.delenv("KNOWLINK_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_CHAT", raising=False)
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_VISION", raising=False)
+
     service = build_default_ai_service()
 
     assert "deepseek" in service.json_clients

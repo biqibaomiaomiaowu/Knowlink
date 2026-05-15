@@ -11,6 +11,7 @@ from server.ai.providers.openai_compatible import (
 )
 from server.ai.providers.vivo import get_configured_asr_client, get_configured_ocr_client
 from server.ai.service import AIService, JsonChatClient, VisionJsonClient
+from server.config.settings import load_root_dotenv
 
 
 _DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
@@ -20,6 +21,7 @@ _DEFAULT_VIVO_VISION_MODEL = "Doubao-Seed-2.0-mini"
 
 
 def build_default_ai_service() -> AIService:
+    load_root_dotenv()
     json_clients: dict[AIProviderName, JsonChatClient] = {}
     vision_clients: dict[AIProviderName, VisionJsonClient] = {}
 

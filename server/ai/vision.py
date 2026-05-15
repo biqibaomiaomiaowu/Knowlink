@@ -11,6 +11,7 @@ from server.ai.core.errors import AIProviderError
 from server.ai.core.types import AIModelResult, VisionImage, VisionJsonRequest
 from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleVisionJsonClient
 from server.ai.service import AIService
+from server.config.settings import load_root_dotenv
 
 
 VisionSegmentType = Literal["ocr_text", "formula", "image_caption"]
@@ -81,6 +82,7 @@ class VisionModelUnsupportedError(RuntimeError):
 
 
 def get_configured_vision_client() -> VisionClient | None:
+    load_root_dotenv()
     if not _env_bool("KNOWLINK_ENABLE_VIVO_VISION"):
         return None
 

@@ -8,6 +8,7 @@ from server.ai.core.errors import AIOutputParseError, AIProviderError
 from server.ai.core.json_output import message_content_to_text, parse_json_object
 from server.ai.core.types import ChatMessage, JsonChatRequest
 from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.config.settings import load_root_dotenv
 
 
 _DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -24,6 +25,7 @@ class DeepSeekChatConfig:
 
 
 def get_configured_deepseek_chat_config() -> DeepSeekChatConfig | None:
+    load_root_dotenv()
     api_key = os.getenv("KNOWLINK_DEEPSEEK_API_KEY", "").strip()
     if not api_key:
         return None

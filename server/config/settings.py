@@ -43,7 +43,7 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
-    _load_root_dotenv()
+    load_root_dotenv()
     base_dir = Path(__file__).resolve().parents[1]
     settings = Settings(
         app_name=os.getenv("KNOWLINK_APP_NAME", "KnowLink API"),
@@ -86,7 +86,7 @@ def get_settings() -> Settings:
     return settings
 
 
-def _load_root_dotenv() -> None:
+def load_root_dotenv() -> None:
     load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
 
 

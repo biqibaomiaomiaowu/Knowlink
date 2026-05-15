@@ -23,6 +23,22 @@ class DeepSeekLangChainConfig:
 
 ChatFactory = Callable[..., Any]
 _SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high"}
+_STRUCTURED_OUTPUT_ERROR_MARKERS = (
+    "response_format",
+    "json_schema",
+    "structured output",
+    "json_object",
+)
+_UNSUPPORTED_ERROR_MARKERS = (
+    "not support",
+    "unsupported",
+    "invalid",
+    "unknown",
+    "unrecognized",
+    "not accepted",
+    "not allowed",
+    "extra inputs are not permitted",
+)
 
 
 def _message_role_and_content(message: ChatMessage | Mapping[str, Any]) -> tuple[str, str]:
@@ -76,13 +92,31 @@ class DeepSeekLangChainJsonClient:
             kwargs[_base_url_argument_name(self._chat_factory)] = self._config.base_url
 
         try:
-            chat = self._chat_factory(**kwargs)
-            message = chat.invoke(_to_langchain_messages(request.messages))
+            message = self._invoke_chat(kwargs, request)
         except Exception as exc:  # noqa: BLE001 - provider SDK errors are normalized at this boundary.
-            raise AIProviderError(f"deepseek provider call failed: {exc}") from exc
+            if request.response_format and _is_unsupported_structured_output_error(exc):
+                fallback_kwargs = dict(kwargs)
+                fallback_kwargs.pop("model_kwargs", None)
+                try:
+                    message = self._invoke_chat(fallback_kwargs, request)
+                except Exception as retry_exc:  # noqa: BLE001 - provider SDK errors are normalized at this boundary.
+                    raise AIProviderError(f"deepseek provider call failed: {retry_exc}") from retry_exc
+            else:
+                raise AIProviderError(f"deepseek provider call failed: {exc}") from exc
 
         text = message_content_to_text(getattr(message, "content", message))
         return AIModelResult(text=text, parsed_json=parse_json_object(text), raw=message)
+
+    def _invoke_chat(self, kwargs: dict[str, Any], request: JsonChatRequest) -> Any:
+        chat = self._chat_factory(**kwargs)
+        return chat.invoke(_to_langchain_messages(request.messages))
+
+
+def _is_unsupported_structured_output_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return any(marker in message for marker in _STRUCTURED_OUTPUT_ERROR_MARKERS) and any(
+        marker in message for marker in _UNSUPPORTED_ERROR_MARKERS
+    )
 
 
 def _base_url_argument_name(chat_factory: ChatFactory) -> str:

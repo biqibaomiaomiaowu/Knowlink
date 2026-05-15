@@ -35,8 +35,9 @@
 - `langchain-core>=1.4,<2.0`
 - `langchain-openai>=1.2,<2.0`
 - `langchain-deepseek>=1.0,<2.0`
+- `openai>=2.26,<3.0`
 
-保留当前 `openai>=1.54,<2.0`。`langchain-openai` 只用于 OpenAI-compatible provider，例如 vivo chat completion；DeepSeek 官方 API 使用 `langchain-deepseek` 的 `ChatDeepSeek`，不走带 `base_url` 覆盖的 `ChatOpenAI`。第一轮不引入 `langchain-community`，除非后续实现确实需要 community integration。
+`langchain-openai>=1.2,<2.0` 的真实依赖要求 `openai>=2.26,<3.0`，因此本轮保留 OpenAI SDK 依赖但升级到 2.x，不能降级到 OpenAI SDK 1.x，否则无法满足“最新 LangChain”要求。仓库当前没有直接 `openai` SDK 调用，SDK 2.x 风险主要集中在 LangChain provider 适配层，由 `OpenAICompatibleJsonClient` / `OpenAICompatibleVisionJsonClient` 测试覆盖。`langchain-openai` 只用于 OpenAI-compatible provider，例如 vivo chat completion；DeepSeek 官方 API 使用 `langchain-deepseek` 的 `ChatDeepSeek`，不走带 `base_url` 覆盖的 `ChatOpenAI`。第一轮不引入 `langchain-community`，除非后续实现确实需要 community integration。
 
 ### 3.2 dotenv 加载
 

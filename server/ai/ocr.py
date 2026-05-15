@@ -11,6 +11,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from server.config.settings import load_root_dotenv
+
 
 _DEFAULT_OCR_TIMEOUT_SEC = 10.0
 
@@ -51,6 +53,7 @@ class OcrClient(Protocol):
 
 
 def get_configured_ocr_client() -> OcrClient | None:
+    load_root_dotenv()
     if not _env_bool("KNOWLINK_ENABLE_VIVO_OCR"):
         return None
 

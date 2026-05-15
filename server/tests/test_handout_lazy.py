@@ -318,7 +318,9 @@ def test_vivo_handout_outline_client_uses_ai_service_request_and_normalizes_mode
     assert request.temperature == 0.1
     assert request.timeout_sec == 7
     assert request.response_format == {"type": "json_object"}
-    assert request.metadata == {"max_tokens": 2048, "stream": False}
+    assert request.metadata["max_tokens"] == 2048
+    assert request.metadata["stream"] is False
+    assert request.metadata["request_id"]
     assert "sourceSegmentKeys" in request.messages[0].content
     assert "video_caption segments" in request.messages[1].content
     assert outline == {

@@ -676,7 +676,9 @@ def test_vivo_handout_block_client_uses_ai_service_request():
     assert request.temperature == 0.1
     assert request.timeout_sec == 9
     assert request.response_format == {"type": "json_object"}
-    assert request.metadata == {"max_tokens": 4096, "stream": False}
+    assert request.metadata["max_tokens"] == 4096
+    assert request.metadata["stream"] is False
+    assert request.metadata["request_id"]
     assert [message.role for message in request.messages] == ["system", "user"]
     HANDOUT_BLOCK_VALIDATOR.validate(block)
     assert block["generationMetadata"] == {"source": "model", "reason": "model_response"}

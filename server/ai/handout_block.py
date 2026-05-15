@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
@@ -13,6 +14,7 @@ from server.ai.deepseek import get_configured_deepseek_chat_config
 from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
 from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleJsonClient
 from server.ai.service import AIService, get_default_ai_service
+from server.config.settings import load_root_dotenv
 from server.parsers.base import clean_text
 
 
@@ -56,6 +58,7 @@ class HandoutBlockClient(Protocol):
 
 
 def get_configured_handout_block_client() -> HandoutBlockClient | None:
+    load_root_dotenv()
     provider = os.getenv("KNOWLINK_HANDOUT_BLOCK_PROVIDER", "vivo").strip().lower()
     if provider == "deepseek":
         config = get_configured_deepseek_chat_config()
@@ -239,7 +242,7 @@ class VivoHandoutBlockClient:
                 temperature=0.1,
                 timeout_sec=self._timeout_sec,
                 response_format={"type": "json_object"},
-                metadata={"max_tokens": 4096, "stream": False},
+                metadata={"max_tokens": 4096, "stream": False, "request_id": str(uuid.uuid4())},
             ),
             label="vivo handout block",
         )
