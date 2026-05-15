@@ -649,34 +649,6 @@ def _deepseek_base_url(base_url: str) -> str:
     return trimmed
 
 
-def _parse_outline_chat_response(
-    payload: dict[str, Any],
-    *,
-    captions: Sequence[Mapping[str, Any]],
-    title: str,
-    summary: str,
-) -> dict[str, Any]:
-    if "error" in payload:
-        raise RuntimeError(f"vivo outline failed: {payload['error']}")
-
-    try:
-        content = payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("vivo outline response missing message content") from exc
-
-    text = _message_content_to_text(content)
-    json_text = _extract_json_object(text)
-    if json_text is None:
-        raise RuntimeError("vivo outline response is not JSON")
-
-    try:
-        model_payload = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"vivo outline response has invalid JSON: {exc}") from exc
-
-    return _normalize_model_outline(model_payload, captions=captions, title=title, summary=summary)
-
-
 def _normalize_model_outline(
     payload: Any,
     *,
@@ -966,35 +938,6 @@ def _chat_base_url(base_url: str) -> str:
     if trimmed.endswith("/v1"):
         return trimmed
     return f"{trimmed}/v1"
-
-
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        texts = [item.get("text", "") for item in content if isinstance(item, dict)]
-        return "\n".join(text for text in texts if text)
-    return str(content)
-
-
-def _extract_json_object(text: str) -> str | None:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
-
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    return stripped[start : end + 1]
 
 
 def _clean_context(text: str | None) -> str:

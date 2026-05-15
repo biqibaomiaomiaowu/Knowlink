@@ -1178,59 +1178,6 @@ def _deepseek_base_url(base_url: str) -> str:
     return trimmed
 
 
-def _parse_chat_json_payload(payload: Mapping[str, Any], *, label: str) -> dict[str, Any]:
-    if "error" in payload:
-        raise RuntimeError(f"{label} failed: {payload['error']}")
-
-    try:
-        content = payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"{label} response missing message content") from exc
-
-    text = _message_content_to_text(content)
-    json_text = _extract_json_object(text)
-    if json_text is None:
-        raise RuntimeError(f"{label} response is not JSON")
-
-    try:
-        model_payload = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{label} response has invalid JSON: {exc}") from exc
-    if not isinstance(model_payload, dict):
-        raise RuntimeError(f"{label} JSON must be an object")
-    return model_payload
-
-
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, Mapping):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "\n".join(parts)
-    return ""
-
-
-def _extract_json_object(text: str) -> str | None:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?", "", stripped, flags=re.IGNORECASE).strip()
-        stripped = re.sub(r"```$", "", stripped).strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start >= 0 and end > start:
-        return stripped[start : end + 1]
-    return None
-
-
 def _chat_base_url(base_url: str) -> str:
     clean_url = base_url.rstrip("/")
     if clean_url.endswith("/v1"):

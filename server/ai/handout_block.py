@@ -1213,56 +1213,6 @@ def _deepseek_base_url(base_url: str) -> str:
     return trimmed
 
 
-def _parse_chat_json_payload(payload: dict[str, Any], *, label: str) -> dict[str, Any]:
-    if "error" in payload:
-        raise RuntimeError(f"{label} failed: {payload['error']}")
-    try:
-        content = payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"{label} response missing message content") from exc
-
-    text = _message_content_to_text(content)
-    json_text = _extract_json_object(text)
-    if json_text is None:
-        raise RuntimeError(f"{label} response is not JSON")
-    try:
-        result = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{label} response has invalid JSON: {exc}") from exc
-    if not isinstance(result, dict):
-        raise RuntimeError(f"{label} JSON must be an object")
-    return result
-
-
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        texts = [item.get("text", "") for item in content if isinstance(item, dict)]
-        return "\n".join(text for text in texts if text)
-    return str(content)
-
-
-def _extract_json_object(text: str) -> str | None:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
-
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    return stripped[start : end + 1]
-
-
 def _first_present(payload: Mapping[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in payload:
