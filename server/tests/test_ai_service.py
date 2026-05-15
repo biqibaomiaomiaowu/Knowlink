@@ -217,6 +217,75 @@ def test_openai_compatible_json_client_passes_request_model_base_url_and_json_mo
     assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
 
 
+def test_openai_compatible_json_client_passes_valid_generation_metadata() -> None:
+    created: list[FakeChatModel] = []
+
+    def chat_factory(**kwargs: Any) -> FakeChatModel:
+        model = FakeChatModel('{"answer": "ok"}', **kwargs)
+        created.append(model)
+        return model
+
+    client = OpenAICompatibleJsonClient(
+        OpenAICompatibleConfig(
+            api_key="vivo-key",
+            model="config-model",
+            base_url="https://api-ai.vivo.com.cn/v1",
+        ),
+        chat_factory=chat_factory,
+    )
+
+    client.complete_json(
+        JsonChatRequest(
+            provider="vivo",
+            model="request-model",
+            messages=[ChatMessage(role="user", content="question")],
+            metadata={"max_tokens": 2048, "stream": False},
+        )
+    )
+
+    assert created[0].kwargs["max_tokens"] == 2048
+    assert created[0].kwargs["streaming"] is False
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"max_tokens": 0, "stream": False},
+        {"max_tokens": -1, "stream": False},
+        {"max_tokens": True, "stream": False},
+        {"max_tokens": "2048", "stream": False},
+    ],
+)
+def test_openai_compatible_json_client_omits_invalid_max_tokens(metadata: dict[str, Any]) -> None:
+    created: list[FakeChatModel] = []
+
+    def chat_factory(**kwargs: Any) -> FakeChatModel:
+        model = FakeChatModel('{"answer": "ok"}', **kwargs)
+        created.append(model)
+        return model
+
+    client = OpenAICompatibleJsonClient(
+        OpenAICompatibleConfig(
+            api_key="vivo-key",
+            model="config-model",
+            base_url="https://api-ai.vivo.com.cn/v1",
+        ),
+        chat_factory=chat_factory,
+    )
+
+    client.complete_json(
+        JsonChatRequest(
+            provider="vivo",
+            model="request-model",
+            messages=[ChatMessage(role="user", content="question")],
+            metadata=metadata,
+        )
+    )
+
+    assert "max_tokens" not in created[0].kwargs
+    assert created[0].kwargs["streaming"] is False
+
+
 def test_openai_compatible_json_client_omits_model_kwargs_when_response_format_is_none() -> None:
     created: list[FakeChatModel] = []
 

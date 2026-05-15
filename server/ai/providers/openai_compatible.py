@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
@@ -43,6 +43,7 @@ class OpenAICompatibleJsonClient:
                     temperature=request.temperature,
                     timeout_sec=request.timeout_sec,
                     response_format=request.response_format,
+                    metadata=request.metadata,
                 )
             )
             message = chat.invoke(_to_langchain_messages(request.messages))
@@ -73,6 +74,7 @@ class OpenAICompatibleVisionJsonClient:
                     temperature=request.temperature,
                     timeout_sec=request.timeout_sec,
                     response_format={"type": "json_object"},
+                    metadata=None,
                 )
             )
             message = chat.invoke([HumanMessage(content=content)])
@@ -90,6 +92,7 @@ def _chat_kwargs(
     temperature: float,
     timeout_sec: float,
     response_format: dict[str, Any] | None,
+    metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "model": model or config.model,
@@ -100,4 +103,11 @@ def _chat_kwargs(
     }
     if response_format:
         kwargs["model_kwargs"] = {"response_format": response_format}
+    if metadata:
+        max_tokens = metadata.get("max_tokens")
+        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0:
+            kwargs["max_tokens"] = max_tokens
+        stream = metadata.get("stream")
+        if isinstance(stream, bool):
+            kwargs["streaming"] = stream
     return kwargs
