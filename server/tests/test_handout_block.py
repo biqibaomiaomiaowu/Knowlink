@@ -3,6 +3,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from server.ai.core.types import AIModelResult
 from server.ai.handout_block import (
     DeepSeekHandoutBlockClient,
     VivoHandoutBlockClient,
@@ -564,67 +565,45 @@ def test_configured_handout_block_client_supports_deepseek_provider(monkeypatch)
     assert isinstance(get_configured_handout_block_client(), DeepSeekHandoutBlockClient)
 
 
-def test_deepseek_handout_block_client_uses_thinking_json_mode(monkeypatch):
+def test_deepseek_handout_block_client_uses_langchain_json_client(monkeypatch):
     captured = {}
+    model_payload = {
+        "outlineKey": "outline-1",
+        "title": "集合的基本概念",
+        "summary": "集合由确定元素组成。",
+        "contentMd": "集合是由确定对象组成的整体。",
+        "estimatedMinutes": 3,
+        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": "kp-outline-1-1",
+                "displayName": "集合",
+                "description": "理解集合与元素的关系。",
+                "difficultyLevel": "beginner",
+                "importanceScore": 80,
+                "sortNo": 1,
+            }
+        ],
+        "citations": [
+            {
+                "resourceId": 1,
+                "segmentKey": "mp4-c1",
+                "startSec": 0,
+                "endSec": 20,
+                "refLabel": "视频 00:00-00:20",
+            }
+        ],
+    }
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
+    class FakeLangChainJsonClient:
+        def __init__(self, config):
+            captured["config"] = config
 
-        def __exit__(self, exc_type, exc, traceback):
-            return None
+        def complete_json(self, request):
+            captured["request"] = request
+            return AIModelResult(text=json.dumps(model_payload, ensure_ascii=False), parsed_json=model_payload)
 
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "reasoning_content": "思考内容不会被解析。",
-                                "content": json.dumps(
-                                    {
-                                        "outlineKey": "outline-1",
-                                        "title": "集合的基本概念",
-                                        "summary": "集合由确定元素组成。",
-                                        "contentMd": "集合是由确定对象组成的整体。",
-                                        "estimatedMinutes": 3,
-                                        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
-                                        "knowledgePoints": [
-                                            {
-                                                "knowledgePointKey": "kp-outline-1-1",
-                                                "displayName": "集合",
-                                                "description": "理解集合与元素的关系。",
-                                                "difficultyLevel": "beginner",
-                                                "importanceScore": 80,
-                                                "sortNo": 1,
-                                            }
-                                        ],
-                                        "citations": [
-                                            {
-                                                "resourceId": 1,
-                                                "segmentKey": "mp4-c1",
-                                                "startSec": 0,
-                                                "endSec": 20,
-                                                "refLabel": "视频 00:00-00:20",
-                                            }
-                                        ],
-                                    },
-                                    ensure_ascii=False,
-                                ),
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["body"] = request.data.decode("utf-8")
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("server.ai.deepseek.DeepSeekLangChainJsonClient", FakeLangChainJsonClient)
     client = DeepSeekHandoutBlockClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com",
@@ -635,15 +614,17 @@ def test_deepseek_handout_block_client_uses_thinking_json_mode(monkeypatch):
 
     block = generate_handout_block(_outline_item(), _segments(), client=client)
 
-    body = json.loads(captured["body"])
-    assert captured["url"] == "https://api.deepseek.com/chat/completions"
-    assert captured["timeout"] == 11
-    assert body["model"] == "deepseek-v4-flash"
-    assert body["thinking"] == {"type": "enabled"}
-    assert body["reasoning_effort"] == "high"
-    assert body["response_format"] == {"type": "json_object"}
-    assert body["max_tokens"] == 8192
-    assert "temperature" not in body
+    assert captured["config"].api_key == "fake-deepseek-key"
+    assert captured["config"].model == "deepseek-v4-flash"
+    assert captured["config"].base_url == "https://api.deepseek.com"
+    assert captured["config"].timeout_sec == 11
+    request = captured["request"]
+    assert request.provider == "deepseek"
+    assert request.model == "deepseek-v4-flash"
+    assert request.timeout_sec == 11
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata == {"max_tokens": 8192, "reasoning_effort": "high"}
+    assert [message.role for message in request.messages] == ["system", "user"]
     HANDOUT_BLOCK_VALIDATOR.validate(block)
     assert block["title"] == "集合的基本概念"
 

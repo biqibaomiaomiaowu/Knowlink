@@ -3,6 +3,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from server.ai.core.types import AIModelResult
 from server.ai.qa_policy import (
     DeepSeekQaAnswerClient,
     VivoQaAnswerClient,
@@ -249,53 +250,31 @@ def test_configured_qa_answer_client_supports_deepseek_provider_without_vivo_ena
     assert isinstance(get_configured_qa_answer_client(), DeepSeekQaAnswerClient)
 
 
-def test_deepseek_qa_answer_client_uses_thinking_json_mode(monkeypatch):
+def test_deepseek_qa_answer_client_uses_langchain_json_client(monkeypatch):
     captured = {}
+    model_payload = {
+        "answerMd": "集合是确定对象组成的整体。",
+        "answerType": "direct_answer",
+        "citations": [
+            {
+                "resourceId": 1,
+                "segmentKey": "mp4-c1",
+                "startSec": 0,
+                "endSec": 20,
+                "refLabel": "视频 00s-20s",
+            }
+        ],
+    }
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
+    class FakeLangChainJsonClient:
+        def __init__(self, config):
+            captured["config"] = config
 
-        def __exit__(self, exc_type, exc, traceback):
-            return None
+        def complete_json(self, request):
+            captured["request"] = request
+            return AIModelResult(text=json.dumps(model_payload, ensure_ascii=False), parsed_json=model_payload)
 
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "reasoning_content": "思考内容不会被解析。",
-                                "content": json.dumps(
-                                    {
-                                        "answerMd": "集合是确定对象组成的整体。",
-                                        "answerType": "direct_answer",
-                                        "citations": [
-                                            {
-                                                "resourceId": 1,
-                                                "segmentKey": "mp4-c1",
-                                                "startSec": 0,
-                                                "endSec": 20,
-                                                "refLabel": "视频 00s-20s",
-                                            }
-                                        ],
-                                    },
-                                    ensure_ascii=False,
-                                ),
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["body"] = request.data.decode("utf-8")
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("server.ai.deepseek.DeepSeekLangChainJsonClient", FakeLangChainJsonClient)
     client = DeepSeekQaAnswerClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com",
@@ -314,15 +293,17 @@ def test_deepseek_qa_answer_client_uses_thinking_json_mode(monkeypatch):
         client=client,
     )
 
-    body = json.loads(captured["body"])
-    assert captured["url"] == "https://api.deepseek.com/chat/completions"
-    assert captured["timeout"] == 13
-    assert body["model"] == "deepseek-v4-flash"
-    assert body["thinking"] == {"type": "enabled"}
-    assert body["reasoning_effort"] == "high"
-    assert body["response_format"] == {"type": "json_object"}
-    assert body["max_tokens"] == 4096
-    assert "temperature" not in body
+    assert captured["config"].api_key == "fake-deepseek-key"
+    assert captured["config"].model == "deepseek-v4-flash"
+    assert captured["config"].base_url == "https://api.deepseek.com"
+    assert captured["config"].timeout_sec == 13
+    request = captured["request"]
+    assert request.provider == "deepseek"
+    assert request.model == "deepseek-v4-flash"
+    assert request.timeout_sec == 13
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata == {"max_tokens": 4096, "reasoning_effort": "high"}
+    assert [message.role for message in request.messages] == ["system", "user"]
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "direct_answer"
 
