@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
@@ -23,15 +24,25 @@ class DeepSeekLangChainConfig:
 ChatFactory = Callable[..., Any]
 
 
-def _to_langchain_messages(messages: Sequence[ChatMessage]) -> list[BaseMessage]:
+def _message_role_and_content(message: ChatMessage | Mapping[str, Any]) -> tuple[str, str]:
+    if isinstance(message, Mapping):
+        role = message.get("role", "user")
+        if not isinstance(role, str):
+            role = "user"
+        return role, message_content_to_text(message.get("content"))
+    return message.role, message.content
+
+
+def _to_langchain_messages(messages: Sequence[ChatMessage | Mapping[str, Any]]) -> list[BaseMessage]:
     langchain_messages: list[BaseMessage] = []
     for message in messages:
-        if message.role == "system":
-            langchain_messages.append(SystemMessage(content=message.content))
-        elif message.role == "assistant":
-            langchain_messages.append(AIMessage(content=message.content))
+        role, content = _message_role_and_content(message)
+        if role == "system":
+            langchain_messages.append(SystemMessage(content=content))
+        elif role == "assistant":
+            langchain_messages.append(AIMessage(content=content))
         else:
-            langchain_messages.append(HumanMessage(content=message.content))
+            langchain_messages.append(HumanMessage(content=content))
     return langchain_messages
 
 
@@ -54,6 +65,12 @@ class DeepSeekLangChainJsonClient:
         }
         if request.response_format:
             kwargs["model_kwargs"] = {"response_format": request.response_format}
+        max_tokens = request.metadata.get("max_tokens")
+        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+            kwargs["max_tokens"] = max_tokens
+        reasoning_effort = request.metadata.get("reasoning_effort")
+        if isinstance(reasoning_effort, str):
+            kwargs["reasoning_effort"] = reasoning_effort
         if self._config.base_url:
             kwargs[_base_url_argument_name(self._chat_factory)] = self._config.base_url
 

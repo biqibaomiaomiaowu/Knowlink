@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from server.ai.core import AIConfigurationError, ChatMessage, JsonChatRequest, VisionImage, VisionJsonRequest
 from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
+from server.ai.providers.deepseek_chat import _to_langchain_messages
 from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleJsonClient
 from server.ai.providers.openai_compatible import OpenAICompatibleVisionJsonClient
 from server.ai.providers.registry import build_default_ai_service
@@ -78,6 +79,7 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
             temperature=0.7,
             timeout_sec=13,
             response_format={"type": "json_object"},
+            metadata={"max_tokens": 2048, "reasoning_effort": "high"},
         )
     )
 
@@ -88,6 +90,8 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
     assert created[0].kwargs["api_key"] == "deepseek-key"
     assert created[0].kwargs["timeout"] == 13
     assert created[0].kwargs["temperature"] == 0.7
+    assert created[0].kwargs["max_tokens"] == 2048
+    assert created[0].kwargs["reasoning_effort"] == "high"
     assert created[0].kwargs["model_kwargs"]["response_format"] == {"type": "json_object"}
     assert created[0].kwargs.get("api_base") == "https://api.deepseek.com"
     assert [type(message) for message in created[0].invocations[0]] == [SystemMessage, AIMessage, HumanMessage]
@@ -96,6 +100,19 @@ def test_deepseek_langchain_client_uses_factory_messages_and_json_mode() -> None
         "previous answer",
         "question",
     ]
+
+
+def test_deepseek_langchain_message_mapping_accepts_legacy_dict_messages() -> None:
+    messages = _to_langchain_messages(
+        [
+            {"role": "system", "content": [{"text": "system hello"}]},
+            {"role": "assistant", "content": [{"text": "assistant hello"}]},
+            {"content": [{"text": "hello"}]},
+        ]
+    )
+
+    assert [type(message) for message in messages] == [SystemMessage, AIMessage, HumanMessage]
+    assert [message.content for message in messages] == ["system hello", "assistant hello", "hello"]
 
 
 def test_deepseek_langchain_client_omits_model_kwargs_when_response_format_is_none() -> None:

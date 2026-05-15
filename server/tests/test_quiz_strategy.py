@@ -288,7 +288,7 @@ def test_deepseek_quiz_client_uses_langchain_json_client(monkeypatch):
     monkeypatch.setattr("server.ai.deepseek.DeepSeekLangChainJsonClient", FakeLangChainJsonClient)
     client = DeepSeekQuizGenerationClient(
         api_key="fake-deepseek-key",
-        base_url="https://api.deepseek.com",
+        base_url="https://api.deepseek.com/v1",
         model="deepseek-v4-flash",
         reasoning_effort="high",
         timeout_sec=12,

@@ -97,7 +97,7 @@ class DeepSeekJsonChatClient:
                 DeepSeekLangChainConfig(
                     api_key=self._api_key,
                     model=self._model,
-                    base_url=self._base_url,
+                    base_url=_chat_base_url(self._base_url),
                     timeout_sec=self._timeout_sec,
                 )
             )
