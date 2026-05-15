@@ -22,6 +22,7 @@ class DeepSeekLangChainConfig:
 
 
 ChatFactory = Callable[..., Any]
+_SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
 def _message_role_and_content(message: ChatMessage | Mapping[str, Any]) -> tuple[str, str]:
@@ -66,10 +67,10 @@ class DeepSeekLangChainJsonClient:
         if request.response_format:
             kwargs["model_kwargs"] = {"response_format": request.response_format}
         max_tokens = request.metadata.get("max_tokens")
-        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool):
+        if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0:
             kwargs["max_tokens"] = max_tokens
         reasoning_effort = request.metadata.get("reasoning_effort")
-        if isinstance(reasoning_effort, str):
+        if isinstance(reasoning_effort, str) and reasoning_effort in _SUPPORTED_REASONING_EFFORTS:
             kwargs["reasoning_effort"] = reasoning_effort
         if self._config.base_url:
             kwargs[_base_url_argument_name(self._chat_factory)] = self._config.base_url

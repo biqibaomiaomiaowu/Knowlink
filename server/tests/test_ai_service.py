@@ -115,6 +115,46 @@ def test_deepseek_langchain_message_mapping_accepts_legacy_dict_messages() -> No
     assert [message.content for message in messages] == ["system hello", "assistant hello", "hello"]
 
 
+@pytest.mark.parametrize(
+    ("metadata", "forbidden_kwargs"),
+    [
+        ({"max_tokens": 0, "reasoning_effort": "high"}, {"max_tokens"}),
+        ({"max_tokens": -1, "reasoning_effort": "high"}, {"max_tokens"}),
+        ({"max_tokens": True, "reasoning_effort": "high"}, {"max_tokens"}),
+        ({"max_tokens": "2048", "reasoning_effort": "high"}, {"max_tokens"}),
+        ({"max_tokens": 2048, "reasoning_effort": ""}, {"reasoning_effort"}),
+        ({"max_tokens": 2048, "reasoning_effort": "unsupported"}, {"reasoning_effort"}),
+        ({"max_tokens": 2048, "reasoning_effort": 1}, {"reasoning_effort"}),
+    ],
+)
+def test_deepseek_langchain_client_omits_invalid_metadata_kwargs(
+    metadata: dict[str, Any],
+    forbidden_kwargs: set[str],
+) -> None:
+    created: list[FakeChatModel] = []
+
+    def chat_factory(**kwargs: Any) -> FakeChatModel:
+        model = FakeChatModel('{"answer": 42}', **kwargs)
+        created.append(model)
+        return model
+
+    client = DeepSeekLangChainJsonClient(
+        DeepSeekLangChainConfig(api_key="deepseek-key", model="config-model"),
+        chat_factory=chat_factory,
+    )
+
+    client.complete_json(
+        JsonChatRequest(
+            provider="deepseek",
+            model="request-model",
+            messages=[ChatMessage(role="user", content="question")],
+            metadata=metadata,
+        )
+    )
+
+    assert forbidden_kwargs.isdisjoint(created[0].kwargs)
+
+
 def test_deepseek_langchain_client_omits_model_kwargs_when_response_format_is_none() -> None:
     created: list[FakeChatModel] = []
 
