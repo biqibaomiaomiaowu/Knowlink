@@ -269,3 +269,47 @@ def test_registry_does_not_override_deepseek_base_url_when_env_is_missing(
 
     assert isinstance(client, DeepSeekLangChainJsonClient)
     assert client._config.base_url is None
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://api-ai.vivo.com.cn",
+        "https://api-ai.vivo.com.cn/",
+        "https://api-ai.vivo.com.cn/v1",
+        "https://api-ai.vivo.com.cn/v1/",
+    ],
+)
+def test_registry_normalizes_vivo_chat_base_url(monkeypatch: pytest.MonkeyPatch, base_url: str) -> None:
+    monkeypatch.delenv("KNOWLINK_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_CHAT", "1")
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_VISION", raising=False)
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "vivo-key")
+    monkeypatch.setenv("KNOWLINK_VIVO_BASE_URL", base_url)
+
+    client = build_default_ai_service().json_clients["vivo"]
+
+    assert isinstance(client, OpenAICompatibleJsonClient)
+    assert client._config.base_url == "https://api-ai.vivo.com.cn/v1"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://api-ai.vivo.com.cn",
+        "https://api-ai.vivo.com.cn/",
+        "https://api-ai.vivo.com.cn/v1",
+        "https://api-ai.vivo.com.cn/v1/",
+    ],
+)
+def test_registry_normalizes_vivo_vision_base_url(monkeypatch: pytest.MonkeyPatch, base_url: str) -> None:
+    monkeypatch.delenv("KNOWLINK_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_CHAT", raising=False)
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_VISION", "1")
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "vivo-key")
+    monkeypatch.setenv("KNOWLINK_VIVO_BASE_URL", base_url)
+
+    client = build_default_ai_service().vision_clients["vivo"]
+
+    assert isinstance(client, OpenAICompatibleVisionJsonClient)
+    assert client._config.base_url == "https://api-ai.vivo.com.cn/v1"

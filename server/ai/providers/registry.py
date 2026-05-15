@@ -68,7 +68,7 @@ def _build_vivo_chat_client() -> OpenAICompatibleJsonClient | None:
         OpenAICompatibleConfig(
             api_key=api_key,
             model=_env_str("KNOWLINK_VIVO_CHAT_MODEL", _DEFAULT_VIVO_TEXT_MODEL),
-            base_url=_env_str("KNOWLINK_VIVO_BASE_URL", _DEFAULT_VIVO_BASE_URL),
+            base_url=_normalize_openai_v1_base_url(_env_str("KNOWLINK_VIVO_BASE_URL", _DEFAULT_VIVO_BASE_URL)),
             timeout_sec=_env_float("KNOWLINK_VIVO_CHAT_TIMEOUT_SEC", 30.0),
         )
     )
@@ -84,7 +84,7 @@ def _build_vivo_vision_client() -> OpenAICompatibleVisionJsonClient | None:
         OpenAICompatibleConfig(
             api_key=api_key,
             model=_env_str("KNOWLINK_VIVO_VISION_MODEL", _DEFAULT_VIVO_VISION_MODEL),
-            base_url=_env_str("KNOWLINK_VIVO_BASE_URL", _DEFAULT_VIVO_BASE_URL),
+            base_url=_normalize_openai_v1_base_url(_env_str("KNOWLINK_VIVO_BASE_URL", _DEFAULT_VIVO_BASE_URL)),
             timeout_sec=_env_float("KNOWLINK_VIVO_VISION_TIMEOUT_SEC", 30.0),
         )
     )
@@ -113,3 +113,10 @@ def _env_str(name: str, default: str) -> str:
 def _env_optional_str(name: str) -> str | None:
     value = os.getenv(name, "").strip()
     return value or None
+
+
+def _normalize_openai_v1_base_url(base_url: str) -> str:
+    trimmed = base_url.rstrip("/")
+    if trimmed.endswith("/v1"):
+        return trimmed
+    return f"{trimmed}/v1"

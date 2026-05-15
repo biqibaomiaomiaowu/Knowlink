@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Protocol
 
+from server.ai.asr import AsrClient
 from server.ai.core.errors import AIConfigurationError
 from server.ai.core.types import AIModelResult, AIProviderName, JsonChatRequest, VisionJsonRequest
+from server.ai.ocr import OcrClient
 
 
 class JsonChatClient(Protocol):
@@ -22,8 +24,8 @@ class VisionJsonClient(Protocol):
 class AIService:
     json_clients: dict[AIProviderName, JsonChatClient]
     vision_clients: dict[AIProviderName, VisionJsonClient]
-    asr_client: object | None = None
-    ocr_client: object | None = None
+    asr_client: AsrClient | None = None
+    ocr_client: OcrClient | None = None
 
     def complete_json(self, request: JsonChatRequest) -> AIModelResult:
         client = self.json_clients.get(request.provider)
