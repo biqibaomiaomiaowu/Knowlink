@@ -24,7 +24,7 @@ class JsonChatRequest:
     messages: Sequence[ChatMessage]
     temperature: float = 0.2
     timeout_sec: float = 30.0
-    response_format: dict[str, Any] = field(default_factory=lambda: {"type": "json_object"})
+    response_format: dict[str, Any] | None = field(default_factory=lambda: {"type": "json_object"})
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
