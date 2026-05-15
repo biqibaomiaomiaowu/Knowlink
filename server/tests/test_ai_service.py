@@ -6,11 +6,13 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from server.ai.core import AIConfigurationError, ChatMessage, JsonChatRequest, VisionImage, VisionJsonRequest
+from server.ai.providers import vivo
 from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
 from server.ai.providers.deepseek_chat import _to_langchain_messages
 from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleJsonClient
 from server.ai.providers.openai_compatible import OpenAICompatibleVisionJsonClient
 from server.ai.providers.registry import build_default_ai_service
+from server.ai.providers.vivo import VivoLongAsrClient, VivoOcrClient
 from server.ai.providers.vision_chat import image_to_data_url
 from server.ai.service import AIService
 
@@ -385,6 +387,47 @@ def test_registry_only_registers_deepseek_when_api_key_exists(monkeypatch: pytes
     service = build_default_ai_service()
 
     assert "deepseek" in service.json_clients
+
+
+def test_registry_leaves_vivo_asr_and_ocr_unconfigured_without_enable_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_ASR", raising=False)
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_OCR", raising=False)
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_ID", "2026764332")
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "vivo-key")
+
+    service = build_default_ai_service()
+
+    assert service.asr_client is None
+    assert service.ocr_client is None
+
+
+def test_registry_configures_vivo_asr_and_ocr_clients_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_ASR", "true")
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_OCR", "true")
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_ID", "2026764332")
+    monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "vivo-key")
+    monkeypatch.delenv("KNOWLINK_VIVO_OCR_BUSINESS_ID", raising=False)
+
+    service = build_default_ai_service()
+
+    assert isinstance(service.asr_client, VivoLongAsrClient)
+    assert isinstance(service.ocr_client, VivoOcrClient)
+    assert service.ocr_client._business_id == "aigc2026764332"
+
+
+def test_vivo_provider_facade_exports_custom_asr_and_ocr_clients() -> None:
+    assert set(vivo.__all__) == {
+        "AsrClient",
+        "VivoLongAsrClient",
+        "get_configured_asr_client",
+        "OcrClient",
+        "VivoOcrClient",
+        "get_configured_ocr_client",
+    }
 
 
 def test_registry_does_not_override_deepseek_base_url_when_env_is_missing(

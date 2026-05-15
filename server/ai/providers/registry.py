@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import os
 
-from server.ai.asr import get_configured_asr_client
 from server.ai.core.types import AIProviderName
-from server.ai.ocr import get_configured_ocr_client
 from server.ai.providers.deepseek_chat import DeepSeekLangChainConfig, DeepSeekLangChainJsonClient
 from server.ai.providers.openai_compatible import (
     OpenAICompatibleConfig,
     OpenAICompatibleJsonClient,
     OpenAICompatibleVisionJsonClient,
 )
+from server.ai.providers.vivo import get_configured_asr_client, get_configured_ocr_client
 from server.ai.service import AIService, JsonChatClient, VisionJsonClient
 
 
