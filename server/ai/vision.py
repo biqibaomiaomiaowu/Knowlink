@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import base64
 import json
 import os
 import time
 import uuid
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
+
+from server.ai.core.errors import AIProviderError
+from server.ai.core.types import AIModelResult, VisionImage, VisionJsonRequest
+from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleVisionJsonClient
+from server.ai.service import AIService
+from server.config.settings import load_root_dotenv
 
 
 VisionSegmentType = Literal["ocr_text", "formula", "image_caption"]
@@ -79,6 +82,7 @@ class VisionModelUnsupportedError(RuntimeError):
 
 
 def get_configured_vision_client() -> VisionClient | None:
+    load_root_dotenv()
     if not _env_bool("KNOWLINK_ENABLE_VIVO_VISION"):
         return None
 
@@ -139,12 +143,19 @@ class VivoVisionClient:
         base_url: str,
         model: str,
         timeout_sec: float | None = None,
+        ai_service: AIService | None = None,
     ) -> None:
         self._app_id = app_id
         self._app_key = app_key
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout_sec = timeout_sec if timeout_sec is not None else _DEFAULT_VISION_TIMEOUT_SEC
+        self._ai_service = ai_service or _build_scoped_vivo_ai_service(
+            app_key=app_key,
+            base_url=base_url,
+            model=model,
+            timeout_sec=self._timeout_sec,
+        )
         self._last_request_at = 0.0
         self._min_request_interval_sec = 0.8
 
@@ -210,58 +221,63 @@ class VivoVisionClient:
         document_context: str | None,
     ) -> list[VisionAssetResult]:
         self._throttle()
-        content: list[dict[str, Any]] = [
-            {
-                "type": "text",
-                "text": _build_batch_prompt(
-                    resource_type=resource_type,
-                    assets=assets,
-                    document_context=document_context,
-                ),
-            }
-        ]
-        for index, asset in enumerate(assets, start=1):
-            content.append({"type": "text", "text": _asset_label(index, asset)})
-            content.append({"type": "image_url", "image_url": {"url": _data_url(asset.image_bytes, asset.mime_type)}})
-
-        payload = {
-            "model": self._model,
-            "messages": [{"role": "user", "content": content}],
-            "temperature": 0.1,
-            "max_tokens": 2048,
-            "stream": False,
-        }
-        request = urllib.request.Request(
-            f"{_chat_base_url(self._base_url)}/chat/completions?request_id={uuid.uuid4()}",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._app_key}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-            method="POST",
+        prompt = _build_batch_prompt(
+            resource_type=resource_type,
+            assets=assets,
+            document_context=document_context,
         )
-
+        request = VisionJsonRequest(
+            provider="vivo",
+            model=self._model,
+            prompt=prompt,
+            images=[_vision_image_for_asset(asset) for asset in assets],
+            temperature=0.1,
+            timeout_sec=self._timeout_sec,
+            metadata={
+                "max_tokens": 2048,
+                "stream": False,
+                "request_id": str(uuid.uuid4()),
+                "resource_type": resource_type,
+                "asset_labels": [_asset_label(index, asset) for index, asset in enumerate(assets, start=1)],
+            },
+        )
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
-                body = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            try:
-                payload = json.loads(body)
-            except json.JSONDecodeError:
-                raise RuntimeError(f"vivo multimodal http {exc.code}: {body}") from exc
-            _raise_vivo_vision_error(payload, prefix=f"vivo multimodal http {exc.code}")
-        except (OSError, urllib.error.URLError) as exc:
+            result = self._ai_service.complete_vision_json(request)
+        except AIProviderError as exc:
+            if _is_model_unsupported_error(str(exc)) or "unsupported image model" in str(exc).lower():
+                raise VisionModelUnsupportedError(str(exc)) from exc
             raise RuntimeError(f"vivo multimodal request failed: {exc}") from exc
 
         default_asset_id = assets[0].asset_id if len(assets) == 1 else None
-        return _parse_chat_response(json.loads(body), default_asset_id=default_asset_id)
+        return _parse_model_result(result, default_asset_id=default_asset_id)
 
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_at
         if elapsed < self._min_request_interval_sec:
             time.sleep(self._min_request_interval_sec - elapsed)
         self._last_request_at = time.monotonic()
+
+
+def _build_scoped_vivo_ai_service(
+    *,
+    app_key: str,
+    base_url: str,
+    model: str,
+    timeout_sec: float,
+) -> AIService:
+    return AIService(
+        json_clients={},
+        vision_clients={
+            "vivo": OpenAICompatibleVisionJsonClient(
+                OpenAICompatibleConfig(
+                    api_key=app_key,
+                    model=model,
+                    base_url=_chat_base_url(base_url),
+                    timeout_sec=timeout_sec,
+                )
+            )
+        },
+    )
 
 
 def _build_batch_prompt(
@@ -294,10 +310,11 @@ def _asset_label(index: int, asset: VisualAsset) -> str:
     return f"图片 {index}: assetId={asset.asset_id}; location={location_text}; hint={asset.hint or 'visual_content'}"
 
 
-def _data_url(image_bytes: bytes, mime_type: str) -> str:
-    mime = mime_type if mime_type.startswith("image/") else "image/png"
-    image_base64 = base64.b64encode(image_bytes).decode("ascii")
-    return f"data:{mime};base64,{image_base64}"
+def _vision_image_for_asset(asset: VisualAsset) -> VisionImage:
+    mime_type = asset.mime_type.strip().lower()
+    if not mime_type.startswith("image/"):
+        mime_type = "image/png"
+    return VisionImage(mime_type=mime_type, data=asset.image_bytes, source_name=asset.asset_id or asset.hint)
 
 
 def _chat_base_url(base_url: str) -> str:
@@ -307,27 +324,15 @@ def _chat_base_url(base_url: str) -> str:
     return f"{trimmed}/v1"
 
 
-def _parse_chat_response(payload: dict[str, Any], *, default_asset_id: str | None) -> list[VisionAssetResult]:
-    error = _error_from_payload(payload)
-    if error is not None:
-        _raise_vivo_vision_error(error, prefix="vivo multimodal failed")
-
-    try:
-        content = payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("vivo multimodal response missing message content") from exc
-
-    text = _message_content_to_text(content)
-    return _parse_model_content(text, default_asset_id=default_asset_id)
-
-
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        texts = [item.get("text", "") for item in content if isinstance(item, dict)]
-        return "\n".join(text for text in texts if text)
-    return str(content)
+def _parse_model_result(result: AIModelResult, *, default_asset_id: str | None) -> list[VisionAssetResult]:
+    if result.parsed_json is not None:
+        error = _error_from_payload(result.parsed_json)
+        if error is not None:
+            _raise_vivo_vision_error(error, prefix="vivo multimodal failed")
+        content = json.dumps(result.parsed_json, ensure_ascii=False)
+    else:
+        content = result.text
+    return _parse_model_content(content, default_asset_id=default_asset_id)
 
 
 def _parse_model_content(content: str, *, default_asset_id: str | None) -> list[VisionAssetResult]:
@@ -397,9 +402,7 @@ def is_vision_model_unsupported_error(exc: BaseException) -> bool:
 def _error_from_payload(payload: dict[str, Any]) -> Any | None:
     if "error" in payload:
         return payload["error"]
-    if "choices" not in payload and any(
-        key in payload for key in ("code", "error_code", "errorCode", "message", "error_msg")
-    ):
+    if "choices" not in payload and any(key in payload for key in ("code", "error_code", "errorCode", "error_msg")):
         return payload
     return None
 

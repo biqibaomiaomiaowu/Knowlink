@@ -5,10 +5,14 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 SUPPORTED_TASK_QUEUES = {"dramatiq", "noop"}
 PRODUCTION_LIKE_ENVS = {"production", "prod", "staging"}
 UNSAFE_PRODUCTION_STORAGE_BACKENDS = {"", "demo", "disabled", "fake", "local", "memory", "none"}
+_ROOT_DIR = Path(__file__).resolve().parents[2]
+_DOTENV_PATH = _ROOT_DIR / ".env"
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,7 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
+    load_root_dotenv()
     base_dir = Path(__file__).resolve().parents[1]
     settings = Settings(
         app_name=os.getenv("KNOWLINK_APP_NAME", "KnowLink API"),
@@ -79,6 +84,10 @@ def get_settings() -> Settings:
     _validate_task_queue(settings)
     _validate_runtime_hardening(settings)
     return settings
+
+
+def load_root_dotenv() -> None:
+    load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
 
 
 def _validate_task_queue(settings: Settings) -> None:

@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from server.ai.core.errors import AIOutputParseError
+from server.ai.core.types import AIModelResult
 from server.ai.quiz_strategy import (
     DeepSeekQuizGenerationClient,
     build_quiz_question_refs,
@@ -26,6 +28,19 @@ class FakeQuizClient:
         self.prompt_contexts.append(dict(prompt_context))
         index = min(len(self.prompt_contexts) - 1, len(self.payloads) - 1)
         return self.payloads[index]
+
+
+class FakeAIService:
+    def __init__(self, payload: dict | None = None, error: BaseException | None = None):
+        self.payload = payload if payload is not None else {}
+        self.error = error
+        self.requests = []
+
+    def complete_json(self, request):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return AIModelResult(text=json.dumps(self.payload, ensure_ascii=False), parsed_json=self.payload)
 
 
 def _generate_quiz_payload() -> dict:
@@ -269,83 +284,41 @@ def test_quiz_prompt_context_excludes_blocks_without_source_segments():
     assert "block-empty" not in allowed_keys
 
 
-def test_deepseek_quiz_client_uses_thinking_json_mode(monkeypatch):
-    captured = {}
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "reasoning_content": "思考内容不会被解析。",
-                                "content": json.dumps(_model_payload(3), ensure_ascii=False),
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["body"] = request.data.decode("utf-8")
-        captured["headers"] = dict(request.header_items())
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+def test_deepseek_quiz_client_uses_ai_service_json_request():
+    ai_service = FakeAIService(_model_payload(3))
     client = DeepSeekQuizGenerationClient(
         api_key="fake-deepseek-key",
-        base_url="https://api.deepseek.com",
+        base_url="https://api.deepseek.com/v1",
         model="deepseek-v4-flash",
         reasoning_effort="high",
         timeout_sec=12,
+        ai_service=ai_service,
     )
 
     payload = generate_quiz_payload(_handout_blocks(), segments=_segments(), client=client)
 
-    body = json.loads(captured["body"])
-    assert captured["url"] == "https://api.deepseek.com/chat/completions"
-    assert captured["timeout"] == 12
-    assert captured["headers"]["Authorization"] == "Bearer fake-deepseek-key"
-    assert body["model"] == "deepseek-v4-flash"
-    assert body["thinking"] == {"type": "enabled"}
-    assert body["reasoning_effort"] == "high"
-    assert body["response_format"] == {"type": "json_object"}
-    assert body["max_tokens"] == 8192
-    assert "temperature" not in body
-    assert "JSON" in body["messages"][0]["content"] or "json" in body["messages"][0]["content"]
+    request = ai_service.requests[0]
+    assert request.provider == "deepseek"
+    assert request.model == "deepseek-v4-flash"
+    assert request.timeout_sec == 12
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata == {"max_tokens": 8192, "reasoning_effort": "high"}
+    assert [message.role for message in request.messages] == ["system", "user"]
+    assert "JSON" in request.messages[0].content or "json" in request.messages[0].content
     QUIZ_VALIDATOR.validate(payload)
 
 
-def test_deepseek_quiz_client_rejects_bad_json(monkeypatch):
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps({"choices": [{"message": {"content": "not-json"}}]}).encode("utf-8")
-
-    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+def test_deepseek_quiz_client_rejects_bad_json():
+    ai_service = FakeAIService(error=AIOutputParseError("model output does not contain a JSON object"))
     client = DeepSeekQuizGenerationClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         reasoning_effort="high",
+        ai_service=ai_service,
     )
 
-    with pytest.raises(RuntimeError, match="response is not JSON"):
+    with pytest.raises(AIOutputParseError, match="JSON object"):
         client.generate_quiz({"questionCountRange": {"min": 3, "max": 5}})
 
 

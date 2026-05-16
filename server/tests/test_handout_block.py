@@ -3,6 +3,8 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from server.ai.core.errors import AIConfigurationError
+from server.ai.core.types import AIModelResult
 from server.ai.handout_block import (
     DeepSeekHandoutBlockClient,
     VivoHandoutBlockClient,
@@ -16,6 +18,19 @@ from server.ai.handout_block import (
 ROOT = Path(__file__).resolve().parents[2]
 HANDOUT_BLOCK_SCHEMA = json.loads((ROOT / "schemas/ai/handout_block.schema.json").read_text(encoding="utf-8"))
 HANDOUT_BLOCK_VALIDATOR = Draft202012Validator(HANDOUT_BLOCK_SCHEMA)
+
+
+class FakeAIService:
+    def __init__(self, payload: dict | None = None, error: BaseException | None = None):
+        self.payload = payload if payload is not None else {}
+        self.error = error
+        self.requests = []
+
+    def complete_json(self, request):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return AIModelResult(text=json.dumps(self.payload, ensure_ascii=False), parsed_json=self.payload)
 
 
 def test_fallback_handout_block_uses_known_segments_and_validates_schema(monkeypatch):
@@ -564,88 +579,124 @@ def test_configured_handout_block_client_supports_deepseek_provider(monkeypatch)
     assert isinstance(get_configured_handout_block_client(), DeepSeekHandoutBlockClient)
 
 
-def test_deepseek_handout_block_client_uses_thinking_json_mode(monkeypatch):
-    captured = {}
+def test_deepseek_handout_block_client_uses_ai_service_request():
+    model_payload = {
+        "outlineKey": "outline-1",
+        "title": "集合的基本概念",
+        "summary": "集合由确定元素组成。",
+        "contentMd": "集合是由确定对象组成的整体。",
+        "estimatedMinutes": 3,
+        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": "kp-outline-1-1",
+                "displayName": "集合",
+                "description": "理解集合与元素的关系。",
+                "difficultyLevel": "beginner",
+                "importanceScore": 80,
+                "sortNo": 1,
+            }
+        ],
+        "citations": [
+            {
+                "resourceId": 1,
+                "segmentKey": "mp4-c1",
+                "startSec": 0,
+                "endSec": 20,
+                "refLabel": "视频 00:00-00:20",
+            }
+        ],
+    }
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "reasoning_content": "思考内容不会被解析。",
-                                "content": json.dumps(
-                                    {
-                                        "outlineKey": "outline-1",
-                                        "title": "集合的基本概念",
-                                        "summary": "集合由确定元素组成。",
-                                        "contentMd": "集合是由确定对象组成的整体。",
-                                        "estimatedMinutes": 3,
-                                        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
-                                        "knowledgePoints": [
-                                            {
-                                                "knowledgePointKey": "kp-outline-1-1",
-                                                "displayName": "集合",
-                                                "description": "理解集合与元素的关系。",
-                                                "difficultyLevel": "beginner",
-                                                "importanceScore": 80,
-                                                "sortNo": 1,
-                                            }
-                                        ],
-                                        "citations": [
-                                            {
-                                                "resourceId": 1,
-                                                "segmentKey": "mp4-c1",
-                                                "startSec": 0,
-                                                "endSec": 20,
-                                                "refLabel": "视频 00:00-00:20",
-                                            }
-                                        ],
-                                    },
-                                    ensure_ascii=False,
-                                ),
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["body"] = request.data.decode("utf-8")
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ai_service = FakeAIService(model_payload)
     client = DeepSeekHandoutBlockClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         reasoning_effort="high",
         timeout_sec=11,
+        ai_service=ai_service,
     )
 
     block = generate_handout_block(_outline_item(), _segments(), client=client)
 
-    body = json.loads(captured["body"])
-    assert captured["url"] == "https://api.deepseek.com/chat/completions"
-    assert captured["timeout"] == 11
-    assert body["model"] == "deepseek-v4-flash"
-    assert body["thinking"] == {"type": "enabled"}
-    assert body["reasoning_effort"] == "high"
-    assert body["response_format"] == {"type": "json_object"}
-    assert body["max_tokens"] == 8192
-    assert "temperature" not in body
+    request = ai_service.requests[0]
+    assert request.provider == "deepseek"
+    assert request.model == "deepseek-v4-flash"
+    assert request.timeout_sec == 11
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata == {"max_tokens": 8192, "reasoning_effort": "high"}
+    assert [message.role for message in request.messages] == ["system", "user"]
     HANDOUT_BLOCK_VALIDATOR.validate(block)
     assert block["title"] == "集合的基本概念"
+
+
+def test_vivo_handout_block_client_uses_ai_service_request():
+    model_payload = {
+        "outlineKey": "outline-1",
+        "title": "集合的基本概念",
+        "summary": "集合由确定元素组成。",
+        "contentMd": "集合是由确定对象组成的整体。",
+        "estimatedMinutes": 3,
+        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": "kp-outline-1-1",
+                "displayName": "集合",
+                "description": "理解集合与元素的关系。",
+                "difficultyLevel": "beginner",
+                "importanceScore": 80,
+                "sortNo": 1,
+            }
+        ],
+        "citations": [
+            {
+                "resourceId": 1,
+                "segmentKey": "mp4-c1",
+                "startSec": 0,
+                "endSec": 20,
+                "refLabel": "视频 00:00-00:20",
+            }
+        ],
+    }
+    ai_service = FakeAIService(model_payload)
+    client = VivoHandoutBlockClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-pro",
+        timeout_sec=9,
+        ai_service=ai_service,
+    )
+
+    block = generate_handout_block(_outline_item(), _segments(), client=client)
+
+    request = ai_service.requests[0]
+    assert request.provider == "vivo"
+    assert request.model == "Doubao-Seed-2.0-pro"
+    assert request.temperature == 0.1
+    assert request.timeout_sec == 9
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata["max_tokens"] == 4096
+    assert request.metadata["stream"] is False
+    assert request.metadata["request_id"]
+    assert [message.role for message in request.messages] == ["system", "user"]
+    HANDOUT_BLOCK_VALIDATOR.validate(block)
+    assert block["generationMetadata"] == {"source": "model", "reason": "model_response"}
+
+
+def test_handout_block_maps_ai_configuration_error_to_fallback_reason():
+    client = VivoHandoutBlockClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-pro",
+        timeout_sec=9,
+        ai_service=FakeAIService(error=AIConfigurationError("missing provider")),
+    )
+
+    block = generate_handout_block(_outline_item(), _segments(), client=client)
+
+    HANDOUT_BLOCK_VALIDATOR.validate(block)
+    assert block["generationMetadata"] == {"source": "fallback", "reason": "model_unconfigured"}
 
 
 def _outline_item():

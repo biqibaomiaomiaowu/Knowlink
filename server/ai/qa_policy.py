@@ -5,12 +5,20 @@ import os
 import re
 import time
 import uuid
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
-from server.ai.deepseek import DeepSeekJsonChatClient, get_configured_deepseek_chat_config
+from server.ai.core.errors import AIOutputParseError, fallback_reason_for_error
+from server.ai.core.types import ChatMessage, JsonChatRequest
+from server.ai.deepseek import get_configured_deepseek_chat_config
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
+from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleJsonClient
+from server.ai.service import AIService, get_default_ai_service
+from server.config.settings import load_root_dotenv
 from server.parsers.base import clean_text
 
 
@@ -68,6 +76,7 @@ class QaAnswerClient(Protocol):
 
 
 def get_configured_qa_answer_client() -> QaAnswerClient | None:
+    load_root_dotenv()
     provider = os.getenv("KNOWLINK_QA_PROVIDER", "vivo").strip().lower()
     if provider == "deepseek":
         config = get_configured_deepseek_chat_config()
@@ -79,6 +88,7 @@ def get_configured_qa_answer_client() -> QaAnswerClient | None:
             model=config.model,
             reasoning_effort=config.reasoning_effort,
             timeout_sec=_env_float("KNOWLINK_VIVO_QA_TIMEOUT_SEC", _DEFAULT_QA_TIMEOUT_SEC),
+            ai_service=_default_ai_service_for_provider("deepseek"),
         )
     if provider not in {"", "vivo"}:
         return None
@@ -95,6 +105,7 @@ def get_configured_qa_answer_client() -> QaAnswerClient | None:
         base_url=os.getenv("KNOWLINK_VIVO_BASE_URL", "https://api-ai.vivo.com.cn"),
         model=os.getenv("KNOWLINK_VIVO_QA_MODEL", _DEFAULT_QA_MODEL),
         timeout_sec=_env_float("KNOWLINK_VIVO_QA_TIMEOUT_SEC", _DEFAULT_QA_TIMEOUT_SEC),
+        ai_service=_default_ai_service_for_provider("vivo"),
     )
 
 
@@ -106,11 +117,16 @@ class VivoQaAnswerClient:
         base_url: str,
         model: str,
         timeout_sec: float | None = None,
+        ai_service: AIService | None = None,
     ) -> None:
-        self._app_key = app_key
-        self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout_sec = timeout_sec if timeout_sec is not None else _DEFAULT_QA_TIMEOUT_SEC
+        self._ai_service = ai_service or _scoped_vivo_ai_service(
+            app_key=app_key,
+            base_url=base_url,
+            model=model,
+            timeout_sec=self._timeout_sec,
+        )
         self._last_request_at = 0.0
         self._min_request_interval_sec = 0.8
 
@@ -119,34 +135,22 @@ class VivoQaAnswerClient:
             raise RuntimeError("vivo qa requires at least one evidence candidate")
 
         self._throttle()
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": _QA_SYSTEM_PROMPT},
-                {"role": "user", "content": _build_qa_prompt(question, candidates)},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 2048,
-            "stream": False,
-        }
-        request = urllib.request.Request(
-            f"{_chat_base_url(self._base_url)}/chat/completions?request_id={uuid.uuid4()}",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._app_key}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-            method="POST",
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="vivo",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_QA_SYSTEM_PROMPT),
+                    ChatMessage(role="user", content=_build_qa_prompt(question, candidates)),
+                ],
+                temperature=0.1,
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 2048, "stream": False, "request_id": str(uuid.uuid4())},
+            ),
+            label="vivo qa",
         )
-
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
-                body = response.read().decode("utf-8")
-            chat_payload = json.loads(body)
-        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"vivo qa request failed: {exc}") from exc
-
-        return _parse_chat_json_payload(chat_payload, label="vivo qa")
 
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_at
@@ -164,24 +168,36 @@ class DeepSeekQaAnswerClient:
         model: str,
         reasoning_effort: str,
         timeout_sec: float | None = None,
+        ai_service: AIService | None = None,
     ) -> None:
-        self._client = DeepSeekJsonChatClient(
+        self._model = model
+        self._reasoning_effort = reasoning_effort
+        self._timeout_sec = timeout_sec if timeout_sec is not None else _DEFAULT_QA_TIMEOUT_SEC
+        self._ai_service = ai_service or _scoped_deepseek_ai_service(
             api_key=api_key,
             base_url=base_url,
             model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_sec=timeout_sec if timeout_sec is not None else _DEFAULT_QA_TIMEOUT_SEC,
-            label="deepseek qa",
+            timeout_sec=self._timeout_sec,
         )
 
     def generate_answer(self, question: str, candidates: Sequence[QaEvidenceCandidate]) -> dict[str, Any]:
         if not candidates:
             raise RuntimeError("deepseek qa requires at least one evidence candidate")
 
-        return self._client.complete_json(
-            system_prompt=_QA_SYSTEM_PROMPT,
-            user_prompt=_build_qa_prompt(question, candidates),
-            max_tokens=4096,
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="deepseek",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_QA_SYSTEM_PROMPT),
+                    ChatMessage(role="user", content=_build_qa_prompt(question, candidates)),
+                ],
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 4096, "reasoning_effort": self._reasoning_effort},
+            ),
+            label="deepseek qa",
         )
 
 
@@ -217,8 +233,8 @@ def generate_block_qa_response(
                 client.generate_answer(question, answer_candidates),
                 candidates=answer_candidates,
             )
-        except Exception:
-            return _fallback_qa_response(answer_candidates, reason="model_error")
+        except Exception as exc:
+            return _fallback_qa_response(answer_candidates, reason=fallback_reason_for_error(exc))
 
     return _fallback_qa_response(answer_candidates, reason="model_unavailable")
 
@@ -1106,57 +1122,64 @@ def _build_qa_prompt(question: str, candidates: Sequence[QaEvidenceCandidate], *
     )
 
 
-def _parse_chat_json_payload(payload: Mapping[str, Any], *, label: str) -> dict[str, Any]:
-    if "error" in payload:
-        raise RuntimeError(f"{label} failed: {payload['error']}")
-
-    try:
-        content = payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"{label} response missing message content") from exc
-
-    text = _message_content_to_text(content)
-    json_text = _extract_json_object(text)
-    if json_text is None:
-        raise RuntimeError(f"{label} response is not JSON")
-
-    try:
-        model_payload = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{label} response has invalid JSON: {exc}") from exc
-    if not isinstance(model_payload, dict):
-        raise RuntimeError(f"{label} JSON must be an object")
-    return model_payload
+def _complete_model_json(ai_service: AIService, request: JsonChatRequest, *, label: str) -> dict[str, Any]:
+    result = ai_service.complete_json(request)
+    if isinstance(result.parsed_json, dict):
+        return result.parsed_json
+    raise AIOutputParseError(f"{label} JSON must be an object")
 
 
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, Mapping):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "\n".join(parts)
-    return ""
+def _scoped_vivo_ai_service(
+    *,
+    app_key: str,
+    base_url: str,
+    model: str,
+    timeout_sec: float,
+) -> AIService:
+    return AIService(
+        json_clients={
+            "vivo": OpenAICompatibleJsonClient(
+                OpenAICompatibleConfig(
+                    api_key=app_key,
+                    model=model,
+                    base_url=_chat_base_url(base_url),
+                    timeout_sec=timeout_sec,
+                )
+            )
+        },
+        vision_clients={},
+    )
 
 
-def _extract_json_object(text: str) -> str | None:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?", "", stripped, flags=re.IGNORECASE).strip()
-        stripped = re.sub(r"```$", "", stripped).strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start >= 0 and end > start:
-        return stripped[start : end + 1]
-    return None
+def _scoped_deepseek_ai_service(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout_sec: float,
+) -> AIService:
+    return AIService(
+        json_clients={
+            "deepseek": DeepSeekLangChainJsonClient(
+                DeepSeekLangChainConfig(
+                    api_key=api_key,
+                    model=model,
+                    base_url=_deepseek_base_url(base_url),
+                    timeout_sec=timeout_sec,
+                )
+            )
+        },
+        vision_clients={},
+    )
+
+
+def _default_ai_service_for_provider(provider: str) -> AIService | None:
+    service = get_default_ai_service()
+    return service if provider in service.json_clients else None
+
+
+def _deepseek_base_url(base_url: str) -> str:
+    return normalize_deepseek_base_url(base_url) or "https://api.deepseek.com/v1"
 
 
 def _chat_base_url(base_url: str) -> str:

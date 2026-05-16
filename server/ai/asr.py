@@ -12,6 +12,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from server.config.settings import load_root_dotenv
+
 
 _DEFAULT_ASR_TIMEOUT_SEC = 30.0
 _DEFAULT_ASR_POLL_INTERVAL_SEC = 3.0
@@ -33,6 +35,7 @@ class AsrClient(Protocol):
 
 
 def get_configured_asr_client() -> AsrClient | None:
+    load_root_dotenv()
     if not _env_bool("KNOWLINK_ENABLE_VIVO_ASR"):
         return None
 

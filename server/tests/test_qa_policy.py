@@ -3,6 +3,8 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from server.ai.core.errors import AIOutputParseError, AIProviderError
+from server.ai.core.types import AIModelResult
 from server.ai.qa_policy import (
     DeepSeekQaAnswerClient,
     VivoQaAnswerClient,
@@ -17,6 +19,19 @@ from server.ai.qa_policy import (
 ROOT = Path(__file__).resolve().parents[2]
 QA_RESPONSE_SCHEMA = json.loads((ROOT / "schemas/ai/qa_response.schema.json").read_text(encoding="utf-8"))
 QA_RESPONSE_VALIDATOR = Draft202012Validator(QA_RESPONSE_SCHEMA)
+
+
+class FakeAIService:
+    def __init__(self, payload: dict | None = None, error: BaseException | None = None):
+        self.payload = payload if payload is not None else {}
+        self.error = error
+        self.requests = []
+
+    def complete_json(self, request):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return AIModelResult(text=json.dumps(self.payload, ensure_ascii=False), parsed_json=self.payload)
 
 
 def test_block_scoped_qa_prioritizes_current_block_refs_before_other_evidence():
@@ -249,59 +264,29 @@ def test_configured_qa_answer_client_supports_deepseek_provider_without_vivo_ena
     assert isinstance(get_configured_qa_answer_client(), DeepSeekQaAnswerClient)
 
 
-def test_deepseek_qa_answer_client_uses_thinking_json_mode(monkeypatch):
-    captured = {}
+def test_deepseek_qa_answer_client_uses_ai_service_request():
+    model_payload = {
+        "answerMd": "集合是确定对象组成的整体。",
+        "answerType": "direct_answer",
+        "citations": [
+            {
+                "resourceId": 1,
+                "segmentKey": "mp4-c1",
+                "startSec": 0,
+                "endSec": 20,
+                "refLabel": "视频 00s-20s",
+            }
+        ],
+    }
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "reasoning_content": "思考内容不会被解析。",
-                                "content": json.dumps(
-                                    {
-                                        "answerMd": "集合是确定对象组成的整体。",
-                                        "answerType": "direct_answer",
-                                        "citations": [
-                                            {
-                                                "resourceId": 1,
-                                                "segmentKey": "mp4-c1",
-                                                "startSec": 0,
-                                                "endSec": 20,
-                                                "refLabel": "视频 00s-20s",
-                                            }
-                                        ],
-                                    },
-                                    ensure_ascii=False,
-                                ),
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["body"] = request.data.decode("utf-8")
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    ai_service = FakeAIService(model_payload)
     client = DeepSeekQaAnswerClient(
         api_key="fake-deepseek-key",
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         reasoning_effort="high",
         timeout_sec=13,
+        ai_service=ai_service,
     )
 
     response = generate_block_qa_response(
@@ -314,77 +299,37 @@ def test_deepseek_qa_answer_client_uses_thinking_json_mode(monkeypatch):
         client=client,
     )
 
-    body = json.loads(captured["body"])
-    assert captured["url"] == "https://api.deepseek.com/chat/completions"
-    assert captured["timeout"] == 13
-    assert body["model"] == "deepseek-v4-flash"
-    assert body["thinking"] == {"type": "enabled"}
-    assert body["reasoning_effort"] == "high"
-    assert body["response_format"] == {"type": "json_object"}
-    assert body["max_tokens"] == 4096
-    assert "temperature" not in body
+    request = ai_service.requests[0]
+    assert request.provider == "deepseek"
+    assert request.model == "deepseek-v4-flash"
+    assert request.timeout_sec == 13
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata == {"max_tokens": 4096, "reasoning_effort": "high"}
+    assert [message.role for message in request.messages] == ["system", "user"]
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "direct_answer"
 
 
-def test_vivo_qa_answer_client_uses_chat_completions_and_normalizes_json(monkeypatch):
-    captured = {}
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": "```json\n"
-                                        + json.dumps(
-                                            {
-                                                "answerMd": "集合是确定对象组成的整体。",
-                                                "answerType": "direct_answer",
-                                                "citations": [
-                                                    {
-                                                        "resourceId": 2,
-                                                        "segmentKey": "pdf-p1",
-                                                        "pageNo": 1,
-                                                        "refLabel": "PDF 第 1 页",
-                                                    }
-                                                ],
-                                            },
-                                            ensure_ascii=False,
-                                        )
-                                        + "\n```",
-                                    }
-                                ],
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["headers"] = dict(request.header_items())
-        captured["body"] = request.data.decode("utf-8")
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+def test_vivo_qa_answer_client_uses_ai_service_request_and_normalizes_json():
+    model_payload = {
+        "answerMd": "集合是确定对象组成的整体。",
+        "answerType": "direct_answer",
+        "citations": [
+            {
+                "resourceId": 2,
+                "segmentKey": "pdf-p1",
+                "pageNo": 1,
+                "refLabel": "PDF 第 1 页",
+            }
+        ],
+    }
+    ai_service = FakeAIService(model_payload)
     client = VivoQaAnswerClient(
         app_key="fake-key",
         base_url="https://example.invalid/v1",
         model="Doubao-Seed-2.0-pro",
         timeout_sec=7,
+        ai_service=ai_service,
     )
     response = generate_block_qa_response(
         "集合的定义是什么？",
@@ -396,36 +341,27 @@ def test_vivo_qa_answer_client_uses_chat_completions_and_normalizes_json(monkeyp
         client=client,
     )
 
-    body = json.loads(captured["body"])
-    assert captured["url"].startswith("https://example.invalid/v1/chat/completions?request_id=")
-    assert captured["headers"]["Authorization"] == "Bearer fake-key"
-    assert captured["headers"]["Content-type"] == "application/json; charset=utf-8"
-    assert captured["timeout"] == 7
-    assert body["model"] == "Doubao-Seed-2.0-pro"
-    assert body["temperature"] == 0.1
-    assert body["stream"] is False
-    assert "evidenceCandidates" in body["messages"][1]["content"]
+    request = ai_service.requests[0]
+    assert request.provider == "vivo"
+    assert request.model == "Doubao-Seed-2.0-pro"
+    assert request.temperature == 0.1
+    assert request.timeout_sec == 7
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata["max_tokens"] == 2048
+    assert request.metadata["stream"] is False
+    assert request.metadata["request_id"]
+    assert "evidenceCandidates" in request.messages[1].content
     assert response["answerType"] == "direct_answer"
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
 
 
-def test_vivo_qa_bad_json_falls_back_to_candidate(monkeypatch):
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps({"choices": [{"message": {"content": "not-json"}}]}).encode("utf-8")
-
-    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+def test_vivo_qa_bad_json_falls_back_to_candidate():
     client = VivoQaAnswerClient(
         app_key="fake-key",
         base_url="https://example.invalid/v1",
         model="Doubao-Seed-2.0-pro",
         timeout_sec=7,
+        ai_service=FakeAIService(error=AIOutputParseError("model output does not contain a JSON object")),
     )
 
     response = generate_block_qa_response(
@@ -439,45 +375,22 @@ def test_vivo_qa_bad_json_falls_back_to_candidate(monkeypatch):
     )
 
     assert response["answerType"] == "direct_answer"
-    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_error"}
+    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_output_invalid"}
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
 
 
-def test_vivo_qa_candidate_outside_citation_becomes_insufficient_evidence(monkeypatch):
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "answerMd": "候选外引用不能被接受。",
-                                        "answerType": "direct_answer",
-                                        "citations": [{"resourceId": 999, "pageNo": 1, "refLabel": "外部资料"}],
-                                    },
-                                    ensure_ascii=False,
-                                )
-                            }
-                        }
-                    ]
-                },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+def test_vivo_qa_candidate_outside_citation_becomes_insufficient_evidence():
+    model_payload = {
+        "answerMd": "候选外引用不能被接受。",
+        "answerType": "direct_answer",
+        "citations": [{"resourceId": 999, "pageNo": 1, "refLabel": "外部资料"}],
+    }
     client = VivoQaAnswerClient(
         app_key="fake-key",
         base_url="https://example.invalid/v1",
         model="Doubao-Seed-2.0-pro",
         timeout_sec=7,
+        ai_service=FakeAIService(model_payload),
     )
 
     response = generate_block_qa_response(
@@ -492,6 +405,28 @@ def test_vivo_qa_candidate_outside_citation_becomes_insufficient_evidence(monkey
 
     assert response["answerType"] == "insufficient_evidence"
     assert response["citations"] == []
+
+
+def test_qa_maps_ai_provider_error_to_fallback_reason():
+    client = VivoQaAnswerClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-pro",
+        timeout_sec=7,
+        ai_service=FakeAIService(error=AIProviderError("provider unavailable")),
+    )
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={**_current_block(), "citations": [], "knowledgePoints": []},
+        segments=_segments(),
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_provider_error"}
 
 
 def test_qa_message_refs_include_only_answer_citations_not_all_candidates():

@@ -212,6 +212,46 @@ def test_task_dispatcher_defaults_to_dramatiq_and_rejects_unknown_queue(monkeypa
         build_task_dispatcher()
 
 
+def test_settings_loads_root_dotenv_before_reading_environment(monkeypatch, tmp_path):
+    from server.config import settings as settings_module
+
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("KNOWLINK_HOST=127.0.0.9\nKNOWLINK_TASK_QUEUE=noop\n", encoding="utf-8")
+    monkeypatch.setattr(settings_module, "_DOTENV_PATH", dotenv_path)
+    monkeypatch.delenv("KNOWLINK_HOST", raising=False)
+    monkeypatch.delenv("KNOWLINK_TASK_QUEUE", raising=False)
+    settings_module.get_settings.cache_clear()
+
+    try:
+        settings = settings_module.get_settings()
+    finally:
+        settings_module.get_settings.cache_clear()
+        os.environ.pop("KNOWLINK_HOST", None)
+        os.environ.pop("KNOWLINK_TASK_QUEUE", None)
+
+    assert settings.host == "127.0.0.9"
+    assert settings.task_queue == "noop"
+
+
+def test_settings_keeps_real_environment_above_dotenv(monkeypatch, tmp_path):
+    from server.config import settings as settings_module
+
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("KNOWLINK_HOST=127.0.0.9\nKNOWLINK_TASK_QUEUE=noop\n", encoding="utf-8")
+    monkeypatch.setattr(settings_module, "_DOTENV_PATH", dotenv_path)
+    monkeypatch.setenv("KNOWLINK_HOST", "10.0.0.5")
+    monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "dramatiq")
+    settings_module.get_settings.cache_clear()
+
+    try:
+        settings = settings_module.get_settings()
+    finally:
+        settings_module.get_settings.cache_clear()
+
+    assert settings.host == "10.0.0.5"
+    assert settings.task_queue == "dramatiq"
+
+
 def test_settings_reject_unknown_task_queue_at_startup(monkeypatch):
     from server.config.settings import get_settings
 

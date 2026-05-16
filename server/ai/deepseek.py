@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import json
 import os
-import re
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Mapping
+
+from server.ai.core.errors import AIOutputParseError, AIProviderError
+from server.ai.core.json_output import message_content_to_text, parse_json_object
+from server.ai.core.types import ChatMessage, JsonChatRequest
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
+from server.config.settings import load_root_dotenv
 
 
 _DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -23,6 +29,7 @@ class DeepSeekChatConfig:
 
 
 def get_configured_deepseek_chat_config() -> DeepSeekChatConfig | None:
+    load_root_dotenv()
     api_key = os.getenv("KNOWLINK_DEEPSEEK_API_KEY", "").strip()
     if not api_key:
         return None
@@ -50,6 +57,7 @@ class DeepSeekJsonChatClient:
         reasoning_effort: str,
         timeout_sec: float,
         label: str,
+        langchain_client: DeepSeekLangChainJsonClient | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
@@ -57,38 +65,49 @@ class DeepSeekJsonChatClient:
         self._reasoning_effort = reasoning_effort
         self._timeout_sec = timeout_sec
         self._label = label
+        self._langchain_client = langchain_client
 
     def complete_json(self, *, system_prompt: str, user_prompt: str, max_tokens: int) -> dict[str, Any]:
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+        request = JsonChatRequest(
+            provider="deepseek",
+            model=self._model,
+            messages=[
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=user_prompt),
             ],
-            "thinking": {"type": "enabled"},
-            "reasoning_effort": self._reasoning_effort,
-            "response_format": {"type": "json_object"},
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        request = urllib.request.Request(
-            f"{_chat_base_url(self._base_url)}/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json; charset=utf-8",
+            timeout_sec=self._timeout_sec,
+            response_format={"type": "json_object"},
+            metadata={
+                "max_tokens": max_tokens,
+                "reasoning_effort": self._reasoning_effort,
             },
-            method="POST",
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
-                body = response.read().decode("utf-8")
-            chat_payload = json.loads(body)
-        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            result = self._get_langchain_client().complete_json(request)
+        except AIProviderError as exc:
             raise RuntimeError(f"{self._label} request failed: {exc}") from exc
+        except AIOutputParseError as exc:
+            raise RuntimeError(_parse_error_message(exc, label=self._label)) from exc
 
-        return parse_chat_json_payload(chat_payload, label=self._label)
+        if isinstance(result.parsed_json, dict):
+            return result.parsed_json
+        try:
+            return parse_json_object(result.text)
+        except AIOutputParseError as exc:
+            raise RuntimeError(_parse_error_message(exc, label=self._label)) from exc
+
+    def _get_langchain_client(self) -> DeepSeekLangChainJsonClient:
+        if self._langchain_client is None:
+            self._langchain_client = DeepSeekLangChainJsonClient(
+                DeepSeekLangChainConfig(
+                    api_key=self._api_key,
+                    model=self._model,
+                    base_url=_chat_base_url(self._base_url),
+                    timeout_sec=self._timeout_sec,
+                )
+            )
+        return self._langchain_client
 
 
 def parse_chat_json_payload(payload: Mapping[str, Any], *, label: str) -> dict[str, Any]:
@@ -100,51 +119,20 @@ def parse_chat_json_payload(payload: Mapping[str, Any], *, label: str) -> dict[s
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(f"{label} response missing message content") from exc
 
-    json_text = _extract_json_object(_message_content_to_text(content))
-    if json_text is None:
-        raise RuntimeError(f"{label} response is not JSON")
-
     try:
-        model_payload = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{label} response has invalid JSON: {exc}") from exc
-    if not isinstance(model_payload, dict):
-        raise RuntimeError(f"{label} JSON must be an object")
-    return model_payload
+        return parse_json_object(message_content_to_text(content))
+    except AIOutputParseError as exc:
+        raise RuntimeError(_parse_error_message(exc, label=label)) from exc
 
 
 def _chat_base_url(base_url: str) -> str:
-    trimmed = base_url.rstrip("/")
-    if trimmed.endswith("/v1"):
-        return trimmed[:-3]
-    return trimmed
+    return normalize_deepseek_base_url(base_url) or f"{_DEFAULT_DEEPSEEK_BASE_URL}/v1"
 
 
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, Mapping):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "\n".join(parts)
-    return ""
-
-
-def _extract_json_object(text: str) -> str | None:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?", "", stripped, flags=re.IGNORECASE).strip()
-        stripped = re.sub(r"```$", "", stripped).strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start >= 0 and end > start:
-        return stripped[start : end + 1]
-    return None
+def _parse_error_message(error: AIOutputParseError, *, label: str) -> str:
+    message = str(error)
+    if "JSON root must be an object" in message:
+        return f"{label} JSON must be an object"
+    if "invalid JSON" in message:
+        return f"{label} response has invalid JSON: {message}"
+    return f"{label} response is not JSON"
