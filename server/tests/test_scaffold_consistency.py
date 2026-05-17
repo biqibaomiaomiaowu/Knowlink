@@ -58,7 +58,7 @@ def test_dashboard_and_pipeline_status_cover_competition_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "dashboard-upload-1"},
             json_body={
                 "resourceType": "pdf",
-                "objectKey": "raw/1/high-math.pdf",
+                "objectKey": f"raw/1/{course_id}/high-math.pdf",
                 "originalName": "high-math.pdf",
                 "mimeType": "application/pdf",
                 "sizeBytes": 1024,
@@ -182,7 +182,7 @@ def test_handout_qa_and_jump_target_keep_single_locator_per_citation():
             headers=AUTH_HEADERS | {"idempotency-key": "mixed-citation-upload"},
             json_body={
                 "resourceType": "pdf",
-                "objectKey": "raw/1/demo.pdf",
+                "objectKey": f"raw/1/{course_id}/demo.pdf",
                 "originalName": "demo.pdf",
                 "mimeType": "application/pdf",
                 "sizeBytes": 1024,
@@ -276,7 +276,7 @@ def test_handout_qa_and_jump_target_keep_single_locator_per_citation():
     assert jump_anchor_body["data"]["anchorKey"] == "section-integral"
 
 
-def test_inquiry_quiz_and_review_cover_planning_display_fields():
+def test_inquiry_and_quiz_generate_cover_planning_display_fields():
     create_status, create_body = asyncio.run(
         request(
             "POST",
@@ -300,7 +300,7 @@ def test_inquiry_quiz_and_review_cover_planning_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "planning-display-upload"},
             json_body={
                 "resourceType": "pdf",
-                "objectKey": "raw/1/planning-display.pdf",
+                "objectKey": f"raw/1/{course_id}/planning-display.pdf",
                 "originalName": "planning-display.pdf",
                 "mimeType": "application/pdf",
                 "sizeBytes": 1024,
@@ -345,6 +345,18 @@ def test_inquiry_quiz_and_review_cover_planning_display_fields():
     )
     assert quiz_generate_status == 200
     quiz_id = quiz_generate["data"]["entity"]["id"]
+    assert quiz_generate["data"]["entity"]["type"] == "quiz"
+
+    quiz_status, quiz_body = asyncio.run(
+        request(
+            "GET",
+            f"/api/v1/quizzes/{quiz_id}/status",
+            headers=AUTH_HEADERS,
+        )
+    )
+    assert quiz_status == 200
+    assert quiz_body["data"]["status"] == "queued"
+    assert quiz_body["data"]["questionCount"] == 0
 
     submit_status, submit_body = asyncio.run(
         request(
@@ -354,23 +366,8 @@ def test_inquiry_quiz_and_review_cover_planning_display_fields():
             json_body={"answers": [{"questionId": 8101, "selectedOption": "A"}]},
         )
     )
-    assert submit_status == 200
-    assert "masteryDelta" in submit_body["data"]
-    assert "recommendedReviewAction" in submit_body["data"]
-
-    review_status, review_body = asyncio.run(
-        request(
-            "GET",
-            f"/api/v1/courses/{course_id}/review-tasks",
-            headers=AUTH_HEADERS,
-        )
-    )
-    assert review_status == 200
-    first_task = review_body["data"]["items"][0]
-    assert "recommendedSegment" in first_task
-    assert "practiceEntry" in first_task
-    assert "reviewOrder" in first_task
-    assert "intensity" in first_task
+    assert submit_status == 409
+    assert submit_body["errorCode"] == "quiz.not_ready"
 
 
 def test_scaffold_structure_and_docs_are_aligned():
@@ -390,7 +387,7 @@ def test_scaffold_structure_and_docs_are_aligned():
         ROOT / "alembic/versions/1b319cfadeb3_init_tables.py",
         ROOT / "client_flutter/lib/features/qa/qa_page.dart",
         ROOT / "client_flutter/test/shared/course_flow_providers_test.dart",
-        ROOT / "docs/development-scaffold.md",
+        ROOT / "docs/engineering/development-scaffold.md",
     ]
     for path in required_paths:
         assert path.exists(), f"missing scaffold path: {path}"
@@ -410,9 +407,9 @@ def test_scaffold_structure_and_docs_are_aligned():
         assert "runtime_store" not in source, f"router still depends on runtime store: {router_path}"
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "docs/v1/architecture.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/contracts/api-contract.md").read_text(encoding="utf-8")
-    scaffold = (ROOT / "docs/development-scaffold.md").read_text(encoding="utf-8")
+    scaffold = (ROOT / "docs/engineering/development-scaffold.md").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     pubspec = (ROOT / "client_flutter/pubspec.yaml").read_text(encoding="utf-8")
     architecture_scaffold = architecture.split("### 7.1 后端", 1)[1].split("---", 1)[0]
@@ -431,9 +428,10 @@ def test_scaffold_structure_and_docs_are_aligned():
     assert "快应用工程实现" in architecture
     assert "文档优先级矩阵" in readme
     assert "当前完成度矩阵" in scaffold
-    assert "基础四表 SQLAlchemy model 与 Alembic 初始化迁移" in scaffold
-    assert "已接纳" in scaffold
-    assert "完整 SQLAlchemy 持久化仓储仍未接通" in scaffold
+    assert "SQLAlchemy model 与 Alembic 迁移" in scaffold
+    assert "第一版业务表已覆盖" in scaffold
+    assert "第一版已接通" in scaffold
+    assert "内存态 demo 适配器仍保留" in scaffold
     assert "server/schemas/api.py" not in architecture_scaffold
     assert "app_factory.py" in architecture_scaffold
     assert "router.py" in architecture_scaffold
@@ -449,6 +447,9 @@ def test_scaffold_structure_and_docs_are_aligned():
 
 
 def test_basic_database_four_table_scaffold_is_accepted():
+    import server.infra.db.models  # noqa: F401
+    from server.infra.db.base import Base
+
     sources = {
         "courses": (ROOT / "server/infra/db/models/course.py").read_text(encoding="utf-8"),
         "course_resources": (ROOT / "server/infra/db/models/resource.py").read_text(encoding="utf-8"),
@@ -489,12 +490,15 @@ def test_basic_database_four_table_scaffold_is_accepted():
     }
 
     for table_name, fields in expected_fields.items():
+        model_columns = set(Base.metadata.tables[table_name].c.keys())
         assert f'__tablename__ = "{table_name}"' in sources[table_name]
         assert f"'{table_name}'" in migration or f'"{table_name}"' in migration
         for field in fields:
-            assert field in sources[table_name], f"{field} missing in {table_name} model"
+            assert (
+                field in sources[table_name] or field in model_columns
+            ), f"{field} missing in {table_name} model"
             assert f"'{field}'" in migration or f'"{field}"' in migration, f"{field} missing in migration"
 
-    assert "BaseSettings" in session
-    assert "create_async_engine" in session
+    assert "create_engine" in session
+    assert "create_async_engine" not in session
     assert "target_metadata = Base.metadata" in (ROOT / "alembic/env.py").read_text(encoding="utf-8")

@@ -55,4 +55,7 @@ coverage/
 
 # Local Codex workspace data
 .codex
+.agents/
+.superpowers/
+docs/superpowers/
 AGENTS.md

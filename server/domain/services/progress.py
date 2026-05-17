@@ -15,10 +15,17 @@ class ProgressService:
 
     def update_progress(self, *, course_id: int, payload) -> dict[str, object]:
         self._ensure_course(course_id)
-        return self.progress.update_progress(
-            course_id,
-            payload.model_dump(by_alias=True, exclude_none=True),
-        )
+        try:
+            return self.progress.update_progress(
+                course_id,
+                payload.model_dump(by_alias=True, exclude_none=True),
+            )
+        except ValueError as exc:
+            raise ServiceError(
+                message=str(exc),
+                error_code="progress.invalid_reference",
+                status_code=400,
+            ) from exc
 
     def _ensure_course(self, course_id: int) -> dict[str, object]:
         course = self.courses.get_course(course_id)

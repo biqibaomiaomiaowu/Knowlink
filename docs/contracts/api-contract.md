@@ -1,6 +1,6 @@
 # KnowLink API Contract
 
-本文件冻结 MVP 阶段前后端共享的请求字段、响应字段、异步返回结构和 demo 鉴权策略。曹乐 owner 的 Week 1 冻结项与固定联调资料集基线见 [week1-cao-le-freeze.md](./week1-cao-le-freeze.md) 和 [../demo-assets-baseline.md](../demo-assets-baseline.md)；Week 2 解析与问询业务 contract 见 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md)。若与其他文档冲突，以本文件为准。
+本文件冻结第一版（V1/MVP）前后端共享的请求字段、响应字段、异步返回结构和 demo 鉴权策略。曹乐 owner 的 Week 1 冻结项与固定联调资料集基线见 [week1-cao-le-freeze.md](./week1-cao-le-freeze.md) 和 [../v1/demo-assets-baseline.md](../v1/demo-assets-baseline.md)；Week 2 解析与问询业务 contract 见 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md)。若与其他 V1 文档冲突，以本文件为准。V2 功能范围、负责人分工和验收口径以根目录 [docs/v2/phase-plan.md](../v2/phase-plan.md) 为准；V2 进入实现前必须同步更新本文件或新增 V2 contract 文档，不能用本文的 V1 stub 口径否定 V2 计划。
 
 ## 1. 通用约定
 
@@ -16,6 +16,7 @@
   - 每条 citation 必须且只能带一组合法定位字段：`pageNo` / `slideNo` / `anchorKey` / `startSec+endSec`
   - handout block / jump-target 可以同时暴露视频时间与文档跳转信息，但这些字段不能混在同一条 citation 里
   - 每条 normalized segment 也必须且只能带与 `resourceType` 匹配的定位字段
+  - API public citations 只暴露 `resourceId`、`refLabel` 和 locator 字段；`segmentId` / `segmentKey` 仅作为服务端反查、落库和 AI 策略内部 identity，不出现在 public citation 响应中
 - 以下写接口必须支持 `Idempotency-Key`：
   - `POST /api/v1/courses`
   - `POST /api/v1/recommendations/{catalogId}/confirm`
@@ -26,6 +27,9 @@
   - `POST /api/v1/courses/{courseId}/quizzes/generate`
   - `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
 - 带路径参数的课程接口一律以 path 中的 `courseId` 为准；请求体不再重复传同义 `courseId`，`POST /api/v1/qa/messages` 是唯一例外。
+- Docker / runtime 默认任务队列为 `KNOWLINK_TASK_QUEUE=dramatiq`；`noop` dispatcher 只允许通过显式设置 `KNOWLINK_TASK_QUEUE=noop` 用于本地测试或开发，不得作为运行时默认。未知 `KNOWLINK_TASK_QUEUE` 值必须启动失败。
+- `KNOWLINK_ENV=production` / `prod` / `staging` 时，demo 鉴权 token、MinIO 默认凭据、`KNOWLINK_TASK_QUEUE=noop`、非 `sql` 的 `KNOWLINK_RUNTIME_REPOSITORY_BACKEND`，以及 `demo` / `fake` / `memory` / `local` / `disabled` 等非持久化或禁用型 `KNOWLINK_STORAGE_BACKEND` 必须启动前 fail-fast；本地 `development` / test 仍可使用 `.env.example` 的 demo 默认值。
+- scheduler 当前没有真实生产定时任务，默认 `KNOWLINK_SCHEDULER_ENABLED=false`，且默认 compose 不启动 scheduler 服务；如需手动运行，必须显式启用该环境变量。
 
 ### 1.1 Week 1 冻结入口
 
@@ -38,7 +42,28 @@
 - 曹乐负责的解析产物字段说明、解析步骤映射、`pipeline-status` 进度 / 状态 / 失败 / `partial_success` 语义，以及问询题到 `learning_preferences` 的映射，以 [week2-cao-le-parse-inquiry-contract.md](./week2-cao-le-parse-inquiry-contract.md) 为验收入口。
 - 本文件中的 API 示例只展示接口形态；解析产物和问询落库的业务含义以 Week 2 冻结入口为准。
 
-### 1.3 核心状态枚举
+### 1.3 V2 contract 过渡口径
+
+- `docs/v2/phase-plan.md` 是第二版的规划和责任口径，不直接等同于已实现 API。
+- V2 新增或重做 B站真实导入、知识图谱、实时流式输出、主观题自动判卷时，必须先补充对应 API / DTO / schema / 错误码 contract，再实施代码。
+- V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示当前第一版实现状态。
+- V2 状态拼写统一使用 `canceled`，不使用 `cancelled`。外部资料或旧 spec 中出现 `cancelled` 时，进入 API contract 前统一归一化为 `canceled`。
+- V2 B站导入细分状态建议映射到现有 `async_tasks.status`：
+
+| `bilibili_import_run.status` | `async_tasks.status` | 说明 |
+|---|---|---|
+| `pending`、`waiting_download` | `queued` | 等待元数据、排队或等待用户确认 |
+| `fetching_metadata`、`downloading`、`merging`、`uploading` | `running` | 任务正在执行 |
+| `imported` | `succeeded` | 已创建课程资源 |
+| `failed` | `failed` | 不可恢复失败 |
+| `recoverable` | `failed` | 可恢复失败，响应中必须带可重试原因 |
+| `canceled` | `canceled` | 用户或系统取消 |
+
+- V2 实时输出默认复用 `async_tasks.id` 作为任务真相源；SSE 订阅优先使用 `/api/v1/async-tasks/{taskId}/events`，若后续增加 `/api/v1/tasks` 聚合层，只能作为 `async_tasks` 的只读适配层。
+- V2 知识图谱需要补充 graph read model contract，至少冻结节点、边、证据引用、置信度、审核状态和跳转目标。
+- V2 主观题判卷需要补充主观题 schema、attempt/grading API、判卷状态、评分结果、证据引用和低置信度人审字段。
+
+### 1.4 核心状态枚举
 
 - `lifecycleStatus`: `draft` `resource_ready` `inquiry_ready` `learning_ready` `archived` `failed`
 - `pipelineStage`: `idle` `upload` `parse` `inquiry` `handout`
@@ -286,7 +311,7 @@
 
 ```json
 {
-  "uploadUrl": "https://minio.local/upload/demo",
+  "uploadUrl": "http://127.0.0.1:9000/knowlink/raw/1/101/temp/chapter-1.pdf?...",
   "objectKey": "raw/1/101/temp/chapter-1.pdf",
   "headers": {
     "x-amz-meta-course-id": "101"
@@ -294,6 +319,9 @@
   "expiresAt": "2026-04-18T15:15:00+00:00"
 }
 ```
+
+本地 Docker 联调时，`uploadUrl` 必须使用浏览器可访问的 `KNOWLINK_MINIO_PUBLIC_ENDPOINT`
+签名，例如 `http://127.0.0.1:9000/...`；不能返回容器内 hostname `minio:9000`。
 
 ### `POST /api/v1/courses/{courseId}/resources/upload-complete`
 
@@ -341,6 +369,33 @@
 }
 ```
 
+### `GET /api/v1/course-resources/{resourceId}/playback`
+
+说明：
+
+- 讲义页通过 `GET /api/v1/handout-blocks/{blockId}/jump-target` 拿到 `videoResourceId` 后，使用该接口换取真实可播放地址。
+- `playbackUrl` 是对象存储预签名 GET 地址，默认 1 小时有效；本地 Docker 联调必须返回 `KNOWLINK_MINIO_PUBLIC_ENDPOINT` 对应的浏览器可访问 host，例如 `http://127.0.0.1:9000/...`，不能返回容器内 `minio:9000`。
+- `durationSec` 当前没有稳定字段时返回 `null`，不为播放接口新增数据库字段。
+
+响应 `data`：
+
+```json
+{
+  "resourceId": 501,
+  "resourceType": "mp4",
+  "playbackUrl": "http://127.0.0.1:9000/knowlink/raw/1/101/temp/video.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256",
+  "mimeType": "video/mp4",
+  "expiresAt": "2026-04-18T16:00:00+00:00",
+  "durationSec": null
+}
+```
+
+错误：
+
+- `404 resource.not_found`：资源不存在或不属于当前用户可访问课程
+- `409 resource.not_video`：资源存在但 `resourceType` 不是 `mp4`
+- `503 resource.playback_unavailable`：对象存储不可用或播放地址生成失败
+
 ### `DELETE /api/v1/courses/{courseId}/resources/{resourceId}`
 
 响应 `data`：
@@ -352,9 +407,14 @@
 }
 ```
 
-### B 站导入预留接口
+错误：
 
-以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 contract，但当前服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。
+- `404 resource.not_found`：资源不存在或不属于当前课程
+- `409 resource.has_dependents`：资源已被解析段落、向量文档、讲义引用、QA 引用、测验引用、复习引用或学习进度等后端产物引用；当前接口不做级联删除，需先清理或重建依赖产物后再删除资源
+
+### B 站导入预留接口（V1/MVP）
+
+以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 contract 以本文件 1.3 的过渡口径和后续补充的 V2 API 章节为准。
 
 stub 阶段约束：
 
@@ -374,9 +434,9 @@ stub 阶段约束：
 
 说明：
 
-- stub 阶段会保留上述 `requestBody` 结构，但暂不收紧为必填校验；鉴权通过后统一返回 `501`。
+- V1 stub 阶段会保留上述 `requestBody` 结构，但暂不收紧为必填校验；鉴权通过后统一返回 `501`。
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -390,15 +450,15 @@ stub 阶段约束：
 }
 ```
 
-约束：
+V1 约束：
 
 - 第一版只冻结单个公开视频链接，不覆盖番剧、合集、收藏夹和批量导入。
 - 支持范围只包含标准视频页链接、`BV` 链接和 `b23.tv` 短链。
-- 未来接通后，该异步导入实体类型固定为 `bilibili_import_run`。
+- V2 接通后，该异步导入实体类型固定为 `bilibili_import_run`，范围按 `docs/v2/phase-plan.md` 扩展到单视频、多 P、合集、番剧。
 
 ### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -417,7 +477,7 @@ stub 阶段约束：
 
 ### `GET /api/v1/bilibili-import-runs/{importRunId}/status`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -434,7 +494,7 @@ stub 阶段约束：
 
 ### `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -450,7 +510,7 @@ stub 阶段约束：
 
 ### `POST /api/v1/bilibili/auth/qr/sessions`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -463,7 +523,7 @@ stub 阶段约束：
 
 ### `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -476,7 +536,7 @@ stub 阶段约束：
 
 ### `GET /api/v1/bilibili/auth/session`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -488,7 +548,7 @@ stub 阶段约束：
 
 ### `DELETE /api/v1/bilibili/auth/session`
 
-未来接通后的响应 `data`：
+V2 接通后的响应 `data`：
 
 ```json
 {
@@ -496,7 +556,7 @@ stub 阶段约束：
 }
 ```
 
-当前未实现阶段统一返回：
+V1 当前未实现阶段统一返回：
 
 ```json
 {
@@ -632,6 +692,16 @@ stub 阶段约束：
 说明：
 
 - 这是后端和演示排障用辅助接口，不作为页面主流程依赖。
+- 只有 `failed`、`queued` 状态可通过该接口重新入队；`succeeded`、`canceled`、`retrying` 或未知状态不得重试。
+- 重新入队前会把任务状态重置为 `queued`、清空旧错误并将 `progressPct` 置 0；如果 enqueue 失败，任务会被标记为 `failed` 且写入 `async_task.enqueue_failed`，客户端可继续展示重试入口。
+
+错误：
+
+- `404 pipeline.task_not_found`：任务不存在
+- `409 pipeline.task_not_retryable`：任务当前状态不可重试
+- `409 pipeline.task_retry_unsupported`：任务类型不支持该 retry 接口
+- `409 pipeline.task_retry_stale`：任务状态重置为 `queued` 时发现记录已变化或不可写
+- `503 async_task.enqueue_failed`：任务创建或 retry 时写入成功但派发到队列失败；响应代表后端未能把任务交给 dispatcher / broker，任务记录会保留失败原因
 
 ## 7. 问询与讲义
 
@@ -684,7 +754,9 @@ stub 阶段约束：
       "label": "本轮学习时间预算",
       "type": "number",
       "required": true,
-      "options": []
+      "options": [],
+      "minValue": 30,
+      "maxValue": 600
     },
     {
       "key": "handout_style",
@@ -729,6 +801,8 @@ stub 阶段约束：
   ]
 }
 ```
+
+说明：`number` 类型题目当前仅用于 `time_budget_minutes`，服务端下发并强制校验 `minValue: 30`、`maxValue: 600`。
 
 ### `POST /api/v1/courses/{courseId}/inquiry/answers`
 
@@ -816,15 +890,38 @@ stub 阶段约束：
   "summary": "按视频时间线组织的讲义目录",
   "items": [
     {
-      "outlineKey": "outline-1",
-      "blockId": 4001,
-      "title": "集合的基本概念",
-      "summary": "介绍集合、元素和属于关系",
+      "outlineKey": "section-1",
+      "title": "集合的概念与表示",
+      "summary": "从集合定义过渡到集合表示方法",
       "startSec": 0,
-      "endSec": 180,
+      "endSec": 360,
       "sortNo": 1,
-      "generationStatus": "pending",
-      "sourceSegmentKeys": ["mp4-c1", "mp4-c2"]
+      "children": [
+        {
+          "outlineKey": "outline-1",
+          "blockId": 4001,
+          "title": "集合的基本概念",
+          "summary": "介绍集合、元素和属于关系",
+          "startSec": 0,
+          "endSec": 180,
+          "sortNo": 1,
+          "generationStatus": "pending",
+          "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+          "topicTags": ["集合"]
+        },
+        {
+          "outlineKey": "outline-2",
+          "blockId": 4002,
+          "title": "集合的表示方法",
+          "summary": "从列举法过渡到描述法",
+          "startSec": 180,
+          "endSec": 360,
+          "sortNo": 2,
+          "generationStatus": "pending",
+          "sourceSegmentKeys": ["mp4-c3"],
+          "topicTags": []
+        }
+      ]
     }
   ]
 }
@@ -832,9 +929,12 @@ stub 阶段约束：
 
 说明：
 
-- 这是视频优先讲义页的首屏读取接口方向；接口实现 owner 仍按 `TEAM_DIVISION.md` 执行。
-- `items[*].sourceSegmentKeys` 是 API read model 必返字段，用于后续 block 生成和引用校验；前端可忽略展示。
-- 点击目录项时，播放器跳转到 `startSec`；播放时间落在 `[startSec, endSec)` 时高亮对应目录项，最后一段允许命中 `endSec`。
+- 这是视频优先讲义页的首屏读取接口；本轮为破坏性两级 outline API 改动，Flutter 需后续单独适配。
+- `items[]` 是大标题，只负责语义分组和展开；大标题没有 `blockId`，不可直接生成讲义块，也不作为点击、跳转、高亮或 QA 的目标。
+- `items[*].children[]` 是小标题，也是唯一 leaf item；只有 child 绑定 `blockId`、`generationStatus`、`sourceSegmentKeys` 和 `topicTags`。
+- `items[*].children[*].sourceSegmentKeys` 是 API read model 必返字段，用于后续 block 生成和引用校验；前端可忽略展示。
+- 点击 child 目录项时，播放器跳转到 child `startSec`；播放时间落在 child `[startSec, endSec)` 时高亮对应 child，最后一个 child 允许命中 `endSec`。
+- 同一个大标题下的 children 必须在视频时间线上连续归属，不能与其他大标题穿插；大标题 `startSec/endSec` 等于 children 的最小开始和最大结束。
 
 ### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`
 
@@ -843,15 +943,21 @@ stub 阶段约束：
 ```json
 {
   "blockId": 4001,
+  "handoutVersionId": 3001,
   "outlineKey": "outline-1",
   "title": "极限与连续",
   "summary": "先抓必考定义和题型",
   "status": "ready",
+  "generationStatus": "ready",
   "contentMd": "### 极限与连续",
   "startSec": 120,
   "endSec": 360,
-  "pageFrom": 2,
-  "pageTo": 5,
+  "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+  "knowledgePoints": [],
+  "generationMetadata": {
+    "source": "model",
+    "reason": "model_response"
+  },
   "citations": [
     {
       "resourceId": 501,
@@ -862,23 +968,29 @@ stub 阶段约束：
 }
 ```
 
-同一结构也允许返回：
+`citations[]` 中同一结构也允许返回：
 
 - `slideNo`：PPTX slide 引用
 - `anchorKey`：DOCX heading / anchor 引用
+- `items[*].generationMetadata` 是已生成 block 的必返元数据，`source` 取值为 `model` 或 `fallback`，`reason` 用于区分真实模型生成、模型异常 fallback、本地 fallback 等来源。
+- `items[*].citations[]` 是 public citation，只暴露 `resourceId`、`refLabel` 与 locator 字段；`segmentId` / `segmentKey` 不出现在 public response 中。
 
 未生成 block 可返回：
 
 ```json
 {
   "blockId": 4002,
+  "handoutVersionId": 3001,
   "outlineKey": "outline-2",
   "title": "集合的表示方法",
   "summary": "从列举法过渡到描述法",
   "status": "pending",
+  "generationStatus": "pending",
   "contentMd": null,
   "startSec": 180,
   "endSec": 360,
+  "sourceSegmentKeys": ["mp4-c3"],
+  "knowledgePoints": [],
   "citations": []
 }
 ```
@@ -901,7 +1013,7 @@ stub 阶段约束：
 
 说明：
 
-- 这是单个目录项懒生成的接口方向；幂等、任务入队和 DTO 由后端 owner 落地。
+- 这是单个 child 目录项懒生成的接口方向；幂等、任务入队和 DTO 由后端 owner 落地。
 - 必须支持 `Idempotency-Key`；相同用户、相同 `blockId`、相同 `Idempotency-Key` 的重复请求不得创建重复 block 或重复任务。
 - 当 block 已处于 `generating` 时，重复请求返回当前任务，`entity.type = handout_block`，不得重复入队。
 - 当 block 已处于 `ready` 时，重复请求返回当前 block 状态，不重新生成。
@@ -916,12 +1028,13 @@ stub 阶段约束：
   "blockId": 4002,
   "outlineKey": "outline-2",
   "status": "generating",
+  "generationStatus": "generating",
   "startSec": 180,
   "endSec": 360
 }
 ```
 
-### `GET /api/v1/courses/{courseId}/handouts/current-block?currentSec=205`
+### `GET /api/v1/courses/{courseId}/handouts/current-block?currentSec=335`
 
 响应 `data`：
 
@@ -931,10 +1044,17 @@ stub 阶段约束：
   "outlineKey": "outline-2",
   "startSec": 180,
   "endSec": 360,
+  "status": "pending",
   "generationStatus": "pending",
   "prefetchBlockId": 4003
 }
 ```
+
+说明：
+
+- 播放时间命中规则为 `[startSec, endSec)`；最后一个 block 允许命中 `endSec`。
+- 仅当距离当前 block 结束 30 秒以内，且紧邻的下一个 block 仍为 `pending` 时，返回 `prefetchBlockId`。
+- 如果紧邻下一个 block 已经是 `generating`、`ready` 或 `failed`，不跳过它去建议更后面的 pending block。
 
 ### `GET /api/v1/handout-blocks/{blockId}/jump-target`
 
@@ -950,6 +1070,19 @@ stub 阶段约束：
   "slideNo": 6
 }
 ```
+
+## 7A. V2 知识图谱 contract 待冻结
+
+V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知识图谱时，必须先补充 graph read model contract，至少包含：
+
+- 课程级图谱读取入口，例如 `GET /api/v1/courses/{courseId}/knowledge-graph`。
+- 子图或路径读取入口，例如围绕知识点、讲义块、题目或复习任务查询局部图谱。
+- 节点字段：稳定 `nodeId`、`nodeType`、`title`、`summary`、`mastery`、`confidence`、`sourceRefs`。
+- 边字段：稳定 `edgeId`、`edgeType`、`sourceNodeId`、`targetNodeId`、`weight`、`evidenceRefs`、`reviewStatus`。
+- 跳转字段：能回到讲义块、视频时间戳、PDF 页码、PPT 页码或 DOCX anchor。
+- 审核字段：AI 生成边和人工确认边必须可区分。
+
+在该 contract 冻结前，图谱生成、图谱查询包装、推荐增强和判卷证据链不得各自扩写不同字段。
 
 ## 8. 问答、测验、复习
 
@@ -972,6 +1105,11 @@ stub 阶段约束：
   "sessionId": 6001,
   "messageId": 6002,
   "answerMd": "定义控制了题型的判断边界。",
+  "answerType": "direct_answer",
+  "generationMetadata": {
+    "source": "model",
+    "reason": "model_response"
+  },
   "citations": [
     {
       "resourceId": 501,
@@ -981,6 +1119,13 @@ stub 阶段约束：
   ]
 }
 ```
+
+说明：
+
+- `answerType` 取值为 `direct_answer`、`clarification`、`insufficient_evidence`。
+- Doubao / vivo QA 接入只影响服务端回答生成策略，不改变前端请求字段、接口路径或 citations 结构。
+- `citations` 只能来自服务端当前候选证据反查；`insufficient_evidence` 时固定为空数组。
+- `generationMetadata.source` 取值为 `model` 或 `fallback`；本地 fallback、模型异常 fallback 或证据不足拒答必须带明确 `reason`，调用方不得把 fallback 当成真实模型答案。
 
 ### `GET /api/v1/qa/sessions/{sessionId}/messages`
 
@@ -993,6 +1138,11 @@ stub 阶段约束：
       "sessionId": 6001,
       "messageId": 6002,
       "answerMd": "定义控制了题型的判断边界。",
+      "answerType": "direct_answer",
+      "generationMetadata": {
+        "source": "model",
+        "reason": "model_response"
+      },
       "citations": [
         {
           "resourceId": 501,
@@ -1006,6 +1156,22 @@ stub 阶段约束：
 ```
 
 ### `POST /api/v1/courses/{courseId}/quizzes/generate`
+
+请求可省略；省略时默认 `questionCountLevel = medium`：
+
+```json
+{
+  "questionCountLevel": "medium"
+}
+```
+
+说明：
+
+- `questionCountLevel` 可取 `small`、`medium`、`large`。
+- `small` 表示后端实时生成 1-3 题；`medium` 表示 3-5 题；`large` 表示 5-10 题。
+- 前端只提交档位，不提交精确题数；响应仍以实际 `questionCount` 和 `questions` 为准。
+- 测验题目由 DeepSeek 官方 API 实时生成，使用 `deepseek-v4-flash`、thinking enabled、`reasoning_effort=high`，并只允许基于当前课程的 active handout ready blocks 与当前 parse run segments 出题。
+- DeepSeek 未配置、超时、坏 JSON、题数不在档位范围、引用未知 block / segment 或 schema 校验失败时，异步任务失败，不回退模板题。
 
 响应结构与其他异步生成接口一致，`entity.type = quiz`。
 
@@ -1048,6 +1214,17 @@ stub 阶段约束：
   ]
 }
 ```
+
+`selectedOption` 的 contract 值是稳定选项 key：`A` / `B` / `C` / `D`。题目响应中的
+`options` 数组按该顺序对应四个选项；后端会兼容精确匹配的完整选项文本并归一化为 key，
+但前端不应依赖提交完整文本。
+
+V2 主观题判卷说明：
+
+- V1 `POST /api/v1/quizzes/{quizId}/attempts` 只冻结客观题提交，`selectedOption` 不得被复用为主观题答案。
+- V2 主观题需要新增或扩展 contract 来表达 `questionType`、`textAnswer`、`rubric`、`gradingRunId`、判卷状态、分项分数、证据引用、置信度和 `needsHumanReview`。
+- V2 判卷若走异步，必须继续使用 `async_tasks.id` 作为任务真相源，并明确 attempt 与 grading run 的对应关系。
+- 在上述 contract 冻结前，后端、前端和 AI schema 不得各自扩写主观题字段。
 
 响应 `data`：
 

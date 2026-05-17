@@ -5,11 +5,20 @@ import os
 import re
 import time
 import uuid
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
+from server.ai.core.errors import AIOutputParseError, fallback_reason_for_error
+from server.ai.core.types import ChatMessage, JsonChatRequest
+from server.ai.deepseek import get_configured_deepseek_chat_config
+from server.ai.providers.deepseek_chat import (
+    DeepSeekLangChainConfig,
+    DeepSeekLangChainJsonClient,
+    normalize_deepseek_base_url,
+)
+from server.ai.providers.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleJsonClient
+from server.ai.service import AIService, get_default_ai_service
+from server.config.settings import load_root_dotenv
 from server.parsers.base import clean_text
 
 
@@ -25,18 +34,20 @@ JSON 格式固定为：
 2. sourceSegmentKeys 只能来自当前 outline item 的 video_caption segments。
 3. citations 必须引用输入中的 segmentKey；视频 citation 必须落在 outline item 时间范围内。
 4. 每个 citation 只能使用一种定位：pageNo、slideNo、anchorKey、或 startSec/endSec。
-5. contentMd 使用中文 Markdown，先解释本段核心概念，再给出简短例子或学习提醒。
+5. 如果输入包含与本段相关的 PDF/PPT/DOCX supplemental segments，选择 1-3 条文档 citation；你只需要选择 segmentKey/refLabel，pageNo/slideNo/anchorKey 由服务端按输入 segment 反查校验。
+6. contentMd 使用中文 Markdown，先解释本段核心概念，再给出简短例子或学习提醒。
 """
 
 
 @dataclass(frozen=True)
 class HandoutBlockContext:
     source_segments: list[dict[str, Any]]
+    adjacent_segments: list[dict[str, Any]]
     supplemental_segments: list[dict[str, Any]]
 
     @property
     def all_segments(self) -> list[dict[str, Any]]:
-        return [*self.source_segments, *self.supplemental_segments]
+        return [*self.source_segments, *self.adjacent_segments, *self.supplemental_segments]
 
 
 class HandoutBlockClient(Protocol):
@@ -51,6 +62,23 @@ class HandoutBlockClient(Protocol):
 
 
 def get_configured_handout_block_client() -> HandoutBlockClient | None:
+    load_root_dotenv()
+    provider = os.getenv("KNOWLINK_HANDOUT_BLOCK_PROVIDER", "vivo").strip().lower()
+    if provider == "deepseek":
+        config = get_configured_deepseek_chat_config()
+        if config is None:
+            return None
+        return DeepSeekHandoutBlockClient(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            model=config.model,
+            reasoning_effort=config.reasoning_effort,
+            timeout_sec=_env_float("KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC", _DEFAULT_HANDOUT_BLOCK_TIMEOUT_SEC),
+            ai_service=_default_ai_service_for_provider("deepseek"),
+        )
+    if provider not in {"", "vivo"}:
+        return None
+
     app_key = os.getenv("KNOWLINK_VIVO_APP_KEY", "").strip()
     if not app_key:
         return None
@@ -60,6 +88,7 @@ def get_configured_handout_block_client() -> HandoutBlockClient | None:
         base_url=os.getenv("KNOWLINK_VIVO_BASE_URL", "https://api-ai.vivo.com.cn"),
         model=os.getenv("KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL", _DEFAULT_HANDOUT_BLOCK_MODEL),
         timeout_sec=_env_float("KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC", _DEFAULT_HANDOUT_BLOCK_TIMEOUT_SEC),
+        ai_service=_default_ai_service_for_provider("vivo"),
     )
 
 
@@ -85,13 +114,19 @@ def generate_handout_block(
                 segments=context.all_segments,
                 preferences=preferences,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            return fallback_handout_block(
+                outline_item,
+                context=context,
+                preferences=preferences,
+                reason=fallback_reason_for_error(exc),
+            )
 
     return fallback_handout_block(
         outline_item,
         context=context,
         preferences=preferences,
+        reason="model_unavailable",
     )
 
 
@@ -99,6 +134,7 @@ def build_handout_block_context(
     outline_item: Mapping[str, Any],
     segments: Sequence[Mapping[str, Any]],
     *,
+    max_adjacent_segments: int = 2,
     max_supplemental_segments: int = 6,
 ) -> HandoutBlockContext:
     known_segments = [_normalize_segment(segment, index) for index, segment in enumerate(segments, start=1)]
@@ -128,6 +164,13 @@ def build_handout_block_context(
     if not source_segments:
         raise ValueError("at least one known video_caption segment is required for handout block generation")
 
+    source_key_set = {segment["segmentKey"] for segment in source_segments}
+    adjacent_segments = _adjacent_video_segments(
+        known_segments,
+        source_segments=source_segments,
+        source_key_set=source_key_set,
+        max_adjacent_segments=max_adjacent_segments,
+    )
     source_text = "\n".join(str(segment["textContent"]) for segment in source_segments)
     query_text = " ".join(
         clean_text(
@@ -145,7 +188,11 @@ def build_handout_block_context(
         query_text=query_text,
     )[:max_supplemental_segments]
 
-    return HandoutBlockContext(source_segments=source_segments, supplemental_segments=supplemental)
+    return HandoutBlockContext(
+        source_segments=source_segments,
+        adjacent_segments=adjacent_segments,
+        supplemental_segments=supplemental,
+    )
 
 
 class VivoHandoutBlockClient:
@@ -156,11 +203,16 @@ class VivoHandoutBlockClient:
         base_url: str,
         model: str,
         timeout_sec: float | None = None,
+        ai_service: AIService | None = None,
     ) -> None:
-        self._app_key = app_key
-        self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout_sec = timeout_sec if timeout_sec is not None else _DEFAULT_HANDOUT_BLOCK_TIMEOUT_SEC
+        self._ai_service = ai_service or _scoped_vivo_ai_service(
+            app_key=app_key,
+            base_url=base_url,
+            model=model,
+            timeout_sec=self._timeout_sec,
+        )
         self._last_request_at = 0.0
         self._min_request_interval_sec = 0.8
 
@@ -175,47 +227,90 @@ class VivoHandoutBlockClient:
             raise RuntimeError("vivo handout block requires context segments")
 
         self._throttle()
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": _HANDOUT_BLOCK_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": _build_handout_block_prompt(
-                        outline_item,
-                        context_segments,
-                        preferences=preferences,
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="vivo",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_HANDOUT_BLOCK_SYSTEM_PROMPT),
+                    ChatMessage(
+                        role="user",
+                        content=_build_handout_block_prompt(
+                            outline_item,
+                            context_segments,
+                            preferences=preferences,
+                        ),
                     ),
-                },
-            ],
-            "temperature": 0.1,
-            "max_tokens": 4096,
-            "stream": False,
-        }
-        request = urllib.request.Request(
-            f"{_chat_base_url(self._base_url)}/chat/completions?request_id={uuid.uuid4()}",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._app_key}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-            method="POST",
+                ],
+                temperature=0.1,
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 4096, "stream": False, "request_id": str(uuid.uuid4())},
+            ),
+            label="vivo handout block",
         )
-
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
-                body = response.read().decode("utf-8")
-            chat_payload = json.loads(body)
-        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"vivo handout block request failed: {exc}") from exc
-
-        return _parse_chat_json_payload(chat_payload, label="vivo handout block")
 
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_at
         if elapsed < self._min_request_interval_sec:
             time.sleep(self._min_request_interval_sec - elapsed)
         self._last_request_at = time.monotonic()
+
+
+class DeepSeekHandoutBlockClient:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model: str,
+        reasoning_effort: str,
+        timeout_sec: float | None = None,
+        ai_service: AIService | None = None,
+    ) -> None:
+        self._model = model
+        self._reasoning_effort = reasoning_effort
+        self._timeout_sec = timeout_sec if timeout_sec is not None else _DEFAULT_HANDOUT_BLOCK_TIMEOUT_SEC
+        self._ai_service = ai_service or _scoped_deepseek_ai_service(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            timeout_sec=self._timeout_sec,
+        )
+
+    def generate_block(
+        self,
+        outline_item: Mapping[str, Any],
+        context_segments: Sequence[Mapping[str, Any]],
+        *,
+        preferences: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not context_segments:
+            raise RuntimeError("deepseek handout block requires context segments")
+
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="deepseek",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_HANDOUT_BLOCK_SYSTEM_PROMPT),
+                    ChatMessage(
+                        role="user",
+                        content=_build_handout_block_prompt(
+                            outline_item,
+                            context_segments,
+                            preferences=preferences,
+                        ),
+                    ),
+                ],
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 8192, "reasoning_effort": self._reasoning_effort},
+            ),
+            label="deepseek handout block",
+        )
 
 
 def normalize_handout_block_payload(
@@ -264,7 +359,7 @@ def normalize_handout_block_payload(
         citations,
         outline_item=outline_item,
         source_segments=context.source_segments,
-        source_segment_keys=source_segment_keys,
+        supplemental_segments=context.supplemental_segments,
     )
 
     return {
@@ -276,6 +371,7 @@ def normalize_handout_block_payload(
         "sourceSegmentKeys": source_segment_keys,
         "knowledgePoints": knowledge_points,
         "citations": citations,
+        "generationMetadata": _generation_metadata(source="model", reason="model_response"),
     }
 
 
@@ -284,6 +380,7 @@ def fallback_handout_block(
     *,
     context: HandoutBlockContext,
     preferences: Mapping[str, Any] | None = None,
+    reason: str = "model_unavailable",
 ) -> dict[str, Any]:
     title = clean_text(str(outline_item.get("title") or "")) or "讲义片段"
     summary = clean_text(str(outline_item.get("summary") or "")) or _truncate(
@@ -297,16 +394,29 @@ def fallback_handout_block(
         summary=summary,
         preferences=preferences,
     )
+    source_segment_keys = [segment["segmentKey"] for segment in context.source_segments]
+    citations = _fallback_citations(outline_item=outline_item, context=context)
+    citations = _ensure_source_video_citation(
+        citations,
+        outline_item=outline_item,
+        source_segments=context.source_segments,
+        supplemental_segments=context.supplemental_segments,
+    )
     return {
         "outlineKey": _stable_key(str(outline_item.get("outlineKey") or "outline")),
         "title": title,
         "summary": summary,
         "contentMd": content_md,
         "estimatedMinutes": _estimated_minutes(None, content_md),
-        "sourceSegmentKeys": [segment["segmentKey"] for segment in context.source_segments],
+        "sourceSegmentKeys": source_segment_keys,
         "knowledgePoints": knowledge_points,
-        "citations": _fallback_citations(outline_item=outline_item, context=context),
+        "citations": citations,
+        "generationMetadata": _generation_metadata(source="fallback", reason=reason),
     }
+
+
+def _generation_metadata(*, source: str, reason: str) -> dict[str, str]:
+    return {"source": source, "reason": reason}
 
 
 def citation_segment_keys(block: Mapping[str, Any]) -> list[str]:
@@ -320,6 +430,26 @@ def citation_segment_keys(block: Mapping[str, Any]) -> list[str]:
             keys.append(key)
             seen.add(key)
     return keys
+
+
+def handout_block_ref_identity(citation: Mapping[str, Any]) -> tuple[int, str, tuple[tuple[str, Any], ...]] | None:
+    resource_id = _as_positive_int(citation.get("resourceId") or citation.get("resource_id"))
+    if resource_id is None:
+        return None
+
+    segment_id = _as_positive_int(citation.get("segmentId") or citation.get("segment_id"))
+    if segment_id is not None:
+        segment_identity = f"id:{segment_id}"
+    else:
+        segment_key = citation.get("segmentKey") or citation.get("segment_key")
+        if not isinstance(segment_key, str) or not segment_key.strip():
+            return None
+        segment_identity = f"key:{_stable_key(segment_key)}"
+
+    locator = _citation_locator_tuple(citation)
+    if not locator:
+        return None
+    return (resource_id, segment_identity, locator)
 
 
 def _normalize_segment(segment: Mapping[str, Any], index: int) -> dict[str, Any]:
@@ -357,14 +487,59 @@ def _rank_supplemental_segments(segments: Sequence[Mapping[str, Any]], *, query_
             continue
         compact = text.lower()
         score = sum(1 for keyword in keywords if keyword in compact)
-        if score == 0:
-            score = 1
-        scored.append((-score, int(segment.get("orderNo") or index + 1), dict(segment)))
+        ranked_segment = dict(segment)
+        ranked_segment["_supplementalScore"] = score
+        scored.append((-score, int(segment.get("orderNo") or index + 1), ranked_segment))
     return [item[2] for item in sorted(scored, key=lambda item: (item[0], item[1], item[2]["segmentKey"]))]
+
+
+def _adjacent_video_segments(
+    segments: Sequence[Mapping[str, Any]],
+    *,
+    source_segments: Sequence[Mapping[str, Any]],
+    source_key_set: set[str],
+    max_adjacent_segments: int,
+) -> list[dict[str, Any]]:
+    if max_adjacent_segments <= 0:
+        return []
+
+    ordered_video = [
+        dict(segment)
+        for segment in sorted(segments, key=lambda item: (int(item.get("orderNo") or 0), str(item.get("segmentKey") or "")))
+        if segment.get("segmentType") == "video_caption"
+    ]
+    if not ordered_video:
+        return []
+
+    source_indexes = [
+        index
+        for index, segment in enumerate(ordered_video)
+        if segment.get("segmentKey") in source_key_set
+    ]
+    if not source_indexes:
+        return []
+
+    source_resource_ids = {
+        _as_positive_int(segment.get("resourceId"))
+        for segment in source_segments
+        if _as_positive_int(segment.get("resourceId")) is not None
+    }
+    before_limit = max(0, min(source_indexes) - max_adjacent_segments)
+    after_limit = min(len(ordered_video), max(source_indexes) + max_adjacent_segments + 1)
+    adjacent: list[dict[str, Any]] = []
+    for segment in [*ordered_video[before_limit : min(source_indexes)], *ordered_video[max(source_indexes) + 1 : after_limit]]:
+        resource_id = _as_positive_int(segment.get("resourceId"))
+        if source_resource_ids and resource_id not in source_resource_ids:
+            continue
+        if segment["segmentKey"] not in source_key_set:
+            adjacent.append(segment)
+    return adjacent
 
 
 def _keywords(text: str) -> set[str]:
     tokens = set(re.findall(r"[A-Za-z0-9_]{3,}|[\u4e00-\u9fff]{2,}", text.lower()))
+    for chinese_run in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        tokens.update(chinese_run[index : index + 2] for index in range(0, len(chinese_run) - 1))
     return {token for token in tokens if len(token) >= 2}
 
 
@@ -522,10 +697,23 @@ def _append_unique_citation(
 
 
 def _citation_identity(citation: Mapping[str, Any]) -> tuple[str, tuple[tuple[str, Any], ...]]:
-    return (
-        str(citation["segmentKey"]),
-        tuple((key, citation[key]) for key in ("pageNo", "slideNo", "anchorKey", "startSec", "endSec") if key in citation),
-    )
+    identity = handout_block_ref_identity(citation)
+    if identity is None:
+        return ("", ())
+    resource_id, segment_identity, locator = identity
+    return (f"{resource_id}:{segment_identity}", locator)
+
+
+def _citation_locator_tuple(citation: Mapping[str, Any]) -> tuple[tuple[str, Any], ...]:
+    locators = _raw_locator(citation)
+    if len(locators) != 1:
+        return ()
+    key, value = next(iter(locators.items()))
+    if key == "timeRange":
+        return (("startSec", value[0]), ("endSec", value[1]))
+    if value is None:
+        return ()
+    return ((key, value),)
 
 
 def _expand_video_time_range_citations(
@@ -583,9 +771,14 @@ def _expand_video_time_range_citations(
         if end_sec <= start_sec:
             continue
 
+        split_raw_item = {
+            key: value
+            for key, value in raw_item.items()
+            if key not in {"segmentKey", "segment_key", "segmentId", "segment_id"}
+        }
         citation = _citation_from_segment(
             segment,
-            raw_item={**raw_item, "startSec": start_sec, "endSec": end_sec},
+            raw_item={**split_raw_item, "startSec": start_sec, "endSec": end_sec},
             outline_start=outline_start,
             outline_end=outline_end,
         )
@@ -606,6 +799,11 @@ def _seed_video_segment(
         segment = by_key.get(_stable_key(key))
         if segment is None or segment.get("segmentType") != "video_caption":
             return _INVALID_VIDEO_SEED
+        segment_id = _as_int(raw_item.get("segmentId") or raw_item.get("segment_id"))
+        if segment_id is not None:
+            by_id_segment = by_id.get(segment_id)
+            if by_id_segment is None or by_id_segment.get("segmentKey") != segment.get("segmentKey"):
+                return _INVALID_VIDEO_SEED
         return segment
 
     segment_id = _as_int(raw_item.get("segmentId") or raw_item.get("segment_id"))
@@ -623,37 +821,105 @@ def _ensure_source_video_citation(
     *,
     outline_item: Mapping[str, Any],
     source_segments: Sequence[Mapping[str, Any]],
-    source_segment_keys: Sequence[str],
+    supplemental_segments: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    source_key_set = set(source_segment_keys)
     source_video_segments = [
         segment
         for segment in source_segments
-        if segment.get("segmentType") == "video_caption" and segment.get("segmentKey") in source_key_set
+        if segment.get("segmentType") == "video_caption"
     ]
     if not source_video_segments:
         return citations
 
-    source_video_key_set = {segment["segmentKey"] for segment in source_video_segments}
-    if any(citation.get("segmentKey") in source_video_key_set for citation in citations):
-        return citations
-
-    citation = _citation_from_segment(
-        source_video_segments[0],
-        raw_item={},
-        outline_start=_as_int(outline_item.get("startSec")),
-        outline_end=_as_int(outline_item.get("endSec")),
+    doc_citations = [
+        citation
+        for citation in citations
+        if "startSec" not in citation and "endSec" not in citation
+    ][:3]
+    if not doc_citations:
+        fallback_doc = _fallback_document_citation(supplemental_segments)
+        if fallback_doc is not None:
+            doc_citations = [fallback_doc]
+    block_video_citation = _block_range_video_citation(
+        outline_item=outline_item,
+        source_video_segments=source_video_segments,
     )
-    if citation is None:
-        return citations
-    return [citation, *citations]
+    if block_video_citation is None:
+        return doc_citations or citations
+
+    return [block_video_citation, *doc_citations]
+
+
+def _fallback_document_citation(segments: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    for segment in segments:
+        if segment.get("segmentType") == "video_caption":
+            continue
+        if not _supplemental_segment_is_relevant(segment):
+            continue
+        citation = _citation_from_segment(
+            segment,
+            raw_item={},
+            outline_start=None,
+            outline_end=None,
+        )
+        if citation is not None:
+            return citation
+    return None
+
+
+def _block_range_video_citation(
+    *,
+    outline_item: Mapping[str, Any],
+    source_video_segments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    first_segment = source_video_segments[0] if source_video_segments else None
+    if first_segment is None:
+        return None
+
+    resource_id = _as_positive_int(first_segment.get("resourceId"))
+    if resource_id is None:
+        return None
+
+    outline_start = _as_int(outline_item.get("startSec"))
+    outline_end = _as_int(outline_item.get("endSec"))
+    start_sec = outline_start
+    end_sec = outline_end
+    if start_sec is None:
+        start_sec = min(
+            (value for value in (_as_int(segment.get("startSec")) for segment in source_video_segments) if value is not None),
+            default=None,
+        )
+    if end_sec is None:
+        end_sec = max(
+            (value for value in (_as_int(segment.get("endSec")) for segment in source_video_segments) if value is not None),
+            default=None,
+        )
+    if start_sec is None or end_sec is None or end_sec <= start_sec:
+        return None
+
+    citation: dict[str, Any] = {
+        "resourceId": resource_id,
+        "segmentKey": first_segment["segmentKey"],
+        "startSec": start_sec,
+        "endSec": end_sec,
+        "refLabel": f"视频 {start_sec:02d}s-{end_sec:02d}s",
+    }
+    segment_id = _as_positive_int(first_segment.get("segmentId"))
+    if segment_id is not None:
+        citation["segmentId"] = segment_id
+    return citation
 
 
 def _fallback_citations(*, outline_item: Mapping[str, Any], context: HandoutBlockContext) -> list[dict[str, Any]]:
     outline_start = _as_int(outline_item.get("startSec"))
     outline_end = _as_int(outline_item.get("endSec"))
     citations: list[dict[str, Any]] = []
-    for segment in [*context.source_segments[:2], *context.supplemental_segments[:3]]:
+    supplemental_segments = [
+        segment
+        for segment in context.supplemental_segments
+        if _supplemental_segment_is_relevant(segment)
+    ][:3]
+    for segment in [*context.source_segments[:1], *supplemental_segments]:
         citation = _citation_from_segment(
             segment,
             raw_item={},
@@ -665,6 +931,11 @@ def _fallback_citations(*, outline_item: Mapping[str, Any], context: HandoutBloc
     if not citations:
         raise ValueError("handout block needs at least one segment with resourceId and locator for citation")
     return citations
+
+
+def _supplemental_segment_is_relevant(segment: Mapping[str, Any]) -> bool:
+    score = _as_int(segment.get("_supplementalScore"))
+    return score is None or score > 0
 
 
 def _citation_segment(
@@ -715,6 +986,16 @@ def _citation_from_segment(
     if not segment_locator:
         return None
 
+    raw_resource_id = _as_positive_int(raw_item.get("resourceId") or raw_item.get("resource_id"))
+    segment_resource_id = _as_positive_int(segment.get("resourceId"))
+    if raw_resource_id is not None and segment_resource_id is not None and raw_resource_id != segment_resource_id:
+        return None
+
+    raw_segment_id = _as_positive_int(raw_item.get("segmentId") or raw_item.get("segment_id"))
+    segment_id = _as_positive_int(segment.get("segmentId"))
+    if raw_segment_id is not None and segment_id is not None and raw_segment_id != segment_id:
+        return None
+
     raw_locator = _raw_locator(raw_item)
     if len(raw_locator) > 1:
         return None
@@ -724,8 +1005,6 @@ def _citation_from_segment(
             if "startSec" not in segment_locator or "endSec" not in segment_locator:
                 return None
         elif raw_key not in segment_locator:
-            return None
-        if raw_key != "timeRange" and segment_locator.get(raw_key) != raw_value:
             return None
 
     if segment.get("segmentType") == "video_caption":
@@ -750,7 +1029,7 @@ def _citation_from_segment(
     else:
         locator = segment_locator
 
-    resource_id = _as_positive_int(segment.get("resourceId") or raw_item.get("resourceId") or raw_item.get("resource_id"))
+    resource_id = segment_resource_id or raw_resource_id
     if resource_id is None:
         return None
 
@@ -759,7 +1038,6 @@ def _citation_from_segment(
         "segmentKey": segment["segmentKey"],
         "refLabel": clean_text(str(raw_item.get("refLabel") or raw_item.get("ref_label") or "")) or segment_label(segment),
     }
-    segment_id = _as_positive_int(segment.get("segmentId") or raw_item.get("segmentId") or raw_item.get("segment_id"))
     if segment_id is not None:
         citation["segmentId"] = segment_id
     citation.update(locator)
@@ -879,54 +1157,64 @@ def _serializable_segment(segment: Mapping[str, Any]) -> dict[str, Any]:
     return {key: segment[key] for key in keys if key in segment}
 
 
-def _parse_chat_json_payload(payload: dict[str, Any], *, label: str) -> dict[str, Any]:
-    if "error" in payload:
-        raise RuntimeError(f"{label} failed: {payload['error']}")
-    try:
-        content = payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"{label} response missing message content") from exc
-
-    text = _message_content_to_text(content)
-    json_text = _extract_json_object(text)
-    if json_text is None:
-        raise RuntimeError(f"{label} response is not JSON")
-    try:
-        result = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{label} response has invalid JSON: {exc}") from exc
-    if not isinstance(result, dict):
-        raise RuntimeError(f"{label} JSON must be an object")
-    return result
+def _complete_model_json(ai_service: AIService, request: JsonChatRequest, *, label: str) -> dict[str, Any]:
+    result = ai_service.complete_json(request)
+    if isinstance(result.parsed_json, dict):
+        return result.parsed_json
+    raise AIOutputParseError(f"{label} JSON must be an object")
 
 
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        texts = [item.get("text", "") for item in content if isinstance(item, dict)]
-        return "\n".join(text for text in texts if text)
-    return str(content)
+def _scoped_vivo_ai_service(
+    *,
+    app_key: str,
+    base_url: str,
+    model: str,
+    timeout_sec: float,
+) -> AIService:
+    return AIService(
+        json_clients={
+            "vivo": OpenAICompatibleJsonClient(
+                OpenAICompatibleConfig(
+                    api_key=app_key,
+                    model=model,
+                    base_url=_chat_base_url(base_url),
+                    timeout_sec=timeout_sec,
+                )
+            )
+        },
+        vision_clients={},
+    )
 
 
-def _extract_json_object(text: str) -> str | None:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
+def _scoped_deepseek_ai_service(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout_sec: float,
+) -> AIService:
+    return AIService(
+        json_clients={
+            "deepseek": DeepSeekLangChainJsonClient(
+                DeepSeekLangChainConfig(
+                    api_key=api_key,
+                    model=model,
+                    base_url=_deepseek_base_url(base_url),
+                    timeout_sec=timeout_sec,
+                )
+            )
+        },
+        vision_clients={},
+    )
 
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
 
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    return stripped[start : end + 1]
+def _default_ai_service_for_provider(provider: str) -> AIService | None:
+    service = get_default_ai_service()
+    return service if provider in service.json_clients else None
+
+
+def _deepseek_base_url(base_url: str) -> str:
+    return normalize_deepseek_base_url(base_url) or "https://api.deepseek.com/v1"
 
 
 def _first_present(payload: Mapping[str, Any], *keys: str) -> Any:

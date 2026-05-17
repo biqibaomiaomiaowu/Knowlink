@@ -1,9 +1,15 @@
-from server.infra.db.session import AsyncSessionLocal
-from typing import AsyncGenerator
+from __future__ import annotations
 
-async def get_db() -> AsyncGenerator[AsyncSessionLocal, None]:
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+from collections.abc import Generator
+
+from sqlalchemy.orm import Session
+
+from server.infra.db.session import create_session
+
+
+def get_db() -> Generator[Session, None, None]:
+    session = create_session()
+    try:
+        yield session
+    finally:
+        session.close()

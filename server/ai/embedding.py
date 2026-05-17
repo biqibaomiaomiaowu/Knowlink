@@ -7,6 +7,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Protocol, Sequence
 
+from server.config.settings import load_root_dotenv
+
 
 _DEFAULT_EMBEDDING_MODEL = "m3e-base"
 _DEFAULT_EMBEDDING_TIMEOUT_SEC = 10.0
@@ -19,6 +21,7 @@ class EmbeddingClient(Protocol):
 
 
 def get_configured_embedding_client() -> EmbeddingClient | None:
+    load_root_dotenv()
     if not _env_bool("KNOWLINK_ENABLE_VIVO_EMBEDDING"):
         return None
 

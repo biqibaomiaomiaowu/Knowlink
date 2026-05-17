@@ -67,6 +67,11 @@ void main() {
     notifier.setQuiz(8001);
     notifier.setQuizAttempt(8201);
     notifier.setReviewTaskRun(8301);
+    container.read(activeBlockProvider.notifier).state = 4001;
+    container.read(playerStateProvider.notifier).state = const PlayerState(
+      positionSec: 320,
+      isPlaying: true,
+    );
 
     notifier.startCourse('102');
 
@@ -83,6 +88,9 @@ void main() {
     expect(state.quizId, isNull);
     expect(state.quizAttemptId, isNull);
     expect(state.reviewTaskRunId, isNull);
+    expect(container.read(activeBlockProvider), isNull);
+    expect(container.read(playerStateProvider).positionSec, 0);
+    expect(container.read(playerStateProvider).isPlaying, isFalse);
   });
 
   test('starting the same course preserves existing flow state', () {
@@ -121,6 +129,11 @@ void main() {
     notifier.setQuiz(8001);
     notifier.setQuizAttempt(8201);
     notifier.setReviewTaskRun(8301);
+    container.read(activeBlockProvider.notifier).state = 4001;
+    container.read(playerStateProvider.notifier).state = const PlayerState(
+      positionSec: 320,
+      isPlaying: true,
+    );
 
     notifier.syncCreatedCourse(
       courseId: 205,
@@ -142,5 +155,8 @@ void main() {
     expect(state.quizId, isNull);
     expect(state.quizAttemptId, isNull);
     expect(state.reviewTaskRunId, isNull);
+    expect(container.read(activeBlockProvider), isNull);
+    expect(container.read(playerStateProvider).positionSec, 0);
+    expect(container.read(playerStateProvider).isPlaying, isFalse);
   });
 }

@@ -8,9 +8,19 @@ from jsonschema.exceptions import ValidationError
 
 from server.ai.handout_lazy import outline_timeline_issues
 from server.schemas.common import AsyncEntity
+from server.schemas.responses import HandoutBlock as HandoutBlockResponse
 
 
 ROOT = Path(__file__).resolve().parents[2]
+ARCHITECTURE_DOC = "docs/v1/architecture.md"
+TEAM_DIVISION_DOC = "docs/v1/team-division.md"
+WEEKLY_PLAN_DOC = "docs/v1/weekly-plan.md"
+SCAFFOLD_DOC = "docs/engineering/development-scaffold.md"
+DEMO_ASSETS_BASELINE_DOC = "docs/v1/demo-assets-baseline.md"
+DEMO_ASSETS_FIRST_EDITION_DOC = "docs/v1/demo-assets-first-edition.md"
+DEMO_ASSETS_BASELINE_NAV_LINK = "v1/demo-assets-baseline.md"
+DEMO_ASSETS_FIRST_EDITION_NAV_LINK = "v1/demo-assets-first-edition.md"
+DOCS_NAV_DOC = "docs/README.md"
 
 
 def load_text(relative_path: str) -> str:
@@ -29,13 +39,15 @@ def build_validator(relative_path: str) -> Draft202012Validator:
 
 def test_week1_freeze_docs_are_linked_from_readme_and_contract():
     readme = load_text("README.md")
+    docs_nav = load_text(DOCS_NAV_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
 
     assert "docs/contracts/week1-cao-le-freeze.md" in readme
-    assert "docs/demo-assets-baseline.md" in readme
-    assert "docs/demo-assets-first-edition.md" in readme
+    assert "docs/README.md" in readme
+    assert DEMO_ASSETS_BASELINE_NAV_LINK in docs_nav
+    assert DEMO_ASSETS_FIRST_EDITION_NAV_LINK in docs_nav
     assert "week1-cao-le-freeze.md" in api_contract
-    assert "../demo-assets-baseline.md" in api_contract
+    assert "../v1/demo-assets-baseline.md" in api_contract
 
 
 def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
@@ -68,7 +80,7 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
 def test_week2_video_outline_lazy_handout_semantics_are_frozen():
     api_contract = load_text("docs/contracts/api-contract.md")
     week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
-    weekly_plan = load_text("WEEKLY_PLAN.md")
+    weekly_plan = load_text(WEEKLY_PLAN_DOC)
     env_example = load_text(".env.example")
 
     for token in (
@@ -87,6 +99,16 @@ def test_week2_video_outline_lazy_handout_semantics_are_frozen():
         "KNOWLINK_VIVO_HANDOUT_BLOCK_MODEL",
         "KNOWLINK_VIVO_HANDOUT_TIMEOUT_SEC",
         "KNOWLINK_VIVO_HANDOUT_BLOCK_TIMEOUT_SEC",
+        "KNOWLINK_HANDOUT_OUTLINE_PROVIDER",
+        "KNOWLINK_HANDOUT_BLOCK_PROVIDER",
+        "KNOWLINK_QA_PROVIDER",
+        "KNOWLINK_DEEPSEEK_API_KEY",
+        "KNOWLINK_DEEPSEEK_BASE_URL",
+        "KNOWLINK_DEEPSEEK_MODEL",
+        "KNOWLINK_DEEPSEEK_REASONING_EFFORT",
+        "KNOWLINK_DEEPSEEK_QUIZ_TIMEOUT_SEC",
+        "deepseek-v4-flash",
+        "https://api.deepseek.com",
         "KNOWLINK_ENABLE_VIVO_EMBEDDING",
         "KNOWLINK_VIVO_EMBEDDING_MODEL",
         "KNOWLINK_VIVO_EMBEDDING_TIMEOUT_SEC",
@@ -116,7 +138,7 @@ def test_week2_video_outline_lazy_handout_semantics_are_frozen():
     assert "`knowledge_extract` 在视频优先链路中表示目录抽取 ready" in weekly_plan
     assert "schema valid 当成 timeline valid" in week2_contract
     assert "只描述 `ready` block 的 AI 生成结果" in week2_contract
-    assert "视频引用必须落在该 outline item 的 `startSec/endSec` 范围内" in week2_contract
+    assert "视频引用必须落在该 outline child item 的 `startSec/endSec` 范围内" in week2_contract
     assert '"outlineReady": true' in api_contract
     assert '"generatedKnowledgePointCount": 0' in api_contract
     assert '"outlineStatus": "ready"' in api_contract
@@ -129,13 +151,27 @@ def test_latest_outline_read_model_requires_source_segment_keys():
         "### `GET /api/v1/courses/{courseId}/handouts/latest/outline`", 1
     )[1].split("### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`", 1)[0]
 
+    assert '"children": [' in outline_section
     assert '"sourceSegmentKeys": ["mp4-c1", "mp4-c2"]' in outline_section
-    assert "`items[*].sourceSegmentKeys` 是 API read model 必返字段" in outline_section
+    assert "`items[*].children[*].sourceSegmentKeys` 是 API read model 必返字段" in outline_section
+    assert "大标题没有 `blockId`" in outline_section
     assert "前端可忽略展示" in outline_section
 
 
+def test_latest_blocks_contract_exposes_generation_metadata_and_public_citations():
+    api_contract = load_text("docs/contracts/api-contract.md")
+
+    blocks_section = api_contract.split(
+        "### `GET /api/v1/courses/{courseId}/handouts/latest/blocks`", 1
+    )[1].split("### `POST /api/v1/handout-blocks/{blockId}/generate`", 1)[0]
+
+    assert '"generationMetadata": {' in blocks_section
+    assert "`items[*].generationMetadata`" in blocks_section
+    assert "`segmentId` / `segmentKey`" in blocks_section
+
+
 def test_knowledge_point_block_ownership_contract_is_frozen():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
 
     knowledge_points_section = week2_contract.split("### 1.3 `knowledge_points`", 1)[1].split(
@@ -216,9 +252,9 @@ def test_parse_contract_documents_quality_gate_and_vision_env_vars():
 
 
 def test_bilibili_reserved_contract_is_aligned_across_docs():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
-    team_division = load_text("TEAM_DIVISION.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
     error_codes = load_text("docs/contracts/error-codes.md")
 
@@ -235,8 +271,8 @@ def test_bilibili_reserved_contract_is_aligned_across_docs():
 
 def test_bilibili_stub_owner_is_consistent_across_collaboration_docs():
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
-    team_division = load_text("TEAM_DIVISION.md")
-    weekly_plan = load_text("WEEKLY_PLAN.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
+    weekly_plan = load_text(WEEKLY_PLAN_DOC)
 
     assert "由曹乐在第 2 周完成 stub 实现" not in freeze_doc
     assert "杨彩艺" in freeze_doc
@@ -263,8 +299,38 @@ def test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape(
     assert '"answerCount"' not in delete_session_section
 
 
+def test_course_resource_playback_contract_is_frozen():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    error_codes = load_text("docs/contracts/error-codes.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
+
+    playback_section = api_contract.split(
+        "### `GET /api/v1/course-resources/{resourceId}/playback`", 1
+    )[1].split("### `DELETE /api/v1/courses/{courseId}/resources/{resourceId}`", 1)[0]
+
+    for token in (
+        "videoResourceId",
+        "playbackUrl",
+        "mimeType",
+        "expiresAt",
+        "durationSec",
+        "KNOWLINK_MINIO_PUBLIC_ENDPOINT",
+        "http://127.0.0.1:9000",
+        "minio:9000",
+        "`404 resource.not_found`",
+        "`409 resource.not_video`",
+        "`503 resource.playback_unavailable`",
+    ):
+        assert token in playback_section
+
+    for token in ("resource.not_found", "resource.not_video", "resource.playback_unavailable"):
+        assert token in error_codes
+
+    assert "GET /api/v1/course-resources/{resourceId}/playback" in team_division
+
+
 def test_demo_token_and_statuses_are_consistent_across_docs():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
     env_example = load_text(".env.example")
@@ -309,6 +375,44 @@ def test_demo_token_and_statuses_are_consistent_across_docs():
     assert "`bilibili_import_run`" in api_contract
 
 
+def test_phase5_runtime_defaults_and_resource_delete_contract_are_documented():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    error_codes = load_text("docs/contracts/error-codes.md")
+    env_example = load_text(".env.example")
+    readme = load_text("README.md")
+
+    assert "KNOWLINK_TASK_QUEUE=dramatiq" in env_example
+    assert "KNOWLINK_SCHEDULER_ENABLED=false" in env_example
+    assert "KNOWLINK_ENV=development" in env_example
+    assert "`409 resource.has_dependents`" in api_contract
+    assert "resource.has_dependents" in error_codes
+    assert "scheduler 默认禁用" in readme
+    assert "Dramatiq worker 和 scheduler" not in readme
+
+
+def test_phase5_async_enqueue_and_retry_errors_are_documented():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    error_codes = load_text("docs/contracts/error-codes.md")
+
+    expected_errors = (
+        "async_task.enqueue_failed",
+        "pipeline.task_not_found",
+        "pipeline.task_not_retryable",
+        "pipeline.task_retry_unsupported",
+        "pipeline.task_retry_stale",
+    )
+    for error_code in expected_errors:
+        assert error_code in api_contract
+        assert error_code in error_codes
+
+    assert "`503 async_task.enqueue_failed`" in api_contract
+    assert "`POST /api/v1/async-tasks/{taskId}/retry`" in api_contract
+    assert "只有 `failed`、`queued` 状态可通过该接口重新入队" in api_contract
+    assert "`retrying` 等可重试任务" not in api_contract
+    assert "任务状态重置为 `queued` 时发现记录已变化或不可写" in api_contract
+    assert "任务状态更新为 retry 时" not in api_contract
+
+
 def test_async_entity_accepts_bilibili_import_run():
     entity = AsyncEntity(type="bilibili_import_run", id=9101)
     assert entity.type == "bilibili_import_run"
@@ -316,7 +420,7 @@ def test_async_entity_accepts_bilibili_import_run():
 
 
 def test_lazy_handout_block_async_and_status_contract_are_frozen():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
 
     for text in (architecture, api_contract):
@@ -334,7 +438,7 @@ def test_lazy_handout_block_async_and_status_contract_are_frozen():
 
 
 def test_handout_version_status_semantics_are_frozen():
-    architecture = load_text("ARCHITECTURE.md")
+    architecture = load_text(ARCHITECTURE_DOC)
     api_contract = load_text("docs/contracts/api-contract.md")
 
     for text in (architecture, api_contract):
@@ -360,13 +464,13 @@ def test_freeze_doc_tracks_seed_titles_and_fixed_manual_course_title():
 
 def test_collaboration_docs_expose_change_flow_and_priority_matrices():
     readme = load_text("README.md")
-    team_division = load_text("TEAM_DIVISION.md")
-    scaffold = load_text("docs/development-scaffold.md")
+    team_division = load_text(TEAM_DIVISION_DOC)
+    scaffold = load_text(SCAFFOLD_DOC)
 
     assert "文档优先级矩阵" in readme
     assert "api-contract.md" in readme
-    assert "ARCHITECTURE.md" in readme
-    assert "TEAM_DIVISION.md" in readme
+    assert ARCHITECTURE_DOC in readme
+    assert TEAM_DIVISION_DOC in readme
 
     assert "Schema / Contract 变更流程" in team_division
     assert "文档优先级矩阵" in team_division
@@ -435,6 +539,7 @@ def test_collaboration_docs_expose_change_flow_and_priority_matrices():
                     {"resourceId": 503, "refLabel": "DOCX 积分部分", "anchorKey": "section-integral"},
                     {"resourceId": 504, "refLabel": "视频 02:00-04:00", "startSec": 120, "endSec": 240},
                 ],
+                "generationMetadata": {"source": "model", "reason": "model_response"},
             },
         ),
     ],
@@ -594,26 +699,36 @@ def test_handout_outline_schema_accepts_valid_payload():
         "summary": "按视频时间线组织的讲义目录",
         "items": [
             {
-                "outlineKey": "outline-1",
-                "title": "集合的基本概念",
-                "summary": "介绍集合、元素和属于关系",
+                "outlineKey": "section-1",
+                "title": "集合的概念与表示",
+                "summary": "从集合定义过渡到集合表示方法",
                 "startSec": 0,
-                "endSec": 180,
-                "sortNo": 1,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
-                "topicTags": ["集合"],
-            },
-            {
-                "outlineKey": "outline-2",
-                "title": "集合的表示方法",
-                "summary": "从列举法过渡到描述法",
-                "startSec": 180,
                 "endSec": 360,
-                "sortNo": 2,
-                "generationStatus": "ready",
-                "sourceSegmentKeys": ["mp4-c3"],
-                "topicTags": [],
+                "sortNo": 1,
+                "children": [
+                    {
+                        "outlineKey": "outline-1",
+                        "title": "集合的基本概念",
+                        "summary": "介绍集合、元素和属于关系",
+                        "startSec": 0,
+                        "endSec": 180,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c1", "mp4-c2"],
+                        "topicTags": ["集合"],
+                    },
+                    {
+                        "outlineKey": "outline-2",
+                        "title": "集合的表示方法",
+                        "summary": "从列举法过渡到描述法",
+                        "startSec": 180,
+                        "endSec": 360,
+                        "sortNo": 2,
+                        "generationStatus": "ready",
+                        "sourceSegmentKeys": ["mp4-c3"],
+                        "topicTags": [],
+                    },
+                ],
             },
         ],
     }
@@ -628,24 +743,34 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
         "summary": "结构合法但时间线非法",
         "items": [
             {
-                "outlineKey": "outline-1",
-                "title": "第一段",
-                "summary": "第一段",
+                "outlineKey": "section-1",
+                "title": "非法父级",
+                "summary": "非法父级",
                 "startSec": 0,
-                "endSec": 100,
-                "sortNo": 1,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c1"],
-            },
-            {
-                "outlineKey": "outline-1",
-                "title": "第二段",
-                "summary": "第二段",
-                "startSec": 90,
                 "endSec": 120,
                 "sortNo": 1,
-                "generationStatus": "pending",
-                "sourceSegmentKeys": ["mp4-c2"],
+                "children": [
+                    {
+                        "outlineKey": "outline-1",
+                        "title": "第一段",
+                        "summary": "第一段",
+                        "startSec": 0,
+                        "endSec": 100,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c1"],
+                    },
+                    {
+                        "outlineKey": "outline-1",
+                        "title": "第二段",
+                        "summary": "第二段",
+                        "startSec": 90,
+                        "endSec": 120,
+                        "sortNo": 1,
+                        "generationStatus": "pending",
+                        "sourceSegmentKeys": ["mp4-c2"],
+                    },
+                ],
             },
         ],
     }
@@ -673,7 +798,7 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
                     "startSec": 0,
                     "endSec": 180,
                     "sortNo": 1,
-                    "generationStatus": "pending",
+                    "children": [],
                 }
             ],
         },
@@ -688,8 +813,18 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
                     "startSec": 0,
                     "endSec": 180,
                     "sortNo": 1,
-                    "generationStatus": "done",
-                    "sourceSegmentKeys": ["mp4-c1"],
+                    "children": [
+                        {
+                            "outlineKey": "outline-1",
+                            "title": "bad",
+                            "summary": "bad",
+                            "startSec": 0,
+                            "endSec": 180,
+                            "sortNo": 1,
+                            "generationStatus": "done",
+                            "sourceSegmentKeys": ["mp4-c1"],
+                        }
+                    ],
                 }
             ],
         },
@@ -698,15 +833,25 @@ def test_handout_outline_timeline_validator_catches_contract_invalid_payload():
             "summary": "bad",
             "items": [
                 {
-                    "outlineKey": "outline-1",
+                    "outlineKey": "section-1",
                     "title": "bad",
                     "summary": "bad",
                     "startSec": 0,
                     "endSec": 180,
                     "sortNo": 1,
-                    "generationStatus": "pending",
+                    "children": [
+                        {
+                            "outlineKey": "outline-1",
+                            "title": "bad",
+                            "summary": "bad",
+                            "startSec": 0,
+                            "endSec": 180,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": ["mp4-c1"],
+                        }
+                    ],
                     "sourceSegmentKeys": ["mp4-c1"],
-                    "unexpected": True,
                 }
             ],
         },
@@ -751,6 +896,7 @@ def test_handout_block_schema_accepts_valid_lazy_block_payload():
                 "pageNo": 1,
             },
         ],
+        "generationMetadata": {"source": "model", "reason": "model_response"},
     }
 
     assert "ready handout block" in schema["description"]
@@ -837,16 +983,111 @@ def test_handout_block_schema_rejects_invalid_lazy_block_payloads(payload: dict)
     ("schema_path", "payload"),
     [
         (
+            "schemas/ai/handout_block.schema.json",
+            {
+                "outlineKey": "outline-1",
+                "title": "集合的基本概念",
+                "summary": "介绍集合、元素和属于关系",
+                "contentMd": "### 集合的基本概念\n集合由确定对象组成。",
+                "estimatedMinutes": 6,
+                "sourceSegmentKeys": ["mp4-c1"],
+                "knowledgePoints": [
+                    {
+                        "knowledgePointKey": "kp-set-basic",
+                        "displayName": "集合",
+                        "description": "集合是确定对象组成的整体。",
+                        "difficultyLevel": "beginner",
+                        "importanceScore": 90,
+                        "sortNo": 1,
+                    }
+                ],
+                "citations": [
+                    {
+                        "resourceId": 501,
+                        "segmentKey": "mp4-c1",
+                        "refLabel": "视频 00:00-03:00",
+                        "startSec": 0,
+                        "endSec": 180,
+                    }
+                ],
+            },
+        ),
+        (
+            "schemas/ai/qa_response.schema.json",
+            {
+                "answerMd": "回答内容",
+                "answerType": "direct_answer",
+                "citations": [{"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}],
+            },
+        ),
+    ],
+)
+def test_phase4_ai_schemas_reject_missing_generation_metadata(schema_path: str, payload: dict):
+    with pytest.raises(ValidationError):
+        build_validator(schema_path).validate(payload)
+
+
+def test_handout_block_response_dto_exposes_generation_metadata_alias():
+    payload = HandoutBlockResponse(
+        blockId=4001,
+        handoutVersionId=3001,
+        outlineKey="outline-1",
+        title="极限与连续",
+        summary="先抓必考定义和题型",
+        status="ready",
+        generationMetadata={"source": "fallback", "reason": "model_unavailable"},
+        citations=[],
+    ).model_dump(by_alias=True)
+
+    assert payload["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
+
+
+@pytest.mark.parametrize(
+    ("schema_path", "payload"),
+    [
+        (
             "schemas/ai/quiz_generation.schema.json",
             {
                 "quizType": "exam_drill",
                 "questions": [
                     {
-                        "stemMd": "1+1=?",
-                        "options": ["1", "2"],
-                        "correctAnswer": "2",
+                        "questionKey": "q1-kp-limit",
+                        "questionType": "single_choice",
+                        "stemMd": "关于极限定义，哪项说法正确？",
+                        "options": ["A", "B", "C", "D"],
+                        "correctAnswer": "A",
                         "explanationMd": "基础算术。",
                         "difficultyLevel": "easy",
+                        "knowledgePointKey": "kp-limit",
+                        "knowledgePointName": "极限定义",
+                        "sourceBlockKey": "block-limit",
+                        "sourceSegmentKeys": ["pdf-p1"],
+                    },
+                    {
+                        "questionKey": "q2-kp-continuity",
+                        "questionType": "single_choice",
+                        "stemMd": "关于连续性，哪项说法正确？",
+                        "options": ["A", "B", "C", "D"],
+                        "correctAnswer": "A",
+                        "explanationMd": "依据当前讲义块。",
+                        "difficultyLevel": "medium",
+                        "knowledgePointKey": "kp-continuity",
+                        "knowledgePointName": "连续性",
+                        "sourceBlockKey": "block-continuity",
+                        "sourceSegmentKeys": ["pdf-p2"],
+                    },
+                    {
+                        "questionKey": "q3-kp-derivative",
+                        "questionType": "single_choice",
+                        "stemMd": "关于导数，哪项说法正确？",
+                        "options": ["A", "B", "C", "D"],
+                        "correctAnswer": "A",
+                        "explanationMd": "依据当前讲义块。",
+                        "difficultyLevel": "hard",
+                        "knowledgePointKey": "kp-derivative",
+                        "knowledgePointName": "导数",
+                        "sourceBlockKey": "block-derivative",
+                        "sourceSegmentKeys": ["pdf-p3"],
                     }
                 ],
             },
@@ -856,18 +1097,61 @@ def test_handout_block_schema_rejects_invalid_lazy_block_payloads(payload: dict)
             {
                 "tasks": [
                     {
+                        "taskKey": "review-kp-limit",
                         "taskType": "redo_quiz",
                         "priorityScore": 80,
                         "reasonText": "错题集中。",
                         "recommendedMinutes": 15,
+                        "knowledgePointKey": "kp-limit",
+                        "sourceQuestionKeys": ["q1-kp-limit"],
+                        "sourceBlockKey": "block-limit",
+                        "sourceSegmentKeys": ["pdf-p1"],
+                        "reviewOrder": 1,
+                        "reasonTags": ["recent_wrong", "low_mastery"],
+                        "recommendedAction": {
+                            "type": "redo_quiz",
+                            "targetBlockKey": "block-limit",
+                            "label": "再练同类题",
+                        },
                     }
                 ],
             },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {"tasks": []},
         ),
     ],
 )
 def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload: dict):
     build_validator(schema_path).validate(payload)
+
+
+def _quiz_question_payload(index: int) -> dict:
+    return {
+        "questionKey": f"q{index}",
+        "questionType": "single_choice",
+        "stemMd": "题干",
+        "options": ["A", "B", "C", "D"],
+        "correctAnswer": "A",
+        "explanationMd": "解释",
+        "difficultyLevel": "easy",
+        "knowledgePointKey": f"kp-{index}",
+        "knowledgePointName": "知识点",
+        "sourceBlockKey": f"block-{index}",
+        "sourceSegmentKeys": [f"seg-{index}"],
+    }
+
+
+def test_quiz_schema_accepts_live_generation_question_count_bounds():
+    validator = build_validator("schemas/ai/quiz_generation.schema.json")
+    for count in (1, 10):
+        validator.validate(
+            {
+                "quizType": "chapter_review",
+                "questions": [_quiz_question_payload(index) for index in range(1, count + 1)],
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -885,13 +1169,52 @@ def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload
             "schemas/ai/quiz_generation.schema.json",
             {
                 "quizType": "exam_drill",
+                "questions": [_quiz_question_payload(index) for index in range(1, 12)],
+            },
+        ),
+        (
+            "schemas/ai/quiz_generation.schema.json",
+            {
+                "quizType": "exam_drill",
                 "questions": [
                     {
+                        "questionKey": "q1",
+                        "questionType": "single_choice",
                         "stemMd": "题干",
-                        "options": ["A", "B"],
+                        "options": ["A", "B", "C", "D"],
                         "correctAnswer": "A",
                         "explanationMd": "解释",
                         "difficultyLevel": "expert",
+                        "knowledgePointKey": "kp-1",
+                        "knowledgePointName": "知识点",
+                        "sourceBlockKey": "block-1",
+                        "sourceSegmentKeys": ["seg-1"],
+                    },
+                    {
+                        "questionKey": "q2",
+                        "questionType": "single_choice",
+                        "stemMd": "题干",
+                        "options": ["A", "B", "C", "D"],
+                        "correctAnswer": "A",
+                        "explanationMd": "解释",
+                        "difficultyLevel": "easy",
+                        "knowledgePointKey": "kp-2",
+                        "knowledgePointName": "知识点",
+                        "sourceBlockKey": "block-2",
+                        "sourceSegmentKeys": ["seg-2"],
+                    },
+                    {
+                        "questionKey": "q3",
+                        "questionType": "single_choice",
+                        "stemMd": "题干",
+                        "options": ["A", "B", "C", "D"],
+                        "correctAnswer": "A",
+                        "explanationMd": "解释",
+                        "difficultyLevel": "easy",
+                        "knowledgePointKey": "kp-3",
+                        "knowledgePointName": "知识点",
+                        "sourceBlockKey": "block-3",
+                        "sourceSegmentKeys": ["seg-3"],
                     }
                 ],
             },
@@ -902,12 +1225,44 @@ def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload
                 "quizType": "exam_drill",
                 "questions": [
                     {
+                        "questionKey": "q1",
                         "stemMd": "题干",
-                        "options": ["A", "B"],
+                        "options": ["A", "B", "C", "D"],
                         "correctAnswer": "A",
                         "explanationMd": "解释",
                         "difficultyLevel": "easy",
                         "questionType": "single_choice",
+                        "knowledgePointKey": "kp-1",
+                        "knowledgePointName": "知识点",
+                        "sourceBlockKey": "block-1",
+                        "sourceSegmentKeys": ["seg-1"],
+                        "pageNo": 2,
+                    },
+                    {
+                        "questionKey": "q2",
+                        "stemMd": "题干",
+                        "options": ["A", "B", "C", "D"],
+                        "correctAnswer": "A",
+                        "explanationMd": "解释",
+                        "difficultyLevel": "easy",
+                        "questionType": "single_choice",
+                        "knowledgePointKey": "kp-2",
+                        "knowledgePointName": "知识点",
+                        "sourceBlockKey": "block-2",
+                        "sourceSegmentKeys": ["seg-2"],
+                    },
+                    {
+                        "questionKey": "q3",
+                        "stemMd": "题干",
+                        "options": ["A", "B", "C", "D"],
+                        "correctAnswer": "A",
+                        "explanationMd": "解释",
+                        "difficultyLevel": "easy",
+                        "questionType": "single_choice",
+                        "knowledgePointKey": "kp-3",
+                        "knowledgePointName": "知识点",
+                        "sourceBlockKey": "block-3",
+                        "sourceSegmentKeys": ["seg-3"],
                     }
                 ],
             },
@@ -915,10 +1270,6 @@ def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload
         (
             "schemas/ai/review_tasks.schema.json",
             {},
-        ),
-        (
-            "schemas/ai/review_tasks.schema.json",
-            {"tasks": []},
         ),
         (
             "schemas/ai/review_tasks.schema.json",
@@ -969,6 +1320,32 @@ def test_quiz_and_review_schemas_accept_valid_payloads(schema_path: str, payload
                         "reasonText": "原因",
                         "recommendedMinutes": 15,
                         "intensity": "high",
+                    }
+                ]
+            },
+        ),
+        (
+            "schemas/ai/review_tasks.schema.json",
+            {
+                "tasks": [
+                    {
+                        "taskKey": "review-kp-limit",
+                        "taskType": "redo_quiz",
+                        "priorityScore": 80,
+                        "reasonText": "错题集中。",
+                        "recommendedMinutes": 15,
+                        "knowledgePointKey": "kp-limit",
+                        "sourceQuestionKeys": ["q1-kp-limit"],
+                        "sourceBlockKey": "block-limit",
+                        "sourceSegmentKeys": ["pdf-p1"],
+                        "reviewOrder": 1,
+                        "reasonTags": ["recent_wrong"],
+                        "recommendedAction": {
+                            "type": "redo_quiz",
+                            "targetBlockKey": "block-limit",
+                            "label": "再练同类题",
+                        },
+                        "pageNo": 2,
                     }
                 ]
             },
@@ -1443,7 +1820,7 @@ def test_normalized_document_schema_rejects_garbled_text_content(bad_text: str):
 
 
 def test_demo_asset_baseline_covers_fixed_joint_test_set():
-    baseline_doc = load_text("docs/demo-assets-baseline.md")
+    baseline_doc = load_text(DEMO_ASSETS_BASELINE_DOC)
 
     for token in (
         "knowlink-demo-main.mp4",
@@ -1458,7 +1835,7 @@ def test_demo_asset_baseline_covers_fixed_joint_test_set():
 
 
 def test_first_edition_manifest_matches_first_edition_doc():
-    first_edition_doc = load_text("docs/demo-assets-first-edition.md")
+    first_edition_doc = load_text(DEMO_ASSETS_FIRST_EDITION_DOC)
     manifest = load_json("server/seeds/demo_assets_manifest.json")
 
     assert manifest["assetSetId"] == "first-edition-what-is-set"

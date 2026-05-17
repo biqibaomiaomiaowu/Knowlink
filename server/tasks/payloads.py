@@ -13,13 +13,23 @@ class ParsePipelinePayload(CamelModel):
 
 class HandoutGeneratePayload(CamelModel):
     course_id: int
-    parse_run_id: int
-    preferred_style: str
+    handout_version_id: int
+    source_parse_run_id: int
+
+
+class HandoutBlockGeneratePayload(CamelModel):
+    course_id: int
+    handout_version_id: int
+    handout_block_id: int
+    source_parse_run_id: int
 
 
 class QuizGeneratePayload(CamelModel):
     course_id: int
-    handout_version_id: int
+    quiz_id: int
+    handout_version_id: int | None = None
+    source_parse_run_id: int | None = None
+    question_count_level: Literal["small", "medium", "large"] = "medium"
 
 
 class ReviewRefreshPayload(CamelModel):
@@ -30,6 +40,7 @@ class ReviewRefreshPayload(CamelModel):
 TASK_PAYLOAD_MODELS = {
     "parse_pipeline": ParsePipelinePayload,
     "handout_generate": HandoutGeneratePayload,
+    "handout_block_generate": HandoutBlockGeneratePayload,
     "quiz_generate": QuizGeneratePayload,
     "review_refresh": ReviewRefreshPayload,
 }

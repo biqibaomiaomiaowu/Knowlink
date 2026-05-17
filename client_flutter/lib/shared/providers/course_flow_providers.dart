@@ -22,6 +22,16 @@ class PlayerState {
   }
 }
 
+class HandoutResumeTarget {
+  const HandoutResumeTarget({
+    required this.courseId,
+    required this.blockId,
+  });
+
+  final String courseId;
+  final int blockId;
+}
+
 class CourseFlowController extends Notifier<CourseFlowState> {
   @override
   CourseFlowState build() => const CourseFlowState();
@@ -46,6 +56,7 @@ class CourseFlowController extends Notifier<CourseFlowState> {
       clearQuizAttemptId: true,
       clearReviewTaskRunId: true,
     );
+    _resetCourseInteractionState();
   }
 
   void startCourse(String courseId) {
@@ -53,6 +64,7 @@ class CourseFlowController extends Notifier<CourseFlowState> {
       return;
     }
     state = CourseFlowState(courseId: courseId);
+    _resetCourseInteractionState();
   }
 
   void setLifecycleStatus(String status) {
@@ -87,6 +99,28 @@ class CourseFlowController extends Notifier<CourseFlowState> {
     state = state.copyWith(nextAction: nextAction);
   }
 
+  void syncPipelineStatus({
+    required String lifecycleStatus,
+    required String pipelineStage,
+    required String pipelineStatus,
+    required int progressPct,
+    int? activeParseRunId,
+    int? activeHandoutVersionId,
+    required String nextAction,
+  }) {
+    state = state.copyWith(
+      lifecycleStatus: lifecycleStatus,
+      pipelineStage: pipelineStage,
+      pipelineStatus: pipelineStatus,
+      progressPct: progressPct,
+      activeParseRunId: activeParseRunId,
+      clearActiveParseRunId: activeParseRunId == null,
+      activeHandoutVersionId: activeHandoutVersionId,
+      clearActiveHandoutVersionId: activeHandoutVersionId == null,
+      nextAction: nextAction,
+    );
+  }
+
   void setSession(int? sessionId) {
     state = sessionId == null
         ? state.copyWith(clearSessionId: true)
@@ -110,6 +144,11 @@ class CourseFlowController extends Notifier<CourseFlowState> {
         ? state.copyWith(clearReviewTaskRunId: true)
         : state.copyWith(reviewTaskRunId: reviewTaskRunId);
   }
+
+  void _resetCourseInteractionState() {
+    ref.read(activeBlockProvider.notifier).state = null;
+    ref.read(playerStateProvider.notifier).state = const PlayerState();
+  }
 }
 
 final courseFlowProvider =
@@ -125,4 +164,8 @@ final activeBlockProvider = StateProvider<int?>((ref) => null);
 
 final playerStateProvider = StateProvider<PlayerState>(
   (ref) => const PlayerState(),
+);
+
+final handoutResumeTargetProvider = StateProvider<HandoutResumeTarget?>(
+  (ref) => null,
 );

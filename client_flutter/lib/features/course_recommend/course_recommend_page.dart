@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_error_view.dart';
 import '../../core/widgets/app_loading_view.dart';
 import '../../core/widgets/app_scaffold.dart';
+import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/confirm_recommendation_result.dart';
 import '../../shared/models/recommendation_card.dart';
 import '../../shared/models/recommendation_enums.dart';
@@ -102,9 +104,12 @@ class _CourseRecommendPageState extends ConsumerState<CourseRecommendPage> {
 
     return AppScaffold(
       title: '智能课程推荐',
+      activeTab: KnowLinkTab.recommend,
       body: ListView(
         controller: _scrollController,
         children: [
+          const _RecommendHero(),
+          const SizedBox(height: 22),
           _RequestDraftCard(
             goalTextController: _goalTextController,
             timeBudgetController: _timeBudgetController,
@@ -176,7 +181,7 @@ class _CourseRecommendPageState extends ConsumerState<CourseRecommendPage> {
             },
             onSubmit: notifier.fetchRecommendations,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           if (state.isFetchingRecommendations)
             const AppLoadingView(label: '正在获取推荐')
           else if (state.recommendations.hasError)
@@ -302,96 +307,148 @@ class _RequestDraftCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Week 1 推荐条件',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: goalTextController,
-              enabled: !isDraftLocked,
-              decoration: const InputDecoration(
-                labelText: '学习目标',
-                hintText: '例如：高等数学期末复习',
-              ),
-              onChanged: isDraftLocked ? null : onGoalTextChanged,
-            ),
-            const SizedBox(height: 12),
-            Row(
+            const Row(
               children: [
+                _StepBadge(number: '1'),
+                SizedBox(width: 12),
                 Expanded(
-                  child: DropdownButtonFormField<SelfLevel>(
-                    initialValue: selfLevel,
-                    decoration: const InputDecoration(labelText: '基础水平'),
-                    items: SelfLevel.values
-                        .map(
-                          (level) => DropdownMenuItem(
-                            value: level,
-                            child: Text(_selfLevelLabel(level)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: isDraftLocked ? null : onSelfLevelChanged,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: timeBudgetController,
-                    enabled: !isDraftLocked,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      errorText: timeBudgetErrorText,
-                      labelText: '时间预算（分钟）',
+                  child: Text(
+                    '设置你的学习偏好',
+                    style: TextStyle(
+                      color: AppTheme.ink,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
                     ),
-                    onChanged: isDraftLocked ? null : onTimeBudgetChanged,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<PreferredStyle>(
-                    initialValue: preferredStyle,
-                    decoration: const InputDecoration(labelText: '讲义偏好'),
-                    items: PreferredStyle.values
-                        .map(
-                          (style) => DropdownMenuItem(
-                            value: style,
-                            child: Text(_preferredStyleLabel(style)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: isDraftLocked ? null : onPreferredStyleChanged,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: examAtController,
-                    enabled: !isDraftLocked,
-                    decoration: InputDecoration(
-                      labelText: '考试时间（可选）',
-                      hintText: '2026-06-15T09:00:00+08:00',
-                      errorText: examAtErrorText,
+            const SizedBox(height: 20),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useGrid = constraints.maxWidth >= 900;
+                final fields = [
+                  _FieldShell(
+                    label: '学习目标',
+                    child: TextField(
+                      controller: goalTextController,
+                      enabled: !isDraftLocked,
+                      decoration: const InputDecoration(
+                        hintText: '掌握数据结构与算法基础',
+                      ),
+                      onChanged: isDraftLocked ? null : onGoalTextChanged,
                     ),
-                    onChanged: isDraftLocked ? null : onExamAtChanged,
                   ),
-                ),
-              ],
+                  _FieldShell(
+                    label: '基础水平',
+                    child: DropdownButtonFormField<SelfLevel>(
+                      initialValue: selfLevel,
+                      decoration: const InputDecoration(),
+                      items: SelfLevel.values
+                          .map(
+                            (level) => DropdownMenuItem(
+                              value: level,
+                              child: Text(_selfLevelLabel(level)),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: isDraftLocked ? null : onSelfLevelChanged,
+                    ),
+                  ),
+                  _FieldShell(
+                    label: '时间周期',
+                    child: TextField(
+                      controller: timeBudgetController,
+                      enabled: !isDraftLocked,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        hintText: '例如：480',
+                        suffixText: '分钟',
+                        errorText: timeBudgetErrorText,
+                      ),
+                      onChanged: isDraftLocked ? null : onTimeBudgetChanged,
+                    ),
+                  ),
+                  _FieldShell(
+                    label: '偏好难度 / 偏好选项',
+                    child: DropdownButtonFormField<PreferredStyle>(
+                      initialValue: preferredStyle,
+                      decoration: const InputDecoration(),
+                      items: PreferredStyle.values
+                          .map(
+                            (style) => DropdownMenuItem(
+                              value: style,
+                              child: Text(_preferredStyleLabel(style)),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: isDraftLocked ? null : onPreferredStyleChanged,
+                    ),
+                  ),
+                ];
+                if (!useGrid) {
+                  return Column(
+                    children: [
+                      for (final field in fields) ...[
+                        field,
+                        const SizedBox(height: 12),
+                      ],
+                      _FieldShell(
+                        label: '考试时间（可选）',
+                        child: TextField(
+                          controller: examAtController,
+                          enabled: !isDraftLocked,
+                          decoration: InputDecoration(
+                            hintText: '2026-06-15T09:00:00+08:00',
+                            errorText: examAtErrorText,
+                          ),
+                          onChanged: isDraftLocked ? null : onExamAtChanged,
+                        ),
+                      ),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = 0; i < fields.length; i++) ...[
+                          Expanded(child: fields[i]),
+                          if (i != fields.length - 1) const SizedBox(width: 44),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: 380,
+                      child: _FieldShell(
+                        label: '考试时间（可选）',
+                        child: TextField(
+                          controller: examAtController,
+                          enabled: !isDraftLocked,
+                          decoration: InputDecoration(
+                            hintText: '2026-06-15T09:00:00+08:00',
+                            errorText: examAtErrorText,
+                          ),
+                          onChanged: isDraftLocked ? null : onExamAtChanged,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
+            Center(
+              child: FilledButton.icon(
                 onPressed: isSubmitDisabled ? null : onSubmit,
-                child: Text(isLoading ? '获取中...' : '获取推荐'),
+                icon: Icon(isLoading ? Icons.sync : Icons.refresh),
+                label: Text(isLoading ? '获取中...' : '获取推荐'),
               ),
             ),
           ],
@@ -418,34 +475,56 @@ class _RecommendationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              item.title,
-              style: Theme.of(context).textTheme.titleMedium,
+            const Row(
+              children: [
+                _StepBadge(number: '2'),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '为你推荐的课程',
+                    style: TextStyle(
+                      color: AppTheme.ink,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text('${item.provider} | ${item.level} | ${item.estimatedHours}h'),
-            const SizedBox(height: 8),
-            Text('匹配度 ${item.fitScore}'),
-            const SizedBox(height: 8),
-            for (final reason in item.reasons) Text('- $reason'),
-            const SizedBox(height: 12),
-            Text(
-              '默认资料清单',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 8),
-            _ResourceManifestList(manifest: item.defaultResourceManifest),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: isActionDisabled ? null : onConfirm,
-                child: Text(isConfirming ? '确认中...' : '确认入课'),
-              ),
+            const SizedBox(height: 22),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 900;
+                final cover = _RecommendationCover(title: item.title);
+                final detail = _RecommendationDetail(
+                  item: item,
+                  isConfirming: isConfirming,
+                  isActionDisabled: isActionDisabled,
+                  onConfirm: onConfirm,
+                );
+                if (!isWide) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      cover,
+                      const SizedBox(height: 18),
+                      detail,
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 265, child: cover),
+                    const SizedBox(width: 24),
+                    Expanded(child: detail),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -494,10 +573,11 @@ class _CreatedCourseCard extends StatelessWidget {
               _ResourceManifestList(manifest: manifest),
             ],
             const SizedBox(height: 16),
-            OutlinedButton(
+            OutlinedButton.icon(
               onPressed: () =>
                   context.go('/import?courseId=${course.courseId}'),
-              child: const Text('前往自主导入页'),
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('前往自主导入页'),
             ),
           ],
         ),
@@ -540,8 +620,339 @@ class _EmptyRecommendationsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Card(
       child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('填写条件后点击“获取推荐”，查看真实推荐结果并完成确认入课。'),
+        padding: EdgeInsets.all(22),
+        child: Text('填写条件后点击“重新生成推荐”，查看真实推荐结果并完成确认入课。'),
+      ),
+    );
+  }
+}
+
+class _RecommendHero extends StatelessWidget {
+  const _RecommendHero();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '智能课程推荐',
+          style: TextStyle(
+            color: AppTheme.ink,
+            fontSize: 34,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0,
+          ),
+        ),
+        SizedBox(height: 10),
+        Text(
+          '基于你的学习目标、基础水平、时间预算和内容偏好，为你推荐最合适的课程。',
+          style: TextStyle(
+            color: AppTheme.muted,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FieldShell extends StatelessWidget {
+  const _FieldShell({
+    required this.label,
+    required this.child,
+  });
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppTheme.ink,
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        child,
+      ],
+    );
+  }
+}
+
+class _RecommendationCover extends StatelessWidget {
+  const _RecommendationCover({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return AspectRatio(
+      aspectRatio: 1.32,
+      child: Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF60A5FA), AppTheme.brandBlueDark],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Stack(
+          children: [
+            const Align(
+              alignment: Alignment.topRight,
+              child: Icon(
+                Icons.play_circle_fill,
+                color: Colors.white70,
+                size: 34,
+              ),
+            ),
+            Align(
+              alignment: Alignment.bottomLeft,
+              child: Icon(
+                title.contains('结构')
+                    ? Icons.account_tree_outlined
+                    : Icons.school_outlined,
+                color: Colors.white,
+                size: 96,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationDetail extends StatelessWidget {
+  const _RecommendationDetail({
+    required this.item,
+    required this.isConfirming,
+    required this.isActionDisabled,
+    required this.onConfirm,
+  });
+
+  final RecommendationCardModel item;
+  final bool isConfirming;
+  final bool isActionDisabled;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final fitPct = item.fitScore.clamp(0, 100);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          item.title,
+          style: const TextStyle(
+            color: AppTheme.ink,
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            SourceChip(icon: Icons.source_outlined, label: item.provider),
+            SourceChip(icon: Icons.school_outlined, label: item.level),
+            SourceChip(icon: Icons.sell_outlined, label: '匹配度 $fitPct%'),
+          ],
+        ),
+        const SizedBox(height: 18),
+        const Text(
+          '推荐理由',
+          style: TextStyle(
+            color: AppTheme.ink,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final reason in item.reasons.take(3))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              reason,
+              style: const TextStyle(
+                color: Color(0xFF334155),
+                fontSize: 15,
+                height: 1.45,
+              ),
+            ),
+          ),
+        const SizedBox(height: 18),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cards = [
+              _MetricMiniCard(
+                icon: Icons.schedule,
+                label: '预计学习时长',
+                value: '${item.estimatedHours} 小时',
+                detail:
+                    '约 ${((item.estimatedHours / 8).ceil()).clamp(1, 99)} 周',
+              ),
+              _MetricMiniCard(
+                icon: Icons.ads_click,
+                label: '匹配度',
+                value: '$fitPct%',
+                detail: '高度匹配',
+              ),
+              const _MetricMiniCard(
+                icon: Icons.bar_chart,
+                label: '适配性',
+                value: '非常适合',
+                detail: '你的学习情况',
+              ),
+            ];
+            if (constraints.maxWidth < 620) {
+              return Column(
+                children: [
+                  for (final card in cards) ...[
+                    card,
+                    const SizedBox(height: 8),
+                  ],
+                ],
+              );
+            }
+            return Row(
+              children: [
+                for (var i = 0; i < cards.length; i++) ...[
+                  Expanded(child: cards[i]),
+                  if (i != cards.length - 1) const SizedBox(width: 1),
+                ],
+              ],
+            );
+          },
+        ),
+        if (item.defaultResourceManifest.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          const Divider(),
+          const SizedBox(height: 8),
+          const Text(
+            '补充资料上传（可选）',
+            style: TextStyle(
+              color: AppTheme.ink,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          _ResourceManifestList(manifest: item.defaultResourceManifest),
+        ],
+        const SizedBox(height: 18),
+        Align(
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: 360,
+            child: FilledButton.icon(
+              icon: const Icon(Icons.menu_book_outlined),
+              onPressed: isActionDisabled ? null : onConfirm,
+              label: Text(isConfirming ? '确认中...' : '选择课程并进入解析'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MetricMiniCard extends StatelessWidget {
+  const _MetricMiniCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.detail,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppTheme.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: AppTheme.brandBlue, size: 26),
+          const SizedBox(height: 10),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.muted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.ink,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            detail,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppTheme.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepBadge extends StatelessWidget {
+  const _StepBadge({required this.number});
+
+  final String number;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 30,
+      height: 30,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF60A5FA), AppTheme.brandBlueDark],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        number,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }

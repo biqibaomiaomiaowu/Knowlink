@@ -17,6 +17,7 @@ from pypdf import PdfWriter
 from pypdf.generic import DictionaryObject, NameObject, StreamObject
 
 from server.ai.asr import AsrSegment, VivoLongAsrClient, get_configured_asr_client
+from server.ai.core import AIModelResult, AIProviderError, VisionJsonRequest
 from server.ai.ocr import OcrAssetResult, OcrBox, VivoOcrClient
 from server.ai.vision import (
     VivoVisionClient,
@@ -40,6 +41,19 @@ PNG_BYTES = (
     b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00"
     b"\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+
+class FakeVisionAIService:
+    def __init__(self, responses):
+        self.requests: list[VisionJsonRequest] = []
+        self._responses = list(responses)
+
+    def complete_vision_json(self, request: VisionJsonRequest) -> AIModelResult:
+        self.requests.append(request)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def assert_valid_normalized_document(payload: dict[str, object] | None) -> dict[str, object]:
@@ -1505,26 +1519,14 @@ def test_configured_vision_client_requires_explicit_enable_flag(monkeypatch):
     assert isinstance(get_configured_vision_client(), VivoVisionClient)
 
 
-def test_vivo_vision_client_reports_unsupported_image_model(monkeypatch):
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {"error": {"code": 1010, "message": "Model do not support image input"}},
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+def test_vivo_vision_client_reports_unsupported_image_model():
+    ai_service = FakeVisionAIService([AIProviderError("unsupported image model: Model do not support image input")])
     client = VivoVisionClient(
         app_id="2026764332",
         app_key="fake-key",
         base_url="https://example.invalid/v1",
         model="text-only-model",
+        ai_service=ai_service,
     )
 
     with pytest.raises(VisionModelUnsupportedError):
@@ -1539,58 +1541,33 @@ def test_vivo_vision_client_reports_unsupported_image_model(monkeypatch):
             ],
             resource_type="pdf",
         )
+    assert len(ai_service.requests) == 1
 
 
-def test_vivo_vision_client_uses_batch_multimodal_chat_request(monkeypatch):
-    captured = {}
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
+def test_vivo_vision_client_uses_batch_multimodal_chat_request():
+    ai_service = FakeVisionAIService(
+        [
+            AIModelResult(
+                text="",
+                parsed_json={
+                    "segments": [
                         {
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        "segments": [
-                                            {
-                                                "assetId": "pdf-p1",
-                                                "segmentType": "image_caption",
-                                                "textContent": "Venn 图展示 A∩B。",
-                                            },
-                                            {"assetId": "pdf-p2", "segmentType": "formula", "textContent": "A∩B"},
-                                        ]
-                                    },
-                                    ensure_ascii=False,
-                                )
-                            }
-                        }
+                            "assetId": "pdf-p1",
+                            "segmentType": "image_caption",
+                            "textContent": "Venn 图展示 A∩B。",
+                        },
+                        {"assetId": "pdf-p2", "segmentType": "formula", "textContent": "A∩B"},
                     ]
                 },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["headers"] = dict(request.header_items())
-        captured["body"] = request.data.decode("utf-8")
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
+            )
+        ]
+    )
     client = VivoVisionClient(
         app_id="2026764332",
         app_key="fake-key",
         base_url="https://example.invalid",
         model="unused",
+        ai_service=ai_service,
     )
     results = client.analyze_images(
         [
@@ -1604,7 +1581,7 @@ def test_vivo_vision_client_uses_batch_multimodal_chat_request(monkeypatch):
             VisualAsset(
                 asset_id="pdf-p2",
                 image_bytes=b"png-bytes-2",
-                mime_type="image/png",
+                mime_type="application/octet-stream",
                 location={"pageNo": 2},
                 hint="pdf_page_visual",
             ),
@@ -1613,96 +1590,117 @@ def test_vivo_vision_client_uses_batch_multimodal_chat_request(monkeypatch):
         document_context="第 1 页：集合",
     )
 
-    body = json.loads(captured["body"])
-    assert captured["url"].startswith("https://example.invalid/v1/chat/completions?request_id=")
-    assert captured["headers"]["Authorization"] == "Bearer fake-key"
-    assert captured["headers"]["Content-type"] == "application/json; charset=utf-8"
-    assert captured["timeout"] == 20.0
-    assert body["model"] == "unused"
-    prompt = body["messages"][0]["content"][0]["text"]
+    [request] = ai_service.requests
+    assert request.provider == "vivo"
+    assert request.model == "unused"
+    assert request.temperature == 0.1
+    assert request.timeout_sec == 20.0
+    assert request.metadata["max_tokens"] == 2048
+    assert request.metadata["stream"] is False
+    assert isinstance(request.metadata["request_id"], str)
+    assert request.metadata["request_id"]
+    assert request.metadata["resource_type"] == "pdf"
+    assert request.metadata["asset_labels"] == [
+        '图片 1: assetId=pdf-p1; location={"pageNo": 1}; hint=pdf_page_visual',
+        '图片 2: assetId=pdf-p2; location={"pageNo": 2}; hint=pdf_page_visual',
+    ]
+    prompt = request.prompt
     assert "assetId" in prompt
     assert "只输出上下文缺失" in prompt
     assert "Markdown table" in prompt
     assert "公式尽量内联" in prompt
-    assert body["messages"][0]["content"][2]["image_url"]["url"].startswith("data:image/png;base64,")
-    assert body["messages"][0]["content"][4]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert [image.data for image in request.images] == [b"png-bytes-1", b"png-bytes-2"]
+    assert [image.source_name for image in request.images] == ["pdf-p1", "pdf-p2"]
+    assert [image.mime_type for image in request.images] == ["image/png", "image/png"]
     assert results == [
         VisionAssetResult(asset_id="pdf-p1", segment_type="image_caption", text="Venn 图展示 A∩B。"),
         VisionAssetResult(asset_id="pdf-p2", segment_type="formula", text="A∩B"),
     ]
 
 
-def test_vivo_vision_client_falls_back_to_image_caption_for_plain_response(monkeypatch):
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps({"choices": [{"message": {"content": "这是一张集合关系图。"}}]}, ensure_ascii=False).encode(
-                "utf-8"
-            )
-
-    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
-
+def test_vivo_vision_client_rejects_plain_response_instead_of_caption_fallback():
+    ai_service = FakeVisionAIService([AIModelResult(text="这是一张集合关系图。")])
     client = VivoVisionClient(
         app_id="2026764332",
         app_key="fake-key",
         base_url="https://example.invalid/v1",
         model="Doubao-Seed-2.0-mini",
+        ai_service=ai_service,
     )
-    results = client.analyze_image(
-        b"png-bytes",
-        mime_type="image/png",
-        resource_type="pptx",
-        location={"slideNo": 3},
-        hint="pptx_shape_visual",
-    )
+    with pytest.raises(RuntimeError, match="response is not JSON"):
+        client.analyze_image(
+            b"png-bytes",
+            mime_type="image/png",
+            resource_type="pptx",
+            location={"slideNo": 3},
+            hint="pptx_shape_visual",
+        )
 
-    assert results == [VisionResult(segment_type="image_caption", text="这是一张集合关系图。")]
 
-
-def test_vivo_vision_client_retries_multi_image_errors_as_single_requests(monkeypatch):
-    calls = {"count": 0}
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-        def read(self):
-            return json.dumps(
-                {
-                    "choices": [
+def test_vivo_vision_client_rejects_schema_invalid_segments():
+    ai_service = FakeVisionAIService(
+        [
+            AIModelResult(
+                text="",
+                parsed_json={
+                    "segments": [
                         {
-                            "message": {
-                                "content": json.dumps(
-                                    {"segments": [{"segmentType": "ocr_text", "textContent": "single ok"}]},
-                                    ensure_ascii=False,
-                                )
-                            }
+                            "assetId": "pdf-p1",
+                            "segmentType": "unknown",
+                            "textContent": "无效类型不能静默丢弃。",
                         }
                     ]
                 },
-                ensure_ascii=False,
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            raise OSError("too many image_url content items")
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+            )
+        ]
+    )
     client = VivoVisionClient(
         app_id="2026764332",
         app_key="fake-key",
         base_url="https://example.invalid/v1",
         model="Doubao-Seed-2.0-mini",
+        ai_service=ai_service,
+    )
+
+    with pytest.raises(RuntimeError, match="schema invalid"):
+        client.analyze_images(
+            [
+                VisualAsset(
+                    asset_id="pdf-p1",
+                    image_bytes=b"png-bytes",
+                    mime_type="image/png",
+                    location={"pageNo": 1},
+                    hint="pdf_page_visual",
+                )
+            ],
+            resource_type="pdf",
+        )
+
+
+def test_vivo_vision_client_retries_multi_image_errors_as_single_requests():
+    ai_service = FakeVisionAIService(
+        [
+            AIProviderError("too many image_url content items"),
+            AIModelResult(
+                text=json.dumps(
+                    {"segments": [{"segmentType": "ocr_text", "textContent": "single ok"}]},
+                    ensure_ascii=False,
+                )
+            ),
+            AIModelResult(
+                text=json.dumps(
+                    {"segments": [{"segmentType": "ocr_text", "textContent": "single ok"}]},
+                    ensure_ascii=False,
+                )
+            ),
+        ]
+    )
+    client = VivoVisionClient(
+        app_id="2026764332",
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-mini",
+        ai_service=ai_service,
     )
 
     results = client.analyze_images(
@@ -1713,11 +1711,46 @@ def test_vivo_vision_client_retries_multi_image_errors_as_single_requests(monkey
         resource_type="pdf",
     )
 
-    assert calls["count"] == 3
+    assert len(ai_service.requests) == 3
+    assert [len(request.images) for request in ai_service.requests] == [2, 1, 1]
+    request_ids = [request.metadata["request_id"] for request in ai_service.requests]
+    assert all(isinstance(request_id, str) and request_id for request_id in request_ids)
+    assert len(set(request_ids)) == 3
     assert results == [
         VisionAssetResult(asset_id="a1", segment_type="ocr_text", text="single ok"),
         VisionAssetResult(asset_id="a2", segment_type="ocr_text", text="single ok"),
     ]
+
+
+def test_vivo_vision_client_reports_unsupported_model_error_payload():
+    ai_service = FakeVisionAIService(
+        [
+            AIModelResult(
+                text="",
+                parsed_json={"error": {"code": 1010, "message": "Model do not support image input"}},
+            )
+        ]
+    )
+    client = VivoVisionClient(
+        app_id="2026764332",
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="text-only-model",
+        ai_service=ai_service,
+    )
+
+    with pytest.raises(VisionModelUnsupportedError):
+        client.analyze_images(
+            [
+                VisualAsset(
+                    asset_id="pdf-p1",
+                    image_bytes=b"png-bytes",
+                    mime_type="image/png",
+                    location={"pageNo": 1},
+                )
+            ],
+            resource_type="pdf",
+        )
 
 
 def test_vivo_ocr_client_uses_general_recognition_with_pos_2(monkeypatch):

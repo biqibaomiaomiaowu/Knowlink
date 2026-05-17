@@ -2,6 +2,8 @@ import asyncio
 import json
 import re
 
+import pytest
+
 from server.app import app
 
 
@@ -94,16 +96,33 @@ def create_manual_course(*, idempotency_key: str, title: str) -> tuple[int, dict
 
 
 def upload_ready_pdf(*, course_id: int, idempotency_key: str, suffix: str) -> dict:
+    return upload_ready_resource(
+        course_id=course_id,
+        idempotency_key=idempotency_key,
+        suffix=suffix,
+        resource_type="pdf",
+        mime_type="application/pdf",
+    )
+
+
+def upload_ready_resource(
+    *,
+    course_id: int,
+    idempotency_key: str,
+    suffix: str,
+    resource_type: str,
+    mime_type: str,
+) -> dict:
     status, body = asyncio.run(
         request(
             "POST",
             f"/api/v1/courses/{course_id}/resources/upload-complete",
             headers=AUTH_HEADERS | {"idempotency-key": idempotency_key},
             json_body={
-                "resourceType": "pdf",
-                "objectKey": f"raw/1/{course_id}/{suffix}.pdf",
-                "originalName": f"{suffix}.pdf",
-                "mimeType": "application/pdf",
+                "resourceType": resource_type,
+                "objectKey": f"raw/1/{course_id}/{suffix}.{resource_type}",
+                "originalName": f"{suffix}.{resource_type}",
+                "mimeType": mime_type,
                 "sizeBytes": 1024,
                 "checksum": f"sha256:{suffix}",
             },
@@ -123,6 +142,16 @@ def start_parse(*, course_id: int, idempotency_key: str) -> dict:
     )
     assert status == 200
     return body
+
+
+def valid_inquiry_answers() -> list[dict[str, object]]:
+    return [
+        {"key": "goal_type", "value": "exam_sprint"},
+        {"key": "mastery_level", "value": "intermediate"},
+        {"key": "time_budget_minutes", "value": 90},
+        {"key": "handout_style", "value": "exam"},
+        {"key": "explanation_granularity", "value": "balanced"},
+    ]
 
 
 def test_health_check():
@@ -157,6 +186,7 @@ def test_recommendation_confirm_is_idempotent():
     headers = AUTH_HEADERS | {"idempotency-key": "rec-confirm-1"}
     payload = {
         "goalText": "高等数学期末复习",
+        "examAt": "2026-06-20T09:30:00+08:00",
         "preferredStyle": "exam",
         "titleOverride": "高数期末冲刺课",
     }
@@ -179,6 +209,57 @@ def test_recommendation_confirm_is_idempotent():
     assert first_status == 201
     assert second_status == 201
     assert first["data"]["course"]["courseId"] == second["data"]["course"]["courseId"]
+    assert first["data"]["course"]["examAt"] == "2026-06-20T09:30:00+08:00"
+
+
+def test_recommendation_confirm_idempotency_key_is_scoped_by_catalog():
+    headers = AUTH_HEADERS | {"idempotency-key": "phase3-rec-confirm-shared"}
+    first_status, first = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/recommendations/math-final-01/confirm",
+            headers=headers,
+            json_body={
+                "goalText": "高数期末复习",
+                "preferredStyle": "exam",
+            },
+        )
+    )
+    second_status, second = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/recommendations/linear-final-01/confirm",
+            headers=headers,
+            json_body={
+                "goalText": "线性代数期末复习",
+                "preferredStyle": "quick",
+            },
+        )
+    )
+
+    assert first_status == 201
+    assert second_status == 201
+    assert first["data"]["createdFromCatalogId"] == "math-final-01"
+    assert second["data"]["createdFromCatalogId"] == "linear-final-01"
+    assert first["data"]["course"]["courseId"] != second["data"]["course"]["courseId"]
+
+
+def test_recommendation_confirm_rejects_naive_exam_at():
+    status, body = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/recommendations/math-final-01/confirm",
+            headers=AUTH_HEADERS | {"idempotency-key": "rec-confirm-naive-exam-at"},
+            json_body={
+                "goalText": "高数期末复习",
+                "examAt": "2026-06-20T09:30:00",
+                "preferredStyle": "exam",
+            },
+        )
+    )
+
+    assert status == 422
+    assert body["errorCode"] == "common.validation_error"
 
 
 def test_create_course_is_idempotent():
@@ -187,6 +268,7 @@ def test_create_course_is_idempotent():
         "title": "期末复习幂等课",
         "entryType": "manual_import",
         "goalText": "验证创建课程幂等",
+        "examAt": "2026-06-20T09:30:00+08:00",
         "preferredStyle": "balanced",
     }
     first, _ = assert_idempotent_post(
@@ -197,6 +279,27 @@ def test_create_course_is_idempotent():
         identity_getter=lambda body: body["data"]["course"]["courseId"],
     )
     assert first["data"]["course"]["title"] == "期末复习幂等课"
+    assert first["data"]["course"]["examAt"] == "2026-06-20T09:30:00+08:00"
+
+
+def test_create_course_rejects_naive_exam_at():
+    status, body = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/courses",
+            headers=AUTH_HEADERS | {"idempotency-key": "manual-course-naive-exam-at"},
+            json_body={
+                "title": "naive examAt 课程",
+                "entryType": "manual_import",
+                "goalText": "验证 naive examAt",
+                "examAt": "2026-06-20T09:30:00",
+                "preferredStyle": "balanced",
+            },
+        )
+    )
+
+    assert status == 422
+    assert body["errorCode"] == "common.validation_error"
 
 
 def test_create_course_then_dashboard_shows_recent_course():
@@ -248,6 +351,95 @@ def test_upload_complete_is_idempotent():
     assert first["data"]["resourceType"] == "pdf"
 
 
+def test_upload_complete_idempotency_key_is_scoped_by_course():
+    first_course_id, _ = create_manual_course(
+        idempotency_key="phase3-upload-scope-course-1",
+        title="上传幂等范围课 A",
+    )
+    second_course_id, _ = create_manual_course(
+        idempotency_key="phase3-upload-scope-course-2",
+        title="上传幂等范围课 B",
+    )
+
+    first = upload_ready_pdf(
+        course_id=first_course_id,
+        idempotency_key="phase3-upload-shared-key",
+        suffix="phase3-upload-a",
+    )
+    second = upload_ready_pdf(
+        course_id=second_course_id,
+        idempotency_key="phase3-upload-shared-key",
+        suffix="phase3-upload-b",
+    )
+
+    assert first["data"]["courseId"] == first_course_id
+    assert second["data"]["courseId"] == second_course_id
+    assert first["data"]["resourceId"] != second["data"]["resourceId"]
+
+
+def test_resource_playback_returns_presigned_url_for_video():
+    course_id, _ = create_manual_course(
+        idempotency_key="playback-course-1",
+        title="视频播放课",
+    )
+    upload = upload_ready_resource(
+        course_id=course_id,
+        idempotency_key="playback-video-upload-1",
+        suffix="playback-video",
+        resource_type="mp4",
+        mime_type="video/mp4",
+    )
+    resource_id = upload["data"]["resourceId"]
+
+    status, body = asyncio.run(
+        request(
+            "GET",
+            f"/api/v1/course-resources/{resource_id}/playback",
+            headers=AUTH_HEADERS,
+        )
+    )
+
+    assert status == 200
+    assert body["data"]["resourceId"] == resource_id
+    assert body["data"]["resourceType"] == "mp4"
+    assert body["data"]["playbackUrl"].startswith("http://object-storage.local/")
+    assert "method=get" in body["data"]["playbackUrl"]
+    assert body["data"]["mimeType"] == "video/mp4"
+    assert body["data"]["durationSec"] is None
+
+
+def test_resource_playback_rejects_non_video_and_missing_resource():
+    course_id, _ = create_manual_course(
+        idempotency_key="playback-course-2",
+        title="非视频播放边界课",
+    )
+    upload = upload_ready_pdf(
+        course_id=course_id,
+        idempotency_key="playback-pdf-upload-1",
+        suffix="playback-pdf",
+    )
+
+    non_video_status, non_video_body = asyncio.run(
+        request(
+            "GET",
+            f"/api/v1/course-resources/{upload['data']['resourceId']}/playback",
+            headers=AUTH_HEADERS,
+        )
+    )
+    missing_status, missing_body = asyncio.run(
+        request(
+            "GET",
+            "/api/v1/course-resources/99999999/playback",
+            headers=AUTH_HEADERS,
+        )
+    )
+
+    assert non_video_status == 409
+    assert non_video_body["errorCode"] == "resource.not_video"
+    assert missing_status == 404
+    assert missing_body["errorCode"] == "resource.not_found"
+
+
 def test_parse_start_is_idempotent():
     course_id, _ = create_manual_course(
         idempotency_key="parse-start-course-1",
@@ -269,6 +461,84 @@ def test_parse_start_is_idempotent():
         ),
     )
     assert first["data"]["entity"]["type"] == "parse_run"
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "suffix"),
+    [
+        (90.0, "float-zero-fraction"),
+        (90.5, "float-fraction"),
+    ],
+)
+def test_inquiry_answers_reject_raw_non_int_numbers_with_service_error(raw_value: float, suffix: str):
+    course_id, _ = create_manual_course(
+        idempotency_key=f"inquiry-number-course-{suffix}",
+        title=f"问询数字校验课 {suffix}",
+    )
+    upload_ready_pdf(
+        course_id=course_id,
+        idempotency_key=f"inquiry-number-upload-{suffix}",
+        suffix=f"inquiry-number-{suffix}",
+    )
+    start_parse(
+        course_id=course_id,
+        idempotency_key=f"inquiry-number-parse-{suffix}",
+    )
+    answers = [
+        answer if answer["key"] != "time_budget_minutes" else {"key": "time_budget_minutes", "value": raw_value}
+        for answer in valid_inquiry_answers()
+    ]
+
+    status, body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/inquiry/answers",
+            headers=AUTH_HEADERS,
+            json_body={"answers": answers},
+        )
+    )
+
+    assert status == 422
+    assert body["errorCode"] == "inquiry.answers_invalid"
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "suffix"),
+    [
+        (["exam_sprint"], "list"),
+        ({"value": "exam_sprint"}, "dict"),
+    ],
+)
+def test_inquiry_answers_reject_raw_non_string_single_select_values(raw_value, suffix: str):
+    course_id, _ = create_manual_course(
+        idempotency_key=f"inquiry-select-course-{suffix}",
+        title=f"问询单选校验课 {suffix}",
+    )
+    upload_ready_pdf(
+        course_id=course_id,
+        idempotency_key=f"inquiry-select-upload-{suffix}",
+        suffix=f"inquiry-select-{suffix}",
+    )
+    start_parse(
+        course_id=course_id,
+        idempotency_key=f"inquiry-select-parse-{suffix}",
+    )
+    answers = [
+        answer if answer["key"] != "goal_type" else {"key": "goal_type", "value": raw_value}
+        for answer in valid_inquiry_answers()
+    ]
+
+    status, body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/inquiry/answers",
+            headers=AUTH_HEADERS,
+            json_body={"answers": answers},
+        )
+    )
+
+    assert status == 422
+    assert body["errorCode"] == "inquiry.answers_invalid"
 
 
 def test_handout_generate_is_idempotent():
@@ -317,6 +587,44 @@ def test_quiz_generate_is_idempotent():
     assert first["data"]["entity"]["type"] == "quiz"
 
 
+def test_quiz_generate_accepts_question_count_level_and_defaults_to_medium():
+    course_id, _ = create_manual_course(
+        idempotency_key="quiz-generate-level-course",
+        title="测验档位课",
+    )
+
+    default_status, default_body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=AUTH_HEADERS | {"idempotency-key": "quiz-generate-level-default"},
+        )
+    )
+    small_status, small_body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=AUTH_HEADERS | {"idempotency-key": "quiz-generate-level-small"},
+            json_body={"questionCountLevel": "small"},
+        )
+    )
+    invalid_status, invalid_body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=AUTH_HEADERS | {"idempotency-key": "quiz-generate-level-invalid"},
+            json_body={"questionCountLevel": "tiny"},
+        )
+    )
+
+    assert default_status == 200
+    assert default_body["data"]["entity"]["type"] == "quiz"
+    assert small_status == 200
+    assert small_body["data"]["entity"]["type"] == "quiz"
+    assert invalid_status == 422
+    assert invalid_body["code"] == 1
+
+
 def test_review_regenerate_is_idempotent():
     course_id, _ = create_manual_course(
         idempotency_key="review-regenerate-course-1",
@@ -328,11 +636,12 @@ def test_review_regenerate_is_idempotent():
         headers=headers,
         expected_status=200,
         identity_getter=lambda body: (
-            body["data"]["entity"]["type"],
-            body["data"]["entity"]["id"],
+            "review_task_run",
+            body["data"]["reviewTaskRunId"],
         ),
     )
-    assert first["data"]["entity"]["type"] == "review_task_run"
+    assert first["data"]["status"] == "ready"
+    assert isinstance(first["data"]["reviewTaskRunId"], int)
 
 
 def test_delete_missing_resource_returns_not_found():

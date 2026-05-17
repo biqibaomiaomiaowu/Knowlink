@@ -14,6 +14,7 @@ import 'package:knowlink_client/shared/models/recommendation_card.dart';
 import 'package:knowlink_client/shared/models/recommendation_enums.dart';
 import 'package:knowlink_client/shared/models/recommendation_request.dart';
 import 'package:knowlink_client/shared/models/resource_manifest_item.dart';
+import 'package:knowlink_client/shared/models/resource_upload_models.dart';
 import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
@@ -308,6 +309,12 @@ class _FakeApiClient extends ApiClient {
           ),
           createdFromCatalogId: catalogId,
         );
+  }
+
+  @override
+  Future<List<CourseResourceModel>> fetchCourseResources(
+      String courseId) async {
+    return const [];
   }
 }
 
