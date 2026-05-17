@@ -1,17 +1,3 @@
-<<<<<<< HEAD
-from __future__ import annotations
-from server.infra.db.base import Base 
-from .parse_run import ParseRun 
-from .course import Course
-from .vector import VectorDocument
-
-__all__ = [
-    "Base",
-    "Course",
-    "ParseRun",
-    "VectorDocument",
-]
-=======
 from server.infra.db.models.async_task import AsyncTask
 from server.infra.db.models.course import Course
 from server.infra.db.models.handout import HandoutBlock, HandoutBlockRef, HandoutOutline, HandoutVersion
@@ -58,4 +44,3 @@ __all__ = [
     "UserCourseProgress",
     "VectorDocument",
 ]
->>>>>>> main
