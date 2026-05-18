@@ -40,6 +40,8 @@ def test_memory_bilibili_import_lifecycle() -> None:
     assert qr_session["status"] == "pending_scan"
     assert import_run["status"] == "pending"
     assert import_run["stage"] == "queued"
+    assert import_run["recoverable"] is False
+    assert import_run["tempDir"] is None
 
     updated = repo.update_bilibili_import_run(
         import_run["importRunId"],
@@ -47,6 +49,8 @@ def test_memory_bilibili_import_lifecycle() -> None:
         progress_pct=40,
         stage="download",
         task_id=7201,
+        recoverable=True,
+        temp_dir="runtime/bilibili/9101",
     )
     runs = repo.list_bilibili_import_runs(course["courseId"])
 
@@ -59,8 +63,11 @@ def test_memory_bilibili_import_lifecycle() -> None:
     assert updated["progressPct"] == 40
     assert updated["stage"] == "download"
     assert updated["taskId"] == 7201
+    assert updated["recoverable"] is True
+    assert updated["tempDir"] == "runtime/bilibili/9101"
     assert updated["preview"] == {"title": "单视频预览"}
     assert updated["selection"] == {"partIds": [1]}
+    assert repo.get_bilibili_import_run(import_run["importRunId"]) == updated
     assert runs == [updated]
 
 
@@ -94,6 +101,8 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
     assert qr_session["status"] == "pending_scan"
     assert import_run["status"] == "pending"
     assert import_run["stage"] == "queued"
+    assert import_run["recoverable"] is False
+    assert import_run["tempDir"] is None
 
     updated = repo.update_bilibili_import_run(
         import_run["importRunId"],
@@ -101,6 +110,8 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
         progress_pct=100,
         stage="done",
         resource_ids=[501],
+        recoverable=True,
+        temp_dir="runtime/bilibili/9101",
     )
 
     assert qr_session["qrKey"] == "qr-sql-1"
@@ -112,12 +123,17 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
     assert updated["progressPct"] == 100
     assert updated["stage"] == "done"
     assert updated["resourceIds"] == [501]
+    assert updated["recoverable"] is True
+    assert updated["tempDir"] == "runtime/bilibili/9101"
     assert updated["finishedAt"] is not None
     assert repo.get_bilibili_import_run(import_run["importRunId"]) == updated
     assert repo.list_bilibili_import_runs(course["courseId"]) == [updated]
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliQrSession)) == 1
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliAuthSession)) == 1
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliImportRun)) == 1
+    columns = BilibiliImportRun.__table__.columns
+    assert not columns["recoverable"].nullable
+    assert columns["temp_dir"].nullable
 
 
 def _build_sql_repo() -> tuple[SqlAlchemyRuntimeRepository, Session]:

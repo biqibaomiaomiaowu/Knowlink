@@ -90,6 +90,9 @@ _BILIBILI_IMPORT_RUN_CHANGE_FIELDS = {
     "selection_json": "selection_json",
     "resource_ids": "resource_ids_json",
     "resourceIds": "resource_ids_json",
+    "recoverable": "recoverable",
+    "temp_dir": "temp_dir",
+    "tempDir": "temp_dir",
     "error_code": "error_code",
     "errorCode": "error_code",
     "failure_reason": "failure_reason",
@@ -312,6 +315,7 @@ class SqlAlchemyRuntimeRepository:
             preview_json=preview,
             selection_json=selection,
             resource_ids_json=[],
+            recoverable=False,
             started_at=now,
         )
         self.session.add(import_run)
@@ -2637,6 +2641,8 @@ def _bilibili_import_run_dict(import_run: BilibiliImportRun) -> dict[str, Any]:
         "preview": import_run.preview_json,
         "selection": import_run.selection_json,
         "resourceIds": import_run.resource_ids_json or [],
+        "recoverable": import_run.recoverable,
+        "tempDir": import_run.temp_dir,
         "errorCode": import_run.error_code,
         "failureReason": import_run.failure_reason,
         "startedAt": _normalize_utc_datetime(import_run.started_at),

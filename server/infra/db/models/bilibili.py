@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.infra.db.base import Base, ID_TYPE, JSON_TYPE, TimestampMixin
@@ -65,6 +65,13 @@ class BilibiliImportRun(Base, TimestampMixin):
     preview_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE, nullable=True)
     selection_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_TYPE, nullable=True)
     resource_ids_json: Mapped[list[int] | None] = mapped_column(JSON_TYPE, nullable=True)
+    recoverable: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+        nullable=False,
+    )
+    temp_dir: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
