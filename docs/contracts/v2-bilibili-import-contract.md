@@ -426,6 +426,17 @@ Bilibili 领域错误码冻结在 [error-codes.md](./error-codes.md) 的 Bilibil
 
 共享基础设施错误码可以按对应 contract 返回，例如任务记录创建后派发失败时允许返回 `503` 和 `async_task.enqueue_failed`。
 
+运行期导入错误必须按以下阶段语义返回：
+
+| 错误码 | 运行阶段 | 返回条件 |
+|---|---|---|
+| `bilibili.metadata_failed` | `metadata` | URL、meta、preview 元数据获取或解析失败 |
+| `bilibili.playurl_failed` | `playurl` | playurl 流选择失败，或无法获取可播放音视频流 |
+| `bilibili.download_failed` | `download` | HTTP 媒体分片或音视频流下载失败 |
+| `bilibili.merge_failed` | `ffmpeg` | ffmpeg stream-copy 合并失败 |
+| `bilibili.upload_failed` | `object_storage` | 合并产物上传对象存储失败 |
+| `bilibili.import_failed` | `resource_import` | 创建课程资源或导入持久化失败 |
+
 会员、付费、DRM、地区限制或账号无权限统一归入 `bilibili.access_denied`，`failureReason` 说明具体原因，不做绕过。
 
 ## 9. 取消与清理

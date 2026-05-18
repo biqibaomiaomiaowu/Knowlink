@@ -15,6 +15,14 @@ FROZEN_STAGE_VALUES = (
     "canceling",
     "canceled",
 )
+FROZEN_RUNTIME_ERROR_STAGES = {
+    "bilibili.metadata_failed": "metadata",
+    "bilibili.playurl_failed": "playurl",
+    "bilibili.download_failed": "download",
+    "bilibili.merge_failed": "ffmpeg",
+    "bilibili.upload_failed": "object_storage",
+    "bilibili.import_failed": "resource_import",
+}
 
 
 def text(path: str) -> str:
@@ -271,6 +279,14 @@ def test_v2_bilibili_error_code_scope_allows_shared_infrastructure_errors():
     assert "Bilibili 领域错误码" in error_section
     assert "共享基础设施错误码" in error_section
     assert "`async_task.enqueue_failed`" in error_section
+
+
+def test_v2_bilibili_runtime_error_codes_are_frozen_in_contract():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    error_section = contract.split("## 8. 错误码", 1)[1].split("## 9. 取消与清理", 1)[0]
+
+    for error_code, stage in FROZEN_RUNTIME_ERROR_STAGES.items():
+        assert re.search(rf"\| `{re.escape(error_code)}` \| `{re.escape(stage)}` \|", error_section)
 
 
 def test_v2_bilibili_returned_error_codes_are_registered():
