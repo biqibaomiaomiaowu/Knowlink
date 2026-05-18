@@ -4,7 +4,13 @@ import re
 
 import pytest
 
+from server.api.deps import get_bilibili_service
 from server.app import app
+from server.domain.services import BilibiliService
+from server.infra.repositories.memory import MemoryScaffoldRepository
+from server.infra.repositories.memory_runtime import RuntimeStore
+from server.tasks.repositories import InMemoryAsyncTaskRepository
+from server.tests.test_bilibili_service import FakeBiliClient, RecordingDispatcher, save_auth
 
 
 AUTH_HEADERS = {"authorization": "Bearer knowlink-demo-token"}
@@ -702,42 +708,68 @@ def test_bilibili_routes_require_auth():
         assert body["errorCode"] == "auth.token_missing"
 
 
-def test_bilibili_reserved_routes_return_not_implemented():
-    requests_to_check = [
-        ("POST", "/api/v1/courses/101/resources/imports/bilibili", None),
-        (
-            "POST",
-            "/api/v1/courses/101/resources/imports/bilibili/preview",
-            {"sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"},
-        ),
-        (
-            "POST",
-            "/api/v1/courses/101/resources/imports/bilibili",
-            {
-                "previewId": "bili_preview_9101",
-                "sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/",
-            },
-        ),
-        ("GET", "/api/v1/courses/101/resources/imports/bilibili", None),
-        ("GET", "/api/v1/bilibili-import-runs/9001/status", None),
-        ("POST", "/api/v1/bilibili-import-runs/9001/cancel", None),
-        ("POST", "/api/v1/bilibili/auth/qr/sessions", None),
-        ("GET", "/api/v1/bilibili/auth/qr/sessions/session-demo-1", None),
-        ("GET", "/api/v1/bilibili/auth/session", None),
-        ("DELETE", "/api/v1/bilibili/auth/session", None),
-    ]
+def test_bilibili_preview_and_import_routes_return_v2_contract():
+    store = RuntimeStore()
+    repo = MemoryScaffoldRepository(store)
+    async_tasks = InMemoryAsyncTaskRepository(task_id_factory=lambda: store.next_id("task"))
+    dispatcher = RecordingDispatcher()
+    service = BilibiliService(
+        courses=repo,
+        bilibili=repo,
+        async_tasks=async_tasks,
+        task_dispatcher=dispatcher,
+        bili_client=FakeBiliClient(),
+    )
+    course = repo.create_course(
+        title="B站 API 合同课",
+        entry_type="manual_import",
+        goal_text="验证 B站导入接口",
+        preferred_style="balanced",
+    )
+    save_auth(repo)
 
-    for method, path, payload in requests_to_check:
-        status, body = asyncio.run(
+    async def override_bilibili_service():
+        return service
+
+    app.dependency_overrides[get_bilibili_service] = override_bilibili_service
+    try:
+        preview_status, preview_body = asyncio.run(
             request(
-                method,
-                path,
+                "POST",
+                f"/api/v1/courses/{course['courseId']}/resources/imports/bilibili/preview",
                 headers=AUTH_HEADERS,
-                json_body=payload,
+                json_body={"sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"},
             )
         )
-        assert status == 501
-        assert body["errorCode"] == "bilibili.not_implemented"
+        assert preview_status == 200
+        preview = preview_body["data"]
+        assert preview["previewId"] == "bili_preview_demo"
+        assert preview["sourceType"] == "multi_p"
+        assert [part["partId"] for part in preview["parts"]] == ["p1", "p2"]
+
+        create_status, create_body = asyncio.run(
+            request(
+                "POST",
+                f"/api/v1/courses/{course['courseId']}/resources/imports/bilibili",
+                headers=AUTH_HEADERS | {"idempotency-key": "api-bili-import-1"},
+                json_body={
+                    "previewId": preview["previewId"],
+                    "sourceUrl": preview["sourceUrl"],
+                    "selectionMode": "selected_parts",
+                    "selectedPartIds": ["p1"],
+                    "qualityPreference": "android_safe",
+                },
+            )
+        )
+    finally:
+        app.dependency_overrides.pop(get_bilibili_service, None)
+
+    assert create_status == 200
+    assert create_body["data"]["status"] == "queued"
+    assert create_body["data"]["nextAction"] == "poll"
+    assert create_body["data"]["entity"]["type"] == "bilibili_import_run"
+    assert isinstance(create_body["data"]["taskId"], int)
+    assert dispatcher.enqueued[0]["payload"]["courseId"] == course["courseId"]
 
 
 def test_bilibili_import_openapi_keeps_reserved_request_body():
