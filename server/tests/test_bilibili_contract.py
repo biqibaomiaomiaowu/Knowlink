@@ -43,6 +43,14 @@ def markdown_table_values(section: str, header: str) -> tuple[str, ...]:
     return tuple(values)
 
 
+def registered_error_codes(error_codes: str) -> set[str]:
+    return set(re.findall(r"`([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)`", error_codes))
+
+
+def returned_error_codes(contract: str) -> set[str]:
+    return set(re.findall(r"(?:^|[\s`])(?:4\d\d|5\d\d)\s+([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)", contract))
+
+
 def test_v2_bilibili_contract_is_linked_from_docs():
     docs_readme = text("docs/README.md")
     api_contract = text("docs/contracts/api-contract.md")
@@ -185,7 +193,7 @@ def test_v2_bilibili_import_creation_returns_async_task_shape():
 
 def test_v2_bilibili_import_creation_freezes_idempotency_semantics():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
-    idempotency_section = contract.split("#### Idempotency-Key", 1)[1].split("失败语义：", 1)[0]
+    idempotency_section = contract.split("#### Idempotency-Key", 1)[1].split("\n### ", 1)[0]
 
     for token in (
         "`userId`",
@@ -263,6 +271,17 @@ def test_v2_bilibili_error_code_scope_allows_shared_infrastructure_errors():
     assert "Bilibili 领域错误码" in error_section
     assert "共享基础设施错误码" in error_section
     assert "`async_task.enqueue_failed`" in error_section
+
+
+def test_v2_bilibili_returned_error_codes_are_registered():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    error_codes = text("docs/contracts/error-codes.md")
+
+    referenced_codes = returned_error_codes(contract)
+    registered_codes = registered_error_codes(error_codes)
+
+    assert {"idempotency.body_mismatch", "async_task.enqueue_failed"} <= referenced_codes
+    assert referenced_codes <= registered_codes
 
 
 def test_phase1_handoff_separates_android_dependency_and_complex_layout_acceptance():
