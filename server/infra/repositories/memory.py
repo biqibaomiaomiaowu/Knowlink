@@ -46,6 +46,76 @@ class MemoryScaffoldRepository:
     def get_course(self, course_id: int) -> dict[str, Any] | None:
         return self.store.get_course(course_id)
 
+    def create_bilibili_qr_session(
+        self,
+        *,
+        qr_key: str,
+        qr_url: str,
+        status: str = "pending",
+        poll_payload_json: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        return self.store.create_bilibili_qr_session(
+            qr_key=qr_key,
+            qr_url=qr_url,
+            status=status,
+            poll_payload_json=poll_payload_json,
+            expires_at=expires_at,
+        )
+
+    def get_bilibili_qr_session(self, qr_key: str) -> dict[str, Any] | None:
+        return self.store.get_bilibili_qr_session(qr_key)
+
+    def update_bilibili_qr_session(self, qr_key: str, **changes: Any) -> dict[str, Any] | None:
+        return self.store.update_bilibili_qr_session(qr_key, **changes)
+
+    def save_bilibili_auth_session(
+        self,
+        *,
+        cookies_json: dict[str, Any],
+        csrf: str | None = None,
+        expires_at: datetime | None = None,
+        status: str = "valid",
+    ) -> dict[str, Any]:
+        return self.store.save_bilibili_auth_session(
+            cookies_json=cookies_json,
+            csrf=csrf,
+            expires_at=expires_at,
+            status=status,
+        )
+
+    def get_bilibili_auth_session(self) -> dict[str, Any] | None:
+        return self.store.get_bilibili_auth_session()
+
+    def delete_bilibili_auth_session(self) -> bool:
+        return self.store.delete_bilibili_auth_session()
+
+    def create_bilibili_import_run(
+        self,
+        *,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any] | None = None,
+        selection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.store.create_bilibili_import_run(
+            course_id=course_id,
+            source_url=source_url,
+            source_type=source_type,
+            preview=preview,
+            selection=selection,
+        )
+
+    def get_bilibili_import_run(self, import_run_id: int) -> dict[str, Any] | None:
+        return self.store.get_bilibili_import_run(import_run_id)
+
+    def list_bilibili_import_runs(self, course_id: int) -> list[dict[str, Any]]:
+        return self.store.list_bilibili_import_runs(course_id)
+
+    def update_bilibili_import_run(self, import_run_id: int, **changes: Any) -> dict[str, Any] | None:
+        return self.store.update_bilibili_import_run(import_run_id, **changes)
+
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.store.create_resource(course_id, payload)
 

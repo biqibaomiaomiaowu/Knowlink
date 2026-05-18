@@ -89,6 +89,59 @@ class AsyncTaskRepository(Protocol):
     ) -> dict[str, Any] | None: ...
 
 
+class BilibiliImportRepository(Protocol):
+    def create_bilibili_qr_session(
+        self,
+        *,
+        qr_key: str,
+        qr_url: str,
+        status: str = "pending",
+        poll_payload_json: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]: ...
+
+    def get_bilibili_qr_session(self, qr_key: str) -> dict[str, Any] | None: ...
+
+    def update_bilibili_qr_session(
+        self,
+        qr_key: str,
+        **changes: Any,
+    ) -> dict[str, Any] | None: ...
+
+    def save_bilibili_auth_session(
+        self,
+        *,
+        cookies_json: dict[str, Any],
+        csrf: str | None = None,
+        expires_at: datetime | None = None,
+        status: str = "valid",
+    ) -> dict[str, Any]: ...
+
+    def get_bilibili_auth_session(self) -> dict[str, Any] | None: ...
+
+    def delete_bilibili_auth_session(self) -> bool: ...
+
+    def create_bilibili_import_run(
+        self,
+        *,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any] | None = None,
+        selection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def get_bilibili_import_run(self, import_run_id: int) -> dict[str, Any] | None: ...
+
+    def list_bilibili_import_runs(self, course_id: int) -> list[dict[str, Any]]: ...
+
+    def update_bilibili_import_run(
+        self,
+        import_run_id: int,
+        **changes: Any,
+    ) -> dict[str, Any] | None: ...
+
+
 class TaskDispatcher(Protocol):
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
 
