@@ -31,6 +31,16 @@ def test_api_contract_bilibili_section_does_not_label_v1_stub_examples_as_v2():
     assert "V1 历史" in bilibili_section
 
 
+def test_v2_bilibili_import_create_requires_idempotency_key():
+    api_contract = text("docs/contracts/api-contract.md")
+    idempotency_section = api_contract.split("以下写接口必须支持 `Idempotency-Key`：", 1)[1].split(
+        "- 带路径参数的课程接口一律以 path 中的 `courseId` 为准",
+        1,
+    )[0]
+
+    assert "POST /api/v1/courses/{courseId}/resources/imports/bilibili" in idempotency_section
+
+
 def test_v2_bilibili_contract_freezes_states_and_paths():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
 
@@ -118,6 +128,8 @@ def test_v2_bilibili_import_creation_returns_async_task_shape():
     )[1].split("### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`", 1)[0]
 
     for token in (
+        '"previewId": "bili_preview_9101"',
+        '"sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2"',
         '"taskId": 7201',
         '"status": "queued"',
         '"nextAction": "poll"',
@@ -130,6 +142,33 @@ def test_v2_bilibili_import_creation_returns_async_task_shape():
     assert '"status": "pending"' not in import_section
     assert '"importRunId"' not in import_section
     assert '"progressPct"' not in import_section
+    assert "`previewId`" in import_section
+    assert "`sourceUrl`" in import_section
+    assert "404 bilibili.preview_not_found" in import_section
+    assert "过期、不存在或不属于当前用户/课程" in import_section
+
+
+def test_v2_bilibili_stage_values_are_frozen_for_ui_mapping():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    stage_section = contract.split("## 6. Stage 展示字段", 1)[1].split("## 7. `async_tasks` 映射", 1)[0]
+
+    assert "技术子阶段" in stage_section
+    assert "UI" in stage_section
+    assert "不要和 `status` 混用" in stage_section
+
+    for stage in (
+        "queued",
+        "metadata",
+        "download",
+        "ffmpeg",
+        "object_storage",
+        "resource_import",
+        "done",
+        "error",
+        "canceling",
+        "canceled",
+    ):
+        assert f"`{stage}`" in stage_section
 
 
 def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
@@ -165,7 +204,7 @@ def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
 
 def test_v2_bilibili_error_code_scope_allows_shared_infrastructure_errors():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
-    error_section = contract.split("## 7. 错误码", 1)[1].split("## 8. 取消与清理", 1)[0]
+    error_section = contract.split("## 8. 错误码", 1)[1].split("## 9. 取消与清理", 1)[0]
 
     assert "Bilibili 领域错误码" in error_section
     assert "共享基础设施错误码" in error_section

@@ -20,6 +20,7 @@
 - 以下写接口必须支持 `Idempotency-Key`：
   - `POST /api/v1/courses`
   - `POST /api/v1/recommendations/{catalogId}/confirm`
+  - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
   - `POST /api/v1/courses/{courseId}/resources/upload-complete`
   - `POST /api/v1/courses/{courseId}/parse/start`
   - `POST /api/v1/courses/{courseId}/handouts/generate`

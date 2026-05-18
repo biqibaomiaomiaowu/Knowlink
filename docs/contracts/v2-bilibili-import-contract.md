@@ -140,6 +140,7 @@
 - URL 不属于支持范围返回 `422 bilibili.unsupported_url`。
 - 未登录或登录态失效返回 `401 bilibili.auth_required` / `401 bilibili.auth_expired`。
 - 元数据不可访问返回 `403 bilibili.access_denied` 或 `502 bilibili.metadata_failed`。
+- 服务端必须保存预览快照并返回 `previewId`，创建导入任务时用 `previewId` 复用该快照。
 
 ### `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
 
@@ -149,6 +150,7 @@
 
 ```json
 {
+  "previewId": "bili_preview_9101",
   "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
   "selectionMode": "selected_parts",
   "selectedPartIds": ["cid-1001"],
@@ -158,6 +160,8 @@
 
 字段：
 
+- `previewId` 必填，服务端用它复用预览快照；若快照过期、不存在或不属于当前用户/课程，返回 `404 bilibili.preview_not_found`。
+- `sourceUrl` 必填，用于幂等回放、快照校验和审计，不替代 `previewId`。
 - `selectionMode` 可取 `current_part`、`all_parts`、`selected_parts`。
 - `selectedPartIds` 仅在 `selected_parts` 时必填。
 - `courseId` 以 path 为准，请求体不重复传同义字段。
@@ -178,6 +182,7 @@
 
 失败语义：
 
+- `previewId` 过期、不存在或不属于当前用户/课程返回 `404 bilibili.preview_not_found`。
 - 选择项不合法返回 `422 bilibili.selection_invalid`。
 - 任务创建或派发失败返回 `503 async_task.enqueue_failed`，响应仍应包含可追踪的任务或失败原因。
 
@@ -293,6 +298,14 @@
 - `entity.type`
 - `entity.id`
 
+导入创建请求必须至少包含：
+
+- `previewId`
+- `sourceUrl`
+- `selectionMode`
+- `selectedPartIds`
+- `qualityPreference`
+
 导入 run 状态和列表响应必须至少包含：
 
 - `importRunId`
@@ -367,7 +380,26 @@ Preview part 必须至少包含：
 | `recoverable` | 可恢复失败，前端可提示重试或重新登录 | 终态 |
 | `canceled` | 用户或系统取消，副作用已尽力清理 | 终态 |
 
-## 6. `async_tasks` 映射
+## 6. Stage 展示字段
+
+`stage` 是给前端 UI 直接展示或映射文案用的技术子阶段字段，不要和 `status` 混用。`status` 表示导入 run 的稳定状态机；`stage` 表示当前更细的执行位置或终态展示标签。
+
+`stage` 建议覆盖以下冻结值：
+
+| `stage` | 含义 |
+|---|---|
+| `queued` | 已入队或等待 worker 领取 |
+| `metadata` | 正在获取或复用预览元数据 |
+| `download` | 正在下载音视频流 |
+| `ffmpeg` | 正在用 ffmpeg 合并 |
+| `object_storage` | 正在上传对象存储 |
+| `resource_import` | 正在创建课程资源记录 |
+| `done` | 已完成并可进入学习链路 |
+| `error` | 失败或可恢复失败的展示阶段 |
+| `canceling` | 正在处理取消和副作用清理 |
+| `canceled` | 已取消 |
+
+## 7. `async_tasks` 映射
 
 | `bilibili_import_run.status` | `async_tasks.status` | 说明 |
 |---|---|---|
@@ -380,7 +412,7 @@ Preview part 必须至少包含：
 
 `async_tasks.entity.type` 固定为 `bilibili_import_run`，`async_tasks.entity.id` 固定为 `importRunId`。
 
-## 7. 错误码
+## 8. 错误码
 
 Bilibili 领域错误码冻结在 [error-codes.md](./error-codes.md) 的 Bilibili 段落。接口实现返回 `bilibili.*` 错误码时只能使用该段落中的错误码，新增 Bilibili 领域错误码必须先更新本文和错误码 contract。
 
@@ -388,7 +420,7 @@ Bilibili 领域错误码冻结在 [error-codes.md](./error-codes.md) 的 Bilibil
 
 会员、付费、DRM、地区限制或账号无权限统一归入 `bilibili.access_denied`，`failureReason` 说明具体原因，不做绕过。
 
-## 8. 取消与清理
+## 9. 取消与清理
 
 - `pending`、`waiting_download`：直接写入 `canceled`，不产生课程资源。
 - `fetching_metadata`：写入 `canceled`，不保留预览副作用。
@@ -409,7 +441,7 @@ runtime/bilibili/{import_run_id}/
 raw/1/{course_id}/bilibili/{import_run_id}/{safe_title}.mp4
 ```
 
-## 9. 验收口径
+## 10. 验收口径
 
 - 固定样例至少覆盖一个可访问的单视频或多 P 链路。
 - 合集和番剧以至少一个可访问样例为准；会员、付费、地区限制或不可观看内容只要求返回明确失败原因。
