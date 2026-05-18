@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
+
+from pydantic import Field
 
 from server.schemas.base import CamelModel
 from server.schemas.common import AsyncEntity, Citation, InquiryQuestionOption, ResourceManifestItem
@@ -255,13 +258,55 @@ class UploadInitData(CamelModel):
     expires_at: datetime
 
 
+class BilibiliPreviewPart(CamelModel):
+    part_id: str
+    title: str
+    duration_sec: int
+    cid: str
+    page_no: int
+    selected_by_default: bool
+
+
+class BilibiliPreviewData(CamelModel):
+    preview_id: str
+    source_url: str
+    source_type: Literal["single_video", "multi_p", "collection", "bangumi"]
+    title: str
+    cover_url: str | None = None
+    total_parts: int
+    parts: list[BilibiliPreviewPart]
+    default_selection_mode: Literal["current_part", "all_parts", "selected_parts"]
+
+
+BilibiliResponseStage = Literal[
+    "queued",
+    "metadata",
+    "download",
+    "ffmpeg",
+    "object_storage",
+    "resource_import",
+    "done",
+    "error",
+    "canceling",
+    "canceled",
+]
+
+
 class BilibiliImportRunSummary(CamelModel):
     import_run_id: int
     course_id: int
+    source_url: str
+    source_type: Literal["single_video", "multi_p", "collection", "bangumi"]
     status: str
-    video_url: str
+    progress_pct: int
+    stage: BilibiliResponseStage
     task_id: int | None = None
-    resource_id: int | None = None
+    resource_ids: list[int] = Field(default_factory=list)
+    preview: BilibiliPreviewData | None = None
+    next_action: str | None = None
+    error_code: str | None = None
+    failure_reason: str | None = None
+    recoverable: bool = False
 
 
 class BilibiliImportListData(CamelModel):
@@ -271,12 +316,18 @@ class BilibiliImportListData(CamelModel):
 class BilibiliImportRunStatusData(CamelModel):
     import_run_id: int
     course_id: int
+    source_url: str
+    source_type: Literal["single_video", "multi_p", "collection", "bangumi"]
     status: str
-    video_url: str
+    progress_pct: int
+    stage: BilibiliResponseStage
     task_id: int | None = None
-    resource_id: int | None = None
+    resource_ids: list[int] = Field(default_factory=list)
+    preview: BilibiliPreviewData | None = None
     next_action: str | None = None
     error_code: str | None = None
+    failure_reason: str | None = None
+    recoverable: bool = False
 
 
 class BilibiliAuthQrSessionData(CamelModel):
