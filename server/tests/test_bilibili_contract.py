@@ -21,6 +21,28 @@ def text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def markdown_table_values(section: str, header: str) -> tuple[str, ...]:
+    values: list[str] = []
+    in_table = False
+
+    for line in section.splitlines():
+        if line.startswith(f"| `{header}` |"):
+            in_table = True
+            continue
+        if in_table and line.startswith("|---"):
+            continue
+        if in_table and line.startswith("|"):
+            match = re.match(r"\| `([^`]+)` \|", line)
+            if match:
+                values.append(match.group(1))
+                continue
+            break
+        if in_table and line.strip():
+            break
+
+    return tuple(values)
+
+
 def test_v2_bilibili_contract_is_linked_from_docs():
     docs_readme = text("docs/README.md")
     api_contract = text("docs/contracts/api-contract.md")
@@ -161,6 +183,27 @@ def test_v2_bilibili_import_creation_returns_async_task_shape():
     assert "过期、不存在或不属于当前用户/课程" in import_section
 
 
+def test_v2_bilibili_import_creation_freezes_idempotency_semantics():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    idempotency_section = contract.split("#### Idempotency-Key", 1)[1].split("失败语义：", 1)[0]
+
+    for token in (
+        "`userId`",
+        "`courseId`",
+        "`POST /api/v1/courses/{courseId}/resources/imports/bilibili`",
+        "`Idempotency-Key`",
+        "相同响应",
+        "`taskId`",
+        "`entity.id`",
+        "请求体不一致",
+        "`409 idempotency.body_mismatch`",
+        "`503 async_task.enqueue_failed`",
+        "不创建重复 run",
+        "可通过列表或状态接口查询",
+    ):
+        assert token in idempotency_section
+
+
 def test_v2_bilibili_stage_values_are_frozen_for_ui_mapping():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
     stage_section = contract.split("## 6. Stage 展示字段", 1)[1].split("## 7. `async_tasks` 映射", 1)[0]
@@ -168,9 +211,10 @@ def test_v2_bilibili_stage_values_are_frozen_for_ui_mapping():
     assert "技术子阶段" in stage_section
     assert "UI" in stage_section
     assert "不要和 `status` 混用" in stage_section
+    assert "`stage` 只允许以下值" in stage_section
+    assert "建议覆盖以下冻结值" not in stage_section
 
-    for stage in FROZEN_STAGE_VALUES:
-        assert f"`{stage}`" in stage_section
+    assert markdown_table_values(stage_section, "stage") == FROZEN_STAGE_VALUES
 
 
 def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
@@ -206,6 +250,7 @@ def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
     example_stage_values = set(re.findall(r'"stage": "([^"]+)"', list_section + status_section))
     assert example_stage_values
     assert example_stage_values <= set(FROZEN_STAGE_VALUES)
+    assert all(stage in FROZEN_STAGE_VALUES for stage in example_stage_values)
     assert "download" in example_stage_values
     assert "ffmpeg" in example_stage_values
     assert "downloading" not in example_stage_values

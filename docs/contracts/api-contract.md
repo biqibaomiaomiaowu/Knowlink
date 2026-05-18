@@ -50,11 +50,11 @@
 - V2 B站真实导入 contract 已单独冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)；该文档覆盖本文 B站 V1 `501` stub 的历史口径。
 - V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示当前第一版实现状态。
 - V2 状态拼写统一使用 `canceled`，不使用 `cancelled`。外部资料或旧 spec 中出现 `cancelled` 时，进入 API contract 前统一归一化为 `canceled`。
-- V2 B站导入细分状态建议映射到现有 `async_tasks.status`：
+- V2 B站导入细分状态到 `async_tasks.status` 的完整冻结映射以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准；本文仅保留过渡摘要：
 
 | `bilibili_import_run.status` | `async_tasks.status` | 说明 |
 |---|---|---|
-| `pending`、`waiting_download` | `queued` | 等待元数据、排队或等待用户确认 |
+| `pending`、`waiting_download` | `queued` | 等待元数据、排队或等待下载槽位 |
 | `fetching_metadata`、`downloading`、`merging`、`uploading` | `running` | 任务正在执行 |
 | `imported` | `succeeded` | 已创建课程资源 |
 | `failed` | `failed` | 不可恢复失败 |

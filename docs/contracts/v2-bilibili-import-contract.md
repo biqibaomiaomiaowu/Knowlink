@@ -186,6 +186,14 @@
 - 选择项不合法返回 `422 bilibili.selection_invalid`。
 - 任务创建或派发失败返回 `503 async_task.enqueue_failed`，响应仍应包含可追踪的任务或失败原因。
 
+#### Idempotency-Key
+
+B站导入创建接口必须支持 `Idempotency-Key`，幂等范围固定为 `userId`、path 中的 `courseId`、`POST /api/v1/courses/{courseId}/resources/imports/bilibili` 和 `Idempotency-Key`。
+
+- 相同范围、相同 key、相同请求体重复提交时，不创建重复 run，不重复入队；返回第一次创建的 async-task 相同响应，至少保持 `taskId`、`status`、`nextAction`、`entity.type`、`entity.id` 一致。
+- 相同范围、相同 key 但请求体不一致时，返回 `409 idempotency.body_mismatch`，不得创建新 run。
+- 若 run 已创建但任务派发失败，首次返回 `503 async_task.enqueue_failed`；同 key 重放必须能看到同一个 run 的失败或可重试状态，不创建重复 run，并保证该 run 可通过列表或状态接口查询。
+
 ### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
 
 列出当前课程的 B站导入记录，用于前端恢复页面和辅助后端联调记录。
@@ -384,7 +392,7 @@ Preview part 必须至少包含：
 
 `stage` 是给前端 UI 直接展示或映射文案用的技术子阶段字段，不要和 `status` 混用。`status` 表示导入 run 的稳定状态机；`stage` 表示当前更细的执行位置或终态展示标签。
 
-`stage` 建议覆盖以下冻结值：
+`stage` 只允许以下值：
 
 | `stage` | 含义 |
 |---|---|

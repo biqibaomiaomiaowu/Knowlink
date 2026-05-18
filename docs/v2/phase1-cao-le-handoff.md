@@ -81,7 +81,7 @@
 ## 10. 本地命令
 
 ```bash
-.venv/bin/python -m pytest -s server/tests/test_bilibili_contract.py server/tests/test_contract_freeze.py::test_bilibili_reserved_contract_is_aligned_across_docs -q
+.venv/bin/python -m pytest -s server/tests/test_bilibili_contract.py server/tests/test_contract_freeze.py::test_bilibili_reserved_contract_is_aligned_across_docs server/tests/test_contract_freeze.py::test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape -q
 ```
 
 后续生产代码接入时，需追加服务、路由、仓储、worker 和 SQL runtime 的对应测试命令。
