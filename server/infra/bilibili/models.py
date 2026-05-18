@@ -17,7 +17,7 @@ class BilibiliPart:
     part_id: str
     title: str
     duration_sec: int
-    cid: str
+    cid: int
     page_no: int
     selected_by_default: bool = False
 

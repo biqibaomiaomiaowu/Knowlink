@@ -52,6 +52,13 @@ def test_parse_bilibili_url_supported_cases(url: str, kind: BilibiliUrlKind, exp
         assert getattr(parsed, key) == value
 
 
+def test_short_url_kind_is_not_exposed_as_source_type():
+    parsed = parse_bilibili_url("https://b23.tv/BV1xx411c7mD")
+
+    assert parsed.kind == BilibiliUrlKind.SHORT
+    assert BilibiliUrlKind.SHORT.value not in {item.value for item in BilibiliSourceType}
+
+
 def test_parse_bilibili_url_rejects_non_bilibili_url():
     with pytest.raises(ValueError, match="unsupported Bilibili URL"):
         parse_bilibili_url("https://example.com/video/BV1xx411c7mD")
@@ -101,7 +108,7 @@ def test_bilibili_response_dtos_dump_contract_camel_case_without_legacy_fields()
                 partId="p1",
                 title="P1",
                 durationSec=120,
-                cid="cid-1",
+                cid=1001,
                 pageNo=1,
                 selectedByDefault=True,
             )
@@ -131,9 +138,27 @@ def test_bilibili_response_dtos_dump_contract_camel_case_without_legacy_fields()
     assert dumped["progressPct"] == 42
     assert dumped["stage"] == "download"
     assert dumped["resourceIds"] == [301, 302]
+    assert dumped["preview"]["parts"][0]["cid"] == 1001
     assert dumped["preview"]["parts"][0]["selectedByDefault"] is True
     assert "videoUrl" not in dumped
     assert "resourceId" not in dumped
+
+
+def test_bilibili_import_run_status_rejects_invalid_and_british_cancelled_statuses():
+    base_payload = {
+        "importRunId": 9101,
+        "courseId": 101,
+        "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+        "sourceType": "single_video",
+        "progressPct": 42,
+        "stage": "download",
+    }
+
+    with pytest.raises(ValidationError):
+        BilibiliImportRunStatusData(status="queued", **base_payload)
+
+    with pytest.raises(ValidationError):
+        BilibiliImportRunStatusData(status="cancelled", **base_payload)
 
 
 def test_bilibili_runtime_models_emit_contract_camel_case_and_source_type_excludes_short():
@@ -155,7 +180,7 @@ def test_bilibili_runtime_models_emit_contract_camel_case_and_source_type_exclud
                 part_id="p1",
                 title="P1",
                 duration_sec=120,
-                cid="cid-1",
+                cid=1001,
                 page_no=1,
                 selected_by_default=True,
             )
@@ -175,7 +200,7 @@ def test_bilibili_runtime_models_emit_contract_camel_case_and_source_type_exclud
                 "partId": "p1",
                 "title": "P1",
                 "durationSec": 120,
-                "cid": "cid-1",
+                "cid": 1001,
                 "pageNo": 1,
                 "selectedByDefault": True,
             }

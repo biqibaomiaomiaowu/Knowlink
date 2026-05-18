@@ -262,7 +262,7 @@ class BilibiliPreviewPart(CamelModel):
     part_id: str
     title: str
     duration_sec: int
-    cid: str
+    cid: int
     page_no: int
     selected_by_default: bool
 
@@ -292,12 +292,26 @@ BilibiliResponseStage = Literal[
 ]
 
 
+BilibiliImportRunStatus = Literal[
+    "pending",
+    "fetching_metadata",
+    "waiting_download",
+    "downloading",
+    "merging",
+    "uploading",
+    "imported",
+    "failed",
+    "recoverable",
+    "canceled",
+]
+
+
 class BilibiliImportRunSummary(CamelModel):
     import_run_id: int
     course_id: int
     source_url: str
     source_type: Literal["single_video", "multi_p", "collection", "bangumi"]
-    status: str
+    status: BilibiliImportRunStatus
     progress_pct: int
     stage: BilibiliResponseStage
     task_id: int | None = None
@@ -318,7 +332,7 @@ class BilibiliImportRunStatusData(CamelModel):
     course_id: int
     source_url: str
     source_type: Literal["single_video", "multi_p", "collection", "bangumi"]
-    status: str
+    status: BilibiliImportRunStatus
     progress_pct: int
     stage: BilibiliResponseStage
     task_id: int | None = None

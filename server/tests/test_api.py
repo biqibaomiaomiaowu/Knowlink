@@ -674,7 +674,14 @@ def test_delete_missing_resource_returns_not_found():
 
 def test_bilibili_routes_require_auth():
     requests_to_check = [
-        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {"videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"}),
+        (
+            "POST",
+            "/api/v1/courses/101/resources/imports/bilibili",
+            {
+                "previewId": "bili_preview_9101",
+                "sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/",
+            },
+        ),
         ("GET", "/api/v1/courses/101/resources/imports/bilibili", None),
         ("GET", "/api/v1/bilibili-import-runs/9001/status", None),
         ("POST", "/api/v1/bilibili-import-runs/9001/cancel", None),
@@ -693,9 +700,14 @@ def test_bilibili_routes_require_auth():
 def test_bilibili_reserved_routes_return_not_implemented():
     requests_to_check = [
         ("POST", "/api/v1/courses/101/resources/imports/bilibili", None),
-        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {}),
-        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {"videoUrl": ""}),
-        ("POST", "/api/v1/courses/101/resources/imports/bilibili", {"videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"}),
+        (
+            "POST",
+            "/api/v1/courses/101/resources/imports/bilibili",
+            {
+                "previewId": "bili_preview_9101",
+                "sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/",
+            },
+        ),
         ("GET", "/api/v1/courses/101/resources/imports/bilibili", None),
         ("GET", "/api/v1/bilibili-import-runs/9001/status", None),
         ("POST", "/api/v1/bilibili-import-runs/9001/cancel", None),
@@ -738,4 +750,6 @@ def test_bilibili_import_openapi_keeps_reserved_request_body():
         for item in content_schema.get("anyOf", [])
     )
     component_schema = schema["components"]["schemas"]["BilibiliImportRequest"]
-    assert "videoUrl" in component_schema["properties"]
+    assert "previewId" in component_schema["properties"]
+    assert "sourceUrl" in component_schema["properties"]
+    assert "videoUrl" not in component_schema["properties"]

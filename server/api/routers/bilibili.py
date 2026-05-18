@@ -19,7 +19,11 @@ async def create_bilibili_import(
         request,
         service.create_import(
             course_id=courseId,
-            video_url=payload.video_url if payload else None,
+            preview_id=payload.preview_id if payload else None,
+            source_url=payload.source_url if payload else None,
+            selection_mode=payload.selection_mode if payload else None,
+            selected_part_ids=payload.selected_part_ids if payload else [],
+            quality_preference=payload.quality_preference if payload else None,
             idempotency_key=request.headers.get("Idempotency-Key"),
         ),
     )

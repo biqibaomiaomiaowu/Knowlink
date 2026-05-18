@@ -8,7 +8,11 @@ class BilibiliService:
         self,
         *,
         course_id: int,
-        video_url: str | None,
+        preview_id: str | None,
+        source_url: str | None,
+        selection_mode: str | None,
+        selected_part_ids: list[str],
+        quality_preference: str | None,
         idempotency_key: str | None,
     ) -> dict[str, object]:
         raise self._not_implemented()
