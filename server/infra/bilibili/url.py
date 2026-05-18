@@ -6,7 +6,7 @@ from enum import StrEnum
 from urllib.parse import parse_qs, urlparse
 
 
-_BVID_RE = re.compile(r"^BV[0-9A-Za-z]+$")
+_BVID_RE = re.compile(r"^BV[0-9A-Za-z]{10}$")
 _BANGUMI_EP_RE = re.compile(r"^ep[0-9]+$")
 
 
@@ -29,7 +29,8 @@ class ParsedBilibiliUrl:
 
 
 def parse_bilibili_url(url: str) -> ParsedBilibiliUrl:
-    parsed = urlparse(url)
+    normalized_url = url.strip()
+    parsed = urlparse(normalized_url)
     host = parsed.netloc.lower()
     path_parts = [part for part in parsed.path.split("/") if part]
 
@@ -37,11 +38,11 @@ def parse_bilibili_url(url: str) -> ParsedBilibiliUrl:
         raise ValueError("unsupported Bilibili URL")
 
     if host == "www.bilibili.com":
-        return _parse_www_bilibili(url, path_parts, parsed.query)
+        return _parse_www_bilibili(normalized_url, path_parts, parsed.query)
     if host == "space.bilibili.com":
-        return _parse_space_bilibili(url, path_parts, parsed.query)
+        return _parse_space_bilibili(normalized_url, path_parts, parsed.query)
     if host == "b23.tv":
-        return _parse_b23(url, path_parts)
+        return _parse_b23(normalized_url, path_parts)
 
     raise ValueError("unsupported Bilibili URL")
 
@@ -98,11 +99,12 @@ def _parse_space_bilibili(original_url: str, path_parts: list[str], query: str) 
 
 
 def _parse_b23(original_url: str, path_parts: list[str]) -> ParsedBilibiliUrl:
-    if path_parts and _BVID_RE.match(path_parts[0]):
+    if path_parts:
+        bvid = path_parts[0] if _BVID_RE.match(path_parts[0]) else None
         return ParsedBilibiliUrl(
             original_url=original_url,
             kind=BilibiliUrlKind.SHORT,
-            bvid=path_parts[0],
+            bvid=bvid,
         )
 
     raise ValueError("unsupported Bilibili URL")
@@ -115,8 +117,8 @@ def _page_no(query: str) -> int | None:
         return None
     try:
         page_no = int(values[0])
-    except ValueError as exc:
-        raise ValueError("unsupported Bilibili URL") from exc
+    except ValueError:
+        return None
     if page_no < 1:
-        raise ValueError("unsupported Bilibili URL")
+        return None
     return page_no

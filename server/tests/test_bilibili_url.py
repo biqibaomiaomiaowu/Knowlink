@@ -41,6 +41,11 @@ from server.schemas.responses import (
             BilibiliUrlKind.SHORT,
             {"bvid": "BV1xx411c7mD"},
         ),
+        (
+            "https://b23.tv/3m9K2Lp",
+            BilibiliUrlKind.SHORT,
+            {"bvid": None},
+        ),
     ],
 )
 def test_parse_bilibili_url_supported_cases(url: str, kind: BilibiliUrlKind, expected: dict[str, object]):
@@ -57,6 +62,26 @@ def test_short_url_kind_is_not_exposed_as_source_type():
 
     assert parsed.kind == BilibiliUrlKind.SHORT
     assert BilibiliUrlKind.SHORT.value not in {item.value for item in BilibiliSourceType}
+
+
+def test_parse_bilibili_url_trims_pasted_whitespace():
+    parsed = parse_bilibili_url(" \nhttps://www.bilibili.com/video/BV1xx411c7mD/\t")
+
+    assert parsed.original_url == "https://www.bilibili.com/video/BV1xx411c7mD/"
+    assert parsed.kind == BilibiliUrlKind.SINGLE_VIDEO
+    assert parsed.bvid == "BV1xx411c7mD"
+
+
+def test_parse_bilibili_url_rejects_obviously_malformed_bv_path():
+    with pytest.raises(ValueError, match="unsupported Bilibili URL"):
+        parse_bilibili_url("https://www.bilibili.com/video/BV1")
+
+
+def test_parse_bilibili_url_falls_back_to_single_video_for_invalid_page_query():
+    parsed = parse_bilibili_url("https://www.bilibili.com/video/BV1xx411c7mD?p=abc")
+
+    assert parsed.kind == BilibiliUrlKind.SINGLE_VIDEO
+    assert parsed.page_no is None
 
 
 def test_parse_bilibili_url_rejects_non_bilibili_url():

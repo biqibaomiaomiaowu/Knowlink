@@ -4,6 +4,14 @@ from server.domain.services.errors import ServiceError
 
 
 class BilibiliService:
+    def preview_import(
+        self,
+        *,
+        course_id: int,
+        source_url: str,
+    ) -> dict[str, object]:
+        raise self._not_implemented()
+
     def create_import(
         self,
         *,

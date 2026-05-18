@@ -676,6 +676,11 @@ def test_bilibili_routes_require_auth():
     requests_to_check = [
         (
             "POST",
+            "/api/v1/courses/101/resources/imports/bilibili/preview",
+            {"sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"},
+        ),
+        (
+            "POST",
             "/api/v1/courses/101/resources/imports/bilibili",
             {
                 "previewId": "bili_preview_9101",
@@ -700,6 +705,11 @@ def test_bilibili_routes_require_auth():
 def test_bilibili_reserved_routes_return_not_implemented():
     requests_to_check = [
         ("POST", "/api/v1/courses/101/resources/imports/bilibili", None),
+        (
+            "POST",
+            "/api/v1/courses/101/resources/imports/bilibili/preview",
+            {"sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"},
+        ),
         (
             "POST",
             "/api/v1/courses/101/resources/imports/bilibili",

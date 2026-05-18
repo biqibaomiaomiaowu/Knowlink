@@ -3,9 +3,25 @@ from fastapi import APIRouter, Depends, Request
 from server.api.deps import get_bilibili_service
 from server.api.response import api_ok
 from server.domain.services import BilibiliService
-from server.schemas.requests import BilibiliImportRequest
+from server.schemas.requests import BilibiliImportRequest, BilibiliPreviewRequest
 
 router = APIRouter(tags=["bilibili"])
+
+
+@router.post("/courses/{courseId}/resources/imports/bilibili/preview")
+async def preview_bilibili_import(
+    courseId: int,
+    request: Request,
+    payload: BilibiliPreviewRequest,
+    service: BilibiliService = Depends(get_bilibili_service),
+):
+    return api_ok(
+        request,
+        service.preview_import(
+            course_id=courseId,
+            source_url=payload.source_url,
+        ),
+    )
 
 
 @router.post("/courses/{courseId}/resources/imports/bilibili")
