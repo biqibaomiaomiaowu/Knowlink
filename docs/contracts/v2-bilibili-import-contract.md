@@ -31,30 +31,30 @@
 
 ```json
 {
-  "sessionId": "bili_qr_20260518_001",
-  "qrCodeUrl": "https://passport.bilibili.com/qr/demo",
-  "loginStatus": "pending",
-  "expiresAt": "2026-05-18T12:05:00+08:00"
+  "sessionId": "bili_qr_session_001",
+  "status": "pending_scan",
+  "qrCodeUrl": "https://passport.bilibili.com/qrcode-demo",
+  "expiresAt": "2026-05-18T12:15:00+00:00"
 }
 ```
 
 说明：
 
-- `loginStatus` 可取 `pending`、`confirmed`、`expired`、`failed`。
+- `status` 可取 `pending_scan`、`scanned`、`confirmed`、`expired`、`failed`。
 - 二维码失效后前端重新创建会话，不复用旧 `sessionId`。
 
 ### `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
 
 查询扫码登录会话状态。
 
-响应 `data`：
+响应 `data` 与创建二维码会话一致，`status` 可取 `pending_scan`、`scanned`、`confirmed`、`expired`、`failed`。
 
 ```json
 {
-  "sessionId": "bili_qr_20260518_001",
-  "loginStatus": "confirmed",
-  "expiresAt": "2026-05-18T12:05:00+08:00",
-  "nextAction": "preview"
+  "sessionId": "bili_qr_session_001",
+  "status": "confirmed",
+  "qrCodeUrl": "https://passport.bilibili.com/qrcode-demo",
+  "expiresAt": "2026-05-18T12:15:00+00:00"
 }
 ```
 
@@ -66,12 +66,13 @@
 
 ```json
 {
-  "authenticated": true,
-  "expiresAt": "2026-06-18T12:00:00+08:00",
-  "displayName": "bili-user",
-  "nextAction": "preview"
+  "loginStatus": "active",
+  "userNickname": "KnowLink Demo",
+  "expiresAt": "2026-05-18T14:00:00+00:00"
 }
 ```
+
+响应不得包含 `SESSDATA`、`bili_jct`、`DedeUserID` 或完整 cookie。
 
 失败语义：
 
@@ -98,8 +99,7 @@
 
 ```json
 {
-  "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
-  "qualityPreference": "android_safe"
+  "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2"
 }
 ```
 
@@ -107,23 +107,31 @@
 
 ```json
 {
-  "courseId": 101,
+  "previewId": "bili_preview_9101",
   "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
-  "sourceType": "bilibili",
-  "preview": {
-    "title": "线性代数复习",
-    "coverUrl": "https://i0.hdslb.com/demo.jpg",
-    "kind": "video",
-    "parts": [
-      {
-        "partId": "cid-1001",
-        "title": "P1 行列式",
-        "durationSec": 1800,
-        "defaultSelected": true
-      }
-    ]
-  },
-  "nextAction": "import"
+  "sourceType": "multi_p",
+  "title": "课程样例",
+  "coverUrl": "https://i0.hdslb.com/bfs/archive/demo.jpg",
+  "totalParts": 2,
+  "parts": [
+    {
+      "partId": "cid-1001",
+      "title": "P1 导论",
+      "durationSec": 600,
+      "cid": 1001,
+      "pageNo": 1,
+      "selectedByDefault": false
+    },
+    {
+      "partId": "cid-1002",
+      "title": "P2 例题",
+      "durationSec": 900,
+      "cid": 1002,
+      "pageNo": 2,
+      "selectedByDefault": true
+    }
+  ],
+  "defaultSelectionMode": "current_part"
 }
 ```
 
@@ -158,20 +166,13 @@
 
 ```json
 {
-  "importRunId": 9001,
-  "courseId": 101,
-  "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
-  "sourceType": "bilibili",
-  "status": "pending",
-  "progressPct": 0,
-  "stage": "queued",
-  "taskId": 7001,
-  "resourceIds": [],
-  "preview": null,
-  "errorCode": null,
-  "failureReason": null,
-  "recoverable": false,
-  "nextAction": "poll_status"
+  "taskId": 7201,
+  "status": "queued",
+  "nextAction": "poll",
+  "entity": {
+    "type": "bilibili_import_run",
+    "id": 9101
+  }
 }
 ```
 
@@ -193,6 +194,7 @@
       "importRunId": 9001,
       "courseId": 101,
       "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+      "sourceType": "multi_p",
       "status": "downloading",
       "progressPct": 42,
       "taskId": 7001,
@@ -200,7 +202,7 @@
       "errorCode": null,
       "failureReason": null,
       "recoverable": false,
-      "nextAction": "poll_status"
+      "nextAction": "poll"
     }
   ]
 }
@@ -217,7 +219,7 @@
   "importRunId": 9001,
   "courseId": 101,
   "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
-  "sourceType": "bilibili",
+  "sourceType": "multi_p",
   "status": "merging",
   "progressPct": 70,
   "stage": "ffmpeg",
@@ -236,7 +238,7 @@
   "errorCode": null,
   "failureReason": null,
   "recoverable": false,
-  "nextAction": "poll_status"
+  "nextAction": "poll"
 }
 ```
 
@@ -254,14 +256,13 @@
 
 ```json
 {
-  "importRunId": 9001,
+  "taskId": 7201,
   "status": "canceled",
-  "taskId": 7001,
-  "resourceIds": [],
-  "errorCode": null,
-  "failureReason": null,
-  "recoverable": false,
-  "nextAction": "none"
+  "nextAction": "none",
+  "entity": {
+    "type": "bilibili_import_run",
+    "id": 9101
+  }
 }
 ```
 
@@ -273,7 +274,15 @@
 
 ## 4. DTO 字段冻结
 
-导入 run 响应必须至少包含：
+导入创建响应必须使用 async-task 语义，至少包含：
+
+- `taskId`
+- `status`
+- `nextAction`
+- `entity.type`
+- `entity.id`
+
+导入 run 状态和列表响应必须至少包含：
 
 - `importRunId`
 - `courseId`
@@ -290,12 +299,25 @@
 - `recoverable`
 - `nextAction`
 
-Preview item 必须至少包含：
+Preview 响应必须至少包含：
+
+- `previewId`
+- `sourceUrl`
+- `sourceType`
+- `title`
+- `coverUrl`
+- `totalParts`
+- `parts`
+- `defaultSelectionMode`
+
+Preview part 必须至少包含：
 
 - `partId`
 - `title`
 - `durationSec`
-- `defaultSelected`
+- `cid`
+- `pageNo`
+- `selectedByDefault`
 
 ## 5. 状态机
 
@@ -378,6 +400,6 @@ raw/1/{course_id}/bilibili/{import_run_id}/{safe_title}.mp4
 
 - 固定样例至少覆盖一个可访问的单视频或多 P 链路。
 - 合集和番剧以至少一个可访问样例为准；会员、付费、地区限制或不可观看内容只要求返回明确失败原因。
-- 导入后必须能在课程资源列表看到 `sourceType=bilibili` 的资源。
+- 导入后必须能在课程资源列表看到来源为 B站的资源。
 - 状态接口必须能展示下载、合并、上传、失败、可恢复失败和取消语义。
-- Android 前端只读取 `qrCodeUrl`、`loginStatus`、`preview.parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 等展示字段，不读取 cookie。
+- Android 前端只读取 `qrCodeUrl`、QR `status`、`loginStatus`、`parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 等展示字段，不读取 cookie。

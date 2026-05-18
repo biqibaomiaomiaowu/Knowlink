@@ -21,7 +21,7 @@
 ## 3. 前端快速说明
 
 - 登录页调用 `POST /api/v1/bilibili/auth/qr/sessions` 获取 `qrCodeUrl`，轮询 `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`。
-- 导入前调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview` 展示 `preview.parts`。
+- 导入前调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview` 展示 `parts`。
 - 创建任务调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili`，随后轮询 `GET /api/v1/bilibili-import-runs/{importRunId}/status`。
 - 取消按钮调用 `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`。
 - 前端只展示 `status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`，不得读取或保存 B站 cookie。
@@ -54,18 +54,31 @@
 - 错误码以 [../contracts/error-codes.md](../contracts/error-codes.md) 的 Bilibili 段落为准。
 - 状态拼写统一使用 `canceled`。
 
-## 7. 验收证据
+## 7. 曹乐独立验收证据
 
-阶段一验收至少需要：
+曹乐独立验收至少需要：
 
-- Android 截图或录屏。
 - 一个固定 B站单视频或多 P 样例。
 - 导入状态接口返回样例。
-- 导入后课程资源记录，资源需带 `sourceType=bilibili`。
+- 导入后课程资源记录，资源需能标识来源为 B站。
 - 失败或不可访问样例的错误码和 `failureReason`。
 - 取消任务后的状态接口返回和临时文件清理记录。
+- 后端测试命令和本地运行命令。
 
-## 8. 本地命令
+## 8. 小组联调依赖
+
+- Android 截图或录屏由朱春雯在前端和真机联调中提供。
+- 页面扫码、预览、进度、失败和取消展示由朱春雯按 contract 字段对齐。
+- 状态样例、任务列表字段说明、测试数据整理和联调记录由杨彩艺按曹乐冻结字段补齐。
+
+## 9. 复杂布局最低验收标准
+
+- 表格：保留行列结构；无法保留原结构时转换为可读 Markdown 表格。
+- 公式：不能出现明显乱码；无法结构化时保留原文或 OCR 文本，并记录 issue。
+- 图片：保留 caption、位置和来源引用。
+- 复杂布局：不丢页、不让引用断裂、不混同不同页或 slide 的 citation。
+
+## 10. 本地命令
 
 ```bash
 .venv/bin/python -m pytest -s server/tests/test_bilibili_contract.py server/tests/test_contract_freeze.py::test_bilibili_reserved_contract_is_aligned_across_docs -q
@@ -73,7 +86,7 @@
 
 后续生产代码接入时，需追加服务、路由、仓储、worker 和 SQL runtime 的对应测试命令。
 
-## 9. 风险
+## 11. 风险
 
 - B站登录态可能过期或触发风控，必须返回明确认证错误，不把 cookie 暴露给前端。
 - 会员、付费、DRM、地区限制或账号无权限内容只返回访问受限，不做绕过。
