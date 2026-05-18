@@ -415,7 +415,7 @@
 
 ### B 站导入预留接口（V1/MVP）
 
-以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 contract 以本文件 1.3 的过渡口径和后续补充的 V2 API 章节为准。
+以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 B站真实导入 contract 已冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)，本文下方示例只作为 V1 历史 stub 形状保留，不作为 V2 字段来源。
 
 stub 阶段约束：
 
@@ -437,119 +437,41 @@ stub 阶段约束：
 
 - V1 stub 阶段会保留上述 `requestBody` 结构，但暂不收紧为必填校验；鉴权通过后统一返回 `501`。
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "taskId": 7201,
-  "status": "queued",
-  "nextAction": "poll",
-  "entity": {
-    "type": "bilibili_import_run",
-    "id": 9101
-  }
-}
-```
+V2 B站真实导入创建响应、请求字段和选择语义以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准；本文不再复制 V2 示例，避免旧 `videoUrl` stub 字段被误用为 V2 contract。
 
 V1 约束：
 
 - 第一版只冻结单个公开视频链接，不覆盖番剧、合集、收藏夹和批量导入。
 - 支持范围只包含标准视频页链接、`BV` 链接和 `b23.tv` 短链。
-- V2 接通后，该异步导入实体类型固定为 `bilibili_import_run`，范围按 `docs/v2/phase-plan.md` 扩展到单视频、多 P、合集、番剧。
+- V2 真实导入的异步导入实体类型、范围和 DTO 字段以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "items": [
-    {
-      "importRunId": 9101,
-      "courseId": 101,
-      "status": "queued",
-      "videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/",
-      "taskId": 7201,
-      "resourceId": null
-    }
-  ]
-}
-```
+V1 历史 stub 阶段没有真实列表数据；V2 列表响应字段以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/bilibili-import-runs/{importRunId}/status`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "importRunId": 9101,
-  "courseId": 101,
-  "status": "queued",
-  "videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/",
-  "taskId": 7201,
-  "resourceId": null,
-  "nextAction": "poll",
-  "errorCode": null
-}
-```
+V1 历史 stub 阶段没有真实状态数据；V2 状态响应字段以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "taskId": 7201,
-  "status": "canceled",
-  "nextAction": "none",
-  "entity": {
-    "type": "bilibili_import_run",
-    "id": 9101
-  }
-}
-```
+V1 历史 stub 阶段不会执行真实取消；V2 取消响应和副作用清理语义以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `POST /api/v1/bilibili/auth/qr/sessions`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "sessionId": "bili_qr_session_001",
-  "status": "pending_scan",
-  "qrCodeUrl": "https://i0.hdslb.com/bfs/static/jinkela/long/qr-demo.png",
-  "expiresAt": "2026-04-18T15:15:00+00:00"
-}
-```
+V1 历史 stub 阶段不会创建真实扫码会话；V2 QR DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "sessionId": "bili_qr_session_001",
-  "status": "pending_scan",
-  "qrCodeUrl": "https://i0.hdslb.com/bfs/static/jinkela/long/qr-demo.png",
-  "expiresAt": "2026-04-18T15:15:00+00:00"
-}
-```
+V1 历史 stub 阶段不会查询真实扫码状态；V2 QR DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/bilibili/auth/session`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "loginStatus": "active",
-  "userNickname": "KnowLink Demo",
-  "expiresAt": "2026-04-18T17:15:00+00:00"
-}
-```
+V1 历史 stub 阶段不会查询真实 B站登录态；V2 auth session DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `DELETE /api/v1/bilibili/auth/session`
 
-V2 接通后的响应 `data`：
+V1 历史 stub 目标响应形状如下；当前未实现阶段仍统一返回 `501`，V2 auth session 删除 DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ```json
 {

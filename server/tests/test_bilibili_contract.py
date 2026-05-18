@@ -17,6 +17,20 @@ def test_v2_bilibili_contract_is_linked_from_docs():
     assert "phase1-cao-le-handoff.md" in docs_readme
 
 
+def test_api_contract_bilibili_section_does_not_label_v1_stub_examples_as_v2():
+    api_contract = text("docs/contracts/api-contract.md")
+    bilibili_section = api_contract.split("### B 站导入预留接口（V1/MVP）", 1)[1].split(
+        "## 7. 异步任务",
+        1,
+    )[0]
+
+    assert "V2 接通后的响应" not in bilibili_section
+    assert "V2 B站真实导入 contract" in bilibili_section
+    assert "v2-bilibili-import-contract.md" in bilibili_section
+    assert "videoUrl" in bilibili_section
+    assert "V1 历史" in bilibili_section
+
+
 def test_v2_bilibili_contract_freezes_states_and_paths():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
 
@@ -116,6 +130,46 @@ def test_v2_bilibili_import_creation_returns_async_task_shape():
     assert '"status": "pending"' not in import_section
     assert '"importRunId"' not in import_section
     assert '"progressPct"' not in import_section
+
+
+def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    list_section = contract.split(
+        "### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`",
+        1,
+    )[1].split("### `GET /api/v1/bilibili-import-runs/{importRunId}/status`", 1)[0]
+    status_section = contract.split("### `GET /api/v1/bilibili-import-runs/{importRunId}/status`", 1)[1].split(
+        "### `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`",
+        1,
+    )[0]
+
+    for section in (list_section, status_section):
+        for field in (
+            "importRunId",
+            "courseId",
+            "sourceUrl",
+            "sourceType",
+            "status",
+            "progressPct",
+            "stage",
+            "taskId",
+            "resourceIds",
+            "preview",
+            "errorCode",
+            "failureReason",
+            "recoverable",
+            "nextAction",
+        ):
+            assert f'"{field}"' in section
+
+
+def test_v2_bilibili_error_code_scope_allows_shared_infrastructure_errors():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    error_section = contract.split("## 7. 错误码", 1)[1].split("## 8. 取消与清理", 1)[0]
+
+    assert "Bilibili 领域错误码" in error_section
+    assert "共享基础设施错误码" in error_section
+    assert "`async_task.enqueue_failed`" in error_section
 
 
 def test_phase1_handoff_separates_android_dependency_and_complex_layout_acceptance():

@@ -197,8 +197,19 @@
       "sourceType": "multi_p",
       "status": "downloading",
       "progressPct": 42,
+      "stage": "downloading",
       "taskId": 7001,
       "resourceIds": [],
+      "preview": {
+        "title": "线性代数复习",
+        "parts": [
+          {
+            "partId": "cid-1001",
+            "title": "P1 行列式",
+            "durationSec": 1800
+          }
+        ]
+      },
       "errorCode": null,
       "failureReason": null,
       "recoverable": false,
@@ -371,7 +382,9 @@ Preview part 必须至少包含：
 
 ## 7. 错误码
 
-V2 B站导入错误码冻结在 [error-codes.md](./error-codes.md) 的 Bilibili 段落。接口实现只能返回该段落中的 B站错误码，新增错误码必须先更新本文和错误码 contract。
+Bilibili 领域错误码冻结在 [error-codes.md](./error-codes.md) 的 Bilibili 段落。接口实现返回 `bilibili.*` 错误码时只能使用该段落中的错误码，新增 Bilibili 领域错误码必须先更新本文和错误码 contract。
+
+共享基础设施错误码可以按对应 contract 返回，例如任务记录创建后派发失败时允许返回 `503` 和 `async_task.enqueue_failed`。
 
 会员、付费、DRM、地区限制或账号无权限统一归入 `bilibili.access_denied`，`failureReason` 说明具体原因，不做绕过。
 
