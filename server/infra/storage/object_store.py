@@ -60,6 +60,15 @@ class ObjectStorage(Protocol):
 
     def download_object_to_file(self, object_key: str, destination_path: str | Path) -> None: ...
 
+    def upload_file(
+        self,
+        object_key: str,
+        source_path: str | Path,
+        *,
+        content_type: str | None = None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> ObjectStat: ...
+
 
 class MinioObjectStorage:
     def __init__(
@@ -183,6 +192,34 @@ class MinioObjectStorage:
             raise ObjectStorageUnavailable("Failed to download object") from exc
         except Exception as exc:  # pragma: no cover - defensive adapter boundary.
             raise ObjectStorageUnavailable("Failed to download object") from exc
+
+    def upload_file(
+        self,
+        object_key: str,
+        source_path: str | Path,
+        *,
+        content_type: str | None = None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> ObjectStat:
+        path = Path(source_path)
+        object_metadata = dict(metadata or {})
+        try:
+            result = self.client.fput_object(
+                self.bucket_name,
+                object_key,
+                str(path),
+                content_type=content_type,
+                metadata=object_metadata,
+            )
+            size_bytes = path.stat().st_size
+        except Exception as exc:  # pragma: no cover - defensive adapter boundary.
+            raise ObjectStorageUnavailable("Failed to upload object") from exc
+        return ObjectStat(
+            size_bytes=size_bytes,
+            etag=getattr(result, "etag", None),
+            metadata=object_metadata,
+            checksum_required=False,
+        )
 
 
 def _checksum_from_metadata(metadata: Mapping[str, str]) -> str | None:
@@ -322,6 +359,20 @@ class DemoObjectStorage:
         path = Path(destination_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"")
+
+    def upload_file(
+        self,
+        object_key: str,
+        source_path: str | Path,
+        *,
+        content_type: str | None = None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> ObjectStat:
+        return ObjectStat(
+            size_bytes=Path(source_path).stat().st_size,
+            metadata=dict(metadata or {}),
+            checksum_required=False,
+        )
 
 
 def build_object_storage(settings) -> ObjectStorage | None:

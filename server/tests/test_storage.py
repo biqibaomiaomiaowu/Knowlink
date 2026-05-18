@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -12,7 +13,13 @@ from server.domain.services.errors import ServiceError
 from server.domain.services.resources import PLAYBACK_EXPIRES_IN, UPLOAD_EXPIRES_IN
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
-from server.infra.storage import MinioObjectStorage, ObjectNotFoundError, ObjectStat, build_object_storage
+from server.infra.storage import (
+    DemoObjectStorage,
+    MinioObjectStorage,
+    ObjectNotFoundError,
+    ObjectStat,
+    build_object_storage,
+)
 from server.schemas.requests import UploadCompleteRequest, UploadInitRequest
 
 
@@ -61,6 +68,7 @@ class RecordingMinioClient:
     def __init__(self) -> None:
         self.presigned_call: tuple[str, str, timedelta] | None = None
         self.presigned_url_call: dict[str, object] | None = None
+        self.fput_call: dict[str, object] | None = None
         self.metadata = {"x-amz-meta-sha256": "abc123"}
 
     def presigned_put_object(
@@ -109,6 +117,24 @@ class RecordingMinioClient:
             etag="etag-demo",
             metadata=self.metadata,
         )
+
+    def fput_object(
+        self,
+        bucket_name: str,
+        object_name: str,
+        file_path: str,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ):
+        self.fput_call = {
+            "bucketName": bucket_name,
+            "objectName": object_name,
+            "filePath": file_path,
+            "contentType": content_type,
+            "metadata": metadata,
+        }
+        return SimpleNamespace(etag="etag-uploaded")
 
 
 def _build_service(storage: FakeObjectStorage | None):
@@ -304,6 +330,50 @@ def test_minio_storage_reads_full_checksum_metadata_from_stat():
 
     assert stat.checksum == "sha256:def456"
     assert stat.metadata == {"x-amz-meta-checksum": "sha256:def456"}
+
+
+def test_demo_object_storage_upload_file_records_file_size(tmp_path):
+    source_path = tmp_path / "merged.mp4"
+    source_path.write_bytes(b"merged-video")
+    storage = DemoObjectStorage()
+
+    stat = storage.upload_file(
+        "raw/1/101/temp/mp4/merged.mp4",
+        source_path,
+        content_type="video/mp4",
+        metadata={"x-amz-meta-course-id": "101"},
+    )
+
+    assert stat.size_bytes == len(b"merged-video")
+    assert stat.etag is None
+    assert stat.metadata == {"x-amz-meta-course-id": "101"}
+    assert stat.checksum_required is False
+
+
+def test_minio_object_storage_upload_file_calls_fput_object(tmp_path):
+    source_path = tmp_path / "merged.mp4"
+    source_path.write_bytes(b"merged-video")
+    client = RecordingMinioClient()
+    storage = MinioObjectStorage(client=client, bucket_name="knowlink")
+
+    stat = storage.upload_file(
+        "raw/1/101/temp/mp4/merged.mp4",
+        source_path,
+        content_type="video/mp4",
+        metadata={"x-amz-meta-course-id": "101"},
+    )
+
+    assert client.fput_call == {
+        "bucketName": "knowlink",
+        "objectName": "raw/1/101/temp/mp4/merged.mp4",
+        "filePath": str(Path(source_path)),
+        "contentType": "video/mp4",
+        "metadata": {"x-amz-meta-course-id": "101"},
+    }
+    assert stat.size_bytes == len(b"merged-video")
+    assert stat.etag == "etag-uploaded"
+    assert stat.metadata == {"x-amz-meta-course-id": "101"}
+    assert stat.checksum_required is False
 
 
 def test_upload_init_uses_storage_presigned_url_and_course_scoped_key():
