@@ -50,7 +50,7 @@
 ## 6. 状态与错误码指针
 
 - 状态机以 `docs/contracts/v2-bilibili-import-contract.md` 第 5 节为准。
-- `bilibili_import_run.status` 到 `async_tasks.status` 的映射以 contract 第 6 节为准。
+- `bilibili_import_run.status` 到 `async_tasks.status` 的映射以 contract 第 7 节「`async_tasks` 映射」为准。
 - 错误码以 [../contracts/error-codes.md](../contracts/error-codes.md) 的 Bilibili 段落为准。
 - 状态拼写统一使用 `canceled`。
 

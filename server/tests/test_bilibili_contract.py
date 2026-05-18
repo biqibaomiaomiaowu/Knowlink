@@ -1,7 +1,20 @@
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+FROZEN_STAGE_VALUES = (
+    "queued",
+    "metadata",
+    "download",
+    "ffmpeg",
+    "object_storage",
+    "resource_import",
+    "done",
+    "error",
+    "canceling",
+    "canceled",
+)
 
 
 def text(path: str) -> str:
@@ -156,18 +169,7 @@ def test_v2_bilibili_stage_values_are_frozen_for_ui_mapping():
     assert "UI" in stage_section
     assert "不要和 `status` 混用" in stage_section
 
-    for stage in (
-        "queued",
-        "metadata",
-        "download",
-        "ffmpeg",
-        "object_storage",
-        "resource_import",
-        "done",
-        "error",
-        "canceling",
-        "canceled",
-    ):
+    for stage in FROZEN_STAGE_VALUES:
         assert f"`{stage}`" in stage_section
 
 
@@ -200,6 +202,13 @@ def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
             "nextAction",
         ):
             assert f'"{field}"' in section
+
+    example_stage_values = set(re.findall(r'"stage": "([^"]+)"', list_section + status_section))
+    assert example_stage_values
+    assert example_stage_values <= set(FROZEN_STAGE_VALUES)
+    assert "download" in example_stage_values
+    assert "ffmpeg" in example_stage_values
+    assert "downloading" not in example_stage_values
 
 
 def test_v2_bilibili_error_code_scope_allows_shared_infrastructure_errors():
@@ -247,6 +256,15 @@ def test_phase1_handoff_separates_android_dependency_and_complex_layout_acceptan
         "citation",
     ):
         assert token in complex_layout
+
+
+def test_phase1_handoff_points_to_current_async_task_mapping_section():
+    handoff = text("docs/v2/phase1-cao-le-handoff.md")
+    status_pointer = handoff.split("## 6. 状态与错误码指针", 1)[1].split("## 7. 曹乐独立验收证据", 1)[0]
+
+    assert "`bilibili_import_run.status` 到 `async_tasks.status`" in status_pointer
+    assert "第 7 节" in status_pointer
+    assert "`async_tasks` 映射" in status_pointer
 
 
 def test_v2_bilibili_error_codes_are_frozen():

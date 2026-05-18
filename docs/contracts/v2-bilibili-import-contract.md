@@ -202,7 +202,7 @@
       "sourceType": "multi_p",
       "status": "downloading",
       "progressPct": 42,
-      "stage": "downloading",
+      "stage": "download",
       "taskId": 7001,
       "resourceIds": [],
       "preview": {
