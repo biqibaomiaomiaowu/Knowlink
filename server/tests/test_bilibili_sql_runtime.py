@@ -22,7 +22,6 @@ def test_memory_bilibili_import_lifecycle() -> None:
     qr_session = repo.create_bilibili_qr_session(
         qr_key="qr-memory-1",
         qr_url="https://passport.bilibili.com/qrcode",
-        status="pending",
     )
     saved_auth = repo.save_bilibili_auth_session(
         cookies_json={"SESSDATA": "memory-session"},
@@ -37,6 +36,10 @@ def test_memory_bilibili_import_lifecycle() -> None:
         preview={"title": "单视频预览"},
         selection={"partIds": [1]},
     )
+
+    assert qr_session["status"] == "pending_scan"
+    assert import_run["status"] == "pending"
+    assert import_run["stage"] == "queued"
 
     updated = repo.update_bilibili_import_run(
         import_run["importRunId"],
@@ -73,7 +76,6 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
     qr_session = repo.create_bilibili_qr_session(
         qr_key="qr-sql-1",
         qr_url="https://passport.bilibili.com/qrcode",
-        status="pending",
     )
     saved_auth = repo.save_bilibili_auth_session(
         cookies_json={"SESSDATA": "sql-session"},
@@ -88,6 +90,10 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
         preview={"title": "SQL 单视频预览"},
         selection={"partIds": [1]},
     )
+
+    assert qr_session["status"] == "pending_scan"
+    assert import_run["status"] == "pending"
+    assert import_run["stage"] == "queued"
 
     updated = repo.update_bilibili_import_run(
         import_run["importRunId"],

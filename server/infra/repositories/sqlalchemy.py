@@ -207,7 +207,7 @@ class SqlAlchemyRuntimeRepository:
         *,
         qr_key: str,
         qr_url: str,
-        status: str = "pending",
+        status: str = "pending_scan",
         poll_payload_json: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
     ) -> dict[str, Any]:
@@ -307,7 +307,7 @@ class SqlAlchemyRuntimeRepository:
             source_url=source_url,
             source_type=source_type,
             status="pending",
-            stage="pending",
+            stage="queued",
             progress_pct=0,
             preview_json=preview,
             selection_json=selection,

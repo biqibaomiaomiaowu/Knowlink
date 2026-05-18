@@ -116,7 +116,7 @@ class RuntimeStore:
         *,
         qr_key: str,
         qr_url: str,
-        status: str = "pending",
+        status: str = "pending_scan",
         poll_payload_json: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
     ) -> dict[str, Any]:
@@ -216,7 +216,7 @@ class RuntimeStore:
             "sourceUrl": source_url,
             "sourceType": source_type,
             "status": "pending",
-            "stage": "pending",
+            "stage": "queued",
             "progressPct": 0,
             "preview": preview,
             "selection": selection,
