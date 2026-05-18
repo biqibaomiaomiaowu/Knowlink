@@ -16,7 +16,7 @@
 - 除健康检查外，接口继续要求 `Authorization: Bearer <token>`。
 - 服务端保存 B站 cookie 必要字段，不向前端返回 cookie 原文。
 - `sourceUrl` 支持 B站单视频、多 P、合集和番剧入口链接。
-- `qualityPreference` 默认 `android_safe`，优先选择 H.264/AVC 视频和 AAC 音频，便于 Android 播放和后续解析。
+- `qualityPreference` phase 1 只允许 `android_safe`，优先选择 H.264/AVC 视频和 AAC 音频，便于 Android 播放和后续解析。
 - 所有创建导入任务的写接口必须支持 `Idempotency-Key`。
 
 ## 3. API
@@ -351,6 +351,27 @@ Preview part 必须至少包含：
 - `pageNo`
 - `selectedByDefault`
 
+字段枚举冻结：
+
+| `sourceType` | 含义 |
+|---|---|
+| `single_video` | 单视频入口或单 P 视频 |
+| `multi_p` | 多 P 视频入口 |
+| `collection` | 合集入口 |
+| `bangumi` | 番剧入口 |
+
+| `qualityPreference` | 含义 |
+|---|---|
+| `android_safe` | phase 1 唯一允许值；优先 H.264/AVC 视频和 AAC 音频，未来 contract 扩展前不得新增其他取值 |
+
+`android_safe` 是 phase 1 唯一允许值，未来 contract 扩展前 `qualityPreference` 不接受其他枚举值。
+
+| `defaultSelectionMode` | 含义 |
+|---|---|
+| `current_part` | 默认只选择当前链接指向的分 P 或当前条目 |
+| `all_parts` | 默认选择预览中的全部可导入条目 |
+| `selected_parts` | 默认选择服务端按 URL 或规则明确标记的条目 |
+
 ## 5. 状态机
 
 `bilibili_import_run.status` 只允许以下值：
@@ -426,9 +447,9 @@ Bilibili 领域错误码冻结在 [error-codes.md](./error-codes.md) 的 Bilibil
 
 共享基础设施错误码可以按对应 contract 返回，例如任务记录创建后派发失败时允许返回 `503` 和 `async_task.enqueue_failed`。
 
-运行期导入错误必须按以下阶段语义返回：
+运行期导入错误必须按以下内部 runner phase 语义记录。`failurePhase` 是 worker/runner 内部失败位置，不是响应 `stage`；它允许包含不对前端暴露的 `playurl`，前端响应和示例中的 `stage` 仍只能使用第 6 节冻结枚举。
 
-| 错误码 | 运行阶段 | 返回条件 |
+| 错误码 | `failurePhase` | 返回条件 |
 |---|---|---|
 | `bilibili.metadata_failed` | `metadata` | URL、meta、preview 元数据获取或解析失败 |
 | `bilibili.playurl_failed` | `playurl` | playurl 流选择失败，或无法获取可播放音视频流 |

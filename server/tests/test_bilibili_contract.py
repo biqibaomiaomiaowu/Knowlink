@@ -15,7 +15,19 @@ FROZEN_STAGE_VALUES = (
     "canceling",
     "canceled",
 )
-FROZEN_RUNTIME_ERROR_STAGES = {
+FROZEN_SOURCE_TYPE_VALUES = (
+    "single_video",
+    "multi_p",
+    "collection",
+    "bangumi",
+)
+FROZEN_QUALITY_PREFERENCE_VALUES = ("android_safe",)
+FROZEN_DEFAULT_SELECTION_MODE_VALUES = (
+    "current_part",
+    "all_parts",
+    "selected_parts",
+)
+FROZEN_RUNTIME_ERROR_PHASES = {
     "bilibili.metadata_failed": "metadata",
     "bilibili.playurl_failed": "playurl",
     "bilibili.download_failed": "download",
@@ -45,6 +57,8 @@ def markdown_table_values(section: str, header: str) -> tuple[str, ...]:
                 values.append(match.group(1))
                 continue
             break
+        if in_table and not line.strip() and values:
+            break
         if in_table and line.strip():
             break
 
@@ -53,6 +67,10 @@ def markdown_table_values(section: str, header: str) -> tuple[str, ...]:
 
 def registered_error_codes(error_codes: str) -> set[str]:
     return set(re.findall(r"`([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)`", error_codes))
+
+
+def backticked_error_codes(markdown: str) -> set[str]:
+    return set(re.findall(r"`([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)`", markdown))
 
 
 def returned_error_codes(contract: str) -> set[str]:
@@ -172,6 +190,22 @@ def test_v2_bilibili_contract_freezes_preview_dto_shape():
     assert "defaultSelected" not in preview_section
 
 
+def test_v2_bilibili_contract_freezes_source_and_selection_enums():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    dto_section = contract.split("## 4. DTO 字段冻结", 1)[1].split("## 5. 状态机", 1)[0]
+
+    assert markdown_table_values(dto_section, "sourceType") == FROZEN_SOURCE_TYPE_VALUES
+    assert markdown_table_values(dto_section, "qualityPreference") == FROZEN_QUALITY_PREFERENCE_VALUES
+    assert markdown_table_values(dto_section, "defaultSelectionMode") == FROZEN_DEFAULT_SELECTION_MODE_VALUES
+
+    assert "`android_safe` 是 phase 1 唯一允许值" in dto_section
+    assert "未来 contract 扩展" in dto_section
+
+    assert '"sourceType": "multi_p"' in contract
+    for source_type in FROZEN_SOURCE_TYPE_VALUES:
+        assert f"`{source_type}`" in dto_section
+
+
 def test_v2_bilibili_import_creation_returns_async_task_shape():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
     import_section = contract.split(
@@ -231,6 +265,7 @@ def test_v2_bilibili_stage_values_are_frozen_for_ui_mapping():
     assert "建议覆盖以下冻结值" not in stage_section
 
     assert markdown_table_values(stage_section, "stage") == FROZEN_STAGE_VALUES
+    assert "playurl" not in stage_section
 
 
 def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
@@ -270,6 +305,7 @@ def test_v2_bilibili_list_and_status_examples_match_frozen_run_fields():
     assert "download" in example_stage_values
     assert "ffmpeg" in example_stage_values
     assert "downloading" not in example_stage_values
+    assert "playurl" not in example_stage_values
 
 
 def test_v2_bilibili_error_code_scope_allows_shared_infrastructure_errors():
@@ -281,12 +317,22 @@ def test_v2_bilibili_error_code_scope_allows_shared_infrastructure_errors():
     assert "`async_task.enqueue_failed`" in error_section
 
 
-def test_v2_bilibili_runtime_error_codes_are_frozen_in_contract():
+def test_v2_bilibili_runtime_error_phases_are_frozen_separately_from_response_stage():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
     error_section = contract.split("## 8. 错误码", 1)[1].split("## 9. 取消与清理", 1)[0]
 
-    for error_code, stage in FROZEN_RUNTIME_ERROR_STAGES.items():
-        assert re.search(rf"\| `{re.escape(error_code)}` \| `{re.escape(stage)}` \|", error_section)
+    assert "`failurePhase`" in error_section
+    assert "内部 runner phase" in error_section
+    assert "不是响应 `stage`" in error_section
+    assert "允许包含不对前端暴露的 `playurl`" in error_section
+    assert "运行阶段" not in error_section
+
+    for error_code, failure_phase in FROZEN_RUNTIME_ERROR_PHASES.items():
+        assert re.search(rf"\| `{re.escape(error_code)}` \| `{re.escape(failure_phase)}` \|", error_section)
+
+    assert "bilibili.playurl_failed" in error_section
+    assert "`playurl`" in error_section
+    assert "playurl" not in FROZEN_STAGE_VALUES
 
 
 def test_v2_bilibili_returned_error_codes_are_registered():
@@ -298,6 +344,19 @@ def test_v2_bilibili_returned_error_codes_are_registered():
 
     assert {"idempotency.body_mismatch", "async_task.enqueue_failed"} <= referenced_codes
     assert referenced_codes <= registered_codes
+
+
+def test_v2_bilibili_backticked_bilibili_error_codes_are_registered():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+    error_codes = text("docs/contracts/error-codes.md")
+
+    referenced_bilibili_codes = {
+        code for code in backticked_error_codes(contract) if code.startswith("bilibili.")
+    }
+    registered_codes = registered_error_codes(error_codes)
+
+    assert referenced_bilibili_codes
+    assert referenced_bilibili_codes <= registered_codes
 
 
 def test_phase1_handoff_separates_android_dependency_and_complex_layout_acceptance():
