@@ -16,6 +16,7 @@
 
 - [v2/phase-plan.md](./v2/phase-plan.md)：第二版阶段计划与负责人分工。
 - [v2/three-phase-design.md](./v2/three-phase-design.md)：第二版三阶段功能设计与技术方案背景。
+- [v2/phase1-cao-le-handoff.md](./v2/phase1-cao-le-handoff.md)：曹乐阶段一后端交接说明。
 
 ## V1 历史冻结文档
 
@@ -30,6 +31,7 @@
 
 - [contracts/api-contract.md](./contracts/api-contract.md)：API path、请求/响应字段、异步返回结构和 V2 contract 过渡口径。
 - [contracts/error-codes.md](./contracts/error-codes.md)：错误码与失败语义。
+- [contracts/v2-bilibili-import-contract.md](./contracts/v2-bilibili-import-contract.md)：V2 阶段一 B站真实导入 API、状态机、错误码和取消语义。
 - [contracts/week1-cao-le-freeze.md](./contracts/week1-cao-le-freeze.md)：曹乐 Week 1 业务语义冻结稿。
 - [contracts/week2-cao-le-parse-inquiry-contract.md](./contracts/week2-cao-le-parse-inquiry-contract.md)：曹乐 Week 2 解析与问询契约。
 
@@ -42,4 +44,3 @@
 
 - [../README.md](../README.md)：仓库总览和最短阅读路径。
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)：提交规范。
-
