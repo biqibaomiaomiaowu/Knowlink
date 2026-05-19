@@ -406,6 +406,33 @@ def test_phase1_handoff_points_to_current_async_task_mapping_section():
     assert "`async_tasks` 映射" in status_pointer
 
 
+def test_phase1_handoff_covers_team_boundaries_runtime_and_course_semantics():
+    handoff = text("docs/v2/phase1-cao-le-handoff.md")
+
+    for token in (
+        "曹乐已完成",
+        "给朱春雯",
+        "给杨彩艺",
+        "扫码",
+        "资源预览",
+        "进度",
+        "取消",
+        "Android",
+        "任务恢复",
+        "ffmpeg",
+        "课程详情",
+        "当前课程",
+        "switch-current",
+        "reasonMaterials",
+        "bilibili.access_denied",
+        "bilibili.merge_failed",
+        "KNOWLINK_RUNTIME_REPOSITORY_BACKEND",
+        "KNOWLINK_QA_PROVIDER",
+        ".venv/bin/python -m pytest",
+    ):
+        assert token in handoff
+
+
 def test_v2_bilibili_error_codes_are_frozen():
     error_codes = text("docs/contracts/error-codes.md")
 

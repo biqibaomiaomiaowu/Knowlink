@@ -1,6 +1,17 @@
 # KnowLink V2 阶段一曹乐后端交接说明
 
-日期：2026-05-18
+日期：2026-05-19
+
+## 0. 曹乐已完成
+
+- V2 B站导入 API contract、错误码、状态机和 `async_tasks` 映射已冻结。
+- B站扫码登录、服务端 cookie 保存、登录态查询、预览、任务创建、状态查询和取消接口已接入后端服务。
+- 小型 B站下载器边界已实现：metadata/playurl、HTTP 下载、取消 token、ffmpeg stream copy 合并和对象存储上传。
+- B站导入 runner 已接通：`server.tasks.bilibili_import.BilibiliImportRunner` 负责从 `bilibili_import_run` 下载、合并、上传并创建课程资源。
+- Dramatiq worker 已接线 `server.tasks.worker:bilibili_import`，真实队列模式会创建 SQL runtime repository/session 并关闭 session。
+- 导入后的课程资源会标记 `sourceType=bilibili`、`originUrl` 和 `parsePolicyJson.importRunId`。
+- 课程库 V2 字段、推荐 `reasonMaterials` / `nextAction`、课程详情、当前课程和 `switch-current` 基础语义已接入。
+- SQL 当前课程使用 `courses.is_current` 显式持久标记；未显式切换时回退最近更新课程。
 
 ## 1. 曹乐可独立交付范围
 
@@ -25,6 +36,21 @@
 - 创建任务调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili`，随后轮询 `GET /api/v1/bilibili-import-runs/{importRunId}/status`。
 - 取消按钮调用 `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`。
 - 前端只展示 `status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`，不得读取或保存 B站 cookie。
+
+## 3.1 给朱春雯
+
+- 页面只需要展示 `qrCodeUrl`、`loginStatus`、`preview.parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`。
+- 前端不读取、不缓存、不打印 cookie；登录态只通过 `GET /api/v1/bilibili/auth/session` 展示。
+- 扫码、资源预览、导入进度、失败提示和取消入口按 contract 字段渲染即可。
+- Android 真机录屏、页面截图、扫码页和进度页交互由朱春雯补充验收证据。
+- 推荐页可读取 `reasonMaterials` 和 `nextAction.type=confirm_course`；课程详情调用 `GET /api/v1/courses/{courseId}`，当前课程调用 `GET /api/v1/courses/current`，切换课程调用 `POST /api/v1/courses/{courseId}/switch-current`。
+
+## 3.2 给杨彩艺
+
+- 可以整理状态查询样例、任务列表样例、错误码说明、基础 DTO 字段说明和联调记录。
+- 可以整理课程库 seed、课程详情、当前课程、课程切换和推荐结果样例。
+- 不要实现下载、ffmpeg 合并、对象存储上传、取消副作用、任务恢复和复杂状态机。
+- 不要新增未冻结错误码；若遇到缺字段，先回到 `docs/contracts/` 和本文件确认口径。
 
 ## 4. 辅助后端边界
 
@@ -53,6 +79,7 @@
 - `bilibili_import_run.status` 到 `async_tasks.status` 的映射以 contract 第 7 节「`async_tasks` 映射」为准。
 - 错误码以 [../contracts/error-codes.md](../contracts/error-codes.md) 的 Bilibili 段落为准。
 - 状态拼写统一使用 `canceled`。
+- 访问受限统一使用 `bilibili.access_denied`；ffmpeg 合并失败统一使用 `bilibili.merge_failed`。
 
 ## 7. 曹乐独立验收证据
 
@@ -81,10 +108,30 @@
 ## 10. 本地命令
 
 ```bash
-.venv/bin/python -m pytest -s server/tests/test_bilibili_contract.py server/tests/test_contract_freeze.py::test_bilibili_reserved_contract_is_aligned_across_docs server/tests/test_contract_freeze.py::test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape -q
+KNOWLINK_RUNTIME_REPOSITORY_BACKEND=memory KNOWLINK_STORAGE_BACKEND=demo KNOWLINK_QA_PROVIDER=vivo KNOWLINK_ENABLE_VIVO_QA=false .venv/bin/python -m pytest -s \
+  server/tests/test_bilibili_contract.py \
+  server/tests/test_bilibili_url.py \
+  server/tests/test_bilibili_service.py \
+  server/tests/test_bilibili_import_runner.py \
+  server/tests/test_bilibili_sql_runtime.py \
+  server/tests/test_api.py::test_course_detail_and_current_course_switch \
+  server/tests/test_scaffold_consistency.py::test_v2_course_catalog_fields_are_present \
+  server/tests/test_sql_runtime_contract.py::test_sql_repository_current_course_uses_recent_then_explicit_switch \
+  -q
 ```
 
-后续生产代码接入时，需追加服务、路由、仓储、worker 和 SQL runtime 的对应测试命令。
+如果只验证文档 contract，可运行：
+
+```bash
+.venv/bin/python -m pytest -s server/tests/test_bilibili_contract.py server/tests/test_contract_freeze.py -q
+```
+
+本地 `.env` 如果启用了 SQL、MinIO 或真实 QA，测试时建议显式覆盖：
+
+- `KNOWLINK_RUNTIME_REPOSITORY_BACKEND=memory`
+- `KNOWLINK_STORAGE_BACKEND=demo`
+- `KNOWLINK_QA_PROVIDER=vivo`
+- `KNOWLINK_ENABLE_VIVO_QA=false`
 
 ## 11. 风险
 
