@@ -7,6 +7,14 @@ import pytest
 
 from server.domain.services import BilibiliService
 from server.domain.services.errors import ServiceError
+from server.infra.bilibili import (
+    BiliClient,
+    BiliDownloader,
+    DownloadCanceled,
+    FfmpegMergeError,
+    FfmpegMerger,
+    MergeCanceled,
+)
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
 from server.tasks.repositories import InMemoryAsyncTaskRepository
@@ -515,3 +523,379 @@ def test_qr_session_create_and_get_persists_pending_scan() -> None:
     assert fetched["sessionId"] == created["sessionId"]
     assert fetched["status"] == "pending_scan"
     assert repo.get_bilibili_qr_session("qr-demo-1")["status"] == "pending_scan"
+
+
+def test_bili_client_preview_normalizes_video_metadata() -> None:
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_json(
+            self,
+            url: str,
+            *,
+            params: dict[str, Any] | None = None,
+            cookies: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            return {
+                "code": 0,
+                "data": {
+                    "bvid": "BV1xx411c7mD",
+                    "title": "线性代数公开课",
+                    "pic": "https://i0.hdslb.com/demo.jpg",
+                    "pages": [
+                        {"cid": 101, "page": 1, "part": "第一讲", "duration": 600},
+                        {"cid": 102, "page": 2, "part": "第二讲", "duration": 720},
+                    ],
+                },
+            }
+
+    transport = FakeTransport()
+    client = BiliClient(transport=transport, preview_id_factory=lambda: "bili_preview_fixed")
+
+    preview = client.preview("https://www.bilibili.com/video/BV1xx411c7mD/?p=2", cookies={"SESSDATA": "secret"})
+
+    assert transport.calls == [
+        {
+            "url": "https://api.bilibili.com/x/web-interface/view",
+            "params": {"bvid": "BV1xx411c7mD"},
+            "cookies": {"SESSDATA": "secret"},
+        }
+    ]
+    assert preview.to_api() == {
+        "previewId": "bili_preview_fixed",
+        "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD/?p=2",
+        "sourceType": "multi_p",
+        "title": "线性代数公开课",
+        "coverUrl": "https://i0.hdslb.com/demo.jpg",
+        "totalParts": 2,
+        "defaultSelectionMode": "current_part",
+        "parts": [
+            {
+                "partId": "p1",
+                "title": "第一讲",
+                "durationSec": 600,
+                "cid": 101,
+                "pageNo": 1,
+                "selectedByDefault": False,
+            },
+            {
+                "partId": "p2",
+                "title": "第二讲",
+                "durationSec": 720,
+                "cid": 102,
+                "pageNo": 2,
+                "selectedByDefault": True,
+            },
+        ],
+    }
+
+
+def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+            self.response = {
+                "code": 0,
+                "data": {
+                    "dash": {
+                        "video": [{"baseUrl": "https://upos.example/video.m4s"}],
+                        "audio": [{"baseUrl": "https://upos.example/audio.m4s"}],
+                    }
+                },
+            }
+
+        def get_json(
+            self,
+            url: str,
+            *,
+            params: dict[str, Any] | None = None,
+            cookies: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            return self.response
+
+    transport = FakeTransport()
+    client = BiliClient(transport=transport)
+
+    data = client.playurl(bvid="BV1xx411c7mD", cid=102, cookies={"SESSDATA": "secret"})
+
+    assert transport.calls == [
+        {
+            "url": "https://api.bilibili.com/x/player/wbi/playurl",
+            "params": {"bvid": "BV1xx411c7mD", "cid": 102, "fnval": 16},
+            "cookies": {"SESSDATA": "secret"},
+        }
+    ]
+    assert data == {
+        "dash": {
+            "video": [{"baseUrl": "https://upos.example/video.m4s"}],
+            "audio": [{"baseUrl": "https://upos.example/audio.m4s"}],
+        }
+    }
+
+    transport.response = {"code": -400, "message": "bad request"}
+    with pytest.raises(ServiceError) as exc:
+        client.playurl(bvid="BV1xx411c7mD", cid=102, cookies={"SESSDATA": "secret"})
+    assert exc.value.error_code == "bilibili.playurl_failed"
+
+
+def test_bili_client_maps_auth_and_access_errors() -> None:
+    class FakeTransport:
+        def __init__(self, response: dict[str, Any]) -> None:
+            self.response = response
+
+        def get_json(
+            self,
+            url: str,
+            *,
+            params: dict[str, Any] | None = None,
+            cookies: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            return self.response
+
+    expired_client = BiliClient(transport=FakeTransport({"code": -101, "message": "账号未登录"}))
+    with pytest.raises(ServiceError) as expired:
+        expired_client.preview("https://www.bilibili.com/video/BV1xx411c7mD/", cookies={})
+    assert expired.value.error_code == "bilibili.auth_expired"
+    assert expired.value.status_code == 401
+
+    denied_client = BiliClient(transport=FakeTransport({"code": -10403, "message": "权限不足"}))
+    with pytest.raises(ServiceError) as denied:
+        denied_client.preview("https://www.bilibili.com/video/BV1xx411c7mD/", cookies={"SESSDATA": "secret"})
+    assert denied.value.error_code == "bilibili.access_denied"
+    assert denied.value.status_code == 403
+
+
+def test_bili_client_refresh_qr_session_extracts_transport_cookies() -> None:
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_json(
+            self,
+            url: str,
+            *,
+            params: dict[str, Any] | None = None,
+            cookies: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            return {
+                "code": 0,
+                "data": {"code": 0},
+                "headers": {
+                    "Set-Cookie": [
+                        "SESSDATA=secret-cookie; Path=/; HttpOnly",
+                        "bili_jct=csrf-cookie; Path=/",
+                        "DedeUserID=12345; Path=/",
+                    ],
+                },
+            }
+
+    transport = FakeTransport()
+    client = BiliClient(transport=transport)
+
+    refreshed = client.refresh_qr_session("qr-demo-1", {"qrcode_key": "qr-key-1"})
+
+    assert transport.calls == [
+        {
+            "url": "https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
+            "params": {"qrcode_key": "qr-key-1"},
+            "cookies": None,
+        }
+    ]
+    assert refreshed["status"] == "confirmed"
+    assert refreshed["cookies"] == {
+        "SESSDATA": "secret-cookie",
+        "bili_jct": "csrf-cookie",
+        "DedeUserID": "12345",
+    }
+    assert "headers" not in refreshed
+
+
+def test_downloader_writes_stream_and_reports_progress(tmp_path) -> None:
+    class FakeStream:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def iter_bytes(self):
+            yield b"abc"
+            yield b"de"
+
+        def close(self) -> None:
+            self.closed = True
+
+    streams: list[FakeStream] = []
+
+    def stream_factory(url: str, *, cookies: dict[str, Any] | None = None):
+        stream = FakeStream()
+        streams.append(stream)
+        assert url == "https://upos.example/video.m4s"
+        assert cookies == {"SESSDATA": "secret"}
+        return stream
+
+    progress: list[dict[str, int]] = []
+    downloader = BiliDownloader(stream_factory=stream_factory)
+    output_path = tmp_path / "video.m4s"
+
+    result = downloader.download(
+        "https://upos.example/video.m4s",
+        output_path,
+        cookies={"SESSDATA": "secret"},
+        progress_callback=progress.append,
+    )
+
+    assert result == output_path
+    assert output_path.read_bytes() == b"abcde"
+    assert progress == [{"downloadedBytes": 3}, {"downloadedBytes": 5}]
+    assert streams[0].closed is True
+
+
+def test_downloader_cleans_partial_file_when_canceled(tmp_path) -> None:
+    class CancelToken:
+        canceled = False
+
+    class FakeStream:
+        def __init__(self, token: CancelToken) -> None:
+            self.closed = False
+            self.token = token
+
+        def iter_bytes(self):
+            yield b"abc"
+            self.token.canceled = True
+            yield b"de"
+
+        def close(self) -> None:
+            self.closed = True
+
+    token = CancelToken()
+    streams: list[FakeStream] = []
+
+    def stream_factory(url: str, *, cookies: dict[str, Any] | None = None):
+        stream = FakeStream(token)
+        streams.append(stream)
+        return stream
+
+    output_path = tmp_path / "video.m4s"
+    downloader = BiliDownloader(stream_factory=stream_factory)
+
+    with pytest.raises(DownloadCanceled):
+        downloader.download(
+            "https://upos.example/video.m4s",
+            output_path,
+            cancel_token=token,
+        )
+
+    assert streams[0].closed is True
+    assert output_path.exists() is False
+
+
+def test_ffmpeg_merger_builds_stream_copy_command(tmp_path) -> None:
+    commands: list[list[str]] = []
+
+    def run_command(command: list[str]) -> int:
+        commands.append(command)
+        return 0
+
+    video_path = tmp_path / "video.m4s"
+    audio_path = tmp_path / "audio.m4s"
+    output_path = tmp_path / "merged.mp4"
+    video_path.write_bytes(b"video")
+    audio_path.write_bytes(b"audio")
+    merger = FfmpegMerger(run_command=run_command)
+
+    result = merger.merge(video_path, audio_path, output_path)
+
+    assert result == output_path
+    assert commands == [
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(video_path),
+            "-i",
+            str(audio_path),
+            "-c",
+            "copy",
+            str(output_path),
+        ]
+    ]
+
+
+def test_ffmpeg_merger_cleans_output_on_failure_and_cancel(tmp_path) -> None:
+    def failing_command(command: list[str]) -> int:
+        output_path.write_bytes(b"partial")
+        return 1
+
+    video_path = tmp_path / "video.m4s"
+    audio_path = tmp_path / "audio.m4s"
+    output_path = tmp_path / "merged.mp4"
+    video_path.write_bytes(b"video")
+    audio_path.write_bytes(b"audio")
+    merger = FfmpegMerger(run_command=failing_command)
+
+    with pytest.raises(FfmpegMergeError):
+        merger.merge(video_path, audio_path, output_path)
+    assert output_path.exists() is False
+
+    class CancelToken:
+        canceled = True
+
+    output_path.write_bytes(b"stale")
+    with pytest.raises(MergeCanceled):
+        merger.merge(video_path, audio_path, output_path, cancel_token=CancelToken())
+    assert output_path.exists() is False
+
+
+def test_ffmpeg_merger_terminates_running_process_when_canceled(tmp_path) -> None:
+    class CancelToken:
+        canceled = False
+
+    class FakeProcess:
+        def __init__(self, token: CancelToken) -> None:
+            self.token = token
+            self.poll_calls = 0
+            self.terminated = False
+            self.killed = False
+            self.returncode = None
+
+        def poll(self):
+            self.poll_calls += 1
+            if self.poll_calls == 2:
+                self.token.canceled = True
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = -15
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+        def wait(self, timeout: float | None = None):
+            return self.returncode
+
+    token = CancelToken()
+    processes: list[FakeProcess] = []
+
+    def popen_factory(command: list[str]):
+        output_path.write_bytes(b"partial")
+        process = FakeProcess(token)
+        processes.append(process)
+        return process
+
+    video_path = tmp_path / "video.m4s"
+    audio_path = tmp_path / "audio.m4s"
+    output_path = tmp_path / "merged.mp4"
+    video_path.write_bytes(b"video")
+    audio_path.write_bytes(b"audio")
+    merger = FfmpegMerger(popen_factory=popen_factory, poll_interval_sec=0)
+
+    with pytest.raises(MergeCanceled):
+        merger.merge(video_path, audio_path, output_path, cancel_token=token)
+
+    assert processes[0].terminated is True
+    assert processes[0].killed is False
+    assert output_path.exists() is False
