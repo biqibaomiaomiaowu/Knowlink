@@ -308,6 +308,27 @@ def test_create_course_rejects_naive_exam_at():
     assert body["errorCode"] == "common.validation_error"
 
 
+def test_course_detail_and_current_course_switch():
+    course_id, _ = create_manual_course(idempotency_key="v2-course-detail", title="V2 多课程语义")
+
+    detail_status, detail = asyncio.run(
+        request("GET", f"/api/v1/courses/{course_id}", headers=AUTH_HEADERS)
+    )
+    switch_status, switched = asyncio.run(
+        request("POST", f"/api/v1/courses/{course_id}/switch-current", headers=AUTH_HEADERS)
+    )
+    current_status, current = asyncio.run(
+        request("GET", "/api/v1/courses/current", headers=AUTH_HEADERS)
+    )
+
+    assert detail_status == 200
+    assert detail["data"]["course"]["courseId"] == course_id
+    assert switch_status == 200
+    assert switched["data"]["currentCourseId"] == course_id
+    assert current_status == 200
+    assert current["data"]["course"]["courseId"] == course_id
+
+
 def test_create_course_then_dashboard_shows_recent_course():
     status, _ = asyncio.run(
         request(

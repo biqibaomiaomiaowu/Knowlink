@@ -140,6 +140,15 @@
         "时长可在当前预算内完成",
         "目标关键词与课程主题高度一致"
       ],
+      "reasonMaterials": [
+        "覆盖高频考点",
+        "适合考前冲刺",
+        "讲义和视频能组成完整复习闭环"
+      ],
+      "nextAction": {
+        "type": "confirm_course",
+        "label": "确认入课并导入资料"
+      },
       "defaultResourceManifest": [
         {
           "resourceType": "mp4",
@@ -183,13 +192,15 @@
 
 - `recommendations` 按 `fitScore` 降序返回。
 - 若 `fitScore` 相同，保持 `server/seeds/course_catalog.json` 中的种子顺序。
-- `reasons[]` 在 Week 1 只允许使用以下冻结文案：
+- `reasons[]` 优先使用 Week 1 冻结文案；V2 若匹配上下文不足 3 条，可从当前 catalog 的 `reasonMaterials[]` 补足展示理由：
   - `难度与当前基础匹配`
   - `难度可控，适合作为过渡课程`
   - `时长可在当前预算内完成`
   - `需要拆分学习节奏，但仍可安排`
   - `目标关键词与课程主题高度一致`
   - `讲义风格与当前偏好一致`
+- `reasonMaterials[]` 来自 `server/seeds/course_catalog.json`，用于课程详情页和推荐卡片解释，不参与排序。
+- `nextAction.type = confirm_course` 表示前端下一步调用 `POST /api/v1/recommendations/{catalogId}/confirm`。
 
 ### `POST /api/v1/recommendations/{catalogId}/confirm`
 
@@ -265,6 +276,52 @@
   ]
 }
 ```
+
+### `GET /api/v1/courses/{courseId}`
+
+响应 `data`：
+
+```json
+{
+  "course": {
+    "courseId": 101,
+    "title": "高数期末冲刺课",
+    "entryType": "recommendation",
+    "catalogId": "math-final-01",
+    "goalText": "高等数学期末复习",
+    "examAt": "2026-06-20T09:00:00+08:00",
+    "preferredStyle": "exam",
+    "lifecycleStatus": "draft",
+    "pipelineStage": "idle",
+    "pipelineStatus": "idle",
+    "updatedAt": "2026-05-19T12:00:00+00:00"
+  }
+}
+```
+
+### `POST /api/v1/courses/{courseId}/switch-current`
+
+响应 `data`：
+
+```json
+{
+  "currentCourseId": 101,
+  "course": {
+    "courseId": 101,
+    "title": "高数期末冲刺课",
+    "entryType": "recommendation",
+    "catalogId": "math-final-01",
+    "lifecycleStatus": "draft",
+    "pipelineStage": "idle",
+    "pipelineStatus": "idle",
+    "updatedAt": "2026-05-19T12:00:00+00:00"
+  }
+}
+```
+
+### `GET /api/v1/courses/current`
+
+响应 `data.course` 与课程详情接口保持同结构。阶段一当前课程语义为单用户基础语义：显式切换后返回该课程；若没有显式切换，返回最近更新课程。
 
 ### `GET /api/v1/home/dashboard`
 

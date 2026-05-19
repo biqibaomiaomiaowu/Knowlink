@@ -46,6 +46,12 @@ class MemoryScaffoldRepository:
     def get_course(self, course_id: int) -> dict[str, Any] | None:
         return self.store.get_course(course_id)
 
+    def set_current_course(self, course_id: int) -> dict[str, Any] | None:
+        return self.store.set_current_course(course_id)
+
+    def get_current_course(self) -> dict[str, Any] | None:
+        return self.store.get_current_course()
+
     def create_bilibili_qr_session(
         self,
         *,

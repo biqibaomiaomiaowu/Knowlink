@@ -3,9 +3,23 @@
     "catalogId": "math-final-01",
     "title": "高等数学期末冲刺",
     "provider": "KnowLink Seed",
+    "subject": "math",
+    "courseCode": "MATH-FINAL-01",
     "level": "intermediate",
+    "targetAudience": "需要高等数学期末冲刺复习的学生",
     "estimatedHours": 4,
     "tags": ["高等数学", "期末", "极限", "导数"],
+    "knowledgeTags": ["极限", "连续", "导数", "积分", "高频题型"],
+    "prerequisites": ["函数基础", "基础代数", "初等函数"],
+    "outline": [
+      {"title": "极限与连续", "estimatedMinutes": 45},
+      {"title": "导数与应用", "estimatedMinutes": 60},
+      {"title": "积分与综合题", "estimatedMinutes": 75}
+    ],
+    "importHints": ["优先导入主课程视频", "配套 PDF 用于公式与例题引用定位"],
+    "reasonMaterials": ["覆盖高频考点", "适合考前冲刺", "讲义和视频能组成完整复习闭环"],
+    "coverUrl": null,
+    "highlights": ["高频题型", "考前节奏", "讲义引用完整"],
     "supportedStyles": ["exam", "balanced"],
     "defaultResourceManifest": [
       {
@@ -39,9 +53,23 @@
     "catalogId": "math-grad-02",
     "title": "考研数学基础巩固",
     "provider": "KnowLink Seed",
+    "subject": "math",
+    "courseCode": "MATH-GRAD-02",
     "level": "beginner",
+    "targetAudience": "需要从基础开始梳理考研数学的学生",
     "estimatedHours": 6,
     "tags": ["考研", "数学", "基础", "入门"],
+    "knowledgeTags": ["函数", "极限", "导数", "线性代数基础", "概率基础"],
+    "prerequisites": ["高中函数基础", "基础代数"],
+    "outline": [
+      {"title": "函数与极限基础", "estimatedMinutes": 60},
+      {"title": "导数基础与常见模型", "estimatedMinutes": 75},
+      {"title": "考研数学基础题型串讲", "estimatedMinutes": 90}
+    ],
+    "importHints": ["先导入体系化视频", "PDF 讲义用于建立基础知识点索引"],
+    "reasonMaterials": ["适合基础补齐", "学习节奏更细", "覆盖考研数学入门知识点"],
+    "coverUrl": null,
+    "highlights": ["基础巩固", "细粒度讲解", "考研导向"],
     "supportedStyles": ["detailed", "balanced"],
     "defaultResourceManifest": [
       {
@@ -70,9 +98,23 @@
     "catalogId": "linear-final-01",
     "title": "线性代数高频题型课",
     "provider": "KnowLink Seed",
+    "subject": "linear_algebra",
+    "courseCode": "LINEAR-FINAL-01",
     "level": "intermediate",
+    "targetAudience": "需要线性代数期末题型训练的学生",
     "estimatedHours": 3,
     "tags": ["线性代数", "期末", "矩阵", "特征值"],
+    "knowledgeTags": ["矩阵运算", "行列式", "向量空间", "特征值", "二次型"],
+    "prerequisites": ["矩阵基础", "方程组基础"],
+    "outline": [
+      {"title": "矩阵与行列式高频题", "estimatedMinutes": 45},
+      {"title": "向量空间与线性相关", "estimatedMinutes": 45},
+      {"title": "特征值、二次型与综合题", "estimatedMinutes": 60}
+    ],
+    "importHints": ["视频优先覆盖题型讲解", "PDF/PPTX 用于题目和证明定位"],
+    "reasonMaterials": ["覆盖线代高频题型", "适合短时刷题", "重点突出矩阵和特征值"],
+    "coverUrl": null,
+    "highlights": ["高频题型", "短时冲刺", "矩阵专题"],
     "supportedStyles": ["exam", "quick"],
     "defaultResourceManifest": [
       {

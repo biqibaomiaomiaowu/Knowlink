@@ -34,6 +34,7 @@ class RecommendationService:
         for item in self.load_catalog():
             score = 50
             reasons: list[str] = []
+            reason_materials = list(item.get("reasonMaterials") or [])
 
             if payload.self_level == item["level"]:
                 score += 20
@@ -56,6 +57,11 @@ class RecommendationService:
             if payload.preferred_style in item["supportedStyles"]:
                 score += 5
                 reasons.append("讲义风格与当前偏好一致")
+            for reason in reason_materials:
+                if len(reasons) >= 3:
+                    break
+                if reason not in reasons:
+                    reasons.append(reason)
 
             results.append(
                 RecommendationCard(
@@ -66,6 +72,11 @@ class RecommendationService:
                     estimated_hours=item["estimatedHours"],
                     fit_score=min(score, 100),
                     reasons=reasons[:3],
+                    reason_materials=reason_materials,
+                    next_action={
+                        "type": "confirm_course",
+                        "label": "确认入课并导入资料",
+                    },
                     default_resource_manifest=[
                         ResourceManifestItem(**resource)
                         for resource in item["defaultResourceManifest"]

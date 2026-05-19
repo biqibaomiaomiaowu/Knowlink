@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from server.domain.repositories import CourseRepository, IdempotencyRepository
+from server.domain.services.errors import ServiceError
 
 
 class CourseService:
@@ -29,3 +30,33 @@ class CourseService:
 
     def list_recent_courses(self) -> dict[str, object]:
         return {"items": self.courses.list_recent_courses()}
+
+    def get_course(self, *, course_id: int) -> dict[str, object]:
+        course = self.courses.get_course(course_id)
+        if course is None:
+            raise ServiceError(
+                message="Course was not found.",
+                error_code="course.not_found",
+                status_code=404,
+            )
+        return {"course": course}
+
+    def switch_current_course(self, *, course_id: int) -> dict[str, object]:
+        course = self.courses.set_current_course(course_id)
+        if course is None:
+            raise ServiceError(
+                message="Course was not found.",
+                error_code="course.not_found",
+                status_code=404,
+            )
+        return {"currentCourseId": course["courseId"], "course": course}
+
+    def get_current_course(self) -> dict[str, object]:
+        course = self.courses.get_current_course()
+        if course is None:
+            raise ServiceError(
+                message="Course was not found.",
+                error_code="course.not_found",
+                status_code=404,
+            )
+        return {"course": course}

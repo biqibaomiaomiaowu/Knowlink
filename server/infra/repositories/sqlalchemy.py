@@ -206,6 +206,37 @@ class SqlAlchemyRuntimeRepository:
             return None
         return _course_dict(course)
 
+    def set_current_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        self.session.execute(
+            update(Course)
+            .where(Course.user_id == self.user_id)
+            .values(is_current=False)
+        )
+        course.is_current = True
+        course.updated_at = utcnow()
+        self._commit_or_flush()
+        return _course_dict(course)
+
+    def get_current_course(self) -> dict[str, Any] | None:
+        explicit = self.session.scalar(
+            select(Course)
+            .where(Course.user_id == self.user_id, Course.is_current.is_(True))
+            .order_by(Course.updated_at.desc(), Course.id.desc())
+        )
+        if explicit is not None:
+            return _course_dict(explicit)
+        course = self.session.scalar(
+            select(Course)
+            .where(Course.user_id == self.user_id)
+            .order_by(Course.updated_at.desc(), Course.id.desc())
+        )
+        if course is None:
+            return None
+        return _course_dict(course)
+
     def create_bilibili_qr_session(
         self,
         *,

@@ -50,6 +50,7 @@ class RuntimeStore:
     bilibili_auth_session: dict[str, Any] | None = None
     bilibili_preview_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
     bilibili_import_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
+    current_course_id: int | None = None
 
     def next_id(self, key: str) -> int:
         with self.lock:
@@ -112,6 +113,22 @@ class RuntimeStore:
 
     def get_course(self, course_id: int) -> dict[str, Any] | None:
         return self.courses.get(course_id)
+
+    def set_current_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        course["updatedAt"] = utcnow()
+        self.current_course_id = course_id
+        return course
+
+    def get_current_course(self) -> dict[str, Any] | None:
+        if self.current_course_id is not None:
+            course = self.get_course(self.current_course_id)
+            if course is not None:
+                return course
+        recent = self.list_recent_courses()
+        return recent[0] if recent else None
 
     def create_bilibili_qr_session(
         self,

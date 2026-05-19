@@ -17,6 +17,8 @@ class RecommendationCard(CamelModel):
     estimated_hours: int
     fit_score: int
     reasons: list[str]
+    reason_materials: list[str] = Field(default_factory=list)
+    next_action: dict[str, object] | None = None
     default_resource_manifest: list[ResourceManifestItem]
 
 
