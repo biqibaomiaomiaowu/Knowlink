@@ -181,10 +181,12 @@ class BilibiliService:
         refresh = getattr(self.bili_client, "refresh_qr_session", None)
         if callable(refresh):
             refreshed = refresh(session_id, existing.get("pollPayloadJson"))
+            refreshed_status = str(refreshed.get("status") or existing.get("status") or "pending_scan")
+            self._persist_confirmed_auth_session(refreshed)
             existing = _call_with_supported_kwargs(
                 self.bilibili.update_bilibili_qr_session,
                 qr_key=session_id,
-                status=str(refreshed.get("status") or existing.get("status") or "pending_scan"),
+                status=refreshed_status,
                 poll_payload_json=(
                     refreshed.get("pollPayload")
                     if isinstance(refreshed.get("pollPayload"), dict)
@@ -478,6 +480,21 @@ class BilibiliService:
     def _cookies_from_auth(auth: dict[str, Any]) -> dict[str, Any]:
         cookies = auth.get("cookiesJson") or auth.get("cookies_json") or {}
         return dict(cookies) if isinstance(cookies, dict) else {}
+
+    def _persist_confirmed_auth_session(self, refreshed: dict[str, Any]) -> None:
+        if str(refreshed.get("status") or "") != "confirmed":
+            return
+        cookies = refreshed.get("cookies")
+        if not isinstance(cookies, dict) or not cookies:
+            return
+        normalized_cookies = {str(key): str(value) for key, value in cookies.items()}
+        _call_with_supported_kwargs(
+            self.bilibili.save_bilibili_auth_session,
+            cookies_json=normalized_cookies,
+            csrf=normalized_cookies.get("bili_jct"),
+            expires_at=refreshed.get("authExpiresAt") or datetime.now(timezone.utc) + timedelta(days=30),
+            status="active",
+        )
 
     @staticmethod
     def _auth_is_active(auth: dict[str, Any]) -> bool:

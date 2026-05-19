@@ -206,6 +206,18 @@ def test_v2_bilibili_contract_freezes_source_and_selection_enums():
         assert f"`{source_type}`" in dto_section
 
 
+def test_v2_bilibili_contract_marks_collection_and_bangumi_as_week2_scope():
+    contract = text("docs/contracts/v2-bilibili-import-contract.md")
+
+    for token in (
+        "第 1 周可验收实现只承诺单视频和多 P",
+        "合集和番剧保留在阶段一第 2 周范围",
+        "第 1 周 preview 适配器可以返回 `422 bilibili.unsupported_url`",
+        "`waiting_download` 是下载槽位队列预留状态",
+    ):
+        assert token in contract
+
+
 def test_v2_bilibili_import_creation_returns_async_task_shape():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
     import_section = contract.split(

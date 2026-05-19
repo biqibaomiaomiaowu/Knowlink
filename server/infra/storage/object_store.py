@@ -69,6 +69,8 @@ class ObjectStorage(Protocol):
         metadata: Mapping[str, str] | None = None,
     ) -> ObjectStat: ...
 
+    def delete_object(self, object_key: str) -> None: ...
+
 
 class MinioObjectStorage:
     def __init__(
@@ -220,6 +222,16 @@ class MinioObjectStorage:
             metadata=object_metadata,
             checksum_required=False,
         )
+
+    def delete_object(self, object_key: str) -> None:
+        try:
+            self.client.remove_object(self.bucket_name, object_key)
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchObject"}:
+                return
+            raise ObjectStorageUnavailable("Failed to delete object") from exc
+        except Exception as exc:  # pragma: no cover - defensive adapter boundary.
+            raise ObjectStorageUnavailable("Failed to delete object") from exc
 
 
 def _checksum_from_metadata(metadata: Mapping[str, str]) -> str | None:
@@ -373,6 +385,9 @@ class DemoObjectStorage:
             metadata=dict(metadata or {}),
             checksum_required=False,
         )
+
+    def delete_object(self, object_key: str) -> None:
+        return None
 
 
 def build_object_storage(settings) -> ObjectStorage | None:

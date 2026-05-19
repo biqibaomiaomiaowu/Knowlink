@@ -23,7 +23,7 @@ from server.domain.services import (
     ReviewService,
 )
 from server.infra.auth import DemoUser, authenticate_token
-from server.infra.bilibili.client import UnavailableBiliClient
+from server.infra.bilibili.client import BiliClient
 from server.infra.db.session import create_session
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import runtime_store
@@ -82,6 +82,11 @@ def _get_task_dispatcher():
 @lru_cache
 def _get_object_storage() -> ObjectStorage | None:
     return _build_object_storage(get_settings())
+
+
+@lru_cache
+def _get_bili_client() -> BiliClient:
+    return BiliClient()
 
 
 @lru_cache
@@ -163,7 +168,7 @@ async def get_bilibili_service(
         bilibili=repo,
         async_tasks=async_tasks,
         task_dispatcher=task_dispatcher,
-        bili_client=UnavailableBiliClient(),
+        bili_client=_get_bili_client(),
     )
 
 

@@ -94,6 +94,7 @@ class FakeStorage:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
         self.uploads: list[dict[str, Any]] = []
+        self.deletes: list[str] = []
 
     def upload_file(
         self,
@@ -116,6 +117,33 @@ class FakeStorage:
         from server.infra.storage import ObjectStat
 
         return ObjectStat(size_bytes=Path(source_path).stat().st_size, checksum_required=False)
+
+    def delete_object(self, object_key: str) -> None:
+        self.deletes.append(object_key)
+
+
+class CancelAfterUploadStorage(FakeStorage):
+    def __init__(self, repo: MemoryScaffoldRepository, import_run_id: int) -> None:
+        super().__init__()
+        self.repo = repo
+        self.import_run_id = import_run_id
+
+    def upload_file(
+        self,
+        object_key: str,
+        source_path: str | Path,
+        *,
+        content_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ):
+        stat = super().upload_file(
+            object_key,
+            source_path,
+            content_type=content_type,
+            metadata=metadata,
+        )
+        self.repo.update_bilibili_import_run(self.import_run_id, status="canceled", stage="canceled")
+        return stat
 
 
 def _build_run() -> tuple[MemoryScaffoldRepository, dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -259,6 +287,25 @@ def test_runner_does_not_upload_or_create_resource_when_canceled_after_merge(tmp
     assert updated["stage"] == "canceled"
     assert async_task["status"] == "canceled"
     assert storage.uploads == []
+    assert repo.list_resources(course["courseId"]) == []
+
+
+def test_runner_deletes_uploaded_object_when_canceled_after_upload(tmp_path: Path) -> None:
+    repo, course, run, task = _build_run()
+    storage = CancelAfterUploadStorage(repo, run["importRunId"])
+    runner = _runner(repo, tmp_path, storage=storage)
+
+    runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
+
+    updated = repo.get_bilibili_import_run(run["importRunId"])
+    async_task = repo.get_async_task(task["taskId"])
+    assert updated is not None
+    assert async_task is not None
+    assert updated["status"] == "canceled"
+    assert updated["stage"] == "canceled"
+    assert async_task["status"] == "canceled"
+    assert len(storage.uploads) == 1
+    assert storage.deletes == [storage.uploads[0]["objectKey"]]
     assert repo.list_resources(course["courseId"]) == []
 
 

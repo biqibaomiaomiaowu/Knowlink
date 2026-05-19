@@ -6,7 +6,9 @@
 
 本文冻结 KnowLink V2 phase 1 B站真实导入的 API、DTO、状态机、错误码和验收口径，供后端实现、前端联调和辅助后端文档整理使用。V1 `501 bilibili.not_implemented` 是历史预留口径，只说明第一版 stub 状态，不再约束 V2 真实导入实现。
 
-本文覆盖单用户下的单视频、多 P、合集和番剧导入；不覆盖收藏夹、热门列表、大规模批量下载、付费/会员/DRM/地区限制内容绕过。
+阶段一总范围覆盖单用户下的单视频、多 P、合集和番剧导入；不覆盖收藏夹、热门列表、大规模批量下载、付费/会员/DRM/地区限制内容绕过。
+
+第 1 周可验收实现只承诺单视频和多 P 的扫码、预览、下载、合并、上传和资源入库闭环。合集和番剧保留在阶段一第 2 周范围；第 1 周先冻结 `collection` / `bangumi` 枚举和 URL 识别口径。第 1 周 preview 适配器可以返回 `422 bilibili.unsupported_url`，不得静默创建不可执行的导入任务。
 
 真相源：KnowLink V2 B站导入以 `bilibili_import_run` 和 `async_tasks` 为任务真相源，不引入第三方下载器的数据库或任务模型。
 
@@ -15,7 +17,7 @@
 - 所有接口仍使用 `/api/v1` 前缀。
 - 除健康检查外，接口继续要求 `Authorization: Bearer <token>`。
 - 服务端保存 B站 cookie 必要字段，不向前端返回 cookie 原文。
-- `sourceUrl` 支持 B站单视频、多 P、合集和番剧入口链接。
+- `sourceUrl` 总范围支持 B站单视频、多 P、合集和番剧入口链接；第 1 周运行时只保证单视频和多 P 可导入，合集和番剧按第 2 周任务接入。
 - `qualityPreference` phase 1 只允许 `android_safe`，优先选择 H.264/AVC 视频和 AAC 音频，便于 Android 播放和后续解析。
 - 所有创建导入任务的写接口必须支持 `Idempotency-Key`。
 
@@ -408,6 +410,8 @@ Preview part 必须至少包含：
 | `failed` | 不可恢复失败 | 终态 |
 | `recoverable` | 可恢复失败，前端可提示重试或重新登录 | 终态 |
 | `canceled` | 用户或系统取消，副作用已尽力清理 | 终态 |
+
+`waiting_download` 是下载槽位队列预留状态。第 1 周单机 runner 没有独立下载槽位队列时可以从 `fetching_metadata` 直接进入 `downloading`，但前端和辅助文档仍必须保留该状态映射，供第 2 周队列化下载接入。
 
 ## 6. Stage 展示字段
 

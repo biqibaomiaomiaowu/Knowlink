@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -523,6 +524,53 @@ def test_qr_session_create_and_get_persists_pending_scan() -> None:
     assert fetched["sessionId"] == created["sessionId"]
     assert fetched["status"] == "pending_scan"
     assert repo.get_bilibili_qr_session("qr-demo-1")["status"] == "pending_scan"
+
+
+def test_qr_session_confirmation_persists_auth_session() -> None:
+    class ConfirmingBiliClient(FakeBiliClient):
+        def refresh_qr_session(self, session_id: str, poll_payload: dict[str, Any] | None) -> dict[str, Any]:
+            return {
+                "sessionId": session_id,
+                "qrCodeUrl": "https://passport.bilibili.com/qrcode/demo",
+                "status": "confirmed",
+                "expiresAt": datetime(2026, 5, 19, 12, 5, tzinfo=timezone.utc),
+                "pollPayload": poll_payload or {"qrcode_key": session_id},
+                "cookies": {
+                    "SESSDATA": "confirmed-cookie",
+                    "bili_jct": "confirmed-csrf",
+                    "DedeUserID": "12345",
+                },
+            }
+
+    service, repo, *_ = build_service()
+    service.bili_client = ConfirmingBiliClient()
+
+    created = service.create_qr_session()
+    fetched = service.get_qr_session(session_id=created["sessionId"])
+
+    auth = repo.get_bilibili_auth_session()
+    assert fetched["status"] == "confirmed"
+    assert auth is not None
+    assert auth["status"] == "active"
+    assert auth["cookiesJson"]["SESSDATA"] == "confirmed-cookie"
+    assert auth["csrf"] == "confirmed-csrf"
+    assert service.get_auth_session()["loginStatus"] == "active"
+
+
+def test_api_bilibili_dependency_wires_real_client_by_default() -> None:
+    from server.api.deps import get_bilibili_service
+
+    _, repo, async_tasks, dispatcher, _ = build_service()
+
+    wired = asyncio.run(
+        get_bilibili_service(
+            repo=repo,
+            async_tasks=async_tasks,
+            task_dispatcher=dispatcher,
+        )
+    )
+
+    assert isinstance(wired.bili_client, BiliClient)
 
 
 def test_bili_client_preview_normalizes_video_metadata() -> None:

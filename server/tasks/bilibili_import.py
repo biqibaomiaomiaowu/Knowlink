@@ -244,7 +244,11 @@ class BilibiliImportRunner:
         except Exception as exc:
             raise _failure_from_exception(exc, default_error_code="bilibili.upload_failed") from exc
 
-        self._raise_if_canceled(import_run_id)
+        try:
+            self._raise_if_canceled(import_run_id)
+        except BilibiliImportCanceled:
+            self._delete_uploaded_object(object_key)
+            raise
         self._advance(
             import_run_id=import_run_id,
             task_id=task_id,
@@ -270,6 +274,21 @@ class BilibiliImportRunner:
             )
         except Exception as exc:
             raise _failure_from_exception(exc, default_error_code="bilibili.import_failed") from exc
+
+    def _delete_uploaded_object(self, object_key: str) -> None:
+        delete_object = getattr(self.storage, "delete_object", None)
+        if not callable(delete_object):
+            raise BilibiliImportFailure(
+                error_code="bilibili.cancel_failed",
+                message=f"Canceled after upload but storage cannot delete object: {object_key}",
+            )
+        try:
+            delete_object(object_key)
+        except Exception as exc:
+            raise BilibiliImportFailure(
+                error_code="bilibili.cancel_failed",
+                message=f"Canceled after upload but failed to delete object: {object_key}",
+            ) from exc
 
     def _load_preview(self, run: dict[str, Any], *, cookies: dict[str, Any]) -> dict[str, Any]:
         preview = run.get("preview")

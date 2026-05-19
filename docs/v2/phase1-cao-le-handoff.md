@@ -12,11 +12,13 @@
 - 导入后的课程资源会标记 `sourceType=bilibili`、`originUrl` 和 `parsePolicyJson.importRunId`。
 - 课程库 V2 字段、推荐 `reasonMaterials` / `nextAction`、课程详情、当前课程和 `switch-current` 基础语义已接入。
 - SQL 当前课程使用 `courses.is_current` 显式持久标记；未显式切换时回退最近更新课程。
+- 第 1 周可验收实现只承诺单视频和多 P 闭环；合集和番剧的枚举、URL 识别和 contract 已预留，真实导入链路留到阶段一第 2 周继续由曹乐补齐。
 
 ## 1. 曹乐可独立交付范围
 
 - B站扫码登录、服务端凭据保存和登录态查询。
-- B站单视频、多 P、合集、番剧的 URL 识别、元数据预览和导入任务创建。
+- B站单视频、多 P 的 URL 识别、元数据预览和导入任务创建。
+- B站合集、番剧的 URL 识别和 contract 枚举预留；第 1 周 preview 适配器可以返回 `422 bilibili.unsupported_url`，第 2 周再接入真实元数据和导入链路。
 - B站 playurl 获取、HTTP 下载、ffmpeg stream copy 合并、对象存储上传和课程资源入库。
 - `bilibili_import_run` 状态机、`async_tasks` 映射、进度、失败原因、可恢复失败和取消副作用清理。
 - B站 V2 contract、错误码、后端测试和验收样例。
