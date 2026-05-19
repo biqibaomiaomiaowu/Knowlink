@@ -37,13 +37,30 @@ class BilibiliAuthSession(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="valid", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
     cookies_json: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, nullable=False)
     csrf: Mapped[str | None] = mapped_column(String(255), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BilibiliPreviewSnapshot(Base, TimestampMixin):
+    __tablename__ = "bilibili_preview_snapshots"
+    __table_args__ = (
+        Index("ix_bilibili_preview_snapshots_user_preview", "user_id", "preview_id", unique=True),
+        Index("ix_bilibili_preview_snapshots_course_user", "course_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    preview_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    user_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    source_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    preview_json: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class BilibiliImportRun(Base, TimestampMixin):

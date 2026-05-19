@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from server.infra.db.base import Base
-from server.infra.db.models import BilibiliAuthSession, BilibiliImportRun, BilibiliQrSession
+from server.infra.db.models import (
+    BilibiliAuthSession,
+    BilibiliImportRun,
+    BilibiliPreviewSnapshot,
+    BilibiliQrSession,
+)
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
@@ -35,6 +42,14 @@ def test_memory_bilibili_import_lifecycle() -> None:
         source_type="single_video",
         preview={"title": "单视频预览"},
         selection={"partIds": [1]},
+    )
+    preview_snapshot = repo.save_bilibili_preview_snapshot(
+        preview_id="bili_preview_memory",
+        course_id=course["courseId"],
+        source_url="https://www.bilibili.com/video/BV1xx411c7mD",
+        source_type="single_video",
+        preview={"previewId": "bili_preview_memory", "title": "单视频预览"},
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
     )
 
     assert qr_session["status"] == "pending_scan"
@@ -67,6 +82,7 @@ def test_memory_bilibili_import_lifecycle() -> None:
     assert updated["tempDir"] == "runtime/bilibili/9101"
     assert updated["preview"] == {"title": "单视频预览"}
     assert updated["selection"] == {"partIds": [1]}
+    assert repo.get_bilibili_preview_snapshot("bili_preview_memory") == preview_snapshot
     assert repo.get_bilibili_import_run(import_run["importRunId"]) == updated
     assert runs == [updated]
 
@@ -97,6 +113,14 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
         preview={"title": "SQL 单视频预览"},
         selection={"partIds": [1]},
     )
+    preview_snapshot = repo.save_bilibili_preview_snapshot(
+        preview_id="bili_preview_sql",
+        course_id=course["courseId"],
+        source_url="https://www.bilibili.com/video/BV1xx411c7mD",
+        source_type="single_video",
+        preview={"previewId": "bili_preview_sql", "title": "SQL 单视频预览"},
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+    )
 
     assert qr_session["status"] == "pending_scan"
     assert import_run["status"] == "pending"
@@ -126,14 +150,49 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
     assert updated["recoverable"] is True
     assert updated["tempDir"] == "runtime/bilibili/9101"
     assert updated["finishedAt"] is not None
+    assert repo.get_bilibili_preview_snapshot("bili_preview_sql") == preview_snapshot
     assert repo.get_bilibili_import_run(import_run["importRunId"]) == updated
     assert repo.list_bilibili_import_runs(course["courseId"]) == [updated]
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliQrSession)) == 1
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliAuthSession)) == 1
+    assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliPreviewSnapshot)) == 1
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliImportRun)) == 1
     columns = BilibiliImportRun.__table__.columns
     assert not columns["recoverable"].nullable
     assert columns["temp_dir"].nullable
+
+
+def test_sql_bilibili_preview_snapshots_are_scoped_by_user() -> None:
+    repo, session = _build_sql_repo()
+    other_user_repo = SqlAlchemyRuntimeRepository(session, user_id=2)
+    course = repo.create_course(
+        title="B站 SQL preview 用户隔离课",
+        entry_type="manual_import",
+        goal_text="验证 previewId 用户隔离",
+        preferred_style="balanced",
+    )
+
+    first = repo.save_bilibili_preview_snapshot(
+        preview_id="bili_preview_shared",
+        course_id=course["courseId"],
+        source_url="https://www.bilibili.com/video/BVfirst/",
+        source_type="single_video",
+        preview={"previewId": "bili_preview_shared", "title": "用户一预览"},
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+    )
+    second = other_user_repo.save_bilibili_preview_snapshot(
+        preview_id="bili_preview_shared",
+        course_id=course["courseId"],
+        source_url="https://www.bilibili.com/video/BVsecond/",
+        source_type="single_video",
+        preview={"previewId": "bili_preview_shared", "title": "用户二预览"},
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+    )
+
+    assert first["previewSnapshotId"] != second["previewSnapshotId"]
+    assert repo.get_bilibili_preview_snapshot("bili_preview_shared")["sourceUrl"].endswith("/BVfirst/")
+    assert other_user_repo.get_bilibili_preview_snapshot("bili_preview_shared")["sourceUrl"].endswith("/BVsecond/")
+    assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliPreviewSnapshot)) == 2
 
 
 def _build_sql_repo() -> tuple[SqlAlchemyRuntimeRepository, Session]:

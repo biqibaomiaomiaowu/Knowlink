@@ -15,6 +15,7 @@ from server.infra.db.models import (
     AsyncTask,
     BilibiliAuthSession,
     BilibiliImportRun,
+    BilibiliPreviewSnapshot,
     BilibiliQrSession,
     Course,
     CourseResource,
@@ -252,7 +253,7 @@ class SqlAlchemyRuntimeRepository:
         cookies_json: dict[str, Any],
         csrf: str | None = None,
         expires_at: datetime | None = None,
-        status: str = "valid",
+        status: str = "active",
     ) -> dict[str, Any]:
         auth_session = self.session.scalar(
             select(BilibiliAuthSession).where(BilibiliAuthSession.user_id == self.user_id)
@@ -294,6 +295,53 @@ class SqlAlchemyRuntimeRepository:
         deleted = result.rowcount != 0
         self._commit_or_flush()
         return deleted
+
+    def save_bilibili_preview_snapshot(
+        self,
+        *,
+        preview_id: str,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any],
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        snapshot = self.session.scalar(
+            select(BilibiliPreviewSnapshot).where(
+                BilibiliPreviewSnapshot.preview_id == preview_id,
+                BilibiliPreviewSnapshot.user_id == self.user_id,
+            )
+        )
+        if snapshot is None:
+            snapshot = BilibiliPreviewSnapshot(
+                preview_id=preview_id,
+                user_id=self.user_id,
+                course_id=course_id,
+                source_url=source_url,
+                source_type=source_type,
+                preview_json=preview,
+                expires_at=_normalize_utc_datetime(expires_at),
+            )
+            self.session.add(snapshot)
+        else:
+            snapshot.course_id = course_id
+            snapshot.source_url = source_url
+            snapshot.source_type = source_type
+            snapshot.preview_json = preview
+            snapshot.expires_at = _normalize_utc_datetime(expires_at)
+        self._commit_or_flush()
+        return _bilibili_preview_snapshot_dict(snapshot)
+
+    def get_bilibili_preview_snapshot(self, preview_id: str) -> dict[str, Any] | None:
+        snapshot = self.session.scalar(
+            select(BilibiliPreviewSnapshot).where(
+                BilibiliPreviewSnapshot.preview_id == preview_id,
+                BilibiliPreviewSnapshot.user_id == self.user_id,
+            )
+        )
+        if snapshot is None:
+            return None
+        return _bilibili_preview_snapshot_dict(snapshot)
 
     def create_bilibili_import_run(
         self,
@@ -2625,6 +2673,20 @@ def _bilibili_auth_session_dict(auth_session: BilibiliAuthSession) -> dict[str, 
         "failureReason": auth_session.failure_reason,
         "createdAt": _normalize_utc_datetime(auth_session.created_at),
         "updatedAt": _normalize_utc_datetime(auth_session.updated_at),
+    }
+
+
+def _bilibili_preview_snapshot_dict(snapshot: BilibiliPreviewSnapshot) -> dict[str, Any]:
+    return {
+        "previewSnapshotId": snapshot.id,
+        "previewId": snapshot.preview_id,
+        "courseId": snapshot.course_id,
+        "sourceUrl": snapshot.source_url,
+        "sourceType": snapshot.source_type,
+        "preview": snapshot.preview_json,
+        "expiresAt": _normalize_utc_datetime(snapshot.expires_at),
+        "createdAt": _normalize_utc_datetime(snapshot.created_at),
+        "updatedAt": _normalize_utc_datetime(snapshot.updated_at),
     }
 
 

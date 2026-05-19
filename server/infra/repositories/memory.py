@@ -75,7 +75,7 @@ class MemoryScaffoldRepository:
         cookies_json: dict[str, Any],
         csrf: str | None = None,
         expires_at: datetime | None = None,
-        status: str = "valid",
+        status: str = "active",
     ) -> dict[str, Any]:
         return self.store.save_bilibili_auth_session(
             cookies_json=cookies_json,
@@ -89,6 +89,28 @@ class MemoryScaffoldRepository:
 
     def delete_bilibili_auth_session(self) -> bool:
         return self.store.delete_bilibili_auth_session()
+
+    def save_bilibili_preview_snapshot(
+        self,
+        *,
+        preview_id: str,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any],
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        return self.store.save_bilibili_preview_snapshot(
+            preview_id=preview_id,
+            course_id=course_id,
+            source_url=source_url,
+            source_type=source_type,
+            preview=preview,
+            expires_at=expires_at,
+        )
+
+    def get_bilibili_preview_snapshot(self, preview_id: str) -> dict[str, Any] | None:
+        return self.store.get_bilibili_preview_snapshot(preview_id)
 
     def create_bilibili_import_run(
         self,

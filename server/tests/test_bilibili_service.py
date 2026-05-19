@@ -103,7 +103,7 @@ def save_auth(repo: MemoryScaffoldRepository) -> None:
         cookies_json={"SESSDATA": "secret-cookie", "bili_jct": "secret-csrf"},
         csrf="secret-csrf",
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
-        status="valid",
+        status="active",
     )
 
 
@@ -114,12 +114,41 @@ def test_auth_session_response_hides_cookie_values() -> None:
     response = service.get_auth_session()
 
     assert response == {
-        "loginStatus": "valid",
+        "loginStatus": "active",
         "userNickname": None,
         "expiresAt": repo.get_bilibili_auth_session()["expiresAt"],
     }
     assert "secret-cookie" not in repr(response)
     assert "cookiesJson" not in response
+
+
+def test_auth_session_contract_distinguishes_missing_and_expired_sessions() -> None:
+    service, repo, *_ = build_service()
+
+    with pytest.raises(ServiceError) as missing:
+        service.get_auth_session()
+    assert missing.value.error_code == "bilibili.auth_required"
+    assert missing.value.status_code == 401
+
+    repo.save_bilibili_auth_session(
+        cookies_json={"SESSDATA": "expired-cookie"},
+        expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        status="active",
+    )
+    with pytest.raises(ServiceError) as expired:
+        service.get_auth_session()
+    assert expired.value.error_code == "bilibili.auth_expired"
+    assert expired.value.status_code == 401
+
+    repo.save_bilibili_auth_session(
+        cookies_json={"SESSDATA": "inactive-cookie"},
+        expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+        status="expired",
+    )
+    with pytest.raises(ServiceError) as inactive:
+        service.preview_import(course_id=create_course(repo), source_url="https://www.bilibili.com/video/BVdemo/")
+    assert inactive.value.error_code == "bilibili.auth_expired"
+    assert inactive.value.status_code == 401
 
 
 def test_preview_requires_course_and_auth_then_returns_parts() -> None:
@@ -180,12 +209,16 @@ def test_create_import_requires_preview_snapshot_creates_run_task_and_dispatch_p
     run = repo.get_bilibili_import_run(response["entity"]["id"])
     assert run["taskId"] == response["taskId"]
     assert run["preview"]["previewId"] == preview["previewId"]
-    assert run["selection"] == {
+    assert {
+        key: run["selection"][key]
+        for key in ("selectionMode", "selectedPartIds", "qualityPreference", "previewId")
+    } == {
         "selectionMode": "selected_parts",
         "selectedPartIds": ["p1"],
         "qualityPreference": "android_safe",
         "previewId": preview["previewId"],
     }
+    assert isinstance(run["selection"]["requestFingerprint"], str)
     task = async_tasks.get_async_task(response["taskId"])
     assert task["taskType"] == "bilibili_import"
     assert task["targetType"] == "bilibili_import_run"
@@ -197,6 +230,184 @@ def test_create_import_requires_preview_snapshot_creates_run_task_and_dispatch_p
         "qualityPreference": "android_safe",
     }
     assert dispatcher.enqueued == [{"taskId": response["taskId"], "payload": task["payloadJson"]}]
+
+
+def test_create_import_uses_persisted_preview_snapshot_across_service_instances() -> None:
+    service, repo, async_tasks, dispatcher, client = build_service()
+    course_id = create_course(repo)
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+    restarted = BilibiliService(
+        courses=repo,
+        bilibili=repo,
+        async_tasks=async_tasks,
+        task_dispatcher=dispatcher,
+        bili_client=client,
+    )
+
+    response = restarted.create_import(
+        course_id=course_id,
+        preview_id=preview["previewId"],
+        source_url=preview["sourceUrl"],
+        selection_mode="all_parts",
+        selected_part_ids=[],
+        quality_preference="android_safe",
+        idempotency_key="bili-create-persisted-preview",
+    )
+
+    run = repo.get_bilibili_import_run(response["entity"]["id"])
+    assert run["preview"]["previewId"] == preview["previewId"]
+
+
+def test_create_import_same_idempotency_key_rejects_different_request_body() -> None:
+    service, repo, *_ = build_service()
+    course_id = create_course(repo)
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+    service.create_import(
+        course_id=course_id,
+        preview_id=preview["previewId"],
+        source_url=preview["sourceUrl"],
+        selection_mode="selected_parts",
+        selected_part_ids=["p1"],
+        quality_preference="android_safe",
+        idempotency_key="bili-create-mismatch",
+    )
+
+    with pytest.raises(ServiceError) as exc:
+        service.create_import(
+            course_id=course_id,
+            preview_id=preview["previewId"],
+            source_url=preview["sourceUrl"],
+            selection_mode="selected_parts",
+            selected_part_ids=["p2"],
+            quality_preference="android_safe",
+            idempotency_key="bili-create-mismatch",
+        )
+
+    assert exc.value.error_code == "idempotency.body_mismatch"
+    assert exc.value.status_code == 409
+
+    with pytest.raises(ServiceError) as changed_url:
+        service.create_import(
+            course_id=course_id,
+            preview_id=preview["previewId"],
+            source_url=f"{preview['sourceUrl']}?changed=1",
+            selection_mode="selected_parts",
+            selected_part_ids=["p1"],
+            quality_preference="android_safe",
+            idempotency_key="bili-create-mismatch",
+        )
+    assert changed_url.value.error_code == "idempotency.body_mismatch"
+    assert changed_url.value.status_code == 409
+
+    with pytest.raises(ServiceError) as changed_preview:
+        service.create_import(
+            course_id=course_id,
+            preview_id="bili_preview_other",
+            source_url=preview["sourceUrl"],
+            selection_mode="selected_parts",
+            selected_part_ids=["p1"],
+            quality_preference="android_safe",
+            idempotency_key="bili-create-mismatch",
+        )
+    assert changed_preview.value.error_code == "idempotency.body_mismatch"
+    assert changed_preview.value.status_code == 409
+    assert len(repo.list_bilibili_import_runs(course_id)) == 1
+
+
+def test_create_import_idempotency_compares_original_request_fingerprint() -> None:
+    service, repo, *_ = build_service()
+    course_id = create_course(repo)
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+    first = service.create_import(
+        course_id=course_id,
+        preview_id=preview["previewId"],
+        source_url=preview["sourceUrl"],
+        selection_mode=None,
+        selected_part_ids=[],
+        quality_preference=None,
+        idempotency_key="bili-create-fingerprint",
+    )
+
+    replay = service.create_import(
+        course_id=course_id,
+        preview_id=preview["previewId"],
+        source_url=preview["sourceUrl"],
+        selection_mode=None,
+        selected_part_ids=[],
+        quality_preference=None,
+        idempotency_key="bili-create-fingerprint",
+    )
+    with pytest.raises(ServiceError) as explicit_default:
+        service.create_import(
+            course_id=course_id,
+            preview_id=preview["previewId"],
+            source_url=preview["sourceUrl"],
+            selection_mode="all_parts",
+            selected_part_ids=[],
+            quality_preference="android_safe",
+            idempotency_key="bili-create-fingerprint",
+        )
+
+    run = repo.get_bilibili_import_run(first["entity"]["id"])
+    assert replay == first
+    assert run["selection"]["selectionMode"] == "all_parts"
+    assert run["selection"]["qualityPreference"] == "android_safe"
+    assert isinstance(run["selection"]["requestFingerprint"], str)
+    assert explicit_default.value.error_code == "idempotency.body_mismatch"
+    assert explicit_default.value.status_code == 409
+
+
+def test_create_import_rejects_preview_snapshot_course_source_and_expiry_mismatch() -> None:
+    service, repo, *_ = build_service()
+    course_id = create_course(repo)
+    other_course_id = create_course(repo)
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+
+    with pytest.raises(ServiceError) as wrong_course:
+        service.create_import(
+            course_id=other_course_id,
+            preview_id=preview["previewId"],
+            source_url=preview["sourceUrl"],
+            selection_mode="all_parts",
+            selected_part_ids=[],
+            quality_preference="android_safe",
+            idempotency_key="bili-create-wrong-course",
+        )
+    assert wrong_course.value.error_code == "bilibili.preview_not_found"
+    assert wrong_course.value.status_code == 404
+
+    with pytest.raises(ServiceError) as wrong_source:
+        service.create_import(
+            course_id=course_id,
+            preview_id=preview["previewId"],
+            source_url=f"{preview['sourceUrl']}?wrong=1",
+            selection_mode="all_parts",
+            selected_part_ids=[],
+            quality_preference="android_safe",
+            idempotency_key="bili-create-wrong-source",
+        )
+    assert wrong_source.value.error_code == "bilibili.preview_not_found"
+    assert wrong_source.value.status_code == 404
+
+    snapshot = repo.get_bilibili_preview_snapshot(preview["previewId"])
+    assert snapshot is not None
+    snapshot["expiresAt"] = datetime.now(timezone.utc) - timedelta(minutes=1)
+    with pytest.raises(ServiceError) as expired:
+        service.create_import(
+            course_id=course_id,
+            preview_id=preview["previewId"],
+            source_url=preview["sourceUrl"],
+            selection_mode="all_parts",
+            selected_part_ids=[],
+            quality_preference="android_safe",
+            idempotency_key="bili-create-expired-preview",
+        )
+    assert expired.value.error_code == "bilibili.preview_not_found"
+    assert expired.value.status_code == 404
 
 
 def test_create_import_rejects_invalid_selected_part_ids() -> None:
@@ -244,6 +455,16 @@ def test_status_and_list_return_next_action_and_current_run_fields() -> None:
     assert status["nextAction"] == "poll"
     assert items[0]["importRunId"] == created["entity"]["id"]
     assert items[0]["nextAction"] == "poll"
+
+
+def test_missing_import_run_uses_v2_contract_error_code() -> None:
+    service, *_ = build_service()
+
+    with pytest.raises(ServiceError) as exc:
+        service.get_import_status(import_run_id=99999)
+
+    assert exc.value.error_code == "bilibili.run_not_found"
+    assert exc.value.status_code == 404
 
 
 def test_cancel_marks_run_and_task_canceled_but_imported_run_fails() -> None:

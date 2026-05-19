@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import hashlib
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from server.domain.services.async_tasks import (
@@ -30,7 +32,6 @@ class BilibiliService:
         self.async_tasks = async_tasks
         self.task_dispatcher = task_dispatcher
         self.bili_client = bili_client
-        self._preview_cache: dict[str, dict[str, Any]] = {}
 
     def preview_import(
         self,
@@ -43,11 +44,16 @@ class BilibiliService:
         preview = self._normalize_preview(
             self.bili_client.preview(source_url, self._cookies_from_auth(auth))
         )
-        self._preview_cache[str(preview["previewId"])] = {
-            "courseId": course_id,
-            "sourceUrl": source_url,
-            "preview": preview,
-        }
+        preview_id = str(preview["previewId"])
+        _call_with_supported_kwargs(
+            self.bilibili.save_bilibili_preview_snapshot,
+            preview_id=preview_id,
+            course_id=course_id,
+            source_url=source_url,
+            source_type=str(preview["sourceType"]),
+            preview=preview,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        )
         return preview
 
     def create_import(
@@ -63,18 +69,46 @@ class BilibiliService:
     ) -> dict[str, object]:
         self._ensure_course(course_id)
         self._require_auth_session()
+        action = f"bilibili.import_create:{course_id}"
+        request_fingerprint = self._request_fingerprint(
+            preview_id=preview_id,
+            source_url=source_url,
+            selection_mode=selection_mode,
+            selected_part_ids=selected_part_ids,
+            quality_preference=quality_preference,
+        )
+        existing = self._get_idempotency_result(action=action, key=idempotency_key)
+        if existing is not None:
+            if not self._idempotent_result_matches_request(
+                existing,
+                course_id=course_id,
+                request_fingerprint=request_fingerprint,
+                source_url=source_url,
+                preview_id=preview_id,
+                selection_mode=selection_mode,
+                selected_part_ids=selected_part_ids,
+                quality_preference=quality_preference,
+            ):
+                raise ServiceError(
+                    message="Idempotency key was reused with a different Bilibili import request body.",
+                    error_code="idempotency.body_mismatch",
+                    status_code=409,
+                )
+            return existing
+
         preview_entry = self._get_preview_entry(
             course_id=course_id,
             preview_id=preview_id,
             source_url=source_url,
         )
         preview = preview_entry["preview"]
+        normalized_selection_mode = selection_mode or preview.get("defaultSelectionMode") or "current_part"
+        normalized_quality_preference = quality_preference or "android_safe"
         self._validate_selection(
             preview=preview,
-            selection_mode=selection_mode,
+            selection_mode=normalized_selection_mode,
             selected_part_ids=selected_part_ids,
         )
-        action = f"bilibili.import_create:{course_id}"
         return run_scoped_idempotent(
             self.bilibili,
             action=action,
@@ -83,9 +117,10 @@ class BilibiliService:
                 course_id=course_id,
                 source_url=str(source_url),
                 preview=preview,
-                selection_mode=selection_mode or preview.get("defaultSelectionMode") or "current_part",
+                selection_mode=str(normalized_selection_mode),
                 selected_part_ids=selected_part_ids,
-                quality_preference=quality_preference or "android_safe",
+                quality_preference=str(normalized_quality_preference),
+                request_fingerprint=request_fingerprint,
             ),
         )
 
@@ -160,11 +195,9 @@ class BilibiliService:
         return self._qr_response(existing)
 
     def get_auth_session(self) -> dict[str, object]:
-        auth = self.bilibili.get_bilibili_auth_session()
-        if auth is None:
-            return {"loginStatus": "not_logged_in", "userNickname": None, "expiresAt": None}
+        auth = self._require_auth_session()
         return {
-            "loginStatus": auth.get("status") or "unknown",
+            "loginStatus": "active",
             "userNickname": auth.get("userNickname") or auth.get("user_nickname"),
             "expiresAt": auth.get("expiresAt") or auth.get("expires_at"),
         }
@@ -182,12 +215,14 @@ class BilibiliService:
         selection_mode: str,
         selected_part_ids: list[str],
         quality_preference: str,
+        request_fingerprint: str,
     ) -> dict[str, object]:
         selection = {
             "selectionMode": selection_mode,
             "selectedPartIds": list(selected_part_ids),
             "qualityPreference": quality_preference,
             "previewId": preview["previewId"],
+            "requestFingerprint": request_fingerprint,
         }
         run = _call_with_supported_kwargs(
             self.bilibili.create_bilibili_import_run,
@@ -265,10 +300,16 @@ class BilibiliService:
 
     def _require_auth_session(self) -> dict[str, Any]:
         auth = self.bilibili.get_bilibili_auth_session()
-        if auth is None or auth.get("status") != "valid" or self._is_expired(auth.get("expiresAt") or auth.get("expires_at")):
+        if auth is None:
             raise ServiceError(
                 message="Bilibili auth session is required.",
                 error_code="bilibili.auth_required",
+                status_code=401,
+            )
+        if not self._auth_is_active(auth) or self._is_expired(auth.get("expiresAt") or auth.get("expires_at")):
+            raise ServiceError(
+                message="Bilibili auth session is expired.",
+                error_code="bilibili.auth_expired",
                 status_code=401,
             )
         return auth
@@ -280,13 +321,14 @@ class BilibiliService:
         preview_id: str | None,
         source_url: str | None,
     ) -> dict[str, Any]:
-        if not preview_id:
+        if not preview_id or not source_url:
             self._raise_preview_not_found()
-        preview_entry = self._preview_cache.get(preview_id)
+        preview_entry = self.bilibili.get_bilibili_preview_snapshot(preview_id)
         if (
             preview_entry is None
             or preview_entry.get("courseId") != course_id
             or preview_entry.get("sourceUrl") != source_url
+            or self._is_expired(preview_entry.get("expiresAt") or preview_entry.get("expires_at"))
         ):
             self._raise_preview_not_found()
         return preview_entry
@@ -296,10 +338,76 @@ class BilibiliService:
         if run is None:
             raise ServiceError(
                 message="Bilibili import run was not found.",
-                error_code="bilibili.import_not_found",
+                error_code="bilibili.run_not_found",
                 status_code=404,
             )
         return run
+
+    def _get_idempotency_result(self, *, action: str, key: str | None) -> Any | None:
+        if not key:
+            return None
+        read = getattr(self.bilibili, "get_idempotency_result", None)
+        if not callable(read):
+            return None
+        return read(action, key)
+
+    def _idempotent_result_matches_request(
+        self,
+        result: Any,
+        *,
+        course_id: int,
+        request_fingerprint: str,
+        source_url: str | None,
+        preview_id: str | None,
+        selection_mode: str | None,
+        selected_part_ids: list[str],
+        quality_preference: str | None,
+    ) -> bool:
+        if not isinstance(result, dict):
+            return False
+        entity = result.get("entity")
+        if not isinstance(entity, dict) or entity.get("type") != "bilibili_import_run":
+            return False
+        import_run_id = entity.get("id")
+        if import_run_id is None:
+            return False
+        run = self.bilibili.get_bilibili_import_run(int(import_run_id))
+        if not isinstance(run, dict):
+            return False
+        selection = run.get("selection")
+        if not isinstance(selection, dict):
+            return False
+        if isinstance(selection.get("requestFingerprint"), str):
+            return run.get("courseId") == course_id and selection["requestFingerprint"] == request_fingerprint
+        requested_selection_mode = selection_mode or str(selection.get("selectionMode") or "current_part")
+        requested_quality_preference = quality_preference or str(selection.get("qualityPreference") or "android_safe")
+        return (
+            run.get("courseId") == course_id
+            and run.get("sourceUrl") == source_url
+            and selection.get("previewId") == preview_id
+            and selection.get("selectionMode") == requested_selection_mode
+            and list(selection.get("selectedPartIds") or []) == list(selected_part_ids)
+            and selection.get("qualityPreference") == requested_quality_preference
+        )
+
+    @staticmethod
+    def _request_fingerprint(
+        *,
+        preview_id: str | None,
+        source_url: str | None,
+        selection_mode: str | None,
+        selected_part_ids: list[str],
+        quality_preference: str | None,
+    ) -> str:
+        payload = {
+            "previewId": preview_id,
+            "sourceUrl": source_url,
+            "selectionMode": selection_mode,
+            "selectedPartIds": list(selected_part_ids),
+            "qualityPreference": quality_preference,
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _raise_preview_not_found() -> None:
@@ -370,6 +478,10 @@ class BilibiliService:
     def _cookies_from_auth(auth: dict[str, Any]) -> dict[str, Any]:
         cookies = auth.get("cookiesJson") or auth.get("cookies_json") or {}
         return dict(cookies) if isinstance(cookies, dict) else {}
+
+    @staticmethod
+    def _auth_is_active(auth: dict[str, Any]) -> bool:
+        return str(auth.get("status") or "") == "active"
 
     @staticmethod
     def _is_expired(expires_at: object) -> bool:

@@ -3,6 +3,7 @@ from server.infra.db.models.bilibili import (
     BilibiliAuthSession,
     BilibiliImportItem,
     BilibiliImportRun,
+    BilibiliPreviewSnapshot,
     BilibiliQrSession,
 )
 from server.infra.db.models.course import Course
@@ -28,6 +29,7 @@ __all__ = [
     "BilibiliAuthSession",
     "BilibiliImportItem",
     "BilibiliImportRun",
+    "BilibiliPreviewSnapshot",
     "BilibiliQrSession",
     "Course",
     "CourseResource",

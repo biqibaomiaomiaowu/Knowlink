@@ -30,6 +30,7 @@ class RuntimeStore:
             "review_task": 8400,
             "bilibili_import_run": 9100,
             "bilibili_qr_session": 9200,
+            "bilibili_preview": 9300,
         }
     )
     idempotency: dict[tuple[str, str], Any] = field(default_factory=dict)
@@ -47,6 +48,7 @@ class RuntimeStore:
     progress: dict[int, dict[str, Any]] = field(default_factory=dict)
     bilibili_qr_sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     bilibili_auth_session: dict[str, Any] | None = None
+    bilibili_preview_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
     bilibili_import_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
 
     def next_id(self, key: str) -> int:
@@ -172,7 +174,7 @@ class RuntimeStore:
         cookies_json: dict[str, Any],
         csrf: str | None = None,
         expires_at: datetime | None = None,
-        status: str = "valid",
+        status: str = "active",
     ) -> dict[str, Any]:
         now = utcnow()
         auth_session = {
@@ -197,6 +199,40 @@ class RuntimeStore:
         existed = self.bilibili_auth_session is not None
         self.bilibili_auth_session = None
         return existed
+
+    def save_bilibili_preview_snapshot(
+        self,
+        *,
+        preview_id: str,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any],
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        existing = self.bilibili_preview_snapshots.get(preview_id)
+        preview_snapshot_id = (
+            existing["previewSnapshotId"]
+            if existing is not None
+            else self.next_id("bilibili_preview")
+        )
+        snapshot = {
+            "previewSnapshotId": preview_snapshot_id,
+            "previewId": preview_id,
+            "courseId": course_id,
+            "sourceUrl": source_url,
+            "sourceType": source_type,
+            "preview": dict(preview),
+            "expiresAt": expires_at,
+            "createdAt": (existing or {}).get("createdAt", now),
+            "updatedAt": now,
+        }
+        self.bilibili_preview_snapshots[preview_id] = snapshot
+        return snapshot
+
+    def get_bilibili_preview_snapshot(self, preview_id: str) -> dict[str, Any] | None:
+        return self.bilibili_preview_snapshots.get(preview_id)
 
     def create_bilibili_import_run(
         self,

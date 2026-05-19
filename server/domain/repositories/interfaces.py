@@ -114,12 +114,25 @@ class BilibiliImportRepository(Protocol):
         cookies_json: dict[str, Any],
         csrf: str | None = None,
         expires_at: datetime | None = None,
-        status: str = "valid",
+        status: str = "active",
     ) -> dict[str, Any]: ...
 
     def get_bilibili_auth_session(self) -> dict[str, Any] | None: ...
 
     def delete_bilibili_auth_session(self) -> bool: ...
+
+    def save_bilibili_preview_snapshot(
+        self,
+        *,
+        preview_id: str,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any],
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]: ...
+
+    def get_bilibili_preview_snapshot(self, preview_id: str) -> dict[str, Any] | None: ...
 
     def create_bilibili_import_run(
         self,

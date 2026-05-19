@@ -772,6 +772,73 @@ def test_bilibili_preview_and_import_routes_return_v2_contract():
     assert dispatcher.enqueued[0]["payload"]["courseId"] == course["courseId"]
 
 
+def test_bilibili_import_route_rejects_idempotency_key_body_mismatch():
+    store = RuntimeStore()
+    repo = MemoryScaffoldRepository(store)
+    async_tasks = InMemoryAsyncTaskRepository(task_id_factory=lambda: store.next_id("task"))
+    dispatcher = RecordingDispatcher()
+    service = BilibiliService(
+        courses=repo,
+        bilibili=repo,
+        async_tasks=async_tasks,
+        task_dispatcher=dispatcher,
+        bili_client=FakeBiliClient(),
+    )
+    course = repo.create_course(
+        title="B站 API 幂等课",
+        entry_type="manual_import",
+        goal_text="验证 B站导入幂等体校验",
+        preferred_style="balanced",
+    )
+    save_auth(repo)
+
+    async def override_bilibili_service():
+        return service
+
+    app.dependency_overrides[get_bilibili_service] = override_bilibili_service
+    try:
+        preview_status, preview_body = asyncio.run(
+            request(
+                "POST",
+                f"/api/v1/courses/{course['courseId']}/resources/imports/bilibili/preview",
+                headers=AUTH_HEADERS,
+                json_body={"sourceUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/"},
+            )
+        )
+        assert preview_status == 200
+        preview = preview_body["data"]
+        create_payload = {
+            "previewId": preview["previewId"],
+            "sourceUrl": preview["sourceUrl"],
+            "selectionMode": "selected_parts",
+            "selectedPartIds": ["p1"],
+            "qualityPreference": "android_safe",
+        }
+        create_status, _ = asyncio.run(
+            request(
+                "POST",
+                f"/api/v1/courses/{course['courseId']}/resources/imports/bilibili",
+                headers=AUTH_HEADERS | {"idempotency-key": "api-bili-import-mismatch"},
+                json_body=create_payload,
+            )
+        )
+        mismatch_status, mismatch_body = asyncio.run(
+            request(
+                "POST",
+                f"/api/v1/courses/{course['courseId']}/resources/imports/bilibili",
+                headers=AUTH_HEADERS | {"idempotency-key": "api-bili-import-mismatch"},
+                json_body=create_payload | {"sourceUrl": f"{preview['sourceUrl']}?changed=1"},
+            )
+        )
+    finally:
+        app.dependency_overrides.pop(get_bilibili_service, None)
+
+    assert create_status == 200
+    assert mismatch_status == 409
+    assert mismatch_body["errorCode"] == "idempotency.body_mismatch"
+    assert len(repo.list_bilibili_import_runs(course["courseId"])) == 1
+
+
 def test_bilibili_import_openapi_keeps_reserved_request_body():
     schema = app.openapi()
     snake_case_placeholder = re.compile(r"\{[a-z]+(?:_[a-z0-9]+)+\}")
