@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from server.schemas.base import CamelModel
 
@@ -69,11 +69,27 @@ class UploadCompleteRequest(CamelModel):
     checksum: str
 
 
+class BilibiliPreviewRequest(CamelModel):
+    source_url: str = Field(min_length=1)
+
+
 class BilibiliImportRequest(CamelModel):
-    video_url: str | None = Field(
-        default=None,
-        description="预留的 B 站单视频链接。stub 阶段允许为空，正式接通后收紧为必填。",
-    )
+    preview_id: str = Field(min_length=1)
+    source_url: str = Field(min_length=1)
+    selection_mode: Literal["current_part", "all_parts", "selected_parts"] = "current_part"
+    selected_part_ids: list[str] = Field(default_factory=list)
+    quality_preference: Literal["android_safe"] = "android_safe"
+
+    @field_validator("selected_part_ids")
+    @classmethod
+    def _clean_selected_part_ids(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item.strip()]
+
+    @model_validator(mode="after")
+    def _selected_parts_must_include_ids(self) -> BilibiliImportRequest:
+        if self.selection_mode == "selected_parts" and not self.selected_part_ids:
+            raise ValueError("selectedPartIds is required when selectionMode is selected_parts.")
+        return self
 
 
 class InquiryAnswerItem(CamelModel):

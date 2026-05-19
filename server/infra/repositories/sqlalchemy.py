@@ -13,6 +13,10 @@ from server.parsers.base import clean_text
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
     AsyncTask,
+    BilibiliAuthSession,
+    BilibiliImportRun,
+    BilibiliPreviewSnapshot,
+    BilibiliQrSession,
     Course,
     CourseResource,
     CourseSegment,
@@ -56,6 +60,48 @@ OUTLINE_DOCUMENT_CONTEXT_TYPES = {
     "ocr_text",
     "formula",
     "image_caption",
+}
+
+_BILIBILI_QR_CHANGE_FIELDS = {
+    "status": "status",
+    "poll_payload_json": "poll_payload_json",
+    "pollPayloadJson": "poll_payload_json",
+    "error_code": "error_code",
+    "errorCode": "error_code",
+    "failure_reason": "failure_reason",
+    "failureReason": "failure_reason",
+    "scanned_at": "scanned_at",
+    "scannedAt": "scanned_at",
+    "confirmed_at": "confirmed_at",
+    "confirmedAt": "confirmed_at",
+    "expires_at": "expires_at",
+    "expiresAt": "expires_at",
+}
+
+_BILIBILI_IMPORT_RUN_CHANGE_FIELDS = {
+    "status": "status",
+    "stage": "stage",
+    "progress_pct": "progress_pct",
+    "progressPct": "progress_pct",
+    "task_id": "task_id",
+    "taskId": "task_id",
+    "preview": "preview_json",
+    "preview_json": "preview_json",
+    "selection": "selection_json",
+    "selection_json": "selection_json",
+    "resource_ids": "resource_ids_json",
+    "resourceIds": "resource_ids_json",
+    "recoverable": "recoverable",
+    "temp_dir": "temp_dir",
+    "tempDir": "temp_dir",
+    "error_code": "error_code",
+    "errorCode": "error_code",
+    "failure_reason": "failure_reason",
+    "failureReason": "failure_reason",
+    "started_at": "started_at",
+    "startedAt": "started_at",
+    "finished_at": "finished_at",
+    "finishedAt": "finished_at",
 }
 
 
@@ -159,6 +205,237 @@ class SqlAlchemyRuntimeRepository:
         if course is None:
             return None
         return _course_dict(course)
+
+    def set_current_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        self.session.execute(
+            update(Course)
+            .where(Course.user_id == self.user_id)
+            .values(is_current=False)
+        )
+        course.is_current = True
+        course.updated_at = utcnow()
+        self._commit_or_flush()
+        return _course_dict(course)
+
+    def get_current_course(self) -> dict[str, Any] | None:
+        explicit = self.session.scalar(
+            select(Course)
+            .where(Course.user_id == self.user_id, Course.is_current.is_(True))
+            .order_by(Course.updated_at.desc(), Course.id.desc())
+        )
+        if explicit is not None:
+            return _course_dict(explicit)
+        course = self.session.scalar(
+            select(Course)
+            .where(Course.user_id == self.user_id)
+            .order_by(Course.updated_at.desc(), Course.id.desc())
+        )
+        if course is None:
+            return None
+        return _course_dict(course)
+
+    def create_bilibili_qr_session(
+        self,
+        *,
+        qr_key: str,
+        qr_url: str,
+        status: str = "pending_scan",
+        poll_payload_json: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        qr_session = BilibiliQrSession(
+            qr_key=qr_key,
+            qr_url=qr_url,
+            status=status,
+            poll_payload_json=poll_payload_json,
+            expires_at=_normalize_utc_datetime(expires_at),
+        )
+        self.session.add(qr_session)
+        self._commit_or_flush()
+        return _bilibili_qr_session_dict(qr_session)
+
+    def get_bilibili_qr_session(self, qr_key: str) -> dict[str, Any] | None:
+        qr_session = self.session.scalar(
+            select(BilibiliQrSession).where(BilibiliQrSession.qr_key == qr_key)
+        )
+        if qr_session is None:
+            return None
+        return _bilibili_qr_session_dict(qr_session)
+
+    def update_bilibili_qr_session(self, qr_key: str, **changes: Any) -> dict[str, Any] | None:
+        qr_session = self.session.scalar(
+            select(BilibiliQrSession).where(BilibiliQrSession.qr_key == qr_key)
+        )
+        if qr_session is None:
+            return None
+        for key, value in changes.items():
+            column_name = _BILIBILI_QR_CHANGE_FIELDS.get(key)
+            if column_name is not None:
+                setattr(qr_session, column_name, _normalize_datetime_change(column_name, value))
+        self._commit_or_flush()
+        return _bilibili_qr_session_dict(qr_session)
+
+    def save_bilibili_auth_session(
+        self,
+        *,
+        cookies_json: dict[str, Any],
+        csrf: str | None = None,
+        expires_at: datetime | None = None,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        auth_session = self.session.scalar(
+            select(BilibiliAuthSession).where(BilibiliAuthSession.user_id == self.user_id)
+        )
+        now = utcnow()
+        if auth_session is None:
+            auth_session = BilibiliAuthSession(
+                user_id=self.user_id,
+                status=status,
+                cookies_json=cookies_json,
+                csrf=csrf,
+                expires_at=_normalize_utc_datetime(expires_at),
+                last_verified_at=now,
+            )
+            self.session.add(auth_session)
+        else:
+            auth_session.status = status
+            auth_session.cookies_json = cookies_json
+            auth_session.csrf = csrf
+            auth_session.expires_at = _normalize_utc_datetime(expires_at)
+            auth_session.last_verified_at = now
+            auth_session.error_code = None
+            auth_session.failure_reason = None
+        self._commit_or_flush()
+        return _bilibili_auth_session_dict(auth_session)
+
+    def get_bilibili_auth_session(self) -> dict[str, Any] | None:
+        auth_session = self.session.scalar(
+            select(BilibiliAuthSession).where(BilibiliAuthSession.user_id == self.user_id)
+        )
+        if auth_session is None:
+            return None
+        return _bilibili_auth_session_dict(auth_session)
+
+    def delete_bilibili_auth_session(self) -> bool:
+        result = self.session.execute(
+            delete(BilibiliAuthSession).where(BilibiliAuthSession.user_id == self.user_id)
+        )
+        deleted = result.rowcount != 0
+        self._commit_or_flush()
+        return deleted
+
+    def save_bilibili_preview_snapshot(
+        self,
+        *,
+        preview_id: str,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any],
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        snapshot = self.session.scalar(
+            select(BilibiliPreviewSnapshot).where(
+                BilibiliPreviewSnapshot.preview_id == preview_id,
+                BilibiliPreviewSnapshot.user_id == self.user_id,
+            )
+        )
+        if snapshot is None:
+            snapshot = BilibiliPreviewSnapshot(
+                preview_id=preview_id,
+                user_id=self.user_id,
+                course_id=course_id,
+                source_url=source_url,
+                source_type=source_type,
+                preview_json=preview,
+                expires_at=_normalize_utc_datetime(expires_at),
+            )
+            self.session.add(snapshot)
+        else:
+            snapshot.course_id = course_id
+            snapshot.source_url = source_url
+            snapshot.source_type = source_type
+            snapshot.preview_json = preview
+            snapshot.expires_at = _normalize_utc_datetime(expires_at)
+        self._commit_or_flush()
+        return _bilibili_preview_snapshot_dict(snapshot)
+
+    def get_bilibili_preview_snapshot(self, preview_id: str) -> dict[str, Any] | None:
+        snapshot = self.session.scalar(
+            select(BilibiliPreviewSnapshot).where(
+                BilibiliPreviewSnapshot.preview_id == preview_id,
+                BilibiliPreviewSnapshot.user_id == self.user_id,
+            )
+        )
+        if snapshot is None:
+            return None
+        return _bilibili_preview_snapshot_dict(snapshot)
+
+    def create_bilibili_import_run(
+        self,
+        *,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any] | None = None,
+        selection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        import_run = BilibiliImportRun(
+            course_id=course_id,
+            source_url=source_url,
+            source_type=source_type,
+            status="pending",
+            stage="queued",
+            progress_pct=0,
+            preview_json=preview,
+            selection_json=selection,
+            resource_ids_json=[],
+            recoverable=False,
+            started_at=now,
+        )
+        self.session.add(import_run)
+        self._commit_or_flush()
+        return _bilibili_import_run_dict(import_run)
+
+    def get_bilibili_import_run(self, import_run_id: int) -> dict[str, Any] | None:
+        import_run = self.session.scalar(
+            select(BilibiliImportRun).where(BilibiliImportRun.id == import_run_id)
+        )
+        if import_run is None:
+            return None
+        return _bilibili_import_run_dict(import_run)
+
+    def list_bilibili_import_runs(self, course_id: int) -> list[dict[str, Any]]:
+        import_runs = self.session.scalars(
+            select(BilibiliImportRun)
+            .where(BilibiliImportRun.course_id == course_id)
+            .order_by(BilibiliImportRun.created_at.desc(), BilibiliImportRun.id.desc())
+        ).all()
+        return [_bilibili_import_run_dict(import_run) for import_run in import_runs]
+
+    def update_bilibili_import_run(self, import_run_id: int, **changes: Any) -> dict[str, Any] | None:
+        import_run = self.session.scalar(
+            select(BilibiliImportRun).where(BilibiliImportRun.id == import_run_id)
+        )
+        if import_run is None:
+            return None
+        for key, value in changes.items():
+            column_name = _BILIBILI_IMPORT_RUN_CHANGE_FIELDS.get(key)
+            if column_name is not None:
+                setattr(import_run, column_name, _normalize_datetime_change(column_name, value))
+        if (
+            import_run.status in {"imported", "failed", "recoverable", "canceled"}
+            and "finished_at" not in changes
+            and "finishedAt" not in changes
+            and import_run.finished_at is None
+        ):
+            import_run.finished_at = utcnow()
+        self._commit_or_flush()
+        return _bilibili_import_run_dict(import_run)
 
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         sort_order = (
@@ -2392,6 +2669,82 @@ def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _normalize_datetime_change(column_name: str, value: Any) -> Any:
+    if column_name.endswith("_at") and isinstance(value, datetime):
+        return _normalize_utc_datetime(value)
+    return value
+
+
+def _bilibili_qr_session_dict(qr_session: BilibiliQrSession) -> dict[str, Any]:
+    return {
+        "qrSessionId": qr_session.id,
+        "qrKey": qr_session.qr_key,
+        "qrUrl": qr_session.qr_url,
+        "status": qr_session.status,
+        "pollPayloadJson": qr_session.poll_payload_json,
+        "errorCode": qr_session.error_code,
+        "failureReason": qr_session.failure_reason,
+        "scannedAt": _normalize_utc_datetime(qr_session.scanned_at),
+        "confirmedAt": _normalize_utc_datetime(qr_session.confirmed_at),
+        "expiresAt": _normalize_utc_datetime(qr_session.expires_at),
+        "createdAt": _normalize_utc_datetime(qr_session.created_at),
+        "updatedAt": _normalize_utc_datetime(qr_session.updated_at),
+    }
+
+
+def _bilibili_auth_session_dict(auth_session: BilibiliAuthSession) -> dict[str, Any]:
+    return {
+        "authSessionId": auth_session.id,
+        "status": auth_session.status,
+        "cookiesJson": auth_session.cookies_json,
+        "csrf": auth_session.csrf,
+        "expiresAt": _normalize_utc_datetime(auth_session.expires_at),
+        "lastVerifiedAt": _normalize_utc_datetime(auth_session.last_verified_at),
+        "errorCode": auth_session.error_code,
+        "failureReason": auth_session.failure_reason,
+        "createdAt": _normalize_utc_datetime(auth_session.created_at),
+        "updatedAt": _normalize_utc_datetime(auth_session.updated_at),
+    }
+
+
+def _bilibili_preview_snapshot_dict(snapshot: BilibiliPreviewSnapshot) -> dict[str, Any]:
+    return {
+        "previewSnapshotId": snapshot.id,
+        "previewId": snapshot.preview_id,
+        "courseId": snapshot.course_id,
+        "sourceUrl": snapshot.source_url,
+        "sourceType": snapshot.source_type,
+        "preview": snapshot.preview_json,
+        "expiresAt": _normalize_utc_datetime(snapshot.expires_at),
+        "createdAt": _normalize_utc_datetime(snapshot.created_at),
+        "updatedAt": _normalize_utc_datetime(snapshot.updated_at),
+    }
+
+
+def _bilibili_import_run_dict(import_run: BilibiliImportRun) -> dict[str, Any]:
+    return {
+        "importRunId": import_run.id,
+        "courseId": import_run.course_id,
+        "taskId": import_run.task_id,
+        "sourceUrl": import_run.source_url,
+        "sourceType": import_run.source_type,
+        "status": import_run.status,
+        "stage": import_run.stage,
+        "progressPct": import_run.progress_pct,
+        "preview": import_run.preview_json,
+        "selection": import_run.selection_json,
+        "resourceIds": import_run.resource_ids_json or [],
+        "recoverable": import_run.recoverable,
+        "tempDir": import_run.temp_dir,
+        "errorCode": import_run.error_code,
+        "failureReason": import_run.failure_reason,
+        "startedAt": _normalize_utc_datetime(import_run.started_at),
+        "finishedAt": _normalize_utc_datetime(import_run.finished_at),
+        "createdAt": _normalize_utc_datetime(import_run.created_at),
+        "updatedAt": _normalize_utc_datetime(import_run.updated_at),
+    }
+
+
 def _resource_dict(resource: CourseResource) -> dict[str, Any]:
     return {
         "resourceId": resource.id,
@@ -2408,6 +2761,7 @@ def _resource_dict(resource: CourseResource) -> dict[str, Any]:
         "ingestStatus": resource.ingest_status,
         "validationStatus": resource.validation_status,
         "processingStatus": resource.processing_status,
+        "parsePolicyJson": resource.parse_policy_json,
         "lastParseRunId": resource.last_parse_run_id,
         "lastError": resource.last_error,
         "sortOrder": resource.sort_order,

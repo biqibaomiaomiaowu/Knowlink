@@ -246,6 +246,45 @@ def test_review_refresh_actor_invokes_runner_without_broker_send(monkeypatch):
     ]
 
 
+def test_bilibili_import_actor_wires_sql_runtime_repo_and_closes_session(monkeypatch):
+    from server.tasks import worker
+
+    calls: list[dict[str, object]] = []
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeRepo:
+        def __init__(self, session) -> None:
+            self.session = session
+
+    fake_session = FakeSession()
+    fake_storage = object()
+
+    def fake_run_bilibili_import(message, **kwargs):
+        calls.append({"message": dict(message), **kwargs})
+
+    monkeypatch.setattr(worker, "create_session", lambda: fake_session, raising=False)
+    monkeypatch.setattr(worker, "SqlAlchemyRuntimeRepository", FakeRepo, raising=False)
+    monkeypatch.setattr(worker, "build_object_storage", lambda settings: fake_storage)
+    monkeypatch.setattr(worker, "run_bilibili_import", fake_run_bilibili_import)
+
+    result = worker.bilibili_import.fn({"taskId": 7, "courseId": 11, "importRunId": 9101})
+
+    assert result is None
+    assert len(calls) == 1
+    assert calls[0]["message"] == {"taskId": 7, "courseId": 11, "importRunId": 9101}
+    assert isinstance(calls[0]["bilibili"], FakeRepo)
+    assert calls[0]["bilibili"] is calls[0]["resources"] is calls[0]["async_tasks"]
+    assert calls[0]["bilibili"].session is fake_session
+    assert calls[0]["storage"] is fake_storage
+    assert fake_session.closed is True
+
+
 def test_dramatiq_dispatcher_sends_to_lazy_actor_path_without_redis():
     payload = _run_script(
         """

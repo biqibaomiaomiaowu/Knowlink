@@ -27,3 +27,29 @@ async def get_recent_courses(
     service: CourseService = Depends(get_course_service),
 ):
     return api_ok(request, service.list_recent_courses())
+
+
+@router.get("/current")
+async def get_current_course(
+    request: Request,
+    service: CourseService = Depends(get_course_service),
+):
+    return api_ok(request, service.get_current_course())
+
+
+@router.get("/{courseId}")
+async def get_course(
+    courseId: int,
+    request: Request,
+    service: CourseService = Depends(get_course_service),
+):
+    return api_ok(request, service.get_course(course_id=courseId))
+
+
+@router.post("/{courseId}/switch-current")
+async def switch_current_course(
+    courseId: int,
+    request: Request,
+    service: CourseService = Depends(get_course_service),
+):
+    return api_ok(request, service.switch_current_course(course_id=courseId))

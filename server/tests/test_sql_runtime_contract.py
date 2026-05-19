@@ -636,6 +636,39 @@ def test_sql_repository_create_course_persists_exam_at_and_returns_it():
     engine.dispose()
 
 
+def test_sql_repository_current_course_uses_recent_then_explicit_switch():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    first = repo.create_course(
+        title="SQLite 当前课程 A",
+        entry_type="manual_import",
+        goal_text="验证当前课程默认语义",
+        preferred_style="balanced",
+    )
+    second = repo.create_course(
+        title="SQLite 当前课程 B",
+        entry_type="manual_import",
+        goal_text="验证当前课程切换语义",
+        preferred_style="balanced",
+    )
+    first_id = _value(first, "courseId", "course_id", "id")
+    second_id = _value(second, "courseId", "course_id", "id")
+
+    assert _value(repo.get_current_course(), "courseId", "course_id", "id") == second_id
+    switched = repo.set_current_course(first_id)
+
+    assert switched is not None
+    assert _value(switched, "courseId", "course_id", "id") == first_id
+    assert _value(repo.get_current_course(), "courseId", "course_id", "id") == first_id
+    repo.create_parse_run(second_id)
+    assert _value(repo.get_current_course(), "courseId", "course_id", "id") == first_id
+    assert repo.set_current_course(999999) is None
+
+    session.close()
+    engine.dispose()
+
+
 def test_sql_repository_normalizes_non_utc_exam_at_to_utc_for_sqlite_round_trip():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)

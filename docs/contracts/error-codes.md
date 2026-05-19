@@ -10,6 +10,7 @@
 - `common.validation_error`: 请求体字段校验失败
 - `common.not_found`: 资源不存在
 - `common.idempotency_replay`: 命中幂等回放
+- `idempotency.body_mismatch`: 相同幂等键重放时请求体与首次提交不一致
 
 ## Recommendation
 
@@ -28,18 +29,20 @@
 ## Bilibili
 
 - `bilibili.not_implemented`: V1 B 站导入与扫码登录接口已预留，但当前服务尚未接通
-- V2 B站真实导入接通前，需要补充并冻结以下错误码类别：
-  - `bilibili.auth_required`: 需要扫码登录后才能导入
-  - `bilibili.auth_expired`: 登录态过期或失效
-  - `bilibili.unsupported_url`: URL 不属于 V2 支持范围
-  - `bilibili.access_denied`: 内容不可访问，包含付费、会员、DRM、地区限制或账号无权限
-  - `bilibili.metadata_failed`: 元数据获取失败
-  - `bilibili.playurl_failed`: 播放地址获取失败
-  - `bilibili.download_failed`: 下载失败
-  - `bilibili.merge_failed`: ffmpeg 合并失败
-  - `bilibili.upload_failed`: 上传对象存储失败
-  - `bilibili.import_failed`: 创建课程资源失败
-  - `bilibili.cancel_failed`: 取消任务失败
+- `bilibili.auth_required`: V2 B站导入需要扫码登录后才能继续
+- `bilibili.auth_expired`: V2 B站登录态过期或服务端凭据失效
+- `bilibili.unsupported_url`: V2 B站链接不属于单视频、多 P、合集或番剧支持范围
+- `bilibili.access_denied`: B站内容不可访问，包含付费、会员、DRM、地区限制或账号无权限
+- `bilibili.metadata_failed`: B站元数据、分 P、合集或番剧条目获取失败
+- `bilibili.playurl_failed`: B站播放地址获取失败或没有可用音视频流
+- `bilibili.download_failed`: B站音视频流下载失败
+- `bilibili.merge_failed`: ffmpeg 合并音视频失败
+- `bilibili.upload_failed`: 合并产物上传对象存储失败
+- `bilibili.import_failed`: 上传后创建课程资源失败
+- `bilibili.cancel_failed`: 取消导入任务或清理副作用失败
+- `bilibili.run_not_found`: B站导入 run 不存在或不属于当前用户
+- `bilibili.selection_invalid`: B站导入选择模式或分 P 选择项不合法
+- `bilibili.preview_not_found`: B站导入预览结果不存在或已失效
 
 ## V2 Knowledge Graph
 

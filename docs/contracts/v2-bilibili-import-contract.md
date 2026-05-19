@@ -1,0 +1,494 @@
+# KnowLink V2 B站导入 Contract
+
+日期：2026-05-18
+
+## 1. 适用范围
+
+本文冻结 KnowLink V2 phase 1 B站真实导入的 API、DTO、状态机、错误码和验收口径，供后端实现、前端联调和辅助后端文档整理使用。V1 `501 bilibili.not_implemented` 是历史预留口径，只说明第一版 stub 状态，不再约束 V2 真实导入实现。
+
+阶段一总范围覆盖单用户下的单视频、多 P、合集和番剧导入；不覆盖收藏夹、热门列表、大规模批量下载、付费/会员/DRM/地区限制内容绕过。
+
+第 1 周可验收实现只承诺单视频和多 P 的扫码、预览、下载、合并、上传和资源入库闭环。合集和番剧保留在阶段一第 2 周范围；第 1 周先冻结 `collection` / `bangumi` 枚举和 URL 识别口径。第 1 周 preview 适配器可以返回 `422 bilibili.unsupported_url`，不得静默创建不可执行的导入任务。
+
+真相源：KnowLink V2 B站导入以 `bilibili_import_run` 和 `async_tasks` 为任务真相源，不引入第三方下载器的数据库或任务模型。
+
+## 2. 通用约定
+
+- 所有接口仍使用 `/api/v1` 前缀。
+- 除健康检查外，接口继续要求 `Authorization: Bearer <token>`。
+- 服务端保存 B站 cookie 必要字段，不向前端返回 cookie 原文。
+- `sourceUrl` 总范围支持 B站单视频、多 P、合集和番剧入口链接；第 1 周运行时只保证单视频和多 P 可导入，合集和番剧按第 2 周任务接入。
+- `qualityPreference` phase 1 只允许 `android_safe`，优先选择 H.264/AVC 视频和 AAC 音频，便于 Android 播放和后续解析。
+- 所有创建导入任务的写接口必须支持 `Idempotency-Key`。
+
+## 3. API
+
+### `POST /api/v1/bilibili/auth/qr/sessions`
+
+创建 B站扫码登录会话。
+
+请求：空 body。
+
+响应 `data`：
+
+```json
+{
+  "sessionId": "bili_qr_session_001",
+  "status": "pending_scan",
+  "qrCodeUrl": "https://passport.bilibili.com/qrcode-demo",
+  "expiresAt": "2026-05-18T12:15:00+00:00"
+}
+```
+
+说明：
+
+- `status` 可取 `pending_scan`、`scanned`、`confirmed`、`expired`、`failed`。
+- 二维码失效后前端重新创建会话，不复用旧 `sessionId`。
+
+### `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
+
+查询扫码登录会话状态。
+
+响应 `data` 与创建二维码会话一致，`status` 可取 `pending_scan`、`scanned`、`confirmed`、`expired`、`failed`。
+
+```json
+{
+  "sessionId": "bili_qr_session_001",
+  "status": "confirmed",
+  "qrCodeUrl": "https://passport.bilibili.com/qrcode-demo",
+  "expiresAt": "2026-05-18T12:15:00+00:00"
+}
+```
+
+### `GET /api/v1/bilibili/auth/session`
+
+查询服务端当前 B站登录态。
+
+响应 `data`：
+
+```json
+{
+  "loginStatus": "active",
+  "userNickname": "KnowLink Demo",
+  "expiresAt": "2026-05-18T14:00:00+00:00"
+}
+```
+
+响应不得包含 `SESSDATA`、`bili_jct`、`DedeUserID` 或完整 cookie。
+
+失败语义：
+
+- 未登录返回 `401 bilibili.auth_required`。
+- cookie 已失效返回 `401 bilibili.auth_expired`。
+
+### `DELETE /api/v1/bilibili/auth/session`
+
+清除服务端保存的 B站登录态。
+
+响应 `data`：
+
+```json
+{
+  "deleted": true
+}
+```
+
+### `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview`
+
+识别 B站链接并返回可选择的导入项，不创建课程资源。
+
+请求：
+
+```json
+{
+  "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2"
+}
+```
+
+响应 `data`：
+
+```json
+{
+  "previewId": "bili_preview_9101",
+  "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+  "sourceType": "multi_p",
+  "title": "课程样例",
+  "coverUrl": "https://i0.hdslb.com/bfs/archive/demo.jpg",
+  "totalParts": 2,
+  "parts": [
+    {
+      "partId": "cid-1001",
+      "title": "P1 导论",
+      "durationSec": 600,
+      "cid": 1001,
+      "pageNo": 1,
+      "selectedByDefault": false
+    },
+    {
+      "partId": "cid-1002",
+      "title": "P2 例题",
+      "durationSec": 900,
+      "cid": 1002,
+      "pageNo": 2,
+      "selectedByDefault": true
+    }
+  ],
+  "defaultSelectionMode": "current_part"
+}
+```
+
+失败语义：
+
+- URL 不属于支持范围返回 `422 bilibili.unsupported_url`。
+- 未登录或登录态失效返回 `401 bilibili.auth_required` / `401 bilibili.auth_expired`。
+- 元数据不可访问返回 `403 bilibili.access_denied` 或 `502 bilibili.metadata_failed`。
+- 服务端必须保存预览快照并返回 `previewId`，创建导入任务时用 `previewId` 复用该快照。
+
+### `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
+
+创建 B站导入任务并写入 `async_tasks`。
+
+请求：
+
+```json
+{
+  "previewId": "bili_preview_9101",
+  "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+  "selectionMode": "selected_parts",
+  "selectedPartIds": ["cid-1001"],
+  "qualityPreference": "android_safe"
+}
+```
+
+字段：
+
+- `previewId` 必填，服务端用它复用预览快照；若快照过期、不存在或不属于当前用户/课程，返回 `404 bilibili.preview_not_found`。
+- `sourceUrl` 必填，用于幂等回放、快照校验和审计，不替代 `previewId`。
+- `selectionMode` 可取 `current_part`、`all_parts`、`selected_parts`。
+- `selectedPartIds` 仅在 `selected_parts` 时必填。
+- `courseId` 以 path 为准，请求体不重复传同义字段。
+
+响应 `data`：
+
+```json
+{
+  "taskId": 7201,
+  "status": "queued",
+  "nextAction": "poll",
+  "entity": {
+    "type": "bilibili_import_run",
+    "id": 9101
+  }
+}
+```
+
+失败语义：
+
+- `previewId` 过期、不存在或不属于当前用户/课程返回 `404 bilibili.preview_not_found`。
+- 选择项不合法返回 `422 bilibili.selection_invalid`。
+- 任务创建或派发失败返回 `503 async_task.enqueue_failed`，响应仍应包含可追踪的任务或失败原因。
+
+#### Idempotency-Key
+
+B站导入创建接口必须支持 `Idempotency-Key`，幂等范围固定为 `userId`、path 中的 `courseId`、`POST /api/v1/courses/{courseId}/resources/imports/bilibili` 和 `Idempotency-Key`。
+
+- 相同范围、相同 key、相同请求体重复提交时，不创建重复 run，不重复入队；返回第一次创建的 async-task 相同响应，至少保持 `taskId`、`status`、`nextAction`、`entity.type`、`entity.id` 一致。
+- 相同范围、相同 key 但请求体不一致时，返回 `409 idempotency.body_mismatch`，不得创建新 run。
+- 若 run 已创建但任务派发失败，首次返回 `503 async_task.enqueue_failed`；同 key 重放必须能看到同一个 run 的失败或可重试状态，不创建重复 run，并保证该 run 可通过列表或状态接口查询。
+
+### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
+
+列出当前课程的 B站导入记录，用于前端恢复页面和辅助后端联调记录。
+
+响应 `data`：
+
+```json
+{
+  "items": [
+    {
+      "importRunId": 9001,
+      "courseId": 101,
+      "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+      "sourceType": "multi_p",
+      "status": "downloading",
+      "progressPct": 42,
+      "stage": "download",
+      "taskId": 7001,
+      "resourceIds": [],
+      "preview": {
+        "title": "线性代数复习",
+        "parts": [
+          {
+            "partId": "cid-1001",
+            "title": "P1 行列式",
+            "durationSec": 1800
+          }
+        ]
+      },
+      "errorCode": null,
+      "failureReason": null,
+      "recoverable": false,
+      "nextAction": "poll"
+    }
+  ]
+}
+```
+
+### `GET /api/v1/bilibili-import-runs/{importRunId}/status`
+
+查询导入任务状态。
+
+响应 `data`：
+
+```json
+{
+  "importRunId": 9001,
+  "courseId": 101,
+  "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+  "sourceType": "multi_p",
+  "status": "merging",
+  "progressPct": 70,
+  "stage": "ffmpeg",
+  "taskId": 7001,
+  "resourceIds": [],
+  "preview": {
+    "title": "线性代数复习",
+    "parts": [
+      {
+        "partId": "cid-1001",
+        "title": "P1 行列式",
+        "durationSec": 1800
+      }
+    ]
+  },
+  "errorCode": null,
+  "failureReason": null,
+  "recoverable": false,
+  "nextAction": "poll"
+}
+```
+
+失败语义：
+
+- run 不存在或不属于当前用户返回 `404 bilibili.run_not_found`。
+
+### `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
+
+请求取消导入任务。取消是显式状态变更，必须尽力停止下载、ffmpeg 和上传副作用。
+
+请求：空 body。
+
+响应 `data`：
+
+```json
+{
+  "taskId": 7201,
+  "status": "canceled",
+  "nextAction": "none",
+  "entity": {
+    "type": "bilibili_import_run",
+    "id": 9101
+  }
+}
+```
+
+失败语义：
+
+- run 不存在返回 `404 bilibili.run_not_found`。
+- 终态 `imported` 不可取消，返回当前结果或 `409 bilibili.cancel_failed`。
+- 停止下载、ffmpeg 或清理临时文件失败时，返回 `409 bilibili.cancel_failed`，并在 `failureReason` 中说明可人工处理的残留。
+
+## 4. DTO 字段冻结
+
+导入创建响应必须使用 async-task 语义，至少包含：
+
+- `taskId`
+- `status`
+- `nextAction`
+- `entity.type`
+- `entity.id`
+
+导入创建请求必须至少包含：
+
+- `previewId`
+- `sourceUrl`
+- `selectionMode`
+- `selectedPartIds`
+- `qualityPreference`
+
+导入 run 状态和列表响应必须至少包含：
+
+- `importRunId`
+- `courseId`
+- `sourceUrl`
+- `sourceType`
+- `status`
+- `progressPct`
+- `stage`
+- `taskId`
+- `resourceIds`
+- `preview`
+- `errorCode`
+- `failureReason`
+- `recoverable`
+- `nextAction`
+
+Preview 响应必须至少包含：
+
+- `previewId`
+- `sourceUrl`
+- `sourceType`
+- `title`
+- `coverUrl`
+- `totalParts`
+- `parts`
+- `defaultSelectionMode`
+
+Preview part 必须至少包含：
+
+- `partId`
+- `title`
+- `durationSec`
+- `cid`
+- `pageNo`
+- `selectedByDefault`
+
+字段枚举冻结：
+
+| `sourceType` | 含义 |
+|---|---|
+| `single_video` | 单视频入口或单 P 视频 |
+| `multi_p` | 多 P 视频入口 |
+| `collection` | 合集入口 |
+| `bangumi` | 番剧入口 |
+
+| `qualityPreference` | 含义 |
+|---|---|
+| `android_safe` | phase 1 唯一允许值；优先 H.264/AVC 视频和 AAC 音频，未来 contract 扩展前不得新增其他取值 |
+
+`android_safe` 是 phase 1 唯一允许值，未来 contract 扩展前 `qualityPreference` 不接受其他枚举值。
+
+| `defaultSelectionMode` | 含义 |
+|---|---|
+| `current_part` | 默认只选择当前链接指向的分 P 或当前条目 |
+| `all_parts` | 默认选择预览中的全部可导入条目 |
+| `selected_parts` | 默认选择服务端按 URL 或规则明确标记的条目 |
+
+## 5. 状态机
+
+`bilibili_import_run.status` 只允许以下值：
+
+- `pending`
+- `fetching_metadata`
+- `waiting_download`
+- `downloading`
+- `merging`
+- `uploading`
+- `imported`
+- `failed`
+- `recoverable`
+- `canceled`
+
+终态：
+
+- `imported`
+- `failed`
+- `recoverable`
+- `canceled`
+
+状态含义：
+
+| 状态 | 含义 | 下一步 |
+|---|---|---|
+| `pending` | run 已创建，等待 worker 或调度器处理 | `fetching_metadata` 或 `waiting_download` |
+| `fetching_metadata` | 正在解析 URL、元数据、分 P、合集或番剧条目 | `waiting_download`、`failed`、`recoverable`、`canceled` |
+| `waiting_download` | 元数据已确认，等待下载槽位 | `downloading`、`canceled` |
+| `downloading` | 正在下载音视频流 | `merging`、`failed`、`recoverable`、`canceled` |
+| `merging` | 正在用 ffmpeg stream copy 合并 | `uploading`、`failed`、`recoverable`、`canceled` |
+| `uploading` | 正在上传对象存储并准备课程资源入库 | `imported`、`failed`、`recoverable`、`canceled` |
+| `imported` | 已创建课程资源并可进入学习链路 | 终态 |
+| `failed` | 不可恢复失败 | 终态 |
+| `recoverable` | 可恢复失败，前端可提示重试或重新登录 | 终态 |
+| `canceled` | 用户或系统取消，副作用已尽力清理 | 终态 |
+
+`waiting_download` 是下载槽位队列预留状态。第 1 周单机 runner 没有独立下载槽位队列时可以从 `fetching_metadata` 直接进入 `downloading`，但前端和辅助文档仍必须保留该状态映射，供第 2 周队列化下载接入。
+
+## 6. Stage 展示字段
+
+`stage` 是给前端 UI 直接展示或映射文案用的技术子阶段字段，不要和 `status` 混用。`status` 表示导入 run 的稳定状态机；`stage` 表示当前更细的执行位置或终态展示标签。
+
+`stage` 只允许以下值：
+
+| `stage` | 含义 |
+|---|---|
+| `queued` | 已入队或等待 worker 领取 |
+| `metadata` | 正在获取或复用预览元数据 |
+| `download` | 正在下载音视频流 |
+| `ffmpeg` | 正在用 ffmpeg 合并 |
+| `object_storage` | 正在上传对象存储 |
+| `resource_import` | 正在创建课程资源记录 |
+| `done` | 已完成并可进入学习链路 |
+| `error` | 失败或可恢复失败的展示阶段 |
+| `canceling` | 正在处理取消和副作用清理 |
+| `canceled` | 已取消 |
+
+## 7. `async_tasks` 映射
+
+| `bilibili_import_run.status` | `async_tasks.status` | 说明 |
+|---|---|---|
+| `pending`、`waiting_download` | `queued` | 等待元数据、排队或等待下载槽位 |
+| `fetching_metadata`、`downloading`、`merging`、`uploading` | `running` | worker 正在执行 |
+| `imported` | `succeeded` | 课程资源已创建 |
+| `failed` | `failed` | 不可恢复失败 |
+| `recoverable` | `failed` | 可恢复失败仍在任务层标记失败，run 响应承载恢复语义 |
+| `canceled` | `canceled` | 已取消 |
+
+`async_tasks.entity.type` 固定为 `bilibili_import_run`，`async_tasks.entity.id` 固定为 `importRunId`。
+
+## 8. 错误码
+
+Bilibili 领域错误码冻结在 [error-codes.md](./error-codes.md) 的 Bilibili 段落。接口实现返回 `bilibili.*` 错误码时只能使用该段落中的错误码，新增 Bilibili 领域错误码必须先更新本文和错误码 contract。
+
+共享基础设施错误码可以按对应 contract 返回，例如任务记录创建后派发失败时允许返回 `503` 和 `async_task.enqueue_failed`。
+
+运行期导入错误必须按以下内部 runner phase 语义记录。`failurePhase` 是 worker/runner 内部失败位置，不是响应 `stage`；它允许包含不对前端暴露的 `playurl`，前端响应和示例中的 `stage` 仍只能使用第 6 节冻结枚举。
+
+| 错误码 | `failurePhase` | 返回条件 |
+|---|---|---|
+| `bilibili.metadata_failed` | `metadata` | URL、meta、preview 元数据获取或解析失败 |
+| `bilibili.playurl_failed` | `playurl` | playurl 流选择失败，或无法获取可播放音视频流 |
+| `bilibili.download_failed` | `download` | HTTP 媒体分片或音视频流下载失败 |
+| `bilibili.merge_failed` | `ffmpeg` | ffmpeg stream-copy 合并失败 |
+| `bilibili.upload_failed` | `object_storage` | 合并产物上传对象存储失败 |
+| `bilibili.import_failed` | `resource_import` | 创建课程资源或导入持久化失败 |
+
+会员、付费、DRM、地区限制或账号无权限统一归入 `bilibili.access_denied`，`failureReason` 说明具体原因，不做绕过。
+
+## 9. 取消与清理
+
+- `pending`、`waiting_download`：直接写入 `canceled`，不产生课程资源。
+- `fetching_metadata`：写入 `canceled`，不保留预览副作用。
+- `downloading`：停止 HTTP 请求，删除临时视频和音频片段。
+- `merging`：终止 ffmpeg 子进程，删除临时输出。
+- `uploading`：尽力中断上传；若对象已存在但课程资源未入库，记录清理提示并避免前端展示半成品。
+- `imported`：不可取消，不删除已创建课程资源。
+
+临时目录格式：
+
+```text
+runtime/bilibili/{import_run_id}/
+```
+
+对象 key 格式：
+
+```text
+raw/1/{course_id}/bilibili/{import_run_id}/{safe_title}.mp4
+```
+
+## 10. 验收口径
+
+- 固定样例至少覆盖一个可访问的单视频或多 P 链路。
+- 合集和番剧以至少一个可访问样例为准；会员、付费、地区限制或不可观看内容只要求返回明确失败原因。
+- 导入后必须能在课程资源列表看到来源为 B站的资源。
+- 状态接口必须能展示下载、合并、上传、失败、可恢复失败和取消语义。
+- Android 前端只读取 `qrCodeUrl`、QR `status`、`loginStatus`、`parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 等展示字段，不读取 cookie。

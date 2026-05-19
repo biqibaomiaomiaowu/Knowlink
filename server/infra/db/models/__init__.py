@@ -1,4 +1,11 @@
 from server.infra.db.models.async_task import AsyncTask
+from server.infra.db.models.bilibili import (
+    BilibiliAuthSession,
+    BilibiliImportItem,
+    BilibiliImportRun,
+    BilibiliPreviewSnapshot,
+    BilibiliQrSession,
+)
 from server.infra.db.models.course import Course
 from server.infra.db.models.handout import HandoutBlock, HandoutBlockRef, HandoutOutline, HandoutVersion
 from server.infra.db.models.idempotency import IdempotencyRecord
@@ -19,6 +26,11 @@ from server.infra.db.models.vector import VectorDocument
 
 __all__ = [
     "AsyncTask",
+    "BilibiliAuthSession",
+    "BilibiliImportItem",
+    "BilibiliImportRun",
+    "BilibiliPreviewSnapshot",
+    "BilibiliQrSession",
     "Course",
     "CourseResource",
     "CourseSegment",

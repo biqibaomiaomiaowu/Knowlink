@@ -257,6 +257,7 @@ def test_bilibili_reserved_contract_is_aligned_across_docs():
     team_division = load_text(TEAM_DIVISION_DOC)
     freeze_doc = load_text("docs/contracts/week1-cao-le-freeze.md")
     error_codes = load_text("docs/contracts/error-codes.md")
+    v2_contract = load_text("docs/contracts/v2-bilibili-import-contract.md")
 
     for text in (architecture, api_contract, team_division, freeze_doc):
         assert "/api/v1/courses/{courseId}/resources/imports/bilibili" in text
@@ -267,6 +268,9 @@ def test_bilibili_reserved_contract_is_aligned_across_docs():
     assert "bilibili.not_implemented" in freeze_doc
     assert "bilibili.not_implemented" in error_codes
     assert "B 站导入预留接口与扫码登录预留接口" in team_division
+    assert "v2-bilibili-import-contract.md" in api_contract
+    assert "`bilibili_import_run` 和 `async_tasks`" in v2_contract
+    assert "POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview" in v2_contract
 
 
 def test_bilibili_stub_owner_is_consistent_across_collaboration_docs():

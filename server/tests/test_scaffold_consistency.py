@@ -1,10 +1,15 @@
 import asyncio
+import json
 from pathlib import Path
 
 from server.tests.test_api import AUTH_HEADERS, request
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_json(path: str):
+    return json.loads((ROOT / path).read_text(encoding="utf-8"))
 
 
 def test_recommendation_manifest_includes_pptx_and_docx():
@@ -22,9 +27,34 @@ def test_recommendation_manifest_includes_pptx_and_docx():
         )
     )
     assert status == 200
-    manifest = payload["data"]["recommendations"][0]["defaultResourceManifest"]
+    recommendation = payload["data"]["recommendations"][0]
+    manifest = recommendation["defaultResourceManifest"]
     resource_types = {item["resourceType"] for item in manifest}
     assert {"mp4", "pdf", "pptx", "docx"} <= resource_types
+    assert recommendation["nextAction"]["type"] == "confirm_course"
+    assert recommendation["reasonMaterials"]
+
+
+def test_v2_course_catalog_fields_are_present():
+    catalog = load_json("server/seeds/course_catalog.json")
+    required = {
+        "subject",
+        "courseCode",
+        "targetAudience",
+        "prerequisites",
+        "knowledgeTags",
+        "outline",
+        "importHints",
+        "reasonMaterials",
+        "coverUrl",
+        "highlights",
+    }
+
+    for item in catalog:
+        assert required <= set(item)
+        assert item["knowledgeTags"]
+        assert item["outline"]
+        assert item["reasonMaterials"]
 
 
 def test_dashboard_and_pipeline_status_cover_competition_display_fields():

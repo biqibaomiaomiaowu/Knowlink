@@ -20,6 +20,7 @@
 - 以下写接口必须支持 `Idempotency-Key`：
   - `POST /api/v1/courses`
   - `POST /api/v1/recommendations/{catalogId}/confirm`
+  - `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
   - `POST /api/v1/courses/{courseId}/resources/upload-complete`
   - `POST /api/v1/courses/{courseId}/parse/start`
   - `POST /api/v1/courses/{courseId}/handouts/generate`
@@ -46,13 +47,14 @@
 
 - `docs/v2/phase-plan.md` 是第二版的规划和责任口径，不直接等同于已实现 API。
 - V2 新增或重做 B站真实导入、知识图谱、实时流式输出、主观题自动判卷时，必须先补充对应 API / DTO / schema / 错误码 contract，再实施代码。
+- V2 B站真实导入 contract 已单独冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)；该文档覆盖本文 B站 V1 `501` stub 的历史口径。
 - V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示当前第一版实现状态。
 - V2 状态拼写统一使用 `canceled`，不使用 `cancelled`。外部资料或旧 spec 中出现 `cancelled` 时，进入 API contract 前统一归一化为 `canceled`。
-- V2 B站导入细分状态建议映射到现有 `async_tasks.status`：
+- V2 B站导入细分状态到 `async_tasks.status` 的完整冻结映射以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准；本文仅保留过渡摘要：
 
 | `bilibili_import_run.status` | `async_tasks.status` | 说明 |
 |---|---|---|
-| `pending`、`waiting_download` | `queued` | 等待元数据、排队或等待用户确认 |
+| `pending`、`waiting_download` | `queued` | 等待元数据、排队或等待下载槽位 |
 | `fetching_metadata`、`downloading`、`merging`、`uploading` | `running` | 任务正在执行 |
 | `imported` | `succeeded` | 已创建课程资源 |
 | `failed` | `failed` | 不可恢复失败 |
@@ -138,6 +140,15 @@
         "时长可在当前预算内完成",
         "目标关键词与课程主题高度一致"
       ],
+      "reasonMaterials": [
+        "覆盖高频考点",
+        "适合考前冲刺",
+        "讲义和视频能组成完整复习闭环"
+      ],
+      "nextAction": {
+        "type": "confirm_course",
+        "label": "确认入课并导入资料"
+      },
       "defaultResourceManifest": [
         {
           "resourceType": "mp4",
@@ -181,13 +192,15 @@
 
 - `recommendations` 按 `fitScore` 降序返回。
 - 若 `fitScore` 相同，保持 `server/seeds/course_catalog.json` 中的种子顺序。
-- `reasons[]` 在 Week 1 只允许使用以下冻结文案：
+- `reasons[]` 优先使用 Week 1 冻结文案；V2 若匹配上下文不足 3 条，可从当前 catalog 的 `reasonMaterials[]` 补足展示理由：
   - `难度与当前基础匹配`
   - `难度可控，适合作为过渡课程`
   - `时长可在当前预算内完成`
   - `需要拆分学习节奏，但仍可安排`
   - `目标关键词与课程主题高度一致`
   - `讲义风格与当前偏好一致`
+- `reasonMaterials[]` 来自 `server/seeds/course_catalog.json`，用于课程详情页和推荐卡片解释，不参与排序。
+- `nextAction.type = confirm_course` 表示前端下一步调用 `POST /api/v1/recommendations/{catalogId}/confirm`。
 
 ### `POST /api/v1/recommendations/{catalogId}/confirm`
 
@@ -263,6 +276,52 @@
   ]
 }
 ```
+
+### `GET /api/v1/courses/{courseId}`
+
+响应 `data`：
+
+```json
+{
+  "course": {
+    "courseId": 101,
+    "title": "高数期末冲刺课",
+    "entryType": "recommendation",
+    "catalogId": "math-final-01",
+    "goalText": "高等数学期末复习",
+    "examAt": "2026-06-20T09:00:00+08:00",
+    "preferredStyle": "exam",
+    "lifecycleStatus": "draft",
+    "pipelineStage": "idle",
+    "pipelineStatus": "idle",
+    "updatedAt": "2026-05-19T12:00:00+00:00"
+  }
+}
+```
+
+### `POST /api/v1/courses/{courseId}/switch-current`
+
+响应 `data`：
+
+```json
+{
+  "currentCourseId": 101,
+  "course": {
+    "courseId": 101,
+    "title": "高数期末冲刺课",
+    "entryType": "recommendation",
+    "catalogId": "math-final-01",
+    "lifecycleStatus": "draft",
+    "pipelineStage": "idle",
+    "pipelineStatus": "idle",
+    "updatedAt": "2026-05-19T12:00:00+00:00"
+  }
+}
+```
+
+### `GET /api/v1/courses/current`
+
+响应 `data.course` 与课程详情接口保持同结构。阶段一当前课程语义为单用户基础语义：显式切换后返回该课程；若没有显式切换，返回最近更新课程。
 
 ### `GET /api/v1/home/dashboard`
 
@@ -414,7 +473,7 @@
 
 ### B 站导入预留接口（V1/MVP）
 
-以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 contract 以本文件 1.3 的过渡口径和后续补充的 V2 API 章节为准。
+以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 B站真实导入 contract 已冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)，本文下方示例只作为 V1 历史 stub 形状保留，不作为 V2 字段来源。
 
 stub 阶段约束：
 
@@ -436,119 +495,41 @@ stub 阶段约束：
 
 - V1 stub 阶段会保留上述 `requestBody` 结构，但暂不收紧为必填校验；鉴权通过后统一返回 `501`。
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "taskId": 7201,
-  "status": "queued",
-  "nextAction": "poll",
-  "entity": {
-    "type": "bilibili_import_run",
-    "id": 9101
-  }
-}
-```
+V2 B站真实导入创建响应、请求字段和选择语义以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准；本文不再复制 V2 示例，避免旧 `videoUrl` stub 字段被误用为 V2 contract。
 
 V1 约束：
 
 - 第一版只冻结单个公开视频链接，不覆盖番剧、合集、收藏夹和批量导入。
 - 支持范围只包含标准视频页链接、`BV` 链接和 `b23.tv` 短链。
-- V2 接通后，该异步导入实体类型固定为 `bilibili_import_run`，范围按 `docs/v2/phase-plan.md` 扩展到单视频、多 P、合集、番剧。
+- V2 真实导入的异步导入实体类型、范围和 DTO 字段以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "items": [
-    {
-      "importRunId": 9101,
-      "courseId": 101,
-      "status": "queued",
-      "videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/",
-      "taskId": 7201,
-      "resourceId": null
-    }
-  ]
-}
-```
+V1 历史 stub 阶段没有真实列表数据；V2 列表响应字段以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/bilibili-import-runs/{importRunId}/status`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "importRunId": 9101,
-  "courseId": 101,
-  "status": "queued",
-  "videoUrl": "https://www.bilibili.com/video/BV1LLDCYJEU3/",
-  "taskId": 7201,
-  "resourceId": null,
-  "nextAction": "poll",
-  "errorCode": null
-}
-```
+V1 历史 stub 阶段没有真实状态数据；V2 状态响应字段以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "taskId": 7201,
-  "status": "canceled",
-  "nextAction": "none",
-  "entity": {
-    "type": "bilibili_import_run",
-    "id": 9101
-  }
-}
-```
+V1 历史 stub 阶段不会执行真实取消；V2 取消响应和副作用清理语义以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `POST /api/v1/bilibili/auth/qr/sessions`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "sessionId": "bili_qr_session_001",
-  "status": "pending_scan",
-  "qrCodeUrl": "https://i0.hdslb.com/bfs/static/jinkela/long/qr-demo.png",
-  "expiresAt": "2026-04-18T15:15:00+00:00"
-}
-```
+V1 历史 stub 阶段不会创建真实扫码会话；V2 QR DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "sessionId": "bili_qr_session_001",
-  "status": "pending_scan",
-  "qrCodeUrl": "https://i0.hdslb.com/bfs/static/jinkela/long/qr-demo.png",
-  "expiresAt": "2026-04-18T15:15:00+00:00"
-}
-```
+V1 历史 stub 阶段不会查询真实扫码状态；V2 QR DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `GET /api/v1/bilibili/auth/session`
 
-V2 接通后的响应 `data`：
-
-```json
-{
-  "loginStatus": "active",
-  "userNickname": "KnowLink Demo",
-  "expiresAt": "2026-04-18T17:15:00+00:00"
-}
-```
+V1 历史 stub 阶段不会查询真实 B站登录态；V2 auth session DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ### `DELETE /api/v1/bilibili/auth/session`
 
-V2 接通后的响应 `data`：
+V1 历史 stub 目标响应形状如下；当前未实现阶段仍统一返回 `501`，V2 auth session 删除 DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ```json
 {

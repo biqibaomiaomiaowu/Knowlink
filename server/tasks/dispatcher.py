@@ -68,6 +68,17 @@ class NoopTaskDispatcher:
             }
         )
 
+    def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("bilibili_import", task_id=task_id, payload=payload, adapter="noop")
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "bilibili_import",
+                "payload": payload,
+                "adapter": "noop",
+            }
+        )
+
 
 class InMemoryTaskDispatcher:
     def __init__(self, *, parse_runs: Any, async_tasks: Any) -> None:
@@ -161,6 +172,17 @@ class InMemoryTaskDispatcher:
             }
         )
 
+    def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("bilibili_import", task_id=task_id, payload=payload, adapter="in_memory")
+        self.enqueued.append(
+            {
+                "taskId": task_id,
+                "taskType": "bilibili_import",
+                "payload": payload,
+                "adapter": "in_memory",
+            }
+        )
+
 
 @dataclass
 class DramatiqTaskDispatcher:
@@ -194,6 +216,12 @@ class DramatiqTaskDispatcher:
             "server.tasks.worker:review_refresh",
         )
     )
+    bilibili_import_actor_path: str = field(
+        default_factory=lambda: os.getenv(
+            "KNOWLINK_BILIBILI_IMPORT_ACTOR",
+            "server.tasks.worker:bilibili_import",
+        )
+    )
 
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None:
         actor = self._load_actor(self.parse_pipeline_actor_path)
@@ -215,6 +243,11 @@ class DramatiqTaskDispatcher:
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
         _log_enqueue("review_refresh", task_id=task_id, payload=payload, adapter="dramatiq")
         actor = self._load_actor(self.review_refresh_actor_path)
+        actor.send({"taskId": task_id, **payload})
+
+    def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _log_enqueue("bilibili_import", task_id=task_id, payload=payload, adapter="dramatiq")
+        actor = self._load_actor(self.bilibili_import_actor_path)
         actor.send({"taskId": task_id, **payload})
 
     def _load_actor(self, actor_path: str) -> Any:
@@ -245,7 +278,15 @@ def _log_enqueue(task_type: str, *, task_id: int, payload: dict[str, Any], adapt
             "task_id": task_id,
             "task_type": task_type,
             "course_id": _int_value(payload, "courseId", "course_id"),
-            "target_id": _int_value(payload, "quizId", "quiz_id", "reviewTaskRunId", "review_task_run_id"),
+            "target_id": _int_value(
+                payload,
+                "quizId",
+                "quiz_id",
+                "reviewTaskRunId",
+                "review_task_run_id",
+                "importRunId",
+                "import_run_id",
+            ),
             "adapter": adapter,
         },
     )

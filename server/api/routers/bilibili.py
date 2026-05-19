@@ -3,9 +3,25 @@ from fastapi import APIRouter, Depends, Request
 from server.api.deps import get_bilibili_service
 from server.api.response import api_ok
 from server.domain.services import BilibiliService
-from server.schemas.requests import BilibiliImportRequest
+from server.schemas.requests import BilibiliImportRequest, BilibiliPreviewRequest
 
 router = APIRouter(tags=["bilibili"])
+
+
+@router.post("/courses/{courseId}/resources/imports/bilibili/preview")
+async def preview_bilibili_import(
+    courseId: int,
+    request: Request,
+    payload: BilibiliPreviewRequest,
+    service: BilibiliService = Depends(get_bilibili_service),
+):
+    return api_ok(
+        request,
+        service.preview_import(
+            course_id=courseId,
+            source_url=payload.source_url,
+        ),
+    )
 
 
 @router.post("/courses/{courseId}/resources/imports/bilibili")
@@ -19,7 +35,11 @@ async def create_bilibili_import(
         request,
         service.create_import(
             course_id=courseId,
-            video_url=payload.video_url if payload else None,
+            preview_id=payload.preview_id if payload else None,
+            source_url=payload.source_url if payload else None,
+            selection_mode=payload.selection_mode if payload else None,
+            selected_part_ids=payload.selected_part_ids if payload else [],
+            quality_preference=payload.quality_preference if payload else None,
             idempotency_key=request.headers.get("Idempotency-Key"),
         ),
     )

@@ -28,6 +28,9 @@ class RuntimeStore:
             "attempt": 8200,
             "review_run": 8300,
             "review_task": 8400,
+            "bilibili_import_run": 9100,
+            "bilibili_qr_session": 9200,
+            "bilibili_preview": 9300,
         }
     )
     idempotency: dict[tuple[str, str], Any] = field(default_factory=dict)
@@ -43,6 +46,11 @@ class RuntimeStore:
     review_tasks: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     async_tasks: dict[int, dict[str, Any]] = field(default_factory=dict)
     progress: dict[int, dict[str, Any]] = field(default_factory=dict)
+    bilibili_qr_sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    bilibili_auth_session: dict[str, Any] | None = None
+    bilibili_preview_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
+    bilibili_import_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
+    current_course_id: int | None = None
 
     def next_id(self, key: str) -> int:
         with self.lock:
@@ -106,18 +114,253 @@ class RuntimeStore:
     def get_course(self, course_id: int) -> dict[str, Any] | None:
         return self.courses.get(course_id)
 
+    def set_current_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        course["updatedAt"] = utcnow()
+        self.current_course_id = course_id
+        return course
+
+    def get_current_course(self) -> dict[str, Any] | None:
+        if self.current_course_id is not None:
+            course = self.get_course(self.current_course_id)
+            if course is not None:
+                return course
+        recent = self.list_recent_courses()
+        return recent[0] if recent else None
+
+    def create_bilibili_qr_session(
+        self,
+        *,
+        qr_key: str,
+        qr_url: str,
+        status: str = "pending_scan",
+        poll_payload_json: dict[str, Any] | None = None,
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        session = {
+            "qrSessionId": self.next_id("bilibili_qr_session"),
+            "qrKey": qr_key,
+            "qrUrl": qr_url,
+            "status": status,
+            "pollPayloadJson": poll_payload_json,
+            "errorCode": None,
+            "failureReason": None,
+            "scannedAt": None,
+            "confirmedAt": None,
+            "expiresAt": expires_at,
+            "createdAt": utcnow(),
+            "updatedAt": utcnow(),
+        }
+        self.bilibili_qr_sessions[qr_key] = session
+        return session
+
+    def get_bilibili_qr_session(self, qr_key: str) -> dict[str, Any] | None:
+        return self.bilibili_qr_sessions.get(qr_key)
+
+    def update_bilibili_qr_session(self, qr_key: str, **changes: Any) -> dict[str, Any] | None:
+        session = self.bilibili_qr_sessions.get(qr_key)
+        if session is None:
+            return None
+        field_map = {
+            "status": "status",
+            "poll_payload_json": "pollPayloadJson",
+            "pollPayloadJson": "pollPayloadJson",
+            "error_code": "errorCode",
+            "errorCode": "errorCode",
+            "failure_reason": "failureReason",
+            "failureReason": "failureReason",
+            "scanned_at": "scannedAt",
+            "scannedAt": "scannedAt",
+            "confirmed_at": "confirmedAt",
+            "confirmedAt": "confirmedAt",
+            "expires_at": "expiresAt",
+            "expiresAt": "expiresAt",
+        }
+        for key, value in changes.items():
+            target = field_map.get(key)
+            if target is not None:
+                session[target] = value
+        session["updatedAt"] = utcnow()
+        return session
+
+    def save_bilibili_auth_session(
+        self,
+        *,
+        cookies_json: dict[str, Any],
+        csrf: str | None = None,
+        expires_at: datetime | None = None,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        now = utcnow()
+        auth_session = {
+            "authSessionId": (self.bilibili_auth_session or {}).get("authSessionId", 1),
+            "status": status,
+            "cookiesJson": dict(cookies_json),
+            "csrf": csrf,
+            "expiresAt": expires_at,
+            "lastVerifiedAt": now,
+            "errorCode": None,
+            "failureReason": None,
+            "createdAt": (self.bilibili_auth_session or {}).get("createdAt", now),
+            "updatedAt": now,
+        }
+        self.bilibili_auth_session = auth_session
+        return auth_session
+
+    def get_bilibili_auth_session(self) -> dict[str, Any] | None:
+        return self.bilibili_auth_session
+
+    def delete_bilibili_auth_session(self) -> bool:
+        existed = self.bilibili_auth_session is not None
+        self.bilibili_auth_session = None
+        return existed
+
+    def save_bilibili_preview_snapshot(
+        self,
+        *,
+        preview_id: str,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any],
+        expires_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        existing = self.bilibili_preview_snapshots.get(preview_id)
+        preview_snapshot_id = (
+            existing["previewSnapshotId"]
+            if existing is not None
+            else self.next_id("bilibili_preview")
+        )
+        snapshot = {
+            "previewSnapshotId": preview_snapshot_id,
+            "previewId": preview_id,
+            "courseId": course_id,
+            "sourceUrl": source_url,
+            "sourceType": source_type,
+            "preview": dict(preview),
+            "expiresAt": expires_at,
+            "createdAt": (existing or {}).get("createdAt", now),
+            "updatedAt": now,
+        }
+        self.bilibili_preview_snapshots[preview_id] = snapshot
+        return snapshot
+
+    def get_bilibili_preview_snapshot(self, preview_id: str) -> dict[str, Any] | None:
+        return self.bilibili_preview_snapshots.get(preview_id)
+
+    def create_bilibili_import_run(
+        self,
+        *,
+        course_id: int,
+        source_url: str,
+        source_type: str,
+        preview: dict[str, Any] | None = None,
+        selection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = utcnow()
+        import_run_id = self.next_id("bilibili_import_run")
+        run = {
+            "importRunId": import_run_id,
+            "courseId": course_id,
+            "taskId": None,
+            "sourceUrl": source_url,
+            "sourceType": source_type,
+            "status": "pending",
+            "stage": "queued",
+            "progressPct": 0,
+            "preview": preview,
+            "selection": selection,
+            "resourceIds": [],
+            "recoverable": False,
+            "tempDir": None,
+            "errorCode": None,
+            "failureReason": None,
+            "startedAt": now,
+            "finishedAt": None,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        self.bilibili_import_runs[import_run_id] = run
+        return run
+
+    def get_bilibili_import_run(self, import_run_id: int) -> dict[str, Any] | None:
+        return self.bilibili_import_runs.get(import_run_id)
+
+    def list_bilibili_import_runs(self, course_id: int) -> list[dict[str, Any]]:
+        return sorted(
+            [
+                run
+                for run in self.bilibili_import_runs.values()
+                if run["courseId"] == course_id
+            ],
+            key=lambda run: (run["createdAt"], run["importRunId"]),
+            reverse=True,
+        )
+
+    def update_bilibili_import_run(self, import_run_id: int, **changes: Any) -> dict[str, Any] | None:
+        run = self.bilibili_import_runs.get(import_run_id)
+        if run is None:
+            return None
+        field_map = {
+            "status": "status",
+            "stage": "stage",
+            "progress_pct": "progressPct",
+            "progressPct": "progressPct",
+            "task_id": "taskId",
+            "taskId": "taskId",
+            "preview": "preview",
+            "preview_json": "preview",
+            "selection": "selection",
+            "selection_json": "selection",
+            "resource_ids": "resourceIds",
+            "resourceIds": "resourceIds",
+            "recoverable": "recoverable",
+            "temp_dir": "tempDir",
+            "tempDir": "tempDir",
+            "error_code": "errorCode",
+            "errorCode": "errorCode",
+            "failure_reason": "failureReason",
+            "failureReason": "failureReason",
+            "started_at": "startedAt",
+            "startedAt": "startedAt",
+            "finished_at": "finishedAt",
+            "finishedAt": "finishedAt",
+        }
+        for key, value in changes.items():
+            target = field_map.get(key)
+            if target is not None:
+                run[target] = value
+        if (
+            run.get("status") in {"imported", "failed", "recoverable", "canceled"}
+            and "finished_at" not in changes
+            and "finishedAt" not in changes
+            and run.get("finishedAt") is None
+        ):
+            run["finishedAt"] = utcnow()
+        run["updatedAt"] = utcnow()
+        return run
+
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         resource_id = self.next_id("resource")
         resource = {
             "resourceId": resource_id,
             "courseId": course_id,
             "resourceType": payload["resourceType"],
+            "sourceType": payload.get("sourceType", "upload"),
+            "originUrl": payload.get("originUrl"),
             "originalName": payload["originalName"],
             "objectKey": payload["objectKey"],
+            "previewKey": payload.get("previewKey"),
             "mimeType": payload.get("mimeType"),
+            "sizeBytes": payload.get("sizeBytes"),
+            "checksum": payload.get("checksum"),
             "ingestStatus": "ready",
             "validationStatus": "passed",
             "processingStatus": "pending",
+            "parsePolicyJson": payload.get("parsePolicyJson"),
         }
         self.resources.setdefault(course_id, []).append(resource)
         return resource

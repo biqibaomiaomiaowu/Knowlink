@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, Text
+from sqlalchemy import Boolean, DateTime, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.infra.db.base import Base, ID_TYPE, JSON_TYPE, TimestampMixin
@@ -13,6 +13,7 @@ class Course(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_courses_user_updated", "user_id", "updated_at"),
         Index("ix_courses_user_lifecycle", "user_id", "lifecycle_status"),
+        Index("ix_courses_user_current", "user_id", "is_current"),
     )
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
@@ -27,6 +28,7 @@ class Course(Base, TimestampMixin):
     preferred_style: Mapped[str] = mapped_column(String(50), default="balanced", nullable=False)
     cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     lifecycle_status: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
     pipeline_stage: Mapped[str] = mapped_column(String(50), default="idle", nullable=False)

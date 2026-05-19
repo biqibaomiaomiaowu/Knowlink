@@ -5,9 +5,12 @@ from typing import Any
 import dramatiq
 
 from server.config.settings import get_settings
+from server.infra.db.session import create_session
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.infra.storage import build_object_storage
 from server.tasks.broker import get_dramatiq_queue_name, list_registered_tasks
 from server.tasks.handouts import run_handout_block_generate, run_handout_generate
+from server.tasks.bilibili_import import run_bilibili_import
 from server.tasks.parse_pipeline import run_parse_pipeline
 from server.tasks.quizzes import run_quiz_generate
 from server.tasks.reviews import run_review_refresh
@@ -43,6 +46,22 @@ def quiz_generate(message: dict[str, Any]) -> None:
 @dramatiq.actor(queue_name=get_dramatiq_queue_name())
 def review_refresh(message: dict[str, Any]) -> None:
     run_review_refresh(message)
+
+
+@dramatiq.actor(queue_name=get_dramatiq_queue_name())
+def bilibili_import(message: dict[str, Any]) -> None:
+    session = create_session()
+    try:
+        repo = SqlAlchemyRuntimeRepository(session)
+        run_bilibili_import(
+            message,
+            bilibili=repo,
+            resources=repo,
+            async_tasks=repo,
+            storage=build_object_storage(get_settings()),
+        )
+    finally:
+        session.close()
 
 
 def main() -> None:
