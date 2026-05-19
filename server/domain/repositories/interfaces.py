@@ -166,6 +166,8 @@ class TaskDispatcher(Protocol):
 
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
 
+    def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
+
 
 class InquiryRepository(Protocol):
     def save_inquiry_answers(

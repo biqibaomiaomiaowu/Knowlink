@@ -37,10 +37,16 @@ class ReviewRefreshPayload(CamelModel):
     review_task_run_id: int | None = None
 
 
+class BilibiliImportPayload(CamelModel):
+    course_id: int
+    import_run_id: int
+
+
 TASK_PAYLOAD_MODELS = {
     "parse_pipeline": ParsePipelinePayload,
     "handout_generate": HandoutGeneratePayload,
     "handout_block_generate": HandoutBlockGeneratePayload,
     "quiz_generate": QuizGeneratePayload,
     "review_refresh": ReviewRefreshPayload,
+    "bilibili_import": BilibiliImportPayload,
 }

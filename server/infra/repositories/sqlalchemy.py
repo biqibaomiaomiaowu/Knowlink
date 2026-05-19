@@ -2730,6 +2730,7 @@ def _resource_dict(resource: CourseResource) -> dict[str, Any]:
         "ingestStatus": resource.ingest_status,
         "validationStatus": resource.validation_status,
         "processingStatus": resource.processing_status,
+        "parsePolicyJson": resource.parse_policy_json,
         "lastParseRunId": resource.last_parse_run_id,
         "lastError": resource.last_error,
         "sortOrder": resource.sort_order,

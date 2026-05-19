@@ -332,12 +332,18 @@ class RuntimeStore:
             "resourceId": resource_id,
             "courseId": course_id,
             "resourceType": payload["resourceType"],
+            "sourceType": payload.get("sourceType", "upload"),
+            "originUrl": payload.get("originUrl"),
             "originalName": payload["originalName"],
             "objectKey": payload["objectKey"],
+            "previewKey": payload.get("previewKey"),
             "mimeType": payload.get("mimeType"),
+            "sizeBytes": payload.get("sizeBytes"),
+            "checksum": payload.get("checksum"),
             "ingestStatus": "ready",
             "validationStatus": "passed",
             "processingStatus": "pending",
+            "parsePolicyJson": payload.get("parsePolicyJson"),
         }
         self.resources.setdefault(course_id, []).append(resource)
         return resource
