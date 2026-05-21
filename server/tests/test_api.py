@@ -3,11 +3,13 @@ import importlib
 import json
 import logging
 import re
+import subprocess
+import sys
 
 import pytest
 
 from server.app import app
-from server.config.logging import JsonFormatter
+from server.config.logging import JsonFormatter, configure_logging
 
 
 AUTH_HEADERS = {"authorization": "Bearer knowlink-demo-token"}
@@ -233,6 +235,33 @@ def test_json_formatter_preserves_unknown_extra_fields():
     assert payload["task_status"] == "finished"
     assert payload["review_task_run_id"] == 23
     assert payload["target_id"] == "target-9"
+
+
+def test_configure_logging_writes_json_to_stderr():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import logging
+
+from server.config.logging import configure_logging
+
+configure_logging()
+logging.getLogger("server.tests.logging").info(
+    "stderr routing check",
+    extra={"request_id": "req_logging_test"},
+)
+""",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout == ""
+    assert '"message":"stderr routing check"' in result.stderr
+    assert '"request_id":"req_logging_test"' in result.stderr
 
 
 def test_auth_is_required_for_api_routes():
