@@ -88,6 +88,8 @@ def test_backend_optimization_contract_freezes_idempotency_and_upload_fast_retur
         "不得同步执行解析、OCR、向量化、讲义生成、B站下载合并或 AI 调用",
         "KNOWLINK_DRAMATIQ_PARSE_QUEUE",
         "KNOWLINK_DRAMATIQ_CONTENT_QUEUE",
+        "KNOWLINK_DRAMATIQ_QUIZ_QUEUE",
+        "KNOWLINK_DRAMATIQ_REVIEW_QUEUE",
         "KNOWLINK_DRAMATIQ_IMPORT_QUEUE",
         "KNOWLINK_DRAMATIQ_MAINTENANCE_QUEUE",
     ):

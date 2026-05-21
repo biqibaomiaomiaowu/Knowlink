@@ -9,6 +9,8 @@ from server.infra.storage import build_object_storage
 from server.tasks.broker import (
     get_dramatiq_content_queue_name,
     get_dramatiq_parse_queue_name,
+    get_dramatiq_quiz_queue_name,
+    get_dramatiq_review_queue_name,
     list_registered_tasks,
 )
 from server.tasks.handouts import run_handout_block_generate, run_handout_generate
@@ -39,12 +41,12 @@ def handout_block_generate(message: dict[str, Any]) -> None:
     run_handout_block_generate(message)
 
 
-@dramatiq.actor(queue_name=get_dramatiq_content_queue_name())
+@dramatiq.actor(queue_name=get_dramatiq_quiz_queue_name())
 def quiz_generate(message: dict[str, Any]) -> None:
     run_quiz_generate(message)
 
 
-@dramatiq.actor(queue_name=get_dramatiq_content_queue_name())
+@dramatiq.actor(queue_name=get_dramatiq_review_queue_name())
 def review_refresh(message: dict[str, Any]) -> None:
     run_review_refresh(message)
 

@@ -100,14 +100,16 @@ print(json.dumps({
             "KNOWLINK_DRAMATIQ_QUEUE": "default_queue",
             "KNOWLINK_DRAMATIQ_PARSE_QUEUE": "parse_io",
             "KNOWLINK_DRAMATIQ_CONTENT_QUEUE": "content_generation",
+            "KNOWLINK_DRAMATIQ_QUIZ_QUEUE": "quiz_generation",
+            "KNOWLINK_DRAMATIQ_REVIEW_QUEUE": "review_refresh",
         },
     )
 
     assert payload == {
         "parse": "parse_io",
         "handout": "content_generation",
-        "quiz": "content_generation",
-        "review": "content_generation",
+        "quiz": "quiz_generation",
+        "review": "review_refresh",
     }
 
 
@@ -119,12 +121,16 @@ import json
 from server.tasks.broker import (
     get_dramatiq_import_queue_name,
     get_dramatiq_maintenance_queue_name,
+    get_dramatiq_quiz_queue_name,
+    get_dramatiq_review_queue_name,
 )
 from server.tasks.worker import handout_generate, parse_pipeline
 
 print(json.dumps({
     "parse": parse_pipeline.queue_name,
     "handout": handout_generate.queue_name,
+    "quiz": get_dramatiq_quiz_queue_name(),
+    "review": get_dramatiq_review_queue_name(),
     "import": get_dramatiq_import_queue_name(),
     "maintenance": get_dramatiq_maintenance_queue_name(),
 }))
@@ -133,6 +139,8 @@ print(json.dumps({
             "KNOWLINK_DRAMATIQ_QUEUE": "default_queue",
             "KNOWLINK_DRAMATIQ_PARSE_QUEUE": "",
             "KNOWLINK_DRAMATIQ_CONTENT_QUEUE": "",
+            "KNOWLINK_DRAMATIQ_QUIZ_QUEUE": "",
+            "KNOWLINK_DRAMATIQ_REVIEW_QUEUE": "",
             "KNOWLINK_DRAMATIQ_IMPORT_QUEUE": "",
             "KNOWLINK_DRAMATIQ_MAINTENANCE_QUEUE": "",
         },
@@ -141,6 +149,8 @@ print(json.dumps({
     assert payload == {
         "parse": "default_queue",
         "handout": "default_queue",
+        "quiz": "default_queue",
+        "review": "default_queue",
         "import": "default_queue",
         "maintenance": "default_queue",
     }
@@ -165,10 +175,85 @@ print(json.dumps({"output": stream.getvalue()}))
             "KNOWLINK_DRAMATIQ_QUEUE": "default_queue",
             "KNOWLINK_DRAMATIQ_PARSE_QUEUE": "parse_io",
             "KNOWLINK_DRAMATIQ_CONTENT_QUEUE": "content_generation",
+            "KNOWLINK_DRAMATIQ_QUIZ_QUEUE": "quiz_generation",
+            "KNOWLINK_DRAMATIQ_REVIEW_QUEUE": "review_refresh",
         },
     )
 
-    assert "--queues content_generation,parse_io" in payload["output"]
+    assert "--queues content_generation,parse_io,quiz_generation,review_refresh" in payload["output"]
+
+
+def test_task_dispatcher_records_enqueue_metrics_for_all_task_types():
+    payload = _run_script(
+        """
+import json
+
+from server.observability.metrics import metrics_response
+from server.tasks.dispatcher import NoopTaskDispatcher
+
+dispatcher = NoopTaskDispatcher()
+dispatcher.enqueue_parse_pipeline(task_id=1, payload={"courseId": 11, "parseRunId": 21})
+dispatcher.enqueue_handout_generate(task_id=2, payload={"courseId": 11, "handoutVersionId": 31})
+dispatcher.enqueue_handout_block_generate(
+    task_id=3,
+    payload={"courseId": 11, "handoutVersionId": 31, "handoutBlockId": 41},
+)
+dispatcher.enqueue_quiz_generate(task_id=4, payload={"courseId": 11, "quizId": 51})
+dispatcher.enqueue_review_refresh(task_id=5, payload={"courseId": 11, "reviewTaskRunId": 61})
+
+metrics = metrics_response()[0].decode("utf-8")
+print(json.dumps({"metrics": metrics}))
+"""
+    )
+
+    metrics = payload["metrics"]
+    for task_type in (
+        "parse_pipeline",
+        "handout_generate",
+        "handout_block_generate",
+        "quiz_generate",
+        "review_refresh",
+    ):
+        assert f'knowlink_async_tasks_total{{status="enqueued",task_type="{task_type}"}} 1.0' in metrics
+    assert "knowlink_async_task_enqueue_duration_seconds_count" in metrics
+
+
+def test_dramatiq_dispatcher_records_enqueue_error_metrics_without_redis():
+    payload = _run_script(
+        """
+import json
+import sys
+import types
+
+class FailingActor:
+    def send(self, message):
+        raise RuntimeError("send failed")
+
+module = types.ModuleType("fake_worker_actor")
+module.parse_pipeline = FailingActor()
+sys.modules[module.__name__] = module
+
+from server.observability.metrics import metrics_response
+from server.tasks.dispatcher import DramatiqTaskDispatcher
+
+dispatcher = DramatiqTaskDispatcher(parse_pipeline_actor_path="fake_worker_actor:parse_pipeline")
+try:
+    dispatcher.enqueue_parse_pipeline(task_id=23, payload={"courseId": 29, "parseRunId": 31})
+except RuntimeError as exc:
+    error = str(exc)
+else:
+    error = None
+
+metrics = metrics_response()[0].decode("utf-8")
+print(json.dumps({"error": error, "metrics": metrics}))
+"""
+    )
+
+    assert payload["error"] == "send failed"
+    assert (
+        'knowlink_async_tasks_total{status="enqueue_failed",task_type="parse_pipeline"} 1.0'
+        in payload["metrics"]
+    )
 
 
 def test_worker_import_fails_fast_for_insecure_production_settings():

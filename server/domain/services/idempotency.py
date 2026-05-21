@@ -43,6 +43,7 @@ def run_fingerprinted_idempotent(
                 idempotency,
                 key=key,
                 factory=factory,
+                scoped_legacy_action=scope,
                 legacy_action=legacy_action,
                 legacy_matches=legacy_matches,
             ),
@@ -67,10 +68,19 @@ def _legacy_or_factory(
     *,
     key: str,
     factory: Callable[[], T],
+    scoped_legacy_action: str | None = None,
     legacy_action: str | None,
     legacy_matches: Callable[[object], bool] | None,
 ) -> T:
+    checked_actions: set[str] = set()
+    if scoped_legacy_action is not None:
+        checked_actions.add(scoped_legacy_action)
+        legacy = _get_idempotency_result(idempotency, scoped_legacy_action, key)
+        if legacy is not _MISSING and (legacy_matches is None or legacy_matches(legacy)):
+            return legacy  # type: ignore[return-value]
     if legacy_action is not None and legacy_matches is not None:
+        if legacy_action in checked_actions:
+            return factory()
         legacy = _get_idempotency_result(idempotency, legacy_action, key)
         if legacy is not _MISSING and legacy_matches(legacy):
             return legacy  # type: ignore[return-value]

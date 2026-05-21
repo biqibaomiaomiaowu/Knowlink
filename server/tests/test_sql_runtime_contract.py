@@ -1001,6 +1001,53 @@ def test_pipeline_service_sql_parse_start_enqueues_once_and_persists_complete_pa
     engine.dispose()
 
 
+def test_pipeline_service_sql_replays_legacy_route_scoped_parse_start_record():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite legacy route-scoped parse",
+        entry_type="manual_import",
+        goal_text="验证旧 route-scoped 幂等记录回放",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/legacy-route-scoped.pdf",
+            "originalName": "legacy-route-scoped.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:legacy-route-scoped",
+        },
+    )
+    _, legacy_trigger = repo.create_parse_run(course_id)
+    legacy = repo.run_idempotent(
+        f"pipelines.parse_start:{course_id}",
+        "sqlite-legacy-route-parse",
+        lambda: legacy_trigger,
+    )
+    dispatcher = _RecordingDispatcher()
+    service = PipelineService(
+        courses=repo,
+        parse_runs=repo,
+        resources=repo,
+        async_tasks=repo,
+        task_dispatcher=dispatcher,
+        idempotency=repo,
+    )
+
+    replayed = service.start_parse(course_id=course_id, idempotency_key="sqlite-legacy-route-parse")
+
+    assert replayed == legacy
+    assert dispatcher.calls == []
+
+    session.close()
+    engine.dispose()
+
+
 def test_course_service_sql_scoped_idempotency_rejects_body_mismatch_and_replays_legacy_record():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)

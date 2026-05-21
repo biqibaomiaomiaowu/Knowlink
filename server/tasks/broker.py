@@ -29,6 +29,14 @@ def get_dramatiq_content_queue_name() -> str:
     return _get_queue_env("KNOWLINK_DRAMATIQ_CONTENT_QUEUE", get_dramatiq_queue_name())
 
 
+def get_dramatiq_quiz_queue_name() -> str:
+    return _get_queue_env("KNOWLINK_DRAMATIQ_QUIZ_QUEUE", get_dramatiq_queue_name())
+
+
+def get_dramatiq_review_queue_name() -> str:
+    return _get_queue_env("KNOWLINK_DRAMATIQ_REVIEW_QUEUE", get_dramatiq_queue_name())
+
+
 def get_dramatiq_import_queue_name() -> str:
     return _get_queue_env("KNOWLINK_DRAMATIQ_IMPORT_QUEUE", get_dramatiq_queue_name())
 

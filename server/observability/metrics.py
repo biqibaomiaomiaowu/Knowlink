@@ -33,6 +33,13 @@ if "ASYNC_TASKS_TOTAL" not in globals():
         ["task_type", "status"],
         registry=REGISTRY,
     )
+if "ASYNC_TASK_ENQUEUE_DURATION_SECONDS" not in globals():
+    ASYNC_TASK_ENQUEUE_DURATION_SECONDS = Histogram(
+        "knowlink_async_task_enqueue_duration_seconds",
+        "Async task enqueue latency",
+        ["task_type", "adapter"],
+        registry=REGISTRY,
+    )
 
 
 def metrics_response() -> tuple[bytes, str]:
