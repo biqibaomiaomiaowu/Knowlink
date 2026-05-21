@@ -13,8 +13,28 @@ from server.tasks.payloads import TASK_PAYLOAD_MODELS
 DEFAULT_DRAMATIQ_QUEUE = "parse_pipeline"
 
 
+def _get_queue_env(name: str, fallback: str) -> str:
+    return os.getenv(name) or fallback
+
+
 def get_dramatiq_queue_name() -> str:
-    return os.getenv("KNOWLINK_DRAMATIQ_QUEUE", DEFAULT_DRAMATIQ_QUEUE)
+    return _get_queue_env("KNOWLINK_DRAMATIQ_QUEUE", DEFAULT_DRAMATIQ_QUEUE)
+
+
+def get_dramatiq_parse_queue_name() -> str:
+    return _get_queue_env("KNOWLINK_DRAMATIQ_PARSE_QUEUE", get_dramatiq_queue_name())
+
+
+def get_dramatiq_content_queue_name() -> str:
+    return _get_queue_env("KNOWLINK_DRAMATIQ_CONTENT_QUEUE", get_dramatiq_queue_name())
+
+
+def get_dramatiq_import_queue_name() -> str:
+    return _get_queue_env("KNOWLINK_DRAMATIQ_IMPORT_QUEUE", get_dramatiq_queue_name())
+
+
+def get_dramatiq_maintenance_queue_name() -> str:
+    return _get_queue_env("KNOWLINK_DRAMATIQ_MAINTENANCE_QUEUE", get_dramatiq_queue_name())
 
 
 def build_redis_broker() -> RedisBroker:

@@ -111,6 +111,41 @@ print(json.dumps({
     }
 
 
+def test_worker_queue_overrides_ignore_blank_values_without_connecting():
+    payload = _run_script(
+        """
+import json
+
+from server.tasks.broker import (
+    get_dramatiq_import_queue_name,
+    get_dramatiq_maintenance_queue_name,
+)
+from server.tasks.worker import handout_generate, parse_pipeline
+
+print(json.dumps({
+    "parse": parse_pipeline.queue_name,
+    "handout": handout_generate.queue_name,
+    "import": get_dramatiq_import_queue_name(),
+    "maintenance": get_dramatiq_maintenance_queue_name(),
+}))
+""",
+        env={
+            "KNOWLINK_DRAMATIQ_QUEUE": "default_queue",
+            "KNOWLINK_DRAMATIQ_PARSE_QUEUE": "",
+            "KNOWLINK_DRAMATIQ_CONTENT_QUEUE": "",
+            "KNOWLINK_DRAMATIQ_IMPORT_QUEUE": "",
+            "KNOWLINK_DRAMATIQ_MAINTENANCE_QUEUE": "",
+        },
+    )
+
+    assert payload == {
+        "parse": "default_queue",
+        "handout": "default_queue",
+        "import": "default_queue",
+        "maintenance": "default_queue",
+    }
+
+
 def test_worker_import_fails_fast_for_insecure_production_settings():
     result = subprocess.run(
         [
