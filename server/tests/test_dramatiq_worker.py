@@ -146,6 +146,31 @@ print(json.dumps({
     }
 
 
+def test_worker_main_prints_all_configured_actor_queues_without_connecting():
+    payload = _run_script(
+        """
+import contextlib
+import io
+import json
+
+from server.tasks.worker import main
+
+stream = io.StringIO()
+with contextlib.redirect_stdout(stream):
+    main()
+
+print(json.dumps({"output": stream.getvalue()}))
+""",
+        env={
+            "KNOWLINK_DRAMATIQ_QUEUE": "default_queue",
+            "KNOWLINK_DRAMATIQ_PARSE_QUEUE": "parse_io",
+            "KNOWLINK_DRAMATIQ_CONTENT_QUEUE": "content_generation",
+        },
+    )
+
+    assert "--queues content_generation,parse_io" in payload["output"]
+
+
 def test_worker_import_fails_fast_for_insecure_production_settings():
     result = subprocess.run(
         [

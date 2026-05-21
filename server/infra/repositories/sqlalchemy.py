@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 import re
 from typing import Any, TypeVar
 
@@ -139,7 +140,7 @@ class SqlAlchemyRuntimeRepository:
 
         try:
             record = IdempotencyRecord(
-                action=scope,
+                action=_scoped_idempotency_action(scope),
                 scope=scope,
                 key=key,
                 request_hash=request_hash,
@@ -2475,6 +2476,11 @@ def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _scoped_idempotency_action(scope: str) -> str:
+    digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()
+    return f"scoped:{digest}"
 
 
 def _resource_dict(resource: CourseResource) -> dict[str, Any]:

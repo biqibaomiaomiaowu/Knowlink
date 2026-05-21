@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from server.domain.repositories import CourseRepository, IdempotencyRepository
+from server.domain.services.idempotency import run_fingerprinted_idempotent
 
 
 class CourseService:
@@ -25,7 +26,15 @@ class CourseService:
                 )
             }
 
-        return self.idempotency.run_idempotent("courses.create", idempotency_key, factory)
+        return run_fingerprinted_idempotent(
+            self.idempotency,
+            scope="courses.create",
+            key=idempotency_key,
+            request_payload=payload.model_dump(by_alias=True),
+            factory=factory,
+            legacy_action="courses.create",
+            legacy_matches=lambda result: isinstance(result, dict),
+        )
 
     def list_recent_courses(self) -> dict[str, object]:
         return {"items": self.courses.list_recent_courses()}

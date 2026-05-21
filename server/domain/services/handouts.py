@@ -15,7 +15,7 @@ from server.domain.services.async_tasks import (
     resolve_async_tasks,
 )
 from server.domain.services.errors import ServiceError
-from server.domain.services.idempotency import async_trigger_matches_course, run_scoped_idempotent
+from server.domain.services.idempotency import async_trigger_matches_course, run_fingerprinted_idempotent
 from server.ai.handout_lazy import HandoutOutlineClient, generate_handout_outline
 
 
@@ -100,10 +100,11 @@ class HandoutService:
             created_response = trigger
             return trigger
 
-        result = run_scoped_idempotent(
+        result = run_fingerprinted_idempotent(
             self.idempotency,
-            action=f"handouts.generate:{course_id}",
+            scope=f"handouts.generate:{course_id}",
             key=idempotency_key,
+            request_payload={"courseId": course_id},
             factory=factory,
             legacy_action="handouts.generate",
             legacy_matches=lambda legacy: async_trigger_matches_course(
@@ -279,10 +280,14 @@ class HandoutService:
             created_response = response
             return response
 
-        result = self.idempotency.run_idempotent(
-            f"handout_blocks.generate:{block_id}",
-            idempotency_key,
-            factory,
+        result = run_fingerprinted_idempotent(
+            self.idempotency,
+            scope=f"handout_blocks.generate:{block_id}",
+            key=idempotency_key,
+            request_payload={"blockId": block_id},
+            factory=factory,
+            legacy_action=f"handout_blocks.generate:{block_id}",
+            legacy_matches=lambda result: isinstance(result, dict),
         )
         if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request

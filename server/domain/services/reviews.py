@@ -15,7 +15,7 @@ from server.domain.services.async_tasks import (
     resolve_async_tasks,
 )
 from server.domain.services.errors import ServiceError
-from server.domain.services.idempotency import review_result_matches_course, run_scoped_idempotent
+from server.domain.services.idempotency import review_result_matches_course, run_fingerprinted_idempotent
 
 
 class ReviewService:
@@ -107,10 +107,11 @@ class ReviewService:
             enqueue_request = (task_id, payload)
             return created_response
 
-        result = run_scoped_idempotent(
+        result = run_fingerprinted_idempotent(
             self.idempotency,
-            action=f"reviews.regenerate:{course_id}",
+            scope=f"reviews.regenerate:{course_id}",
             key=idempotency_key,
+            request_payload={"courseId": course_id},
             factory=factory,
             legacy_action="reviews.regenerate",
             legacy_matches=lambda legacy: review_result_matches_course(

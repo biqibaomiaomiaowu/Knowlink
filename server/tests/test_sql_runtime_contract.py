@@ -17,10 +17,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from server.domain.services.courses import CourseService
+from server.domain.services.errors import ServiceError
 from server.domain.services.pipelines import PipelineService
 from server.domain.services.quizzes import QuizService
 from server.infra.db.base import Base
-from server.schemas.requests import SubmitQuizRequest
+from server.schemas.requests import CreateCourseRequest, SubmitQuizRequest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -994,6 +996,63 @@ def test_pipeline_service_sql_parse_start_enqueues_once_and_persists_complete_pa
         sa.select(async_tasks).where(async_tasks.c.id == first["taskId"])
     ).mappings().one()
     assert task_row["payload_json"] == dispatcher.calls[0]["payload"]
+
+    session.close()
+    engine.dispose()
+
+
+def test_course_service_sql_scoped_idempotency_rejects_body_mismatch_and_replays_legacy_record():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    service = CourseService(courses=repo, idempotency=repo)
+
+    legacy = repo.run_idempotent(
+        "courses.create",
+        "sqlite-legacy-course",
+        lambda: {
+            "course": repo.create_course(
+                title="SQLite legacy course",
+                entry_type="manual_import",
+                goal_text="legacy",
+                preferred_style="balanced",
+            )
+        },
+    )
+    replayed = service.create_course(
+        payload=CreateCourseRequest(
+            title="SQLite legacy course with new body",
+            entry_type="manual_import",
+            goal_text="legacy changed",
+            preferred_style="exam",
+        ),
+        idempotency_key="sqlite-legacy-course",
+    )
+    first = service.create_course(
+        payload=CreateCourseRequest(
+            title="SQLite fingerprint course A",
+            entry_type="manual_import",
+            goal_text="fingerprint",
+            preferred_style="balanced",
+        ),
+        idempotency_key="sqlite-fingerprint-course",
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.create_course(
+            payload=CreateCourseRequest(
+                title="SQLite fingerprint course B",
+                entry_type="manual_import",
+                goal_text="fingerprint",
+                preferred_style="balanced",
+            ),
+            idempotency_key="sqlite-fingerprint-course",
+        )
+
+    assert replayed["course"]["courseId"] == legacy["course"]["courseId"]
+    assert replayed["course"]["title"] == "SQLite legacy course"
+    assert first["course"]["title"] == "SQLite fingerprint course A"
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "idempotency.body_mismatch"
 
     session.close()
     engine.dispose()

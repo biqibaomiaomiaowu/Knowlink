@@ -348,6 +348,38 @@ def test_recommendation_confirm_idempotency_key_is_scoped_by_catalog():
     assert first["data"]["course"]["courseId"] != second["data"]["course"]["courseId"]
 
 
+def test_recommendation_confirm_rejects_same_idempotency_key_with_different_body():
+    headers = AUTH_HEADERS | {"idempotency-key": "rec-confirm-body-mismatch"}
+
+    first_status, first = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/recommendations/math-final-01/confirm",
+            headers=headers,
+            json_body={
+                "goalText": "高数期末复习",
+                "preferredStyle": "exam",
+            },
+        )
+    )
+    second_status, second = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/recommendations/math-final-01/confirm",
+            headers=headers,
+            json_body={
+                "goalText": "高数期末复习",
+                "preferredStyle": "quick",
+            },
+        )
+    )
+
+    assert first_status == 201
+    assert first["data"]["course"]["courseId"]
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
+
+
 def test_recommendation_confirm_rejects_naive_exam_at():
     status, body = asyncio.run(
         request(
@@ -384,6 +416,29 @@ def test_create_course_is_idempotent():
     )
     assert first["data"]["course"]["title"] == "期末复习幂等课"
     assert first["data"]["course"]["examAt"] == "2026-06-20T09:30:00+08:00"
+
+
+def test_create_course_rejects_same_idempotency_key_with_different_body():
+    headers = AUTH_HEADERS | {"idempotency-key": "manual-course-body-mismatch"}
+    first_payload = {
+        "title": "幂等冲突课程 A",
+        "entryType": "manual_import",
+        "goalText": "验证创建课程请求体指纹",
+        "preferredStyle": "balanced",
+    }
+    second_payload = first_payload | {"title": "幂等冲突课程 B"}
+
+    first_status, first = asyncio.run(
+        request("POST", "/api/v1/courses", headers=headers, json_body=first_payload)
+    )
+    second_status, second = asyncio.run(
+        request("POST", "/api/v1/courses", headers=headers, json_body=second_payload)
+    )
+
+    assert first_status == 201
+    assert first["data"]["course"]["title"] == "幂等冲突课程 A"
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
 
 
 def test_create_course_rejects_naive_exam_at():
@@ -770,6 +825,36 @@ def test_quiz_generate_accepts_question_count_level_and_defaults_to_medium():
     assert small_body["data"]["entity"]["type"] == "quiz"
     assert invalid_status == 422
     assert invalid_body["code"] == 1
+
+
+def test_quiz_generate_rejects_same_idempotency_key_with_different_body():
+    course_id, _ = create_manual_course(
+        idempotency_key="quiz-generate-mismatch-course",
+        title="测验幂等冲突课",
+    )
+    headers = AUTH_HEADERS | {"idempotency-key": "quiz-generate-body-mismatch"}
+
+    first_status, first = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=headers,
+            json_body={"questionCountLevel": "small"},
+        )
+    )
+    second_status, second = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=headers,
+            json_body={"questionCountLevel": "large"},
+        )
+    )
+
+    assert first_status == 200
+    assert first["data"]["entity"]["type"] == "quiz"
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
 
 
 def test_review_regenerate_is_idempotent():

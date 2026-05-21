@@ -9,7 +9,6 @@ from server.infra.storage import build_object_storage
 from server.tasks.broker import (
     get_dramatiq_content_queue_name,
     get_dramatiq_parse_queue_name,
-    get_dramatiq_queue_name,
     list_registered_tasks,
 )
 from server.tasks.handouts import run_handout_block_generate, run_handout_generate
@@ -52,11 +51,21 @@ def review_refresh(message: dict[str, Any]) -> None:
 
 def main() -> None:
     registered = ", ".join(list_registered_tasks())
-    queue_name = get_dramatiq_queue_name()
+    queue_names = ",".join(
+        sorted(
+            {
+                parse_pipeline.queue_name,
+                handout_generate.queue_name,
+                handout_block_generate.queue_name,
+                quiz_generate.queue_name,
+                review_refresh.queue_name,
+            }
+        )
+    )
     print(
         "KnowLink Dramatiq actors registered: "
         f"{registered}. Start a worker with: "
-        f"dramatiq server.tasks.broker:broker server.tasks.worker --queues {queue_name}"
+        f"dramatiq server.tasks.broker:broker server.tasks.worker --queues {queue_names}"
     )
 
 
