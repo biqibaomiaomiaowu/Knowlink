@@ -19,9 +19,11 @@ from sqlalchemy.pool import StaticPool
 
 from server.domain.services.courses import CourseService
 from server.domain.services.errors import ServiceError
+from server.domain.services.idempotency import build_request_hash
 from server.domain.services.pipelines import PipelineService
 from server.domain.services.quizzes import QuizService
 from server.infra.db.base import Base
+from server.infra.db.models import IdempotencyRecord
 from server.schemas.requests import CreateCourseRequest, SubmitQuizRequest
 
 
@@ -1043,6 +1045,110 @@ def test_pipeline_service_sql_replays_legacy_route_scoped_parse_start_record():
 
     assert replayed == legacy
     assert dispatcher.calls == []
+
+    session.close()
+    engine.dispose()
+
+
+def test_sql_scoped_idempotency_ignores_expired_records():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    expired_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+    in_progress_scope = "resources.upload_complete:11"
+    in_progress_key = "sqlite-expired-in-progress"
+    in_progress_hash = build_request_hash({"objectKey": "old.pdf"})
+    replacement_hash = build_request_hash({"objectKey": "new.pdf"})
+    session.add(
+        IdempotencyRecord(
+            action="legacy-expired-in-progress",
+            scope=in_progress_scope,
+            key=in_progress_key,
+            request_hash=in_progress_hash,
+            status="in_progress",
+            response_json=None,
+            expires_at=expired_at,
+        )
+    )
+    session.commit()
+
+    replacement = repo.run_scoped_idempotent(
+        scope=in_progress_scope,
+        key=in_progress_key,
+        request_hash=replacement_hash,
+        factory=lambda: {"resourceId": 701, "objectKey": "new.pdf"},
+    )
+
+    succeeded_scope = "pipelines.parse_start:11"
+    succeeded_key = "sqlite-expired-succeeded"
+    succeeded_hash = build_request_hash({"courseId": 11})
+    new_succeeded_hash = build_request_hash({"courseId": 12})
+    session.add(
+        IdempotencyRecord(
+            action="legacy-expired-succeeded",
+            scope=succeeded_scope,
+            key=succeeded_key,
+            request_hash=succeeded_hash,
+            status="succeeded",
+            response_json={"taskId": 1},
+            result_json={"taskId": 1},
+            expires_at=expired_at,
+        )
+    )
+    session.commit()
+
+    new_value = repo.run_scoped_idempotent(
+        scope=succeeded_scope,
+        key=succeeded_key,
+        request_hash=new_succeeded_hash,
+        factory=lambda: {"taskId": 2},
+    )
+
+    rows = session.scalars(
+        sa.select(IdempotencyRecord).where(
+            IdempotencyRecord.scope.in_([in_progress_scope, succeeded_scope])
+        )
+    ).all()
+    records = {(row.scope, row.key): row for row in rows}
+    assert replacement == {"resourceId": 701, "objectKey": "new.pdf"}
+    assert records[(in_progress_scope, in_progress_key)].request_hash == replacement_hash
+    assert records[(in_progress_scope, in_progress_key)].status == "succeeded"
+    assert new_value == {"taskId": 2}
+    assert records[(succeeded_scope, succeeded_key)].request_hash == new_succeeded_hash
+
+    session.close()
+    engine.dispose()
+
+
+def test_sql_scoped_idempotency_keeps_non_expired_mismatch_protection():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    scope = "resources.upload_complete:11"
+    key = "sqlite-active-mismatch"
+    session.add(
+        IdempotencyRecord(
+            action="legacy-active-mismatch",
+            scope=scope,
+            key=key,
+            request_hash=build_request_hash({"objectKey": "old.pdf"}),
+            status="succeeded",
+            response_json={"resourceId": 1},
+            result_json={"resourceId": 1},
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    session.commit()
+
+    with pytest.raises(ServiceError) as exc_info:
+        repo.run_scoped_idempotent(
+            scope=scope,
+            key=key,
+            request_hash=build_request_hash({"objectKey": "new.pdf"}),
+            factory=lambda: {"resourceId": 2},
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "idempotency.body_mismatch"
 
     session.close()
     engine.dispose()

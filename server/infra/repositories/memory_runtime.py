@@ -16,6 +16,14 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _scoped_idempotency_record_expired(expires_at: object) -> bool:
+    if not isinstance(expires_at, datetime):
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= utcnow()
+
+
 @dataclass
 class RuntimeStore:
     lock: Lock = field(default_factory=Lock)
@@ -78,6 +86,10 @@ class RuntimeStore:
         slot = (scope, key)
         with self.lock:
             existing = self.idempotency_records.get(slot)
+            if existing is not None:
+                if _scoped_idempotency_record_expired(existing.get("expiresAt")):
+                    self.idempotency_records.pop(slot, None)
+                    existing = None
             if existing is not None:
                 if existing.get("requestHash") != request_hash:
                     raise_idempotency_body_mismatch()

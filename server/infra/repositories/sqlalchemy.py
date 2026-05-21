@@ -2419,12 +2419,28 @@ class SqlAlchemyRuntimeRepository:
             raise
 
     def _get_scoped_idempotency_record(self, *, scope: str, key: str) -> IdempotencyRecord | None:
-        return self.session.scalar(
+        record = self.session.scalar(
             select(IdempotencyRecord).where(
                 IdempotencyRecord.scope == scope,
                 IdempotencyRecord.key == key,
             )
         )
+        if record is not None and _scoped_idempotency_record_expired(record.expires_at):
+            self._delete_scoped_idempotency_record(scope=scope, key=key)
+            return None
+        return record
+
+    def _delete_scoped_idempotency_record(self, *, scope: str, key: str) -> None:
+        try:
+            self.session.execute(
+                delete(IdempotencyRecord).where(
+                    IdempotencyRecord.scope == scope,
+                    IdempotencyRecord.key == key,
+                )
+            )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
 
     def _delete_in_progress_idempotency_record(self, *, scope: str, key: str) -> None:
         try:
@@ -2476,6 +2492,11 @@ def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _scoped_idempotency_record_expired(expires_at: datetime | None) -> bool:
+    normalized = _normalize_utc_datetime(expires_at)
+    return normalized is not None and normalized <= utcnow()
 
 
 def _scoped_idempotency_action(scope: str) -> str:

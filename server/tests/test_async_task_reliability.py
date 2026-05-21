@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from server.api.deps import (
     get_review_service,
     get_task_dispatcher,
 )
+from server.domain.services.idempotency import build_request_hash
 from server.domain.services.errors import ServiceError
 from server.domain.services.handouts import HandoutService
 from server.domain.services.pipelines import PipelineService
@@ -20,6 +22,7 @@ from server.domain.services.quizzes import QuizService
 from server.domain.services.recommendations import RecommendationFlowService
 from server.domain.services.resources import ResourceService
 from server.domain.services.reviews import ReviewService
+from server.infra.repositories.memory_runtime import RuntimeStore, utcnow as memory_utcnow
 from server.infra.storage import ObjectStat
 from server.schemas.requests import ConfirmRecommendationRequest, UploadCompleteRequest
 from server.tasks import InMemoryTaskDispatcher, NoopTaskDispatcher
@@ -1125,8 +1128,6 @@ def test_legacy_unscoped_upload_complete_replays_only_for_matching_course():
 
 
 def test_scoped_idempotency_rejects_in_progress_replay():
-    from server.domain.services.idempotency import build_request_hash
-
     repo = _LegacyResourceRepo()
     service = ResourceService(
         courses=repo,
@@ -1153,6 +1154,57 @@ def test_scoped_idempotency_rejects_in_progress_replay():
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.error_code == "common.idempotency_replay"
+
+
+def test_memory_scoped_idempotency_ignores_expired_records():
+    store = RuntimeStore()
+    expired_at = memory_utcnow() - timedelta(seconds=1)
+
+    in_progress_scope = "resources.upload_complete:11"
+    in_progress_key = "expired-in-progress"
+    in_progress_hash = build_request_hash({"objectKey": "old.pdf"})
+    replacement_hash = build_request_hash({"objectKey": "new.pdf"})
+    store.idempotency_records[(in_progress_scope, in_progress_key)] = {
+        "scope": in_progress_scope,
+        "key": in_progress_key,
+        "requestHash": in_progress_hash,
+        "status": "in_progress",
+        "responseJson": None,
+        "expiresAt": expired_at,
+    }
+
+    replacement = store.run_scoped_idempotent(
+        scope=in_progress_scope,
+        key=in_progress_key,
+        request_hash=replacement_hash,
+        factory=lambda: {"resourceId": 701, "objectKey": "new.pdf"},
+    )
+
+    succeeded_scope = "pipelines.parse_start:11"
+    succeeded_key = "expired-succeeded"
+    succeeded_hash = build_request_hash({"courseId": 11})
+    new_succeeded_hash = build_request_hash({"courseId": 12})
+    store.idempotency_records[(succeeded_scope, succeeded_key)] = {
+        "scope": succeeded_scope,
+        "key": succeeded_key,
+        "requestHash": succeeded_hash,
+        "status": "succeeded",
+        "responseJson": {"taskId": 1},
+        "expiresAt": expired_at,
+    }
+
+    new_value = store.run_scoped_idempotent(
+        scope=succeeded_scope,
+        key=succeeded_key,
+        request_hash=new_succeeded_hash,
+        factory=lambda: {"taskId": 2},
+    )
+
+    assert replacement == {"resourceId": 701, "objectKey": "new.pdf"}
+    assert store.idempotency_records[(in_progress_scope, in_progress_key)]["requestHash"] == replacement_hash
+    assert store.idempotency_records[(in_progress_scope, in_progress_key)]["status"] == "succeeded"
+    assert new_value == {"taskId": 2}
+    assert store.idempotency_records[(succeeded_scope, succeeded_key)]["requestHash"] == new_succeeded_hash
 
 
 def test_legacy_unscoped_recommendation_confirm_replays_only_for_matching_catalog():
