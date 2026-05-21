@@ -9,6 +9,11 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from server.domain.services.idempotency import (
+    IDEMPOTENCY_EXPIRES_IN,
+    raise_idempotency_body_mismatch,
+    raise_idempotency_in_progress,
+)
 from server.parsers.base import clean_text
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
@@ -119,6 +124,53 @@ class SqlAlchemyRuntimeRepository:
         if existing is None:
             return None
         return existing.result_json
+
+    def run_scoped_idempotent(
+        self,
+        *,
+        scope: str,
+        key: str,
+        request_hash: str,
+        factory: Callable[[], T],
+    ) -> T:
+        existing = self._get_scoped_idempotency_record(scope=scope, key=key)
+        if existing is not None:
+            return self._value_from_scoped_idempotency_record(existing, request_hash)
+
+        try:
+            record = IdempotencyRecord(
+                action=scope,
+                scope=scope,
+                key=key,
+                request_hash=request_hash,
+                status="in_progress",
+                expires_at=utcnow() + IDEMPOTENCY_EXPIRES_IN,
+            )
+            self.session.add(record)
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            existing = self._get_scoped_idempotency_record(scope=scope, key=key)
+            if existing is not None:
+                return self._value_from_scoped_idempotency_record(existing, request_hash)
+            raise
+
+        self._idempotency_depth += 1
+        try:
+            value = factory()
+            ready_value = _json_ready(value)
+            record.status = "succeeded"
+            record.result_json = ready_value
+            record.response_json = ready_value
+            record.http_status = 200
+            self.session.commit()
+            return value
+        except Exception:
+            self.session.rollback()
+            self._delete_in_progress_idempotency_record(scope=scope, key=key)
+            raise
+        finally:
+            self._idempotency_depth -= 1
 
     def create_course(
         self,
@@ -2364,6 +2416,39 @@ class SqlAlchemyRuntimeRepository:
         except Exception:
             self.session.rollback()
             raise
+
+    def _get_scoped_idempotency_record(self, *, scope: str, key: str) -> IdempotencyRecord | None:
+        return self.session.scalar(
+            select(IdempotencyRecord).where(
+                IdempotencyRecord.scope == scope,
+                IdempotencyRecord.key == key,
+            )
+        )
+
+    def _delete_in_progress_idempotency_record(self, *, scope: str, key: str) -> None:
+        try:
+            self.session.execute(
+                delete(IdempotencyRecord).where(
+                    IdempotencyRecord.scope == scope,
+                    IdempotencyRecord.key == key,
+                    IdempotencyRecord.status == "in_progress",
+                )
+            )
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+
+    def _value_from_scoped_idempotency_record(
+        self,
+        record: IdempotencyRecord,
+        request_hash: str,
+    ) -> T:
+        if record.request_hash != request_hash:
+            raise_idempotency_body_mismatch()
+        if record.status == "in_progress":
+            raise_idempotency_in_progress()
+        value = record.response_json if record.response_json is not None else record.result_json
+        return value  # type: ignore[return-value]
 
 
 def _course_dict(course: Course) -> dict[str, Any]:

@@ -21,6 +21,21 @@ class MemoryScaffoldRepository:
     def get_idempotency_result(self, action: str, key: str | None) -> Any | None:
         return self.store.get_idempotency_result(action, key)
 
+    def run_scoped_idempotent(
+        self,
+        *,
+        scope: str,
+        key: str,
+        request_hash: str,
+        factory: Callable[[], T],
+    ) -> T:
+        return self.store.run_scoped_idempotent(
+            scope=scope,
+            key=key,
+            request_hash=request_hash,
+            factory=factory,
+        )
+
     def create_course(
         self,
         *,

@@ -5,6 +5,12 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 
+from server.domain.services.idempotency import (
+    IDEMPOTENCY_EXPIRES_IN,
+    raise_idempotency_body_mismatch,
+    raise_idempotency_in_progress,
+)
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -31,6 +37,7 @@ class RuntimeStore:
         }
     )
     idempotency: dict[tuple[str, str], Any] = field(default_factory=dict)
+    idempotency_records: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     courses: dict[int, dict[str, Any]] = field(default_factory=dict)
     resources: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     parse_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
@@ -66,6 +73,43 @@ class RuntimeStore:
             return None
         with self.lock:
             return self.idempotency.get((action, key))
+
+    def run_scoped_idempotent(self, *, scope: str, key: str, request_hash: str, factory):
+        slot = (scope, key)
+        with self.lock:
+            existing = self.idempotency_records.get(slot)
+            if existing is not None:
+                if existing.get("requestHash") != request_hash:
+                    raise_idempotency_body_mismatch()
+                if existing.get("status") == "in_progress":
+                    raise_idempotency_in_progress()
+                return existing.get("responseJson")
+            self.idempotency_records[slot] = {
+                "scope": scope,
+                "key": key,
+                "requestHash": request_hash,
+                "status": "in_progress",
+                "responseJson": None,
+                "expiresAt": utcnow() + IDEMPOTENCY_EXPIRES_IN,
+            }
+        try:
+            value = factory()
+        except Exception:
+            with self.lock:
+                current = self.idempotency_records.get(slot)
+                if current is not None and current.get("status") == "in_progress":
+                    self.idempotency_records.pop(slot, None)
+            raise
+        with self.lock:
+            self.idempotency_records[slot] = {
+                "scope": scope,
+                "key": key,
+                "requestHash": request_hash,
+                "status": "succeeded",
+                "responseJson": value,
+                "expiresAt": utcnow() + IDEMPOTENCY_EXPIRES_IN,
+            }
+        return value
 
     def create_course(
         self,

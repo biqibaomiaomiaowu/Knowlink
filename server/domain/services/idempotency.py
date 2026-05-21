@@ -1,11 +1,96 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any, TypeVar
+
+from server.domain.services.errors import ServiceError
 
 
 T = TypeVar("T")
+IDEMPOTENCY_EXPIRES_IN = timedelta(hours=24)
 _MISSING = object()
+
+
+def build_request_hash(payload: dict[str, object] | None) -> str:
+    raw = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def run_fingerprinted_idempotent(
+    idempotency: Any,
+    *,
+    scope: str,
+    key: str | None,
+    request_payload: dict[str, object] | None,
+    factory: Callable[[], T],
+    legacy_action: str | None = None,
+    legacy_matches: Callable[[object], bool] | None = None,
+) -> T:
+    if not key:
+        return factory()
+
+    request_hash = build_request_hash(request_payload)
+    scoped = getattr(idempotency, "run_scoped_idempotent", None)
+    if callable(scoped):
+        return scoped(
+            scope=scope,
+            key=key,
+            request_hash=request_hash,
+            factory=lambda: _legacy_or_factory(
+                idempotency,
+                key=key,
+                factory=factory,
+                legacy_action=legacy_action,
+                legacy_matches=legacy_matches,
+            ),
+        )
+
+    record = _get_scoped_record(idempotency, scope, key)
+    if record is not _MISSING:
+        return _value_from_fingerprinted_record(record, request_hash)  # type: ignore[return-value]
+
+    return run_scoped_idempotent(
+        idempotency,
+        action=scope,
+        key=key,
+        factory=factory,
+        legacy_action=legacy_action,
+        legacy_matches=legacy_matches,
+    )
+
+
+def _legacy_or_factory(
+    idempotency: Any,
+    *,
+    key: str,
+    factory: Callable[[], T],
+    legacy_action: str | None,
+    legacy_matches: Callable[[object], bool] | None,
+) -> T:
+    if legacy_action is not None and legacy_matches is not None:
+        legacy = _get_idempotency_result(idempotency, legacy_action, key)
+        if legacy is not _MISSING and legacy_matches(legacy):
+            return legacy  # type: ignore[return-value]
+    return factory()
+
+
+def raise_idempotency_body_mismatch() -> None:
+    raise ServiceError(
+        message="Idempotency key was reused with a different request body.",
+        error_code="idempotency.body_mismatch",
+        status_code=409,
+    )
+
+
+def raise_idempotency_in_progress() -> None:
+    raise ServiceError(
+        message="A request with the same idempotency key is still processing.",
+        error_code="common.idempotency_replay",
+        status_code=409,
+    )
 
 
 def run_scoped_idempotent(
@@ -104,6 +189,35 @@ def _get_idempotency_result(idempotency: Any, action: str, key: str) -> object:
     if value is None:
         return _MISSING
     return value
+
+
+def _get_scoped_record(idempotency: Any, scope: str, key: str) -> object:
+    records = getattr(idempotency, "idempotency_records", None)
+    if isinstance(records, dict):
+        value = records.get((scope, key))
+        if value is not None:
+            return value
+    value = _get_idempotency_result(idempotency, scope, key)
+    if isinstance(value, dict) and (
+        "requestHash" in value
+        or "request_hash" in value
+        or "status" in value
+        or "responseJson" in value
+        or "response_json" in value
+    ):
+        return value
+    return _MISSING
+
+
+def _value_from_fingerprinted_record(record: object, request_hash: str) -> object:
+    if not isinstance(record, dict):
+        return record
+    existing_hash = _text_value(record, "requestHash", "request_hash")
+    if existing_hash is not None and existing_hash != request_hash:
+        raise_idempotency_body_mismatch()
+    if _text_value(record, "status") == "in_progress":
+        raise_idempotency_in_progress()
+    return _field_value(record, "responseJson", "response_json", "resultJson", "result_json")
 
 
 def _task_for_result(async_tasks: Any, result: dict[str, object]) -> dict[str, object] | None:

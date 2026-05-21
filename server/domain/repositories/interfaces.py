@@ -13,6 +13,15 @@ class IdempotencyRepository(Protocol):
 
     def run_idempotent(self, action: str, key: str | None, factory: Callable[[], T]) -> T: ...
 
+    def run_scoped_idempotent(
+        self,
+        *,
+        scope: str,
+        key: str,
+        request_hash: str,
+        factory: Callable[[], T],
+    ) -> T: ...
+
 
 class CourseRepository(Protocol):
     def create_course(
