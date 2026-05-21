@@ -342,6 +342,30 @@ def test_upload_init_uses_storage_presigned_url_and_course_scoped_key():
     ]
 
 
+def test_upload_complete_only_stats_object_and_creates_resource():
+    storage = FakeObjectStorage()
+    service, _, course_id = _build_service(storage)
+    object_key = f"raw/1/{course_id}/temp/pdf/fast-return.pdf"
+    storage.stats[object_key] = ObjectStat(size_bytes=1024, checksum="sha256:fast-return")
+
+    result = service.upload_complete(
+        course_id=course_id,
+        payload=UploadCompleteRequest(
+            resource_type="pdf",
+            object_key=object_key,
+            original_name="fast-return.pdf",
+            mime_type="application/pdf",
+            size_bytes=1024,
+            checksum="sha256:fast-return",
+        ),
+        idempotency_key="fast-return-upload",
+    )
+
+    assert result["resourceId"]
+    assert storage.stat_calls == [object_key]
+    assert result["processingStatus"] == "pending"
+
+
 def test_upload_complete_rejects_object_key_outside_course_prefix():
     storage = FakeObjectStorage()
     service, _, course_id = _build_service(storage)

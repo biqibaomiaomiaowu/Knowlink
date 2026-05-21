@@ -949,6 +949,9 @@ class _LegacyIdempotencyMixin:
     def get_idempotency_result(self, action: str, key: str | None):
         if key is None:
             return None
+        idempotency_records = getattr(self, "idempotency_records", {})
+        if (action, key) in idempotency_records:
+            return idempotency_records[(action, key)]
         return self.idempotency.get((action, key))
 
 
@@ -971,6 +974,7 @@ class _LegacyHandoutRepo(_LegacyIdempotencyMixin, _HandoutRepo):
 class _LegacyResourceRepo(_LegacyIdempotencyMixin):
     def __init__(self) -> None:
         self.idempotency: dict[tuple[str, str], dict[str, Any]] = {}
+        self.idempotency_records: dict[tuple[str, str], dict[str, Any]] = {}
         self.resources: list[dict[str, Any]] = []
         self.next_resource_id = 600
 
@@ -1118,6 +1122,37 @@ def test_legacy_unscoped_upload_complete_replays_only_for_matching_course():
     assert repo.idempotency[("resources.upload_complete:11", "legacy-match")] == matching
     assert created["courseId"] == 11
     assert created["resourceId"] != mismatched["resourceId"]
+
+
+def test_scoped_idempotency_rejects_in_progress_replay():
+    from server.domain.services.idempotency import build_request_hash
+
+    repo = _LegacyResourceRepo()
+    service = ResourceService(
+        courses=repo,
+        resources=repo,
+        idempotency=repo,
+        storage=_LegacyResourceStorage(),
+    )
+    payload = _upload_payload(11, "in-progress")
+    request_hash = build_request_hash(payload.model_dump(by_alias=True))
+    repo.idempotency_records[("resources.upload_complete:11", "in-progress-key")] = {
+        "scope": "resources.upload_complete:11",
+        "key": "in-progress-key",
+        "requestHash": request_hash,
+        "status": "in_progress",
+        "responseJson": None,
+    }
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.upload_complete(
+            course_id=11,
+            payload=payload,
+            idempotency_key="in-progress-key",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "common.idempotency_replay"
 
 
 def test_legacy_unscoped_recommendation_confirm_replays_only_for_matching_catalog():

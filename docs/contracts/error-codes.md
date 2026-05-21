@@ -10,6 +10,7 @@
 - `common.validation_error`: 请求体字段校验失败
 - `common.not_found`: 资源不存在
 - `common.idempotency_replay`: 命中幂等回放
+- `idempotency.body_mismatch`: 同一幂等 scope 和 key 被不同请求体复用
 
 ## Recommendation
 

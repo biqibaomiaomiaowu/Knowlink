@@ -82,6 +82,35 @@ print(json.dumps({
     }
 
 
+def test_worker_actors_can_use_separate_queue_overrides_without_connecting():
+    payload = _run_script(
+        """
+import json
+
+from server.tasks.worker import handout_generate, parse_pipeline, quiz_generate, review_refresh
+
+print(json.dumps({
+    "parse": parse_pipeline.queue_name,
+    "handout": handout_generate.queue_name,
+    "quiz": quiz_generate.queue_name,
+    "review": review_refresh.queue_name,
+}))
+""",
+        env={
+            "KNOWLINK_DRAMATIQ_QUEUE": "default_queue",
+            "KNOWLINK_DRAMATIQ_PARSE_QUEUE": "parse_io",
+            "KNOWLINK_DRAMATIQ_CONTENT_QUEUE": "content_generation",
+        },
+    )
+
+    assert payload == {
+        "parse": "parse_io",
+        "handout": "content_generation",
+        "quiz": "content_generation",
+        "review": "content_generation",
+    }
+
+
 def test_worker_import_fails_fast_for_insecure_production_settings():
     result = subprocess.run(
         [

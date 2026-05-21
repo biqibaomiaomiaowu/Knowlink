@@ -26,8 +26,12 @@
   - `POST /api/v1/handout-blocks/{blockId}/generate`
   - `POST /api/v1/courses/{courseId}/quizzes/generate`
   - `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
+- 幂等 key 的匹配范围为具体业务 scope，不是全局 key；带 `courseId`、`blockId`、`quizId` 等路径 identity 的接口必须把 identity 纳入 scope。
+- 服务端必须保存请求体规范化后的 request fingerprint；同一 scope + `Idempotency-Key` + 相同请求体可回放，同一 scope + `Idempotency-Key` + 不同请求体必须返回 `409 idempotency.body_mismatch`。
+- 已开始但尚未完成的同一 scope + `Idempotency-Key` 请求必须返回 `409 common.idempotency_replay`，不得创建第二份业务实体。
 - 带路径参数的课程接口一律以 path 中的 `courseId` 为准；请求体不再重复传同义 `courseId`，`POST /api/v1/qa/messages` 是唯一例外。
 - Docker / runtime 默认任务队列为 `KNOWLINK_TASK_QUEUE=dramatiq`；`noop` dispatcher 只允许通过显式设置 `KNOWLINK_TASK_QUEUE=noop` 用于本地测试或开发，不得作为运行时默认。未知 `KNOWLINK_TASK_QUEUE` 值必须启动失败。
+- Dramatiq actor 默认使用 `KNOWLINK_DRAMATIQ_QUEUE`；可通过 `KNOWLINK_DRAMATIQ_PARSE_QUEUE`、`KNOWLINK_DRAMATIQ_CONTENT_QUEUE` 覆盖现有 parse / content actor 队列。`KNOWLINK_DRAMATIQ_IMPORT_QUEUE`、`KNOWLINK_DRAMATIQ_MAINTENANCE_QUEUE` 为 V2 后续 import / maintenance actor 预留队列变量。未设置覆盖变量时必须回落到默认队列。
 - `KNOWLINK_ENV=production` / `prod` / `staging` 时，demo 鉴权 token、MinIO 默认凭据、`KNOWLINK_TASK_QUEUE=noop`、非 `sql` 的 `KNOWLINK_RUNTIME_REPOSITORY_BACKEND`，以及 `demo` / `fake` / `memory` / `local` / `disabled` 等非持久化或禁用型 `KNOWLINK_STORAGE_BACKEND` 必须启动前 fail-fast；本地 `development` / test 仍可使用 `.env.example` 的 demo 默认值。
 - scheduler 当前没有真实生产定时任务，默认 `KNOWLINK_SCHEDULER_ENABLED=false`，且默认 compose 不启动 scheduler 服务；如需手动运行，必须显式启用该环境变量。
 
@@ -324,6 +328,11 @@
 签名，例如 `http://127.0.0.1:9000/...`；不能返回容器内 hostname `minio:9000`。
 
 ### `POST /api/v1/courses/{courseId}/resources/upload-complete`
+
+说明：
+
+- 该接口只确认对象存储中上传结果并登记 `course_resources`；不得同步执行解析、OCR、向量化、讲义生成、B站下载合并或 AI 调用。
+- 成功返回后，前端可以立即刷新资源列表；解析仍由 `POST /api/v1/courses/{courseId}/parse/start` 或后续后台策略显式触发。
 
 请求：
 

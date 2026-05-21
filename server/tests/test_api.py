@@ -351,6 +351,49 @@ def test_upload_complete_is_idempotent():
     assert first["data"]["resourceType"] == "pdf"
 
 
+def test_upload_complete_rejects_same_idempotency_key_with_different_body():
+    course_id, _ = create_manual_course(
+        idempotency_key="upload-complete-mismatch-course",
+        title="上传完成幂等冲突课",
+    )
+    headers = AUTH_HEADERS | {"idempotency-key": "upload-complete-body-mismatch"}
+    first_payload = {
+        "resourceType": "pdf",
+        "objectKey": f"raw/1/{course_id}/upload-mismatch-a.pdf",
+        "originalName": "upload-mismatch-a.pdf",
+        "mimeType": "application/pdf",
+        "sizeBytes": 1024,
+        "checksum": "sha256:upload-mismatch-a",
+    }
+    second_payload = first_payload | {
+        "objectKey": f"raw/1/{course_id}/upload-mismatch-b.pdf",
+        "originalName": "upload-mismatch-b.pdf",
+        "checksum": "sha256:upload-mismatch-b",
+    }
+
+    first_status, first = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/resources/upload-complete",
+            headers=headers,
+            json_body=first_payload,
+        )
+    )
+    second_status, second = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/resources/upload-complete",
+            headers=headers,
+            json_body=second_payload,
+        )
+    )
+
+    assert first_status == 201
+    assert first["data"]["resourceId"]
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
+
+
 def test_upload_complete_idempotency_key_is_scoped_by_course():
     first_course_id, _ = create_manual_course(
         idempotency_key="phase3-upload-scope-course-1",
