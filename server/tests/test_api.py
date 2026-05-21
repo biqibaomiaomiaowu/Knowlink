@@ -1,16 +1,19 @@
 import asyncio
+import importlib
 import json
+import logging
 import re
 
 import pytest
 
 from server.app import app
+from server.config.logging import JsonFormatter
 
 
 AUTH_HEADERS = {"authorization": "Bearer knowlink-demo-token"}
 
 
-async def request(method: str, path: str, *, headers=None, json_body=None):
+async def request_raw(method: str, path: str, *, headers=None, json_body=None):
     raw_headers = [
         (key.lower().encode(), value.encode()) for key, value in (headers or {}).items()
     ]
@@ -54,7 +57,27 @@ async def request(method: str, path: str, *, headers=None, json_body=None):
         for message in outgoing
         if message["type"] == "http.response.body"
     )
+    return status, payload
+
+
+async def request(method: str, path: str, *, headers=None, json_body=None):
+    status, payload = await request_raw(
+        method,
+        path,
+        headers=headers,
+        json_body=json_body,
+    )
     return status, json.loads(payload.decode())
+
+
+async def request_text(method: str, path: str, *, headers=None, json_body=None):
+    status, payload = await request_raw(
+        method,
+        path,
+        headers=headers,
+        json_body=json_body,
+    )
+    return status, payload.decode()
 
 
 def assert_idempotent_post(
@@ -158,6 +181,58 @@ def test_health_check():
     status, payload = asyncio.run(request("GET", "/health"))
     assert status == 200
     assert payload == {"status": "ok"}
+
+
+def test_metrics_endpoint_is_public_and_exposes_http_metrics():
+    status, payload_text = asyncio.run(request_text("GET", "/metrics"))
+
+    assert status == 200
+    assert "knowlink_http_requests_total" in payload_text
+
+
+def test_metrics_module_reload_reuses_registered_collectors():
+    import server.observability.metrics as metrics
+
+    reloaded = importlib.reload(metrics)
+
+    assert reloaded.HTTP_REQUESTS_TOTAL is metrics.HTTP_REQUESTS_TOTAL
+    status, payload_text = asyncio.run(request_text("GET", "/metrics"))
+    assert status == 200
+    assert "knowlink_http_requests_total" in payload_text
+
+
+def test_unknown_routes_use_low_cardinality_metric_label():
+    unique_path = "/missing-route-for-metrics-cardinality-89231"
+
+    status, _ = asyncio.run(request_text("GET", unique_path))
+    _, payload_text = asyncio.run(request_text("GET", "/metrics"))
+
+    assert status == 404
+    assert 'route="not_found"' in payload_text
+    assert unique_path not in payload_text
+
+
+def test_json_formatter_preserves_unknown_extra_fields():
+    record = logging.LogRecord(
+        name="server.tests",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="task updated",
+        args=(),
+        exc_info=None,
+    )
+    record.quiz_id = 17
+    record.task_status = "finished"
+    record.review_task_run_id = 23
+    record.target_id = "target-9"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["quiz_id"] == 17
+    assert payload["task_status"] == "finished"
+    assert payload["review_task_run_id"] == 23
+    assert payload["target_id"] == "target-9"
 
 
 def test_auth_is_required_for_api_routes():

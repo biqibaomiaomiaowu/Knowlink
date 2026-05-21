@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+import logging
 import re
+import time
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from server.api.response import api_error
 from server.api.router import build_router
 from server.config.logging import configure_logging
 from server.config.settings import get_settings
 from server.domain.services import ServiceError
+from server.observability.metrics import (
+    HTTP_REQUEST_DURATION_SECONDS,
+    HTTP_REQUESTS_TOTAL,
+    metrics_response,
+)
+
+
+logger = logging.getLogger("server.api.access")
 
 
 class RequestIdMiddleware:
@@ -31,11 +42,44 @@ class RequestIdMiddleware:
         await self.app(scope, receive, send)
 
 
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        started_at = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            route = _route_label(request, status_code=status_code)
+            duration_seconds = time.perf_counter() - started_at
+            HTTP_REQUESTS_TOTAL.labels(
+                method=request.method,
+                route=route,
+                status_code=str(status_code),
+            ).inc()
+            HTTP_REQUEST_DURATION_SECONDS.labels(
+                method=request.method,
+                route=route,
+            ).observe(duration_seconds)
+            logger.info(
+                "http request completed",
+                extra={
+                    "request_id": getattr(request.state, "request_id", None),
+                    "method": request.method,
+                    "route": route,
+                    "status_code": status_code,
+                    "duration_ms": round(duration_seconds * 1000, 3),
+                },
+            )
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging()
     app = FastAPI(title=settings.app_name, version="0.1.0")
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(AccessLogMiddleware)
     cors_allow_origins, cors_allow_origin_regex = _build_cors_origin_rules(settings.cors_allow_origins)
     app.add_middleware(
         CORSMiddleware,
@@ -74,8 +118,23 @@ def create_app() -> FastAPI:
             status_code=exc.status_code,
         )
 
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        content, content_type = metrics_response()
+        return Response(content=content, headers={"Content-Type": content_type})
+
     app.include_router(build_router())
     return app
+
+
+def _route_label(request: Request, *, status_code: int) -> str:
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    if isinstance(route_path, str) and route_path:
+        return route_path
+    if status_code == 404:
+        return "not_found"
+    return "unknown"
 
 
 def _build_cors_origin_rules(origins: tuple[str, ...]) -> tuple[list[str], str | None]:
