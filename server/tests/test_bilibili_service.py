@@ -16,6 +16,7 @@ from server.infra.bilibili import (
     FfmpegMerger,
     MergeCanceled,
 )
+from server.infra.bilibili.client import COLLECTION_API_URL, VIEW_API_URL
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
 from server.tasks.repositories import InMemoryAsyncTaskRepository
@@ -638,6 +639,470 @@ def test_bili_client_preview_normalizes_video_metadata() -> None:
             },
         ],
     }
+
+
+def test_bili_client_preview_maps_malformed_url_to_unsupported_url():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            raise AssertionError(url)
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "unused")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("not a bilibili url", cookies={})
+
+    assert exc_info.value.error_code == "bilibili.unsupported_url"
+    assert exc_info.value.status_code == 422
+
+
+def test_bili_client_preview_video_rejects_non_numeric_cid_as_metadata_failed():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            assert url == VIEW_API_URL
+            return {
+                "code": 0,
+                "data": {
+                    "bvid": "BV1xx411c7mD",
+                    "title": "坏数据视频",
+                    "pages": [{"cid": "bad", "page": 1, "part": "坏数据", "duration": 600}],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_fixed")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://www.bilibili.com/video/BV1xx411c7mD/", cookies={})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_video_rejects_non_numeric_duration_as_metadata_failed():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            assert url == VIEW_API_URL
+            return {
+                "code": 0,
+                "data": {
+                    "bvid": "BV1xx411c7mD",
+                    "title": "坏数据视频",
+                    "pages": [{"cid": 101, "page": 1, "part": "坏数据", "duration": ""}],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_fixed")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://www.bilibili.com/video/BV1xx411c7mD/", cookies={})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_collection_expands_archives_to_parts():
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_json(self, url: str, *, params=None, cookies=None):
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            return {
+                "code": 0,
+                "data": {
+                    "meta": {"name": "线代合集", "cover": "https://i0.hdslb.com/cover.jpg"},
+                    "archives": [
+                        {
+                            "bvid": "BV1xx411c7mD",
+                            "cid": 101,
+                            "title": "P1 行列式",
+                            "duration": 600,
+                            "pic": "https://i0.hdslb.com/p1.jpg",
+                        },
+                        {"bvid": "BV1yy411c7mD", "cid": 102, "title": "P2 矩阵", "duration": 720},
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_collection")
+    preview = client.preview(
+        "https://space.bilibili.com/123/channel/collectiondetail?sid=456",
+        cookies={"SESSDATA": "secret"},
+    )
+
+    data = preview.to_api()
+    assert data["sourceType"] == "collection"
+    assert data["title"] == "线代合集"
+    assert data["defaultSelectionMode"] == "all_parts"
+    assert data["totalParts"] == 2
+    assert data["parts"][0]["partId"] == "collection-456-bv-BV1xx411c7mD-cid-101-p1"
+
+
+def test_bili_client_preview_collection_fetches_all_archive_pages():
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_json(self, url: str, *, params=None, cookies=None):
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            assert url == COLLECTION_API_URL
+            page_num = params["page_num"]
+            if page_num == 1:
+                return {
+                    "code": 0,
+                    "data": {
+                        "meta": {"name": "分页合集"},
+                        "page": {"total": 2, "page_size": 1, "page_num": 1},
+                        "archives": [
+                            {
+                                "bvid": "BV1xx411c7mD",
+                                "cid": 101,
+                                "title": "P1",
+                                "duration": 600,
+                            }
+                        ],
+                    },
+                }
+            if page_num == 2:
+                return {
+                    "code": 0,
+                    "data": {
+                        "meta": {"name": "分页合集"},
+                        "page": {"total": 2, "page_size": 1, "page_num": 2},
+                        "archives": [
+                            {
+                                "bvid": "BV1yy411c7mD",
+                                "cid": 102,
+                                "title": "P2",
+                                "duration": 720,
+                            }
+                        ],
+                    },
+                }
+            raise AssertionError(page_num)
+
+    transport = FakeTransport()
+    client = BiliClient(transport=transport, preview_id_factory=lambda: "bili_preview_collection")
+
+    preview = client.preview(
+        "https://space.bilibili.com/123/channel/collectiondetail?sid=456",
+        cookies={"SESSDATA": "secret"},
+    )
+
+    data = preview.to_api()
+    assert data["totalParts"] == 2
+    assert [part["partId"] for part in data["parts"]] == [
+        "collection-456-bv-BV1xx411c7mD-cid-101-p1",
+        "collection-456-bv-BV1yy411c7mD-cid-102-p2",
+    ]
+    assert [call["params"]["page_num"] for call in transport.calls] == [1, 2]
+
+
+def test_bili_client_preview_collection_rejects_malformed_page_metadata():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            assert url == COLLECTION_API_URL
+            return {
+                "code": 0,
+                "data": {
+                    "meta": {"name": "坏分页合集"},
+                    "page": {"total": "bad", "page_size": 1, "page_num": 1},
+                    "archives": [
+                        {
+                            "bvid": "BV1xx411c7mD",
+                            "cid": 101,
+                            "title": "P1",
+                            "duration": 600,
+                        }
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_collection")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://space.bilibili.com/123/channel/collectiondetail?sid=456", cookies={})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_collection_rejects_incomplete_page_metadata():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            assert url == COLLECTION_API_URL
+            return {
+                "code": 0,
+                "data": {
+                    "meta": {"name": "缺分页字段合集"},
+                    "page": {"total": 2},
+                    "archives": [
+                        {
+                            "bvid": "BV1xx411c7mD",
+                            "cid": 101,
+                            "title": "P1",
+                            "duration": 600,
+                        }
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_collection")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://space.bilibili.com/123/channel/collectiondetail?sid=456", cookies={})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_collection_rejects_non_dict_page_metadata():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            assert url == COLLECTION_API_URL
+            return {
+                "code": 0,
+                "data": {
+                    "meta": {"name": "坏分页合集"},
+                    "page": "bad",
+                    "archives": [
+                        {
+                            "bvid": "BV1xx411c7mD",
+                            "cid": 101,
+                            "title": "P1",
+                            "duration": 600,
+                        }
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_collection")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://space.bilibili.com/123/channel/collectiondetail?sid=456", cookies={})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_collection_resolves_cid_from_video_view_when_archives_omit_cid():
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_json(self, url: str, *, params=None, cookies=None):
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            if url == COLLECTION_API_URL:
+                return {
+                    "code": 0,
+                    "data": {
+                        "meta": {"name": "线代合集"},
+                        "archives": [{"bvid": "BV1xx411c7mD", "title": "合集视频", "duration": 600}],
+                    },
+                }
+            if url == VIEW_API_URL:
+                assert params == {"bvid": "BV1xx411c7mD"}
+                return {
+                    "code": 0,
+                    "data": {
+                        "pages": [{"cid": 101, "page": 1, "part": "P1 行列式", "duration": 600}]
+                    },
+                }
+            raise AssertionError(url)
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_collection")
+    preview = client.preview(
+        "https://space.bilibili.com/123/channel/collectiondetail?sid=456",
+        cookies={"SESSDATA": "secret"},
+    )
+
+    data = preview.to_api()
+    assert data["totalParts"] == 1
+    assert data["parts"][0]["partId"] == "collection-456-bv-BV1xx411c7mD-cid-101-p1"
+    assert data["parts"][0]["title"] == "P1 行列式"
+
+
+def test_bili_client_preview_collection_rejects_non_numeric_cid_as_metadata_failed():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            return {
+                "code": 0,
+                "data": {
+                    "meta": {"name": "合集"},
+                    "archives": [
+                        {"bvid": "BV1xx411c7mD", "cid": "", "title": "坏数据", "duration": 600}
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_collection")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://space.bilibili.com/123/channel/collectiondetail?sid=456", cookies={})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_bangumi_defaults_to_current_episode():
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_json(self, url: str, *, params=None, cookies=None):
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            return {
+                "code": 0,
+                "result": {
+                    "title": "番剧课程",
+                    "cover": "https://i0.hdslb.com/bangumi.jpg",
+                    "episodes": [
+                        {
+                            "id": 123455,
+                            "bvid": "BV1aa411c7mD",
+                            "cid": 201,
+                            "page": 10,
+                            "long_title": "上一讲",
+                            "duration": 500000,
+                        },
+                        {
+                            "id": 123456,
+                            "bvid": "BV1bb411c7mD",
+                            "cid": 202,
+                            "page_no": 20,
+                            "long_title": "当前讲",
+                            "duration": 9500,
+                        },
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_bangumi")
+    preview = client.preview("https://www.bilibili.com/bangumi/play/ep123456", cookies={"SESSDATA": "secret"})
+
+    data = preview.to_api()
+    assert data["sourceType"] == "bangumi"
+    assert data["defaultSelectionMode"] == "current_part"
+    assert data["totalParts"] == 2
+    assert data["parts"][0]["pageNo"] == 1
+    assert data["parts"][0]["durationSec"] == 500
+    assert data["parts"][0]["partId"] == "bangumi-ep-123455-bv-BV1aa411c7mD-cid-201-p1"
+    assert data["parts"][1]["pageNo"] == 2
+    assert data["parts"][1]["durationSec"] == 9
+    assert data["parts"][1]["selectedByDefault"] is True
+    assert data["parts"][1]["partId"] == "bangumi-ep-123456-bv-BV1bb411c7mD-cid-202-p2"
+
+
+def test_bili_client_preview_bangumi_data_body_keeps_second_durations():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            return {
+                "code": 0,
+                "data": {
+                    "title": "番剧课程",
+                    "episodes": [
+                        {
+                            "id": 123456,
+                            "bvid": "BV1bb411c7mD",
+                            "cid": 202,
+                            "long_title": "当前讲",
+                            "duration": 650,
+                        }
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_bangumi")
+
+    preview = client.preview("https://www.bilibili.com/bangumi/play/ep123456", cookies={"SESSDATA": "secret"})
+
+    data = preview.to_api()
+    assert data["parts"][0]["durationSec"] == 650
+    assert data["parts"][0]["partId"] == "bangumi-ep-123456-bv-BV1bb411c7mD-cid-202-p1"
+
+
+def test_bili_client_preview_bangumi_rejects_non_numeric_cid_as_metadata_failed():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            return {
+                "code": 0,
+                "data": {
+                    "title": "番剧课程",
+                    "episodes": [
+                        {
+                            "id": 123456,
+                            "bvid": "BV1bb411c7mD",
+                            "cid": "bad",
+                            "long_title": "当前讲",
+                            "duration": 650,
+                        }
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_bangumi")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://www.bilibili.com/bangumi/play/ep123456", cookies={"SESSDATA": "secret"})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_bangumi_rejects_empty_cid_as_metadata_failed():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            return {
+                "code": 0,
+                "data": {
+                    "title": "番剧课程",
+                    "episodes": [
+                        {
+                            "id": 123456,
+                            "bvid": "BV1bb411c7mD",
+                            "cid": "",
+                            "long_title": "当前讲",
+                            "duration": 650,
+                        }
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_bangumi")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://www.bilibili.com/bangumi/play/ep123456", cookies={"SESSDATA": "secret"})
+
+    assert exc_info.value.error_code == "bilibili.metadata_failed"
+    assert exc_info.value.status_code == 502
+
+
+def test_bili_client_preview_bangumi_rejects_when_current_episode_not_playable():
+    class FakeTransport:
+        def get_json(self, url: str, *, params=None, cookies=None):
+            return {
+                "code": 0,
+                "data": {
+                    "title": "番剧课程",
+                    "episodes": [
+                        {
+                            "id": 123455,
+                            "bvid": "BV1aa411c7mD",
+                            "cid": 201,
+                            "long_title": "上一讲",
+                            "duration": 500,
+                        },
+                        {"id": 123456, "long_title": "当前讲", "duration": 650},
+                    ],
+                },
+            }
+
+    client = BiliClient(transport=FakeTransport(), preview_id_factory=lambda: "bili_preview_bangumi")
+
+    with pytest.raises(ServiceError) as exc_info:
+        client.preview("https://www.bilibili.com/bangumi/play/ep123456", cookies={"SESSDATA": "secret"})
+
+    assert exc_info.value.error_code == "bilibili.access_denied"
+    assert exc_info.value.status_code == 403
 
 
 def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:

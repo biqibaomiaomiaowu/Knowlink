@@ -64,6 +64,22 @@ def test_short_url_kind_is_not_exposed_as_source_type():
     assert BilibiliUrlKind.SHORT.value not in {item.value for item in BilibiliSourceType}
 
 
+def test_collection_url_preserves_owner_mid_and_sid():
+    parsed = parse_bilibili_url("https://space.bilibili.com/123/channel/collectiondetail?sid=456")
+
+    assert parsed.kind == BilibiliUrlKind.COLLECTION
+    assert parsed.collection_id == "456"
+    assert parsed.collection_owner_mid == "123"
+
+
+def test_bangumi_url_exposes_numeric_episode_id():
+    parsed = parse_bilibili_url("https://www.bilibili.com/bangumi/play/ep123456")
+
+    assert parsed.kind == BilibiliUrlKind.BANGUMI
+    assert parsed.episode_id == "ep123456"
+    assert parsed.episode_numeric_id == "123456"
+
+
 def test_parse_bilibili_url_trims_pasted_whitespace():
     parsed = parse_bilibili_url(" \nhttps://www.bilibili.com/video/BV1xx411c7mD/\t")
 

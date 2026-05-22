@@ -25,7 +25,9 @@ class ParsedBilibiliUrl:
     bvid: str | None = None
     page_no: int | None = None
     collection_id: str | None = None
+    collection_owner_mid: str | None = None
     episode_id: str | None = None
+    episode_numeric_id: str | None = None
 
 
 def parse_bilibili_url(url: str) -> ParsedBilibiliUrl:
@@ -73,6 +75,7 @@ def _parse_www_bilibili(original_url: str, path_parts: list[str], query: str) ->
             original_url=original_url,
             kind=BilibiliUrlKind.BANGUMI,
             episode_id=path_parts[2],
+            episode_numeric_id=path_parts[2].removeprefix("ep"),
         )
 
     raise ValueError("unsupported Bilibili URL")
@@ -93,6 +96,7 @@ def _parse_space_bilibili(original_url: str, path_parts: list[str], query: str) 
             original_url=original_url,
             kind=BilibiliUrlKind.COLLECTION,
             collection_id=sid_values[0],
+            collection_owner_mid=path_parts[0],
         )
 
     raise ValueError("unsupported Bilibili URL")
