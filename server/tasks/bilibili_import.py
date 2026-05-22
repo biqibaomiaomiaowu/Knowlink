@@ -29,6 +29,9 @@ class BilibiliImportFailure(Exception):
     recoverable: bool = False
 
 
+_PART_BVID_RE = re.compile(r"(?:^|-)bv-(BV[0-9A-Za-z]{10})(?:-|$)")
+
+
 class BilibiliImportRunner:
     def __init__(
         self,
@@ -333,9 +336,8 @@ class BilibiliImportRunner:
                 quality_preference=quality_preference,
             )
         except TypeError:
-            parsed = parse_bilibili_url(source_url)
             payload = self.bili_client.playurl(
-                bvid=parsed.bvid or "",
+                bvid=_bvid_for_playurl(source_url, part),
                 cid=int(part["cid"]),
                 cookies=cookies,
                 qn=_quality_qn(quality_preference),
@@ -493,6 +495,23 @@ def _extract_media_urls(payload: dict[str, Any]) -> dict[str, Any]:
     raise BilibiliImportFailure(
         error_code="bilibili.playurl_failed",
         message="Bilibili playurl response did not include video and audio streams.",
+    )
+
+
+def _bvid_for_playurl(source_url: str, part: dict[str, Any]) -> str:
+    direct = part.get("bvid") or part.get("bvidUpper")
+    if direct:
+        return str(direct)
+    part_id = str(part.get("partId") or "")
+    match = _PART_BVID_RE.search(part_id)
+    if match:
+        return match.group(1)
+    parsed = parse_bilibili_url(source_url)
+    if parsed.bvid:
+        return parsed.bvid
+    raise BilibiliImportFailure(
+        error_code="bilibili.playurl_failed",
+        message="Bilibili import part did not include a playable bvid.",
     )
 
 
