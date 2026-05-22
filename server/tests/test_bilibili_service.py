@@ -467,6 +467,37 @@ def test_status_and_list_return_next_action_and_current_run_fields() -> None:
     assert items[0]["nextAction"] == "poll"
 
 
+def test_status_next_action_is_retry_for_recoverable_run() -> None:
+    service, repo, *_ = build_service()
+    course_id = create_course(repo)
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+    created = service.create_import(
+        course_id=course_id,
+        preview_id=preview["previewId"],
+        source_url=preview["sourceUrl"],
+        selection_mode="all_parts",
+        selected_part_ids=[],
+        quality_preference="android_safe",
+        idempotency_key="bili-create-recoverable-status",
+    )
+    repo.update_bilibili_import_run(
+        created["entity"]["id"],
+        status="recoverable",
+        stage="error",
+        error_code="bilibili.auth_expired",
+        failure_reason="登录态已过期",
+        recoverable=True,
+    )
+
+    status = service.get_import_status(import_run_id=created["entity"]["id"])
+
+    assert status["nextAction"] == "retry"
+    assert status["recoverable"] is True
+    assert status["errorCode"] == "bilibili.auth_expired"
+    assert status["failureReason"] == "登录态已过期"
+
+
 def test_missing_import_run_uses_v2_contract_error_code() -> None:
     service, *_ = build_service()
 

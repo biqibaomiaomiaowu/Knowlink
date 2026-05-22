@@ -6,6 +6,7 @@ import importlib
 
 import pytest
 
+from server.domain.services.errors import ServiceError
 from server.infra.bilibili.models import BilibiliPart, BilibiliPreview, BilibiliSourceType
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
@@ -316,6 +317,45 @@ def test_runner_marks_failures_on_run_and_async_task(tmp_path: Path, component: 
     assert async_task["status"] == "failed"
     assert async_task["errorCode"] == error_code
     assert repo.list_resources(course["courseId"]) == []
+
+
+def test_runner_marks_auth_expired_provider_failure_recoverable(tmp_path: Path) -> None:
+    repo, course, run, task = _build_run()
+    runner = _runner(
+        repo,
+        tmp_path,
+        bili_client=FakeClient(
+            playurl_error=ServiceError(
+                message="Bilibili auth session is expired.",
+                error_code="bilibili.auth_expired",
+                status_code=401,
+            )
+        ),
+    )
+
+    runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
+
+    updated = repo.get_bilibili_import_run(run["importRunId"])
+    async_task = repo.get_async_task(task["taskId"])
+    assert updated is not None
+    assert async_task is not None
+    assert updated["status"] == "recoverable"
+    assert updated["stage"] == "error"
+    assert updated["errorCode"] == "bilibili.auth_expired"
+    assert updated["recoverable"] is True
+    assert async_task["status"] == "failed"
+
+
+def test_runner_cleans_runtime_dir_on_failure(tmp_path: Path) -> None:
+    repo, course, run, task = _build_run()
+    runner = _runner(repo, tmp_path, downloader=FakeDownloader(error=RuntimeError("download boom")))
+
+    runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
+
+    updated = repo.get_bilibili_import_run(run["importRunId"])
+    assert updated is not None
+    assert updated["status"] == "failed"
+    assert not (tmp_path / str(run["importRunId"])).exists()
 
 
 def test_runner_stops_when_run_is_already_canceled(tmp_path: Path) -> None:
