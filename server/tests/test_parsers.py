@@ -156,6 +156,35 @@ class FakeAsrClient:
         return self.segments
 
 
+class FakeFrameExtractor:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, float]] = []
+
+    def extract_frame(self, video_path, *, timestamp_sec: float):
+        self.calls.append({"timestampSec": timestamp_sec})
+        return b"fake-png"
+
+
+class FakeBatchVisionClient:
+    def analyze_images(self, assets, *, resource_type, document_context=None):
+        assert resource_type == "mp4"
+        asset = list(assets)[0]
+        return [
+            VisionAssetResult(asset_id=asset.asset_id, segment_type="formula", text="x^2 - 5x + 6 = 0"),
+            VisionAssetResult(asset_id=asset.asset_id, segment_type="ocr_text", text="例题：求方程的根"),
+        ]
+
+
+class RaisingFrameExtractor:
+    def extract_frame(self, video_path, *, timestamp_sec: float):
+        raise AssertionError("frame extractor should not be called")
+
+
+class RaisingBatchVisionClient:
+    def analyze_images(self, assets, *, resource_type, document_context=None):
+        raise AssertionError("vision client should not be called")
+
+
 class RaisingOcrClient:
     def recognize_images(self, assets, *, resource_type):
         raise RuntimeError("ocr unavailable")
@@ -1378,6 +1407,103 @@ def test_mp4_parser_uses_asr_segments_and_validates_schema(tmp_path: Path):
             "endSec": 28,
         },
     ]
+
+
+def test_mp4_parser_adds_visual_segments_from_asr_timeline(tmp_path: Path):
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient([AsrSegment(text="我们看这个方程。", start_sec=10, end_sec=20)])
+    extractor = FakeFrameExtractor()
+
+    result = VideoParser(
+        asr_client=asr_client,
+        vision_client=FakeBatchVisionClient(),
+        frame_extractor=extractor,
+        enable_visual_parse=True,
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert [segment["segmentType"] for segment in document["segments"]] == [
+        "video_caption",
+        "formula",
+        "ocr_text",
+    ]
+    formula_segment = document["segments"][1]
+    assert formula_segment["startSec"] == 10
+    assert formula_segment["endSec"] == 20
+    assert formula_segment["formulaText"] == "x^2 - 5x + 6 = 0"
+    assert formula_segment["imageKey"].startswith("frames/mp4/")
+    assert extractor.calls == [{"timestampSec": 15.0}]
+
+
+def test_mp4_parser_keeps_visual_dependencies_idle_when_disabled(tmp_path: Path):
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient([AsrSegment(text="只需要字幕。", start_sec=10, end_sec=20)])
+
+    result = VideoParser(
+        asr_client=asr_client,
+        vision_client=RaisingBatchVisionClient(),
+        frame_extractor=RaisingFrameExtractor(),
+        enable_visual_parse=False,
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert issue_codes(result) == []
+    assert [segment["segmentType"] for segment in document["segments"]] == ["video_caption"]
+
+
+def test_mp4_parser_default_visual_disabled_does_not_load_configured_vision(monkeypatch, tmp_path: Path):
+    def fail_configured_vision_client():
+        raise AssertionError("configured vision client should not be loaded")
+
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIDEO_VISUAL_PARSE", raising=False)
+    monkeypatch.setattr("server.parsers.video.get_configured_vision_client", fail_configured_vision_client)
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    result = VideoParser(
+        asr_client=FakeAsrClient([AsrSegment(text="默认只用字幕。", start_sec=0, end_sec=10)])
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert [segment["segmentType"] for segment in document["segments"]] == ["video_caption"]
+
+
+def test_mp4_parser_orders_visual_segments_across_multiple_frames(tmp_path: Path):
+    class TwoFrameVisionClient:
+        def analyze_images(self, assets, *, resource_type, document_context=None):
+            return [
+                VisionAssetResult(asset_id=asset.asset_id, segment_type="formula", text=f"{asset.asset_id}=x")
+                for asset in assets
+            ] + [
+                VisionAssetResult(asset_id=asset.asset_id, segment_type="ocr_text", text=f"{asset.asset_id} 题干")
+                for asset in assets
+            ]
+
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient(
+        [
+            AsrSegment(text="第一段。", start_sec=0, end_sec=10),
+            AsrSegment(text="第二段。", start_sec=10, end_sec=20),
+        ]
+    )
+
+    result = VideoParser(
+        asr_client=asr_client,
+        vision_client=TwoFrameVisionClient(),
+        frame_extractor=FakeFrameExtractor(),
+        enable_visual_parse=True,
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+
+    assert result.status == "succeeded"
+    assert [segment["orderNo"] for segment in document["segments"]] == [1, 2, 3, 4, 5, 6]
 
 
 def test_mp4_normalized_document_accepts_timeline_visual_segments():
