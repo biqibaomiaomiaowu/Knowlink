@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Protocol
 
 from server.domain.repositories import CourseRepository, IdempotencyRepository
 from server.domain.services.errors import ServiceError
@@ -12,26 +13,28 @@ from server.schemas.responses import RecommendationCard
 from server.schemas.requests import ConfirmRecommendationRequest, RecommendationRequest
 
 
-class RecommendationService:
-    def __init__(self, catalog_path: Path) -> None:
-        self.catalog_path = catalog_path
+class RecommendationProvider(Protocol):
+    def recommend(
+        self,
+        *,
+        catalog: list[dict],
+        payload: RecommendationRequest,
+    ) -> list[RecommendationCard]:
+        ...
 
-    @lru_cache(maxsize=1)
-    def load_catalog(self) -> list[dict]:
-        return json.loads(self.catalog_path.read_text(encoding="utf-8"))
 
-    def get_catalog_entry(self, catalog_id: str) -> dict | None:
-        for item in self.load_catalog():
-            if item["catalogId"] == catalog_id:
-                return item
-        return None
-
-    def recommend(self, payload: RecommendationRequest) -> list[RecommendationCard]:
+class RuleBasedRecommendationProvider:
+    def recommend(
+        self,
+        *,
+        catalog: list[dict],
+        payload: RecommendationRequest,
+    ) -> list[RecommendationCard]:
         results: list[RecommendationCard] = []
         goal_text = payload.goal_text.lower()
         time_budget_hours = payload.time_budget_minutes / 60
 
-        for item in self.load_catalog():
+        for item in catalog:
             score = 50
             reasons: list[str] = []
             reason_materials = list(item.get("reasonMaterials") or [])
@@ -85,6 +88,35 @@ class RecommendationService:
             )
 
         return sorted(results, key=lambda result: result.fit_score, reverse=True)
+
+
+class RecommendationService:
+    def __init__(
+        self,
+        catalog_path: Path,
+        provider: RecommendationProvider | None = None,
+    ) -> None:
+        self.catalog_path = catalog_path
+        self.provider = provider or RuleBasedRecommendationProvider()
+
+    @lru_cache(maxsize=1)
+    def load_catalog(self) -> list[dict]:
+        return json.loads(self.catalog_path.read_text(encoding="utf-8"))
+
+    def get_catalog_entry(self, catalog_id: str) -> dict | None:
+        for item in self.load_catalog():
+            if item["catalogId"] == catalog_id:
+                return item
+        return None
+
+    def recommend(self, payload: RecommendationRequest) -> list[RecommendationCard]:
+        catalog = self.load_catalog()
+        catalog_ids = {str(item["catalogId"]) for item in catalog}
+        return [
+            recommendation
+            for recommendation in self.provider.recommend(catalog=catalog, payload=payload)
+            if recommendation.catalog_id in catalog_ids
+        ]
 
 
 class RecommendationFlowService:

@@ -143,5 +143,100 @@
         "description": "字幕文件"
       }
     ]
+  },
+  {
+    "catalogId": "python-exam-01",
+    "title": "Python 程序设计期末复习",
+    "provider": "KnowLink Seed",
+    "subject": "programming",
+    "courseCode": "PYTHON-EXAM-01",
+    "level": "beginner",
+    "targetAudience": "需要 Python 程序设计期末复习和上机题训练的学生",
+    "estimatedHours": 4,
+    "tags": ["Python", "程序设计", "期末", "上机题"],
+    "knowledgeTags": ["变量与类型", "控制流", "函数", "列表字典", "文件读写"],
+    "prerequisites": ["基础计算机操作", "简单英文关键字阅读"],
+    "outline": [
+      {"title": "语法基础与控制流", "estimatedMinutes": 50},
+      {"title": "函数、容器与常见题型", "estimatedMinutes": 70},
+      {"title": "文件读写与上机综合题", "estimatedMinutes": 60}
+    ],
+    "importHints": ["可导入 B站 Python 复习视频作为主线", "PDF 题单用于定位上机题与参考答案"],
+    "reasonMaterials": ["覆盖程序设计基础题型", "适合短周期上机复习", "视频和题单能支撑讲练结合"],
+    "coverUrl": null,
+    "highlights": ["上机题", "基础语法", "讲练结合"],
+    "supportedStyles": ["exam", "quick", "balanced"],
+    "defaultResourceManifest": [
+      {
+        "resourceType": "mp4",
+        "required": true,
+        "description": "主课程视频"
+      },
+      {
+        "resourceType": "pdf",
+        "required": true,
+        "description": "配套题单 PDF"
+      },
+      {
+        "resourceType": "pptx",
+        "required": false,
+        "description": "课堂复习课件 PPTX"
+      },
+      {
+        "resourceType": "docx",
+        "required": false,
+        "description": "错题整理 DOCX"
+      }
+    ]
+  },
+  {
+    "catalogId": "data-structure-01",
+    "title": "数据结构核心题型课",
+    "provider": "KnowLink Seed",
+    "subject": "computer_science",
+    "courseCode": "DATA-STRUCTURE-01",
+    "level": "intermediate",
+    "targetAudience": "需要梳理数据结构核心概念和算法题型的学生",
+    "estimatedHours": 5,
+    "tags": ["数据结构", "算法", "期末", "链表", "树"],
+    "knowledgeTags": ["线性表", "栈和队列", "二叉树", "图", "排序"],
+    "prerequisites": ["程序设计基础", "递归基础", "简单复杂度分析"],
+    "outline": [
+      {"title": "线性结构与典型操作", "estimatedMinutes": 60},
+      {"title": "树、图与遍历题型", "estimatedMinutes": 90},
+      {"title": "排序查找与综合应用", "estimatedMinutes": 75}
+    ],
+    "importHints": ["适合导入 B站 数据结构视频串讲", "PDF/PPTX 资料用于补充伪代码和题目定位"],
+    "reasonMaterials": ["覆盖数据结构高频题", "适合算法基础补强", "视频讲解与讲义能串起概念和题型"],
+    "coverUrl": null,
+    "highlights": ["算法题型", "树图专题", "期末复习"],
+    "supportedStyles": ["exam", "detailed", "balanced"],
+    "defaultResourceManifest": [
+      {
+        "resourceType": "mp4",
+        "required": true,
+        "description": "主课程视频"
+      },
+      {
+        "resourceType": "pdf",
+        "required": true,
+        "description": "配套讲义 PDF"
+      },
+      {
+        "resourceType": "pptx",
+        "required": false,
+        "description": "算法图示课件 PPTX"
+      },
+      {
+        "resourceType": "docx",
+        "required": false,
+        "description": "补充练习 DOCX"
+      },
+      {
+        "resourceType": "srt",
+        "required": false,
+        "description": "字幕文件"
+      }
+    ]
   }
 ]
