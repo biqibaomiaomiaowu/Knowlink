@@ -1,11 +1,16 @@
 import asyncio
+import importlib
 import json
+import logging
 import re
+import subprocess
+import sys
 
 import pytest
 
 from server.api.deps import get_bilibili_service
 from server.app import app
+from server.config.logging import JsonFormatter, configure_logging
 from server.domain.services import BilibiliService
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
@@ -16,7 +21,7 @@ from server.tests.test_bilibili_service import FakeBiliClient, RecordingDispatch
 AUTH_HEADERS = {"authorization": "Bearer knowlink-demo-token"}
 
 
-async def request(method: str, path: str, *, headers=None, json_body=None):
+async def request_raw(method: str, path: str, *, headers=None, json_body=None):
     raw_headers = [
         (key.lower().encode(), value.encode()) for key, value in (headers or {}).items()
     ]
@@ -60,7 +65,27 @@ async def request(method: str, path: str, *, headers=None, json_body=None):
         for message in outgoing
         if message["type"] == "http.response.body"
     )
+    return status, payload
+
+
+async def request(method: str, path: str, *, headers=None, json_body=None):
+    status, payload = await request_raw(
+        method,
+        path,
+        headers=headers,
+        json_body=json_body,
+    )
     return status, json.loads(payload.decode())
+
+
+async def request_text(method: str, path: str, *, headers=None, json_body=None):
+    status, payload = await request_raw(
+        method,
+        path,
+        headers=headers,
+        json_body=json_body,
+    )
+    return status, payload.decode()
 
 
 def assert_idempotent_post(
@@ -166,6 +191,85 @@ def test_health_check():
     assert payload == {"status": "ok"}
 
 
+def test_metrics_endpoint_is_public_and_exposes_http_metrics():
+    status, payload_text = asyncio.run(request_text("GET", "/metrics"))
+
+    assert status == 200
+    assert "knowlink_http_requests_total" in payload_text
+
+
+def test_metrics_module_reload_reuses_registered_collectors():
+    import server.observability.metrics as metrics
+
+    reloaded = importlib.reload(metrics)
+
+    assert reloaded.HTTP_REQUESTS_TOTAL is metrics.HTTP_REQUESTS_TOTAL
+    status, payload_text = asyncio.run(request_text("GET", "/metrics"))
+    assert status == 200
+    assert "knowlink_http_requests_total" in payload_text
+
+
+def test_unknown_routes_use_low_cardinality_metric_label():
+    unique_path = "/missing-route-for-metrics-cardinality-89231"
+
+    status, _ = asyncio.run(request_text("GET", unique_path))
+    _, payload_text = asyncio.run(request_text("GET", "/metrics"))
+
+    assert status == 404
+    assert 'route="not_found"' in payload_text
+    assert unique_path not in payload_text
+
+
+def test_json_formatter_preserves_unknown_extra_fields():
+    record = logging.LogRecord(
+        name="server.tests",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="task updated",
+        args=(),
+        exc_info=None,
+    )
+    record.quiz_id = 17
+    record.task_status = "finished"
+    record.review_task_run_id = 23
+    record.target_id = "target-9"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["quiz_id"] == 17
+    assert payload["task_status"] == "finished"
+    assert payload["review_task_run_id"] == 23
+    assert payload["target_id"] == "target-9"
+
+
+def test_configure_logging_writes_json_to_stderr():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import logging
+
+from server.config.logging import configure_logging
+
+configure_logging()
+logging.getLogger("server.tests.logging").info(
+    "stderr routing check",
+    extra={"request_id": "req_logging_test"},
+)
+""",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout == ""
+    assert '"message":"stderr routing check"' in result.stderr
+    assert '"request_id":"req_logging_test"' in result.stderr
+
+
 def test_auth_is_required_for_api_routes():
     status, body = asyncio.run(request("GET", "/api/v1/home/dashboard"))
     assert status == 401
@@ -250,6 +354,38 @@ def test_recommendation_confirm_idempotency_key_is_scoped_by_catalog():
     assert first["data"]["course"]["courseId"] != second["data"]["course"]["courseId"]
 
 
+def test_recommendation_confirm_rejects_same_idempotency_key_with_different_body():
+    headers = AUTH_HEADERS | {"idempotency-key": "rec-confirm-body-mismatch"}
+
+    first_status, first = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/recommendations/math-final-01/confirm",
+            headers=headers,
+            json_body={
+                "goalText": "高数期末复习",
+                "preferredStyle": "exam",
+            },
+        )
+    )
+    second_status, second = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/recommendations/math-final-01/confirm",
+            headers=headers,
+            json_body={
+                "goalText": "高数期末复习",
+                "preferredStyle": "quick",
+            },
+        )
+    )
+
+    assert first_status == 201
+    assert first["data"]["course"]["courseId"]
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
+
+
 def test_recommendation_confirm_rejects_naive_exam_at():
     status, body = asyncio.run(
         request(
@@ -286,6 +422,29 @@ def test_create_course_is_idempotent():
     )
     assert first["data"]["course"]["title"] == "期末复习幂等课"
     assert first["data"]["course"]["examAt"] == "2026-06-20T09:30:00+08:00"
+
+
+def test_create_course_rejects_same_idempotency_key_with_different_body():
+    headers = AUTH_HEADERS | {"idempotency-key": "manual-course-body-mismatch"}
+    first_payload = {
+        "title": "幂等冲突课程 A",
+        "entryType": "manual_import",
+        "goalText": "验证创建课程请求体指纹",
+        "preferredStyle": "balanced",
+    }
+    second_payload = first_payload | {"title": "幂等冲突课程 B"}
+
+    first_status, first = asyncio.run(
+        request("POST", "/api/v1/courses", headers=headers, json_body=first_payload)
+    )
+    second_status, second = asyncio.run(
+        request("POST", "/api/v1/courses", headers=headers, json_body=second_payload)
+    )
+
+    assert first_status == 201
+    assert first["data"]["course"]["title"] == "幂等冲突课程 A"
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
 
 
 def test_create_course_rejects_naive_exam_at():
@@ -376,6 +535,49 @@ def test_upload_complete_is_idempotent():
         identity_getter=lambda body: body["data"]["resourceId"],
     )
     assert first["data"]["resourceType"] == "pdf"
+
+
+def test_upload_complete_rejects_same_idempotency_key_with_different_body():
+    course_id, _ = create_manual_course(
+        idempotency_key="upload-complete-mismatch-course",
+        title="上传完成幂等冲突课",
+    )
+    headers = AUTH_HEADERS | {"idempotency-key": "upload-complete-body-mismatch"}
+    first_payload = {
+        "resourceType": "pdf",
+        "objectKey": f"raw/1/{course_id}/upload-mismatch-a.pdf",
+        "originalName": "upload-mismatch-a.pdf",
+        "mimeType": "application/pdf",
+        "sizeBytes": 1024,
+        "checksum": "sha256:upload-mismatch-a",
+    }
+    second_payload = first_payload | {
+        "objectKey": f"raw/1/{course_id}/upload-mismatch-b.pdf",
+        "originalName": "upload-mismatch-b.pdf",
+        "checksum": "sha256:upload-mismatch-b",
+    }
+
+    first_status, first = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/resources/upload-complete",
+            headers=headers,
+            json_body=first_payload,
+        )
+    )
+    second_status, second = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/resources/upload-complete",
+            headers=headers,
+            json_body=second_payload,
+        )
+    )
+
+    assert first_status == 201
+    assert first["data"]["resourceId"]
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
 
 
 def test_upload_complete_idempotency_key_is_scoped_by_course():
@@ -650,6 +852,36 @@ def test_quiz_generate_accepts_question_count_level_and_defaults_to_medium():
     assert small_body["data"]["entity"]["type"] == "quiz"
     assert invalid_status == 422
     assert invalid_body["code"] == 1
+
+
+def test_quiz_generate_rejects_same_idempotency_key_with_different_body():
+    course_id, _ = create_manual_course(
+        idempotency_key="quiz-generate-mismatch-course",
+        title="测验幂等冲突课",
+    )
+    headers = AUTH_HEADERS | {"idempotency-key": "quiz-generate-body-mismatch"}
+
+    first_status, first = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=headers,
+            json_body={"questionCountLevel": "small"},
+        )
+    )
+    second_status, second = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/courses/{course_id}/quizzes/generate",
+            headers=headers,
+            json_body={"questionCountLevel": "large"},
+        )
+    )
+
+    assert first_status == 200
+    assert first["data"]["entity"]["type"] == "quiz"
+    assert second_status == 409
+    assert second["errorCode"] == "idempotency.body_mismatch"
 
 
 def test_review_regenerate_is_idempotent():

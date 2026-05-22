@@ -6,7 +6,7 @@ from urllib.parse import unquote
 
 from server.domain.repositories import CourseRepository, IdempotencyRepository, ResourceRepository
 from server.domain.services.errors import ServiceError
-from server.domain.services.idempotency import result_matches_course, run_scoped_idempotent
+from server.domain.services.idempotency import result_matches_course, run_fingerprinted_idempotent
 from server.infra.repositories.memory_runtime import utcnow
 from server.infra.storage import ObjectNotFoundError, ObjectStat, ObjectStorage, ObjectStorageError
 
@@ -72,10 +72,11 @@ class ResourceService:
                 payload.model_dump(by_alias=True),
             )
 
-        return run_scoped_idempotent(
+        return run_fingerprinted_idempotent(
             self.idempotency,
-            action=f"resources.upload_complete:{course_id}",
+            scope=f"resources.upload_complete:{course_id}",
             key=idempotency_key,
+            request_payload=payload.model_dump(by_alias=True),
             factory=factory,
             legacy_action="resources.upload_complete",
             legacy_matches=lambda result: result_matches_course(result, course_id=course_id),

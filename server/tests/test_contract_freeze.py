@@ -77,6 +77,27 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
         assert step_code in week2_contract
 
 
+def test_backend_optimization_contract_freezes_idempotency_and_upload_fast_return():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    error_codes = load_text("docs/contracts/error-codes.md")
+
+    for token in (
+        "request fingerprint",
+        "idempotency.body_mismatch",
+        "同一 scope + `Idempotency-Key` + 不同请求体",
+        "不得同步执行解析、OCR、向量化、讲义生成、B站下载合并或 AI 调用",
+        "KNOWLINK_DRAMATIQ_PARSE_QUEUE",
+        "KNOWLINK_DRAMATIQ_CONTENT_QUEUE",
+        "KNOWLINK_DRAMATIQ_QUIZ_QUEUE",
+        "KNOWLINK_DRAMATIQ_REVIEW_QUEUE",
+        "KNOWLINK_DRAMATIQ_IMPORT_QUEUE",
+        "KNOWLINK_DRAMATIQ_MAINTENANCE_QUEUE",
+    ):
+        assert token in api_contract
+
+    assert "`idempotency.body_mismatch`" in error_codes
+
+
 def test_week2_video_outline_lazy_handout_semantics_are_frozen():
     api_contract = load_text("docs/contracts/api-contract.md")
     week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")

@@ -6,7 +6,10 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from inspect import Parameter, signature
+from time import perf_counter
 from typing import Any
+
+from server.observability.metrics import ASYNC_TASK_ENQUEUE_DURATION_SECONDS, ASYNC_TASKS_TOTAL
 
 
 LOGGER = logging.getLogger(__name__)
@@ -17,66 +20,99 @@ class NoopTaskDispatcher:
         self.enqueued: list[dict[str, Any]] = []
 
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "parse_pipeline",
-                "payload": payload,
-                "adapter": "noop",
-            }
+        _instrument_enqueue(
+            "parse_pipeline",
+            task_id=task_id,
+            payload=payload,
+            adapter="noop",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "parse_pipeline",
+                    "payload": payload,
+                    "adapter": "noop",
+                }
+            ),
         )
 
     def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "handout_generate",
-                "payload": payload,
-                "adapter": "noop",
-            }
+        _instrument_enqueue(
+            "handout_generate",
+            task_id=task_id,
+            payload=payload,
+            adapter="noop",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "handout_generate",
+                    "payload": payload,
+                    "adapter": "noop",
+                }
+            ),
         )
 
     def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "handout_block_generate",
-                "payload": payload,
-                "adapter": "noop",
-            }
+        _instrument_enqueue(
+            "handout_block_generate",
+            task_id=task_id,
+            payload=payload,
+            adapter="noop",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "handout_block_generate",
+                    "payload": payload,
+                    "adapter": "noop",
+                }
+            ),
         )
 
     def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("quiz_generate", task_id=task_id, payload=payload, adapter="noop")
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "quiz_generate",
-                "payload": payload,
-                "adapter": "noop",
-            }
+        _instrument_enqueue(
+            "quiz_generate",
+            task_id=task_id,
+            payload=payload,
+            adapter="noop",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "quiz_generate",
+                    "payload": payload,
+                    "adapter": "noop",
+                }
+            ),
         )
 
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("review_refresh", task_id=task_id, payload=payload, adapter="noop")
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "review_refresh",
-                "payload": payload,
-                "adapter": "noop",
-            }
+        _instrument_enqueue(
+            "review_refresh",
+            task_id=task_id,
+            payload=payload,
+            adapter="noop",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "review_refresh",
+                    "payload": payload,
+                    "adapter": "noop",
+                }
+            ),
         )
 
     def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("bilibili_import", task_id=task_id, payload=payload, adapter="noop")
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "bilibili_import",
-                "payload": payload,
-                "adapter": "noop",
-            }
+        _instrument_enqueue(
+            "bilibili_import",
+            task_id=task_id,
+            payload=payload,
+            adapter="noop",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "bilibili_import",
+                    "payload": payload,
+                    "adapter": "noop",
+                }
+            ),
         )
 
 
@@ -87,100 +123,142 @@ class InMemoryTaskDispatcher:
         self.enqueued: list[dict[str, Any]] = []
 
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "parse_pipeline",
-                "payload": payload,
-                "adapter": "in_memory",
-            }
-        )
-        course_id = _int_value(payload, "courseId", "course_id")
-        parse_run_id = _int_value(payload, "parseRunId", "parse_run_id")
-        if course_id is None or parse_run_id is None:
-            return
+        def operation() -> None:
+            self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "parse_pipeline",
+                    "payload": payload,
+                    "adapter": "in_memory",
+                }
+            )
+            course_id = _int_value(payload, "courseId", "course_id")
+            parse_run_id = _int_value(payload, "parseRunId", "parse_run_id")
+            if course_id is None or parse_run_id is None:
+                return
 
-        for task in _call_with_supported_kwargs(
-            self.async_tasks.list_async_tasks,
-            course_id=course_id,
-            parse_run_id=parse_run_id,
-        ):
-            current_status = str(task.get("status", "queued"))
-            next_status = "skipped" if current_status == "skipped" else "succeeded"
+            for task in _call_with_supported_kwargs(
+                self.async_tasks.list_async_tasks,
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+            ):
+                current_status = str(task.get("status", "queued"))
+                next_status = "skipped" if current_status == "skipped" else "succeeded"
+                _call_with_supported_kwargs(
+                    self.async_tasks.update_async_task,
+                    task_id=int(task["taskId"]),
+                    status=next_status,
+                    progress_pct=100,
+                )
+
+            mark_succeeded = getattr(self.parse_runs, "mark_parse_run_succeeded", None)
+            if callable(mark_succeeded):
+                _call_with_supported_kwargs(mark_succeeded, parse_run_id=parse_run_id)
+
+        _instrument_enqueue(
+            "parse_pipeline",
+            task_id=task_id,
+            payload=payload,
+            adapter="in_memory",
+            operation=operation,
+        )
+
+    def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        def operation() -> None:
+            self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "handout_generate",
+                    "payload": payload,
+                    "adapter": "in_memory",
+                }
+            )
             _call_with_supported_kwargs(
                 self.async_tasks.update_async_task,
-                task_id=int(task["taskId"]),
-                status=next_status,
+                task_id=task_id,
+                status="succeeded",
                 progress_pct=100,
             )
 
-        mark_succeeded = getattr(self.parse_runs, "mark_parse_run_succeeded", None)
-        if callable(mark_succeeded):
-            _call_with_supported_kwargs(mark_succeeded, parse_run_id=parse_run_id)
-
-    def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "handout_generate",
-                "payload": payload,
-                "adapter": "in_memory",
-            }
-        )
-        _call_with_supported_kwargs(
-            self.async_tasks.update_async_task,
+        _instrument_enqueue(
+            "handout_generate",
             task_id=task_id,
-            status="succeeded",
-            progress_pct=100,
+            payload=payload,
+            adapter="in_memory",
+            operation=operation,
         )
 
     def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "handout_block_generate",
-                "payload": payload,
-                "adapter": "in_memory",
-            }
-        )
-        _call_with_supported_kwargs(
-            self.async_tasks.update_async_task,
+        def operation() -> None:
+            self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "handout_block_generate",
+                    "payload": payload,
+                    "adapter": "in_memory",
+                }
+            )
+            _call_with_supported_kwargs(
+                self.async_tasks.update_async_task,
+                task_id=task_id,
+                status="succeeded",
+                progress_pct=100,
+            )
+
+        _instrument_enqueue(
+            "handout_block_generate",
             task_id=task_id,
-            status="succeeded",
-            progress_pct=100,
+            payload=payload,
+            adapter="in_memory",
+            operation=operation,
         )
 
     def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("quiz_generate", task_id=task_id, payload=payload, adapter="in_memory")
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "quiz_generate",
-                "payload": payload,
-                "adapter": "in_memory",
-            }
+        _instrument_enqueue(
+            "quiz_generate",
+            task_id=task_id,
+            payload=payload,
+            adapter="in_memory",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "quiz_generate",
+                    "payload": payload,
+                    "adapter": "in_memory",
+                }
+            ),
         )
 
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("review_refresh", task_id=task_id, payload=payload, adapter="in_memory")
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "review_refresh",
-                "payload": payload,
-                "adapter": "in_memory",
-            }
+        _instrument_enqueue(
+            "review_refresh",
+            task_id=task_id,
+            payload=payload,
+            adapter="in_memory",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "review_refresh",
+                    "payload": payload,
+                    "adapter": "in_memory",
+                }
+            ),
         )
 
     def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("bilibili_import", task_id=task_id, payload=payload, adapter="in_memory")
-        self.enqueued.append(
-            {
-                "taskId": task_id,
-                "taskType": "bilibili_import",
-                "payload": payload,
-                "adapter": "in_memory",
-            }
+        _instrument_enqueue(
+            "bilibili_import",
+            task_id=task_id,
+            payload=payload,
+            adapter="in_memory",
+            operation=lambda: self.enqueued.append(
+                {
+                    "taskId": task_id,
+                    "taskType": "bilibili_import",
+                    "payload": payload,
+                    "adapter": "in_memory",
+                }
+            ),
         )
 
 
@@ -224,31 +302,60 @@ class DramatiqTaskDispatcher:
     )
 
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        actor = self._load_actor(self.parse_pipeline_actor_path)
-        actor.send({"taskId": task_id, **payload})
+        _instrument_enqueue(
+            "parse_pipeline",
+            task_id=task_id,
+            payload=payload,
+            adapter="dramatiq",
+            operation=lambda: self._load_actor(self.parse_pipeline_actor_path).send({"taskId": task_id, **payload}),
+        )
 
     def enqueue_handout_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        actor = self._load_actor(self.handout_generate_actor_path)
-        actor.send({"taskId": task_id, **payload})
+        _instrument_enqueue(
+            "handout_generate",
+            task_id=task_id,
+            payload=payload,
+            adapter="dramatiq",
+            operation=lambda: self._load_actor(self.handout_generate_actor_path).send({"taskId": task_id, **payload}),
+        )
 
     def enqueue_handout_block_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        actor = self._load_actor(self.handout_block_generate_actor_path)
-        actor.send({"taskId": task_id, **payload})
+        _instrument_enqueue(
+            "handout_block_generate",
+            task_id=task_id,
+            payload=payload,
+            adapter="dramatiq",
+            operation=lambda: self._load_actor(self.handout_block_generate_actor_path).send(
+                {"taskId": task_id, **payload}
+            ),
+        )
 
     def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("quiz_generate", task_id=task_id, payload=payload, adapter="dramatiq")
-        actor = self._load_actor(self.quiz_generate_actor_path)
-        actor.send({"taskId": task_id, **payload})
+        _instrument_enqueue(
+            "quiz_generate",
+            task_id=task_id,
+            payload=payload,
+            adapter="dramatiq",
+            operation=lambda: self._load_actor(self.quiz_generate_actor_path).send({"taskId": task_id, **payload}),
+        )
 
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("review_refresh", task_id=task_id, payload=payload, adapter="dramatiq")
-        actor = self._load_actor(self.review_refresh_actor_path)
-        actor.send({"taskId": task_id, **payload})
+        _instrument_enqueue(
+            "review_refresh",
+            task_id=task_id,
+            payload=payload,
+            adapter="dramatiq",
+            operation=lambda: self._load_actor(self.review_refresh_actor_path).send({"taskId": task_id, **payload}),
+        )
 
     def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None:
-        _log_enqueue("bilibili_import", task_id=task_id, payload=payload, adapter="dramatiq")
-        actor = self._load_actor(self.bilibili_import_actor_path)
-        actor.send({"taskId": task_id, **payload})
+        _instrument_enqueue(
+            "bilibili_import",
+            task_id=task_id,
+            payload=payload,
+            adapter="dramatiq",
+            operation=lambda: self._load_actor(self.bilibili_import_actor_path).send({"taskId": task_id, **payload}),
+        )
 
     def _load_actor(self, actor_path: str) -> Any:
         module_name, _, attr_name = actor_path.partition(":")
@@ -290,6 +397,40 @@ def _log_enqueue(task_type: str, *, task_id: int, payload: dict[str, Any], adapt
             "adapter": adapter,
         },
     )
+
+
+def _instrument_enqueue(
+    task_type: str,
+    *,
+    task_id: int,
+    payload: dict[str, Any],
+    adapter: str,
+    operation: Callable[[], Any],
+) -> Any:
+    started_at = perf_counter()
+    try:
+        result = operation()
+    except Exception:
+        duration = perf_counter() - started_at
+        ASYNC_TASKS_TOTAL.labels(task_type=task_type, status="enqueue_failed").inc()
+        ASYNC_TASK_ENQUEUE_DURATION_SECONDS.labels(task_type=task_type, adapter=adapter).observe(duration)
+        LOGGER.exception(
+            "task enqueue failed",
+            extra={
+                "task_id": task_id,
+                "task_type": task_type,
+                "course_id": _int_value(payload, "courseId", "course_id"),
+                "target_id": _int_value(payload, "quizId", "quiz_id", "reviewTaskRunId", "review_task_run_id"),
+                "adapter": adapter,
+            },
+        )
+        raise
+
+    duration = perf_counter() - started_at
+    ASYNC_TASKS_TOTAL.labels(task_type=task_type, status="enqueued").inc()
+    ASYNC_TASK_ENQUEUE_DURATION_SECONDS.labels(task_type=task_type, adapter=adapter).observe(duration)
+    _log_enqueue(task_type, task_id=task_id, payload=payload, adapter=adapter)
+    return result
 
 
 def _call_with_supported_kwargs(method: Callable[..., Any], **kwargs: Any) -> Any:
