@@ -1425,6 +1425,101 @@ def test_mp4_normalized_document_accepts_timeline_visual_segments():
     assert_valid_normalized_document(document)
 
 
+def test_video_visual_analyzer_maps_vision_results_to_timeline_segments(tmp_path: Path):
+    from server.parsers.video_visual import VideoFrameCandidate, build_video_visual_segments
+
+    candidates = [
+        VideoFrameCandidate(
+            asset_id="mp4-f-000010",
+            image_key="frames/test/000010.png",
+            image_bytes=b"png",
+            mime_type="image/png",
+            start_sec=10,
+            end_sec=20,
+            order_no=2,
+        )
+    ]
+    results = [
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="formula", text="x^2 - 5x + 6 = 0"),
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="ocr_text", text="例题：求方程的根"),
+    ]
+
+    segments = build_video_visual_segments(candidates, results, key_prefix="mp4-vf")
+
+    assert segments == [
+        {
+            "segmentKey": "mp4-vf-10-formula-1",
+            "segmentType": "formula",
+            "orderNo": 2,
+            "textContent": "x^2 - 5x + 6 = 0",
+            "startSec": 10,
+            "endSec": 20,
+            "imageKey": "frames/test/000010.png",
+            "formulaText": "x^2 - 5x + 6 = 0",
+        },
+        {
+            "segmentKey": "mp4-vf-10-ocr-1",
+            "segmentType": "ocr_text",
+            "orderNo": 3,
+            "textContent": "例题：求方程的根",
+            "startSec": 10,
+            "endSec": 20,
+            "imageKey": "frames/test/000010.png",
+        },
+    ]
+
+
+def test_video_visual_candidates_keep_timeline_order_and_float_windows():
+    from server.parsers.video_visual import (
+        VideoFrameCandidate,
+        build_video_visual_segments,
+        candidate_timestamps_from_captions,
+    )
+
+    assert candidate_timestamps_from_captions(
+        [
+            {"startSec": 1.2, "endSec": 1.8},
+            {"startSec": 5, "endSec": 4},
+            {"startSec": 10, "endSec": 20},
+        ]
+    ) == [(1.5, 1, 2), (15.0, 10, 20)]
+
+    candidates = [
+        VideoFrameCandidate(
+            asset_id="mp4-f-000010",
+            image_key="frames/test/000010.png",
+            image_bytes=b"png",
+            mime_type="image/png",
+            start_sec=10,
+            end_sec=20,
+            order_no=2,
+        ),
+        VideoFrameCandidate(
+            asset_id="mp4-f-000020",
+            image_key="frames/test/000020.png",
+            image_bytes=b"png",
+            mime_type="image/png",
+            start_sec=20,
+            end_sec=30,
+            order_no=4,
+        ),
+    ]
+    results = [
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="formula", text="a=b"),
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="ocr_text", text="第一帧"),
+        VisionAssetResult(asset_id="mp4-f-000020", segment_type="image_caption", text="第二帧图示"),
+    ]
+
+    segments = build_video_visual_segments(candidates, results, key_prefix="mp4-vf")
+
+    assert [segment["segmentKey"] for segment in segments] == [
+        "mp4-vf-10-formula-1",
+        "mp4-vf-10-ocr-1",
+        "mp4-vf-20-image-1",
+    ]
+    assert [segment["orderNo"] for segment in segments] == [2, 3, 4]
+
+
 def test_mp4_visual_segments_require_video_time_locator_and_reject_page_locator():
     missing_time = {
         "resourceType": "mp4",
