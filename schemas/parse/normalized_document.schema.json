@@ -24,6 +24,9 @@
                 "required": ["anchorKey"]
               },
               {
+                "required": ["sectionPath"]
+              },
+              {
                 "required": ["startSec"]
               },
               {
@@ -54,6 +57,9 @@
               },
               {
                 "required": ["anchorKey"]
+              },
+              {
+                "required": ["sectionPath"]
               },
               {
                 "required": ["startSec"]
@@ -88,6 +94,9 @@
                 "required": ["slideNo"]
               },
               {
+                "required": ["anchorKey"]
+              },
+              {
                 "required": ["startSec"]
               },
               {
@@ -98,7 +107,39 @@
         }
       ]
     },
-    "videoSegment": {
+    "mp4Segment": {
+      "allOf": [
+        {
+          "properties": {
+            "segmentType": {
+              "enum": ["video_caption", "ocr_text", "formula", "image_caption"]
+            }
+          }
+        },
+        {
+          "required": ["startSec", "endSec"]
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": ["pageNo"]
+              },
+              {
+                "required": ["slideNo"]
+              },
+              {
+                "required": ["anchorKey"]
+              },
+              {
+                "required": ["sectionPath"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "srtSegment": {
       "allOf": [
         {
           "properties": {
@@ -121,6 +162,18 @@
               },
               {
                 "required": ["anchorKey"]
+              },
+              {
+                "required": ["sectionPath"]
+              },
+              {
+                "required": ["imageKey"]
+              },
+              {
+                "required": ["formulaText"]
+              },
+              {
+                "required": ["bboxJson"]
               }
             ]
           }
@@ -196,6 +249,17 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "imageKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "formulaText": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bboxJson": {
+            "type": "object"
           }
         },
         "additionalProperties": false
@@ -273,7 +337,7 @@
       "if": {
         "properties": {
           "resourceType": {
-            "enum": ["mp4", "srt"]
+            "const": "mp4"
           }
         }
       },
@@ -283,7 +347,29 @@
             "items": {
               "allOf": [
                 {
-                  "$ref": "#/$defs/videoSegment"
+                  "$ref": "#/$defs/mp4Segment"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resourceType": {
+            "const": "srt"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "segments": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/srtSegment"
                 }
               ]
             }

@@ -246,6 +246,39 @@ def test_normalized_document_segment_types_match_week2_contract():
         assert f"`{segment_type}`" in week2_contract
 
 
+@pytest.mark.parametrize(
+    ("resource_type", "segment_type", "locator"),
+    [
+        ("pdf", "formula", {"pageNo": 2}),
+        ("pptx", "formula", {"slideNo": 3}),
+        ("docx", "formula", {"sectionPath": ["第 1 章"]}),
+    ],
+)
+def test_normalized_document_schema_accepts_visual_metadata_for_document_resources(
+    resource_type: str,
+    segment_type: str,
+    locator: dict[str, object],
+):
+    validator = build_validator("schemas/parse/normalized_document.schema.json")
+    payload = {
+        "resourceType": resource_type,
+        "segments": [
+            {
+                "segmentKey": f"{resource_type}-formula-1",
+                "segmentType": segment_type,
+                "orderNo": 1,
+                "textContent": "x^2 - 5x + 6 = 0",
+                "imageKey": "visual-assets/parse-run-1/asset-1.png",
+                "formulaText": "x^2 - 5x + 6 = 0",
+                "bboxJson": {"page": 2, "boxes": [{"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.1}]},
+                **locator,
+            }
+        ],
+    }
+
+    validator.validate(payload)
+
+
 def test_parse_contract_documents_quality_gate_and_vision_env_vars():
     week2_contract = load_text("docs/contracts/week2-cao-le-parse-inquiry-contract.md")
 
@@ -1603,7 +1636,6 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
                     "orderNo": 1,
                     "textContent": "integral",
                     "sectionPath": ["第 1 章", "积分"],
-                    "anchorKey": "section-integral",
                 }
             ],
         },
@@ -1661,6 +1693,19 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             ],
         },
         {
+            "resourceType": "pdf",
+            "segments": [
+                {
+                    "segmentKey": "seg-pdf-bad-3",
+                    "segmentType": "pdf_page_text",
+                    "orderNo": 1,
+                    "textContent": "limit",
+                    "pageNo": 2,
+                    "sectionPath": ["第 1 章"],
+                }
+            ],
+        },
+        {
             "resourceType": "pptx",
             "segments": [
                 {
@@ -1673,6 +1718,19 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             ],
         },
         {
+            "resourceType": "pptx",
+            "segments": [
+                {
+                    "segmentKey": "seg-pptx-bad-2",
+                    "segmentType": "ppt_slide_text",
+                    "orderNo": 1,
+                    "textContent": "matrix",
+                    "slideNo": 3,
+                    "sectionPath": ["第 1 章"],
+                }
+            ],
+        },
+        {
             "resourceType": "docx",
             "segments": [
                 {
@@ -1681,6 +1739,19 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
                     "orderNo": 1,
                     "textContent": "integral",
                     "slideNo": 6,
+                }
+            ],
+        },
+        {
+            "resourceType": "docx",
+            "segments": [
+                {
+                    "segmentKey": "seg-docx-bad-2",
+                    "segmentType": "docx_block_text",
+                    "orderNo": 1,
+                    "textContent": "integral",
+                    "sectionPath": ["第 1 章"],
+                    "anchorKey": "section-integral",
                 }
             ],
         },
@@ -1709,6 +1780,20 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
             ],
         },
         {
+            "resourceType": "mp4",
+            "segments": [
+                {
+                    "segmentKey": "seg-video-bad-3",
+                    "segmentType": "video_caption",
+                    "orderNo": 1,
+                    "textContent": "video",
+                    "startSec": 0,
+                    "endSec": 1,
+                    "sectionPath": ["第 1 章"],
+                }
+            ],
+        },
+        {
             "resourceType": "srt",
             "segments": [
                 {
@@ -1717,6 +1802,20 @@ def test_normalized_document_schema_enforces_resource_specific_locations():
                     "orderNo": 1,
                     "textContent": "subtitle",
                     "endSec": 45,
+                }
+            ],
+        },
+        {
+            "resourceType": "srt",
+            "segments": [
+                {
+                    "segmentKey": "seg-srt-bad-2",
+                    "segmentType": "video_caption",
+                    "orderNo": 1,
+                    "textContent": "subtitle",
+                    "startSec": 1,
+                    "endSec": 2,
+                    "sectionPath": ["第 1 章"],
                 }
             ],
         },

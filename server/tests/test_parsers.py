@@ -58,7 +58,8 @@ class FakeVisionAIService:
 
 def assert_valid_normalized_document(payload: dict[str, object] | None) -> dict[str, object]:
     assert payload is not None
-    NORMALIZED_DOCUMENT_VALIDATOR.validate(payload)
+    errors = sorted(NORMALIZED_DOCUMENT_VALIDATOR.iter_errors(payload), key=lambda error: list(error.path))
+    assert not errors, errors[0].message
     return payload
 
 
@@ -1377,6 +1378,130 @@ def test_mp4_parser_uses_asr_segments_and_validates_schema(tmp_path: Path):
             "endSec": 28,
         },
     ]
+
+
+def test_mp4_normalized_document_accepts_timeline_visual_segments():
+    document = {
+        "resourceType": "mp4",
+        "segments": [
+            {
+                "segmentKey": "mp4-c1",
+                "segmentType": "video_caption",
+                "orderNo": 1,
+                "textContent": "讲解一元二次方程。",
+                "startSec": 10,
+                "endSec": 20,
+            },
+            {
+                "segmentKey": "mp4-vf-10-formula-1",
+                "segmentType": "formula",
+                "orderNo": 2,
+                "textContent": "x^2 - 5x + 6 = 0",
+                "startSec": 10,
+                "endSec": 20,
+                "imageKey": "frames/parse-run-1/resource-2/000010.png",
+                "formulaText": "x^2 - 5x + 6 = 0",
+                "bboxJson": {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.1},
+            },
+            {
+                "segmentKey": "mp4-vf-10-ocr-1",
+                "segmentType": "ocr_text",
+                "orderNo": 3,
+                "textContent": "例题：求方程的根",
+                "startSec": 10,
+                "endSec": 20,
+                "imageKey": "frames/parse-run-1/resource-2/000010.png",
+            },
+            {
+                "segmentKey": "mp4-vf-18-image-1",
+                "segmentType": "image_caption",
+                "orderNo": 4,
+                "textContent": "坐标图展示二次函数与 x 轴的两个交点。",
+                "startSec": 18,
+                "endSec": 28,
+            },
+        ],
+    }
+    assert_valid_normalized_document(document)
+
+
+def test_mp4_visual_segments_require_video_time_locator_and_reject_page_locator():
+    missing_time = {
+        "resourceType": "mp4",
+        "segments": [
+            {"segmentKey": "mp4-vf-1", "segmentType": "ocr_text", "orderNo": 1, "textContent": "题干"}
+        ],
+    }
+    page_locator = {
+        "resourceType": "mp4",
+        "segments": [
+            {
+                "segmentKey": "mp4-vf-2",
+                "segmentType": "formula",
+                "orderNo": 1,
+                "textContent": "E=mc^2",
+                "startSec": 1,
+                "endSec": 2,
+                "pageNo": 1,
+            }
+        ],
+    }
+    section_locator = {
+        "resourceType": "mp4",
+        "segments": [
+            {
+                "segmentKey": "mp4-vf-3",
+                "segmentType": "ocr_text",
+                "orderNo": 1,
+                "textContent": "题干",
+                "startSec": 1,
+                "endSec": 2,
+                "sectionPath": ["第 1 章"],
+            }
+        ],
+    }
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(missing_time)
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(page_locator)
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(section_locator)
+
+
+def test_srt_normalized_document_still_rejects_visual_segments():
+    document = {
+        "resourceType": "srt",
+        "segments": [
+            {
+                "segmentKey": "srt-vf-1",
+                "segmentType": "ocr_text",
+                "orderNo": 1,
+                "textContent": "字幕文件不能产生视觉段",
+                "startSec": 1,
+                "endSec": 2,
+            }
+        ],
+    }
+    visual_metadata = {
+        "resourceType": "srt",
+        "segments": [
+            {
+                "segmentKey": "srt-c1",
+                "segmentType": "video_caption",
+                "orderNo": 1,
+                "textContent": "字幕文件不能携带视觉元数据",
+                "startSec": 1,
+                "endSec": 2,
+                "imageKey": "frames/parse-run-1/resource-2/000001.png",
+                "formulaText": "E=mc^2",
+                "bboxJson": {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.1},
+            }
+        ],
+    }
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(document)
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(visual_metadata)
 
 
 def test_mp4_parser_skips_invalid_asr_timeline_and_keeps_clean_segments(tmp_path: Path):
