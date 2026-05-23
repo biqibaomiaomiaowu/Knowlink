@@ -1856,7 +1856,7 @@ def test_real_parse_outputs_have_no_abnormal_chars_or_same_location_duplicates()
 
 def test_configured_vision_client_requires_explicit_enable_flag(monkeypatch):
     monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "fake-key")
-    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_VISION", raising=False)
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_VISION", "false")
 
     assert get_configured_vision_client() is None
 
@@ -2194,7 +2194,7 @@ def test_vivo_ocr_client_uses_general_recognition_with_pos_2(monkeypatch):
 
 def test_configured_asr_client_requires_enable_flag(monkeypatch):
     monkeypatch.setenv("KNOWLINK_VIVO_APP_KEY", "fake-key")
-    monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_ASR", raising=False)
+    monkeypatch.setenv("KNOWLINK_ENABLE_VIVO_ASR", "false")
 
     assert get_configured_asr_client() is None
 

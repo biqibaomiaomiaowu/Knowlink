@@ -683,6 +683,7 @@ V1 当前未实现阶段统一返回：
 
 - 这是后端和演示排障用辅助接口，不作为页面主流程依赖。
 - 只有 `failed`、`queued` 状态可通过该接口重新入队；`succeeded`、`canceled`、`retrying` 或未知状态不得重试。
+- 当前支持重新入队的任务类型包括 `parse_pipeline`、`handout_generate`、`handout_block_generate`、`quiz_generate`、`review_refresh` 和 `bilibili_import`。
 - 重新入队前会把任务状态重置为 `queued`、清空旧错误并将 `progressPct` 置 0；如果 enqueue 失败，任务会被标记为 `failed` 且写入 `async_task.enqueue_failed`，客户端可继续展示重试入口。
 
 错误：

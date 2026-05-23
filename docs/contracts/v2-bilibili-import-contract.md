@@ -8,7 +8,7 @@
 
 阶段一总范围覆盖单用户下的单视频、多 P、合集和番剧导入；不覆盖收藏夹、热门列表、大规模批量下载、付费/会员/DRM/地区限制内容绕过。
 
-第 1 周可验收实现只承诺单视频和多 P 的扫码、预览、下载、合并、上传和资源入库闭环。合集和番剧保留在阶段一第 2 周范围；第 1 周先冻结 `collection` / `bangumi` 枚举和 URL 识别口径。第 1 周 preview 适配器可以返回 `422 bilibili.unsupported_url`，不得静默创建不可执行的导入任务。
+后端实现已接入单视频、多 P、合集和番剧的 URL 识别、预览 DTO、任务创建和 runner 导入路径。阶段一第 2 周仍需用至少一个公网可访问的合集或番剧样例完成真实验收；若公网样例因会员、付费、DRM、地区限制或账号无权限不可观看，只要求返回明确失败原因，不做绕过。
 
 真相源：KnowLink V2 B站导入以 `bilibili_import_run` 和 `async_tasks` 为任务真相源，不引入第三方下载器的数据库或任务模型。
 
@@ -16,10 +16,11 @@
 
 - 所有接口仍使用 `/api/v1` 前缀。
 - 除健康检查外，接口继续要求 `Authorization: Bearer <token>`。
-- 服务端保存 B站 cookie 必要字段，不向前端返回 cookie 原文。
-- `sourceUrl` 总范围支持 B站单视频、多 P、合集和番剧入口链接；第 1 周运行时只保证单视频和多 P 可导入，合集和番剧按第 2 周任务接入。
+- 服务端保存 B站 cookie 必要字段，不向前端返回 cookie 原文；SQL 运行时必须加密落库。
+- `sourceUrl` 总范围支持 B站单视频、多 P、合集和番剧入口链接；真实公网可用性以阶段一第 2 周验收样例为准。
 - `qualityPreference` phase 1 只允许 `android_safe`，优先选择 H.264/AVC 视频和 AAC 音频，便于 Android 播放和后续解析。
 - 所有创建导入任务的写接口必须支持 `Idempotency-Key`。
+- playurl 请求必须带 WBI 签名参数；签名 key 可从服务端凭据缓存或 B站 nav 接口获取。
 
 ## 3. API
 
@@ -143,6 +144,54 @@
 - 未登录或登录态失效返回 `401 bilibili.auth_required` / `401 bilibili.auth_expired`。
 - 元数据不可访问返回 `403 bilibili.access_denied` 或 `502 bilibili.metadata_failed`。
 - 服务端必须保存预览快照并返回 `previewId`，创建导入任务时用 `previewId` 复用该快照。
+
+合集 preview 示例：
+
+```json
+{
+  "previewId": "bili_preview_collection_001",
+  "sourceUrl": "https://space.bilibili.com/123/channel/collectiondetail?sid=456",
+  "sourceType": "collection",
+  "title": "合集样例",
+  "coverUrl": "https://i0.hdslb.com/bfs/archive/collection.jpg",
+  "totalParts": 2,
+  "parts": [
+    {
+      "partId": "collection-456-bv-BV1xx411c7mD-cid-1001-p1",
+      "title": "合集第一讲",
+      "durationSec": 600,
+      "cid": 1001,
+      "pageNo": 1,
+      "selectedByDefault": true
+    }
+  ],
+  "defaultSelectionMode": "all_parts"
+}
+```
+
+番剧 preview 示例：
+
+```json
+{
+  "previewId": "bili_preview_bangumi_001",
+  "sourceUrl": "https://www.bilibili.com/bangumi/play/ep123456",
+  "sourceType": "bangumi",
+  "title": "番剧样例",
+  "coverUrl": "https://i0.hdslb.com/bfs/bangumi/bangumi.jpg",
+  "totalParts": 1,
+  "parts": [
+    {
+      "partId": "bangumi-ep-123456-bv-BV1bb411c7mD-cid-202-p1",
+      "title": "EP1",
+      "durationSec": 1440,
+      "cid": 202,
+      "pageNo": 1,
+      "selectedByDefault": true
+    }
+  ],
+  "defaultSelectionMode": "current_part"
+}
+```
 
 ### `POST /api/v1/courses/{courseId}/resources/imports/bilibili`
 
@@ -274,7 +323,7 @@ B站导入创建接口必须支持 `Idempotency-Key`，幂等范围固定为 `us
 
 ### `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`
 
-请求取消导入任务。取消是显式状态变更，必须尽力停止下载、ffmpeg 和上传副作用。
+请求取消导入任务。取消是显式状态变更，API 先写入 `canceled`，worker 通过 cancel token 协作式停止下载、ffmpeg 和上传副作用。
 
 请求：空 body。
 
@@ -296,7 +345,7 @@ B站导入创建接口必须支持 `Idempotency-Key`，幂等范围固定为 `us
 
 - run 不存在返回 `404 bilibili.run_not_found`。
 - 终态 `imported` 不可取消，返回当前结果或 `409 bilibili.cancel_failed`。
-- 停止下载、ffmpeg 或清理临时文件失败时，返回 `409 bilibili.cancel_failed`，并在 `failureReason` 中说明可人工处理的残留。
+- 已进入 worker 执行期的下载、ffmpeg 或临时文件清理失败不能作为本次 cancel API 的同步响应返回；worker 后续必须在 run 的 `failureReason` 中记录可人工处理的残留。
 
 ## 4. DTO 字段冻结
 
@@ -408,7 +457,7 @@ Preview part 必须至少包含：
 | `uploading` | 正在上传对象存储并准备课程资源入库 | `imported`、`failed`、`recoverable`、`canceled` |
 | `imported` | 已创建课程资源并可进入学习链路 | 终态 |
 | `failed` | 不可恢复失败 | 终态 |
-| `recoverable` | 可恢复失败，前端可提示重试或重新登录 | 终态 |
+| `recoverable` | 可恢复失败，前端可提示重试或重新登录；`nextAction=retry` 时调用 async task retry 重新入队 | 终态 |
 | `canceled` | 用户或系统取消，副作用已尽力清理 | 终态 |
 
 `waiting_download` 是下载槽位队列预留状态。第 1 周单机 runner 没有独立下载槽位队列时可以从 `fetching_metadata` 直接进入 `downloading`，但前端和辅助文档仍必须保留该状态映射，供第 2 周队列化下载接入。
@@ -482,13 +531,20 @@ runtime/bilibili/{import_run_id}/
 对象 key 格式：
 
 ```text
-raw/1/{course_id}/bilibili/{import_run_id}/{safe_title}.mp4
+raw/1/{course_id}/bilibili/{import_run_id}/{part_index}-{safe_title}.mp4
 ```
 
-## 10. 验收口径
+## 10. 恢复与重试
+
+- `recoverable` run 响应必须返回 `nextAction=retry`。
+- B站导入复用通用 `POST /api/v1/async-tasks/{taskId}/retry` 重试入口；该接口会将同一个 `bilibili_import` task 重置为 `queued` 并重新派发。
+- 重新执行 runner 时必须重新获取 playurl，不复用可能已过期的 DASH URL。
+- cookie 失效时返回 `bilibili.auth_expired`，前端应引导重新扫码后再重试。
+
+## 11. 验收口径
 
 - 固定样例至少覆盖一个可访问的单视频或多 P 链路。
 - 合集和番剧以至少一个可访问样例为准；会员、付费、地区限制或不可观看内容只要求返回明确失败原因。
 - 导入后必须能在课程资源列表看到来源为 B站的资源。
 - 状态接口必须能展示下载、合并、上传、失败、可恢复失败和取消语义。
-- Android 前端只读取 `qrCodeUrl`、QR `status`、`loginStatus`、`parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 等展示字段，不读取 cookie。
+- Android 前端只读取 `qrCodeUrl`、QR `status`、`loginStatus`、`parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds` 等展示字段，不读取 cookie。

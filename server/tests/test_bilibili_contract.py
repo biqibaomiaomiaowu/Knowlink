@@ -206,13 +206,15 @@ def test_v2_bilibili_contract_freezes_source_and_selection_enums():
         assert f"`{source_type}`" in dto_section
 
 
-def test_v2_bilibili_contract_marks_collection_and_bangumi_as_week2_scope():
+def test_v2_bilibili_contract_marks_collection_and_bangumi_runtime_path_and_real_sample_scope():
     contract = text("docs/contracts/v2-bilibili-import-contract.md")
 
     for token in (
-        "第 1 周可验收实现只承诺单视频和多 P",
-        "合集和番剧保留在阶段一第 2 周范围",
-        "第 1 周 preview 适配器可以返回 `422 bilibili.unsupported_url`",
+        "后端实现已接入单视频、多 P、合集和番剧的 URL 识别",
+        "阶段一第 2 周仍需用至少一个公网可访问的合集或番剧样例完成真实验收",
+        '"sourceType": "collection"',
+        '"sourceType": "bangumi"',
+        "B站导入复用通用 `POST /api/v1/async-tasks/{taskId}/retry` 重试入口",
         "`waiting_download` 是下载槽位队列预留状态",
     ):
         assert token in contract
