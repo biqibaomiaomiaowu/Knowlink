@@ -16,7 +16,9 @@ from server.infra.bilibili import (
     FfmpegMerger,
     MergeCanceled,
 )
-from server.infra.bilibili.client import COLLECTION_API_URL, VIEW_API_URL
+from server.infra.bilibili.client import COLLECTION_API_URL, PLAYURL_API_URL, VIEW_API_URL
+
+NAV_API_URL = "https://api.bilibili.com/x/web-interface/nav"
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
 from server.tasks.repositories import InMemoryAsyncTaskRepository
@@ -526,8 +528,9 @@ def test_cancel_marks_run_and_task_canceled_but_imported_run_fails() -> None:
     canceled = service.cancel_import(import_run_id=created["entity"]["id"], idempotency_key="cancel-1")
 
     assert canceled["status"] == "canceled"
-    assert canceled["stage"] == "canceled"
     assert canceled["nextAction"] == "none"
+    assert canceled["taskId"] == created["taskId"]
+    assert canceled["entity"] == {"type": "bilibili_import_run", "id": created["entity"]["id"]}
     assert async_tasks.get_async_task(created["taskId"])["status"] == "canceled"
 
     imported = repo.create_bilibili_import_run(
@@ -1140,7 +1143,7 @@ def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:
     class FakeTransport:
         def __init__(self) -> None:
             self.calls: list[dict[str, Any]] = []
-            self.response = {
+            self.playurl_response = {
                 "code": 0,
                 "data": {
                     "dash": {
@@ -1158,20 +1161,33 @@ def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:
             cookies: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             self.calls.append({"url": url, "params": params, "cookies": cookies})
-            return self.response
+            if url == NAV_API_URL:
+                return {
+                    "code": 0,
+                    "data": {
+                        "wbi_img": {
+                            "img_url": "https://i0.hdslb.com/bfs/wbi/0123456789abcdef0123456789abcdef.png",
+                            "sub_url": "https://i0.hdslb.com/bfs/wbi/fedcba9876543210fedcba9876543210.png",
+                        }
+                    },
+                }
+            return self.playurl_response
 
     transport = FakeTransport()
     client = BiliClient(transport=transport)
 
     data = client.playurl(bvid="BV1xx411c7mD", cid=102, cookies={"SESSDATA": "secret"})
 
-    assert transport.calls == [
-        {
-            "url": "https://api.bilibili.com/x/player/wbi/playurl",
-            "params": {"bvid": "BV1xx411c7mD", "cid": 102, "fnval": 16},
-            "cookies": {"SESSDATA": "secret"},
-        }
-    ]
+    assert transport.calls[0]["url"] == NAV_API_URL
+    assert transport.calls[1]["url"] == PLAYURL_API_URL
+    assert transport.calls[1]["cookies"] == {"SESSDATA": "secret"}
+    assert transport.calls[1]["params"] | {
+        "bvid": "BV1xx411c7mD",
+        "cid": 102,
+        "fnval": 16,
+    } == transport.calls[1]["params"]
+    assert "wts" in transport.calls[1]["params"]
+    assert "w_rid" in transport.calls[1]["params"]
     assert data == {
         "dash": {
             "video": [{"baseUrl": "https://upos.example/video.m4s"}],
@@ -1179,7 +1195,7 @@ def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:
         }
     }
 
-    transport.response = {"code": -400, "message": "bad request"}
+    transport.playurl_response = {"code": -400, "message": "bad request"}
     with pytest.raises(ServiceError) as exc:
         client.playurl(bvid="BV1xx411c7mD", cid=102, cookies={"SESSDATA": "secret"})
     assert exc.value.error_code == "bilibili.playurl_failed"

@@ -69,7 +69,10 @@ class BilibiliService:
     ) -> dict[str, object]:
         self._ensure_course(course_id)
         self._require_auth_session()
-        action = f"bilibili.import_create:{course_id}"
+        action = (
+            f"bilibili.import_create:user:{self._user_id()}:"
+            f"/api/v1/courses/{course_id}/resources/imports/bilibili"
+        )
         request_fingerprint = self._request_fingerprint(
             preview_id=preview_id,
             source_url=source_url,
@@ -149,7 +152,7 @@ class BilibiliService:
                 error_code="bilibili.cancel_failed",
                 status_code=409,
             )
-        action = f"bilibili.import_cancel:{import_run_id}"
+        action = f"bilibili.import_cancel:user:{self._user_id()}:run:{import_run_id}"
         return run_scoped_idempotent(
             self.bilibili,
             action=action,
@@ -288,7 +291,12 @@ class BilibiliService:
                 task_id=int(task_id),
                 status="canceled",
             )
-        return self._run_response(updated or run)
+        return {
+            "taskId": int(task_id) if task_id is not None else None,
+            "status": "canceled",
+            "nextAction": "none",
+            "entity": {"type": "bilibili_import_run", "id": import_run_id},
+        }
 
     def _ensure_course(self, course_id: int) -> dict[str, Any]:
         course = self.courses.get_course(course_id)
@@ -495,6 +503,12 @@ class BilibiliService:
             expires_at=refreshed.get("authExpiresAt") or datetime.now(timezone.utc) + timedelta(days=30),
             status="active",
         )
+
+    def _user_id(self) -> int:
+        try:
+            return int(getattr(self.bilibili, "user_id", 1))
+        except (TypeError, ValueError):
+            return 1
 
     @staticmethod
     def _auth_is_active(auth: dict[str, Any]) -> bool:

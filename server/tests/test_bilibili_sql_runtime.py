@@ -141,6 +141,12 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
     assert qr_session["qrKey"] == "qr-sql-1"
     assert saved_auth["csrf"] == "sql-csrf"
     assert loaded_auth == saved_auth
+    raw_auth = session.scalar(sa.select(BilibiliAuthSession))
+    assert raw_auth is not None
+    assert raw_auth.cookies_json != {"SESSDATA": "sql-session"}
+    assert "sql-session" not in repr(raw_auth.cookies_json)
+    assert raw_auth.csrf != "sql-csrf"
+    assert "sql-csrf" not in repr(raw_auth.csrf)
     assert updated is not None
     assert updated["sourceType"] == "single_video"
     assert updated["status"] == "imported"

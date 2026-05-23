@@ -48,6 +48,7 @@ from server.infra.db.models import (
     UserCourseProgress,
     VectorDocument,
 )
+from server.infra.credential_box import decrypt_json_secret, decrypt_text_secret, encrypt_json_secret, encrypt_text_secret
 
 
 T = TypeVar("T")
@@ -339,6 +340,8 @@ class SqlAlchemyRuntimeRepository:
         expires_at: datetime | None = None,
         status: str = "active",
     ) -> dict[str, Any]:
+        stored_cookies_json = encrypt_json_secret(cookies_json)
+        stored_csrf = encrypt_text_secret(csrf)
         auth_session = self.session.scalar(
             select(BilibiliAuthSession).where(BilibiliAuthSession.user_id == self.user_id)
         )
@@ -347,16 +350,16 @@ class SqlAlchemyRuntimeRepository:
             auth_session = BilibiliAuthSession(
                 user_id=self.user_id,
                 status=status,
-                cookies_json=cookies_json,
-                csrf=csrf,
+                cookies_json=stored_cookies_json,
+                csrf=stored_csrf,
                 expires_at=_normalize_utc_datetime(expires_at),
                 last_verified_at=now,
             )
             self.session.add(auth_session)
         else:
             auth_session.status = status
-            auth_session.cookies_json = cookies_json
-            auth_session.csrf = csrf
+            auth_session.cookies_json = stored_cookies_json
+            auth_session.csrf = stored_csrf
             auth_session.expires_at = _normalize_utc_datetime(expires_at)
             auth_session.last_verified_at = now
             auth_session.error_code = None
@@ -2808,8 +2811,8 @@ def _bilibili_auth_session_dict(auth_session: BilibiliAuthSession) -> dict[str, 
     return {
         "authSessionId": auth_session.id,
         "status": auth_session.status,
-        "cookiesJson": auth_session.cookies_json,
-        "csrf": auth_session.csrf,
+        "cookiesJson": decrypt_json_secret(auth_session.cookies_json),
+        "csrf": decrypt_text_secret(auth_session.csrf),
         "expiresAt": _normalize_utc_datetime(auth_session.expires_at),
         "lastVerifiedAt": _normalize_utc_datetime(auth_session.last_verified_at),
         "errorCode": auth_session.error_code,

@@ -47,6 +47,9 @@ class _RecordingDispatcher:
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
         self.calls.append(("review_refresh", task_id, payload))
 
+    def enqueue_bilibili_import(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        self.calls.append(("bilibili_import", task_id, payload))
+
 
 def test_memory_runtime_async_tasks_use_in_memory_dispatcher():
     repo = _get_memory_repository()
@@ -1500,6 +1503,7 @@ def test_parse_start_keeps_created_queued_trigger_when_enqueue_succeeds_synchron
         ("handout_block_generate", "handout_block_generate", {"courseId": 201, "handoutBlockId": 12}),
         ("quiz_generate", "quiz_generate", {"courseId": 201, "quizId": 13}),
         ("review_refresh", "review_refresh", {"courseId": 201, "reviewTaskRunId": 14}),
+        ("bilibili_import", "bilibili_import", {"courseId": 201, "importRunId": 15}),
     ],
 )
 def test_retry_async_task_reenqueues_supported_task_types(

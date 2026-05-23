@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from http.cookies import SimpleCookie
@@ -18,8 +19,77 @@ VIEW_API_URL = "https://api.bilibili.com/x/web-interface/view"
 PLAYURL_API_URL = "https://api.bilibili.com/x/player/wbi/playurl"
 COLLECTION_API_URL = "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list"
 BANGUMI_SEASON_API_URL = "https://api.bilibili.com/pgc/view/web/season"
+NAV_API_URL = "https://api.bilibili.com/x/web-interface/nav"
 QR_GENERATE_API_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 QR_POLL_API_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+
+_WBI_MIXIN_KEY_TABLE = [
+    46,
+    47,
+    18,
+    2,
+    53,
+    8,
+    23,
+    32,
+    15,
+    50,
+    10,
+    31,
+    58,
+    3,
+    45,
+    35,
+    27,
+    43,
+    5,
+    49,
+    33,
+    9,
+    42,
+    19,
+    29,
+    28,
+    14,
+    39,
+    12,
+    38,
+    41,
+    13,
+    37,
+    48,
+    7,
+    16,
+    24,
+    55,
+    40,
+    61,
+    26,
+    17,
+    0,
+    1,
+    60,
+    51,
+    30,
+    4,
+    22,
+    25,
+    54,
+    21,
+    56,
+    59,
+    6,
+    63,
+    57,
+    62,
+    11,
+    36,
+    20,
+    34,
+    44,
+    52,
+]
+_WBI_STRIP_CHARS = "!'()*"
 
 
 class BiliTransport(Protocol):
@@ -367,11 +437,34 @@ class BiliClient:
         params: dict[str, Any] = {"bvid": bvid, "cid": cid, "fnval": 16}
         if qn is not None:
             params["qn"] = qn
+        params = self._with_wbi_signature(params, cookies=cookies)
         return self._require_success(
             self.transport.get_json(PLAYURL_API_URL, params=params, cookies=cookies),
             error_code="bilibili.playurl_failed",
             message="Failed to fetch Bilibili playurl.",
         )
+
+    def _with_wbi_signature(self, params: dict[str, Any], *, cookies: dict[str, Any]) -> dict[str, Any]:
+        keys = self._wbi_keys(cookies=cookies)
+        if keys is None:
+            raise ServiceError(
+                message="Failed to fetch Bilibili WBI signing keys.",
+                error_code="bilibili.playurl_failed",
+                status_code=502,
+            )
+        return _sign_wbi_params(params, img_key=keys[0], sub_key=keys[1])
+
+    def _wbi_keys(self, *, cookies: dict[str, Any]) -> tuple[str, str] | None:
+        cookie_keys = _wbi_keys_from_mapping(cookies)
+        if cookie_keys is not None:
+            return cookie_keys
+        response = self.transport.get_json(NAV_API_URL, cookies=cookies)
+        payload = self._require_success(
+            response,
+            error_code="bilibili.playurl_failed",
+            message="Failed to fetch Bilibili WBI signing metadata.",
+        )
+        return _wbi_keys_from_mapping(payload.get("wbi_img") if isinstance(payload.get("wbi_img"), dict) else {})
 
     @staticmethod
     def _require_success(response: dict[str, Any], *, error_code: str, message: str) -> dict[str, Any]:
@@ -628,6 +721,60 @@ def _mapped_bili_error(response: dict[str, Any], *, default_error_code: str) -> 
     ):
         return ("bilibili.access_denied", 403)
     return (default_error_code, 502)
+
+
+def _wbi_keys_from_mapping(value: dict[str, Any]) -> tuple[str, str] | None:
+    img_key = (
+        value.get("img_key")
+        or value.get("imgKey")
+        or value.get("wbi_img_key")
+        or value.get("wbiImgKey")
+        or _url_filename_stem(value.get("img_url") or value.get("imgUrl"))
+    )
+    sub_key = (
+        value.get("sub_key")
+        or value.get("subKey")
+        or value.get("wbi_sub_key")
+        or value.get("wbiSubKey")
+        or _url_filename_stem(value.get("sub_url") or value.get("subUrl"))
+    )
+    if not img_key or not sub_key:
+        return None
+    return str(img_key), str(sub_key)
+
+
+def _sign_wbi_params(params: dict[str, Any], *, img_key: str, sub_key: str) -> dict[str, Any]:
+    signed = dict(params)
+    signed["wts"] = int(datetime.now(timezone.utc).timestamp())
+    mixin_key = _wbi_mixin_key(img_key + sub_key)
+    query = urlencode(
+        {
+            key: _clean_wbi_value(value)
+            for key, value in sorted(signed.items())
+            if value is not None
+        }
+    )
+    signed["w_rid"] = hashlib.md5(f"{query}{mixin_key}".encode("utf-8")).hexdigest()
+    return signed
+
+
+def _wbi_mixin_key(raw_key: str) -> str:
+    return "".join(raw_key[index] for index in _WBI_MIXIN_KEY_TABLE if index < len(raw_key))[:32]
+
+
+def _clean_wbi_value(value: Any) -> str:
+    text = str(value)
+    return "".join(char for char in text if char not in _WBI_STRIP_CHARS)
+
+
+def _url_filename_stem(value: Any) -> str | None:
+    if not value:
+        return None
+    text = str(value).split("?", 1)[0].rstrip("/")
+    filename = text.rsplit("/", 1)[-1]
+    if "." in filename:
+        filename = filename.rsplit(".", 1)[0]
+    return filename or None
 
 
 def _extract_response_cookies(response: dict[str, Any], payload: dict[str, Any]) -> dict[str, str] | None:

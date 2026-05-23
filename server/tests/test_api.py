@@ -1014,6 +1014,13 @@ def test_bilibili_preview_and_import_routes_return_v2_contract():
                 },
             )
         )
+        cancel_status, cancel_body = asyncio.run(
+            request(
+                "POST",
+                f"/api/v1/bilibili-import-runs/{create_body['data']['entity']['id']}/cancel",
+                headers=AUTH_HEADERS | {"idempotency-key": "api-bili-cancel-1"},
+            )
+        )
     finally:
         app.dependency_overrides.pop(get_bilibili_service, None)
 
@@ -1022,7 +1029,28 @@ def test_bilibili_preview_and_import_routes_return_v2_contract():
     assert create_body["data"]["nextAction"] == "poll"
     assert create_body["data"]["entity"]["type"] == "bilibili_import_run"
     assert isinstance(create_body["data"]["taskId"], int)
+    assert cancel_status == 200
+    assert cancel_body["data"] == {
+        "taskId": create_body["data"]["taskId"],
+        "status": "canceled",
+        "nextAction": "none",
+        "entity": create_body["data"]["entity"],
+    }
     assert dispatcher.enqueued[0]["payload"]["courseId"] == course["courseId"]
+
+
+def test_bilibili_import_route_rejects_missing_request_body():
+    status_code, body = asyncio.run(
+        request(
+            "POST",
+            "/api/v1/courses/101/resources/imports/bilibili",
+            headers=AUTH_HEADERS | {"idempotency-key": "api-bili-import-empty-body"},
+            json_body=None,
+        )
+    )
+
+    assert status_code == 422
+    assert body["errorCode"] == "common.validation_error"
 
 
 def test_bilibili_import_route_rejects_idempotency_key_body_mismatch():
@@ -1106,11 +1134,9 @@ def test_bilibili_import_openapi_keeps_reserved_request_body():
 
     assert path.startswith("/api/v1/")
     request_body = operation["requestBody"]
+    assert request_body["required"] is True
     content_schema = request_body["content"]["application/json"]["schema"]
-    assert any(
-        item.get("$ref", "").endswith("/BilibiliImportRequest")
-        for item in content_schema.get("anyOf", [])
-    )
+    assert content_schema["$ref"].endswith("/BilibiliImportRequest")
     component_schema = schema["components"]["schemas"]["BilibiliImportRequest"]
     assert "previewId" in component_schema["properties"]
     assert "sourceUrl" in component_schema["properties"]

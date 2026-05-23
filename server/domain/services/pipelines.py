@@ -328,6 +328,8 @@ class PipelineService:
             return lambda payload: self.task_dispatcher.enqueue_quiz_generate(task_id=task_id, payload=payload)
         if task_type == "review_refresh":
             return lambda payload: self.task_dispatcher.enqueue_review_refresh(task_id=task_id, payload=payload)
+        if task_type == "bilibili_import":
+            return lambda payload: self.task_dispatcher.enqueue_bilibili_import(task_id=task_id, payload=payload)
         parent_task_id = _int_value(task, "parentTaskId", "parent_task_id")
         if parent_task_id is not None:
             return None
