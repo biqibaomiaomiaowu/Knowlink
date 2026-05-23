@@ -6,6 +6,7 @@ import importlib
 
 import pytest
 
+from server.domain.services.errors import ServiceError
 from server.infra.bilibili.models import BilibiliPart, BilibiliPreview, BilibiliSourceType
 from server.infra.repositories.memory import MemoryScaffoldRepository
 from server.infra.repositories.memory_runtime import RuntimeStore
@@ -44,6 +45,42 @@ class FakeClient:
             "videoUrl": "https://upos.test/video.m4s",
             "audioUrl": "https://upos.test/audio.m4s",
             "headers": {"Referer": source_url},
+        }
+
+
+class CollectionPreviewClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.playurl_calls: list[dict[str, Any]] = []
+
+    def preview(self, source_url: str, cookies: dict[str, Any]) -> BilibiliPreview:
+        return BilibiliPreview(
+            preview_id="bili_preview_collection",
+            source_url=source_url,
+            source_type=BilibiliSourceType.COLLECTION,
+            title="合集课",
+            cover_url=None,
+            total_parts=1,
+            parts=[
+                BilibiliPart(
+                    part_id="collection-456-bv-BV1xx411c7mD-cid-1001-p1",
+                    title="合集第一讲",
+                    duration_sec=30,
+                    cid=1001,
+                    page_no=1,
+                    selected_by_default=True,
+                )
+            ],
+            default_selection_mode="all_parts",
+        )
+
+    def playurl(self, *, bvid: str, cid: int, cookies: dict[str, Any], qn: int | None = None):
+        self.playurl_calls.append({"bvid": bvid, "cid": cid, "qn": qn})
+        return {
+            "dash": {
+                "video": [{"baseUrl": "https://upos.test/video.m4s"}],
+                "audio": [{"baseUrl": "https://upos.test/audio.m4s"}],
+            }
         }
 
 
@@ -146,7 +183,12 @@ class CancelAfterUploadStorage(FakeStorage):
         return stat
 
 
-def _build_run() -> tuple[MemoryScaffoldRepository, dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _build_run(
+    *,
+    source_url: str = "https://www.bilibili.com/video/BV1xx411c7mD",
+    source_type: str = "single_video",
+    selection: dict[str, Any] | None = None,
+) -> tuple[MemoryScaffoldRepository, dict[str, Any], dict[str, Any], dict[str, Any]]:
     repo = MemoryScaffoldRepository(RuntimeStore())
     course = repo.create_course(
         title="Runner course",
@@ -156,10 +198,11 @@ def _build_run() -> tuple[MemoryScaffoldRepository, dict[str, Any], dict[str, An
     )
     run = repo.create_bilibili_import_run(
         course_id=course["courseId"],
-        source_url="https://www.bilibili.com/video/BV1xx411c7mD",
-        source_type="single_video",
+        source_url=source_url,
+        source_type=source_type,
         preview={"title": "Runner demo"},
-        selection={"selectionMode": "current_part", "selectedPartIds": ["p1"], "qualityPreference": "android_safe"},
+        selection=selection
+        or {"selectionMode": "current_part", "selectedPartIds": ["p1"], "qualityPreference": "android_safe"},
     )
     task = repo.create_async_task(
         course_id=course["courseId"],
@@ -217,6 +260,25 @@ def test_runner_imports_bilibili_video_into_course_resource(tmp_path: Path) -> N
     assert not (tmp_path / str(run["importRunId"])).exists()
 
 
+def test_runner_uses_bvid_encoded_in_collection_part_id_for_playurl(tmp_path: Path) -> None:
+    repo, course, run, task = _build_run(
+        source_url="https://space.bilibili.com/123/channel/collectiondetail?sid=456",
+        source_type="collection",
+        selection={"selectionMode": "all_parts", "selectedPartIds": [], "qualityPreference": "android_safe"},
+    )
+    repo.update_bilibili_import_run(
+        run["importRunId"],
+        preview={},
+    )
+    client = CollectionPreviewClient()
+    runner = _runner(repo, tmp_path, bili_client=client)
+
+    runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
+
+    assert client.playurl_calls == [{"bvid": "BV1xx411c7mD", "cid": 1001, "qn": 80}]
+    assert repo.get_bilibili_import_run(run["importRunId"])["status"] == "imported"
+
+
 @pytest.mark.parametrize(
     ("component", "error_code"),
     [
@@ -255,6 +317,45 @@ def test_runner_marks_failures_on_run_and_async_task(tmp_path: Path, component: 
     assert async_task["status"] == "failed"
     assert async_task["errorCode"] == error_code
     assert repo.list_resources(course["courseId"]) == []
+
+
+def test_runner_marks_auth_expired_provider_failure_recoverable(tmp_path: Path) -> None:
+    repo, course, run, task = _build_run()
+    runner = _runner(
+        repo,
+        tmp_path,
+        bili_client=FakeClient(
+            playurl_error=ServiceError(
+                message="Bilibili auth session is expired.",
+                error_code="bilibili.auth_expired",
+                status_code=401,
+            )
+        ),
+    )
+
+    runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
+
+    updated = repo.get_bilibili_import_run(run["importRunId"])
+    async_task = repo.get_async_task(task["taskId"])
+    assert updated is not None
+    assert async_task is not None
+    assert updated["status"] == "recoverable"
+    assert updated["stage"] == "error"
+    assert updated["errorCode"] == "bilibili.auth_expired"
+    assert updated["recoverable"] is True
+    assert async_task["status"] == "failed"
+
+
+def test_runner_cleans_runtime_dir_on_failure(tmp_path: Path) -> None:
+    repo, course, run, task = _build_run()
+    runner = _runner(repo, tmp_path, downloader=FakeDownloader(error=RuntimeError("download boom")))
+
+    runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
+
+    updated = repo.get_bilibili_import_run(run["importRunId"])
+    assert updated is not None
+    assert updated["status"] == "failed"
+    assert not (tmp_path / str(run["importRunId"])).exists()
 
 
 def test_runner_stops_when_run_is_already_canceled(tmp_path: Path) -> None:

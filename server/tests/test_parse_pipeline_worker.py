@@ -98,6 +98,69 @@ def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Pa
     assert _step_statuses(session, message["parseRunId"])["vectorize"] == "succeeded"
 
 
+def test_parse_pipeline_persists_mp4_visual_segment_fields(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "lecture.mp4", resource_type="mp4")
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        assert resource_type == "mp4"
+        assert Path(file_path).name == "lecture.mp4"
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "mp4",
+                "segments": [
+                    {
+                        "segmentKey": "mp4-c1",
+                        "segmentType": "video_caption",
+                        "textContent": "我们看这个方程。",
+                        "startSec": 10,
+                        "endSec": 20,
+                        "orderNo": 1,
+                    },
+                    {
+                        "segmentKey": "mp4-vf-10-formula-1",
+                        "segmentType": "formula",
+                        "orderNo": 2,
+                        "textContent": "x^2 - 5x + 6 = 0",
+                        "formulaText": "x^2 - 5x + 6 = 0",
+                        "startSec": 10,
+                        "endSec": 20,
+                        "imageKey": "frames/mp4/lecture/000010.png",
+                        "bboxJson": {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.1},
+                    },
+                ],
+            },
+            issues=[],
+        )
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=lambda: _FakeEmbeddingClient(),
+        base_dir=tmp_path,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["segmentCount"] == 2
+    segments = session.scalars(sa.select(CourseSegment).order_by(CourseSegment.order_no.asc())).all()
+    assert len(segments) == 2
+    caption_segment = segments[0]
+    assert caption_segment.segment_type == "video_caption"
+    assert caption_segment.start_sec == 10
+    assert caption_segment.end_sec == 20
+    assert caption_segment.text_content == "我们看这个方程。"
+    formula_segment = segments[1]
+    assert formula_segment.segment_type == "formula"
+    assert formula_segment.start_sec == 10
+    assert formula_segment.end_sec == 20
+    assert formula_segment.image_key == "frames/mp4/lecture/000010.png"
+    assert formula_segment.formula_text == "x^2 - 5x + 6 = 0"
+    assert formula_segment.bbox_json == {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.1}
+
+
 def test_parse_pipeline_duplicate_completed_message_does_not_append_artifacts(tmp_path: Path):
     session_factory = _session_factory()
     session = session_factory()

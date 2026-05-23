@@ -58,7 +58,8 @@ class FakeVisionAIService:
 
 def assert_valid_normalized_document(payload: dict[str, object] | None) -> dict[str, object]:
     assert payload is not None
-    NORMALIZED_DOCUMENT_VALIDATOR.validate(payload)
+    errors = sorted(NORMALIZED_DOCUMENT_VALIDATOR.iter_errors(payload), key=lambda error: list(error.path))
+    assert not errors, errors[0].message
     return payload
 
 
@@ -153,6 +154,35 @@ class FakeAsrClient:
         if self.error is not None:
             raise self.error
         return self.segments
+
+
+class FakeFrameExtractor:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, float]] = []
+
+    def extract_frame(self, video_path, *, timestamp_sec: float):
+        self.calls.append({"timestampSec": timestamp_sec})
+        return b"fake-png"
+
+
+class FakeBatchVisionClient:
+    def analyze_images(self, assets, *, resource_type, document_context=None):
+        assert resource_type == "mp4"
+        asset = list(assets)[0]
+        return [
+            VisionAssetResult(asset_id=asset.asset_id, segment_type="formula", text="x^2 - 5x + 6 = 0"),
+            VisionAssetResult(asset_id=asset.asset_id, segment_type="ocr_text", text="例题：求方程的根"),
+        ]
+
+
+class RaisingFrameExtractor:
+    def extract_frame(self, video_path, *, timestamp_sec: float):
+        raise AssertionError("frame extractor should not be called")
+
+
+class RaisingBatchVisionClient:
+    def analyze_images(self, assets, *, resource_type, document_context=None):
+        raise AssertionError("vision client should not be called")
 
 
 class RaisingOcrClient:
@@ -1377,6 +1407,322 @@ def test_mp4_parser_uses_asr_segments_and_validates_schema(tmp_path: Path):
             "endSec": 28,
         },
     ]
+
+
+def test_mp4_parser_adds_visual_segments_from_asr_timeline(tmp_path: Path):
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient([AsrSegment(text="我们看这个方程。", start_sec=10, end_sec=20)])
+    extractor = FakeFrameExtractor()
+
+    result = VideoParser(
+        asr_client=asr_client,
+        vision_client=FakeBatchVisionClient(),
+        frame_extractor=extractor,
+        enable_visual_parse=True,
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert [segment["segmentType"] for segment in document["segments"]] == [
+        "video_caption",
+        "formula",
+        "ocr_text",
+    ]
+    formula_segment = document["segments"][1]
+    assert formula_segment["startSec"] == 10
+    assert formula_segment["endSec"] == 20
+    assert formula_segment["formulaText"] == "x^2 - 5x + 6 = 0"
+    assert formula_segment["imageKey"].startswith("frames/mp4/")
+    assert extractor.calls == [{"timestampSec": 15.0}]
+
+
+def test_mp4_parser_keeps_visual_dependencies_idle_when_disabled(tmp_path: Path):
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient([AsrSegment(text="只需要字幕。", start_sec=10, end_sec=20)])
+
+    result = VideoParser(
+        asr_client=asr_client,
+        vision_client=RaisingBatchVisionClient(),
+        frame_extractor=RaisingFrameExtractor(),
+        enable_visual_parse=False,
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert issue_codes(result) == []
+    assert [segment["segmentType"] for segment in document["segments"]] == ["video_caption"]
+
+
+def test_mp4_parser_default_visual_disabled_does_not_load_configured_vision(monkeypatch, tmp_path: Path):
+    def fail_configured_vision_client():
+        raise AssertionError("configured vision client should not be loaded")
+
+    monkeypatch.delenv("KNOWLINK_ENABLE_VIDEO_VISUAL_PARSE", raising=False)
+    monkeypatch.setattr("server.parsers.video.get_configured_vision_client", fail_configured_vision_client)
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    result = VideoParser(
+        asr_client=FakeAsrClient([AsrSegment(text="默认只用字幕。", start_sec=0, end_sec=10)])
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+    assert result.status == "succeeded"
+    assert [segment["segmentType"] for segment in document["segments"]] == ["video_caption"]
+
+
+def test_mp4_parser_orders_visual_segments_across_multiple_frames(tmp_path: Path):
+    class TwoFrameVisionClient:
+        def analyze_images(self, assets, *, resource_type, document_context=None):
+            return [
+                VisionAssetResult(asset_id=asset.asset_id, segment_type="formula", text=f"{asset.asset_id}=x")
+                for asset in assets
+            ] + [
+                VisionAssetResult(asset_id=asset.asset_id, segment_type="ocr_text", text=f"{asset.asset_id} 题干")
+                for asset in assets
+            ]
+
+    video_path = tmp_path / "lecture.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    asr_client = FakeAsrClient(
+        [
+            AsrSegment(text="第一段。", start_sec=0, end_sec=10),
+            AsrSegment(text="第二段。", start_sec=10, end_sec=20),
+        ]
+    )
+
+    result = VideoParser(
+        asr_client=asr_client,
+        vision_client=TwoFrameVisionClient(),
+        frame_extractor=FakeFrameExtractor(),
+        enable_visual_parse=True,
+    ).parse(video_path)
+
+    document = assert_valid_normalized_document(result.normalized_document)
+
+    assert result.status == "succeeded"
+    assert [segment["orderNo"] for segment in document["segments"]] == [1, 2, 3, 4, 5, 6]
+
+
+def test_mp4_normalized_document_accepts_timeline_visual_segments():
+    document = {
+        "resourceType": "mp4",
+        "segments": [
+            {
+                "segmentKey": "mp4-c1",
+                "segmentType": "video_caption",
+                "orderNo": 1,
+                "textContent": "讲解一元二次方程。",
+                "startSec": 10,
+                "endSec": 20,
+            },
+            {
+                "segmentKey": "mp4-vf-10-formula-1",
+                "segmentType": "formula",
+                "orderNo": 2,
+                "textContent": "x^2 - 5x + 6 = 0",
+                "startSec": 10,
+                "endSec": 20,
+                "imageKey": "frames/parse-run-1/resource-2/000010.png",
+                "formulaText": "x^2 - 5x + 6 = 0",
+                "bboxJson": {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.1},
+            },
+            {
+                "segmentKey": "mp4-vf-10-ocr-1",
+                "segmentType": "ocr_text",
+                "orderNo": 3,
+                "textContent": "例题：求方程的根",
+                "startSec": 10,
+                "endSec": 20,
+                "imageKey": "frames/parse-run-1/resource-2/000010.png",
+            },
+            {
+                "segmentKey": "mp4-vf-18-image-1",
+                "segmentType": "image_caption",
+                "orderNo": 4,
+                "textContent": "坐标图展示二次函数与 x 轴的两个交点。",
+                "startSec": 18,
+                "endSec": 28,
+            },
+        ],
+    }
+    assert_valid_normalized_document(document)
+
+
+def test_video_visual_analyzer_maps_vision_results_to_timeline_segments(tmp_path: Path):
+    from server.parsers.video_visual import VideoFrameCandidate, build_video_visual_segments
+
+    candidates = [
+        VideoFrameCandidate(
+            asset_id="mp4-f-000010",
+            image_key="frames/test/000010.png",
+            image_bytes=b"png",
+            mime_type="image/png",
+            start_sec=10,
+            end_sec=20,
+            order_no=2,
+        )
+    ]
+    results = [
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="formula", text="x^2 - 5x + 6 = 0"),
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="ocr_text", text="例题：求方程的根"),
+    ]
+
+    segments = build_video_visual_segments(candidates, results, key_prefix="mp4-vf")
+
+    assert segments == [
+        {
+            "segmentKey": "mp4-vf-10-formula-1",
+            "segmentType": "formula",
+            "orderNo": 2,
+            "textContent": "x^2 - 5x + 6 = 0",
+            "startSec": 10,
+            "endSec": 20,
+            "imageKey": "frames/test/000010.png",
+            "formulaText": "x^2 - 5x + 6 = 0",
+        },
+        {
+            "segmentKey": "mp4-vf-10-ocr-1",
+            "segmentType": "ocr_text",
+            "orderNo": 3,
+            "textContent": "例题：求方程的根",
+            "startSec": 10,
+            "endSec": 20,
+            "imageKey": "frames/test/000010.png",
+        },
+    ]
+
+
+def test_video_visual_candidates_keep_timeline_order_and_float_windows():
+    from server.parsers.video_visual import (
+        VideoFrameCandidate,
+        build_video_visual_segments,
+        candidate_timestamps_from_captions,
+    )
+
+    assert candidate_timestamps_from_captions(
+        [
+            {"startSec": 1.2, "endSec": 1.8},
+            {"startSec": 5, "endSec": 4},
+            {"startSec": 10, "endSec": 20},
+        ]
+    ) == [(1.5, 1, 2), (15.0, 10, 20)]
+
+    candidates = [
+        VideoFrameCandidate(
+            asset_id="mp4-f-000010",
+            image_key="frames/test/000010.png",
+            image_bytes=b"png",
+            mime_type="image/png",
+            start_sec=10,
+            end_sec=20,
+            order_no=2,
+        ),
+        VideoFrameCandidate(
+            asset_id="mp4-f-000020",
+            image_key="frames/test/000020.png",
+            image_bytes=b"png",
+            mime_type="image/png",
+            start_sec=20,
+            end_sec=30,
+            order_no=4,
+        ),
+    ]
+    results = [
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="formula", text="a=b"),
+        VisionAssetResult(asset_id="mp4-f-000010", segment_type="ocr_text", text="第一帧"),
+        VisionAssetResult(asset_id="mp4-f-000020", segment_type="image_caption", text="第二帧图示"),
+    ]
+
+    segments = build_video_visual_segments(candidates, results, key_prefix="mp4-vf")
+
+    assert [segment["segmentKey"] for segment in segments] == [
+        "mp4-vf-10-formula-1",
+        "mp4-vf-10-ocr-1",
+        "mp4-vf-20-image-1",
+    ]
+    assert [segment["orderNo"] for segment in segments] == [2, 3, 4]
+
+
+def test_mp4_visual_segments_require_video_time_locator_and_reject_page_locator():
+    missing_time = {
+        "resourceType": "mp4",
+        "segments": [
+            {"segmentKey": "mp4-vf-1", "segmentType": "ocr_text", "orderNo": 1, "textContent": "题干"}
+        ],
+    }
+    page_locator = {
+        "resourceType": "mp4",
+        "segments": [
+            {
+                "segmentKey": "mp4-vf-2",
+                "segmentType": "formula",
+                "orderNo": 1,
+                "textContent": "E=mc^2",
+                "startSec": 1,
+                "endSec": 2,
+                "pageNo": 1,
+            }
+        ],
+    }
+    section_locator = {
+        "resourceType": "mp4",
+        "segments": [
+            {
+                "segmentKey": "mp4-vf-3",
+                "segmentType": "ocr_text",
+                "orderNo": 1,
+                "textContent": "题干",
+                "startSec": 1,
+                "endSec": 2,
+                "sectionPath": ["第 1 章"],
+            }
+        ],
+    }
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(missing_time)
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(page_locator)
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(section_locator)
+
+
+def test_srt_normalized_document_still_rejects_visual_segments():
+    document = {
+        "resourceType": "srt",
+        "segments": [
+            {
+                "segmentKey": "srt-vf-1",
+                "segmentType": "ocr_text",
+                "orderNo": 1,
+                "textContent": "字幕文件不能产生视觉段",
+                "startSec": 1,
+                "endSec": 2,
+            }
+        ],
+    }
+    visual_metadata = {
+        "resourceType": "srt",
+        "segments": [
+            {
+                "segmentKey": "srt-c1",
+                "segmentType": "video_caption",
+                "orderNo": 1,
+                "textContent": "字幕文件不能携带视觉元数据",
+                "startSec": 1,
+                "endSec": 2,
+                "imageKey": "frames/parse-run-1/resource-2/000001.png",
+                "formulaText": "E=mc^2",
+                "bboxJson": {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.1},
+            }
+        ],
+    }
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(document)
+    with pytest.raises(AssertionError):
+        assert_valid_normalized_document(visual_metadata)
 
 
 def test_mp4_parser_skips_invalid_asr_timeline_and_keeps_clean_segments(tmp_path: Path):

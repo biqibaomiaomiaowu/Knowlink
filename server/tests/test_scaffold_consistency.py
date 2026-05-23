@@ -57,6 +57,130 @@ def test_v2_course_catalog_fields_are_present():
         assert item["reasonMaterials"]
 
 
+def test_v2_course_catalog_has_phase1_demo_coverage():
+    catalog = load_json("server/seeds/course_catalog.json")
+
+    assert len(catalog) >= 5
+    assert {"math", "linear_algebra"} <= {item["subject"] for item in catalog}
+    assert any(
+        any("B站" in hint or "视频" in hint for hint in item["importHints"])
+        for item in catalog
+    )
+
+    for item in catalog:
+        assert len(item["reasonMaterials"]) >= 3
+        manifest_types = {
+            resource["resourceType"] for resource in item["defaultResourceManifest"]
+        }
+        assert {"mp4", "pdf"} <= manifest_types
+
+
+def test_recommendation_service_uses_provider_boundary_for_rule_based_results():
+    from server.domain.services.recommendations import (
+        RecommendationService,
+        RuleBasedRecommendationProvider,
+    )
+    from server.schemas.requests import RecommendationRequest
+
+    service = RecommendationService(ROOT / "server/seeds/course_catalog.json")
+    payload = RecommendationRequest(
+        goalText="高等数学期末复习",
+        selfLevel="intermediate",
+        timeBudgetMinutes=240,
+        preferredStyle="exam",
+    )
+
+    recommendations = service.recommend(payload)
+    catalog_ids = {item["catalogId"] for item in service.load_catalog()}
+
+    assert isinstance(service.provider, RuleBasedRecommendationProvider)
+    assert recommendations
+    assert recommendations[0].next_action["type"] == "confirm_course"
+    assert recommendations[0].catalog_id in catalog_ids
+
+
+def test_recommendation_provider_protocol_can_be_implemented_by_future_llm_provider():
+    from server.domain.services.recommendations import RecommendationProvider, RecommendationService
+    from server.schemas.common import ResourceManifestItem
+    from server.schemas.requests import RecommendationRequest
+    from server.schemas.responses import RecommendationCard
+
+    class StubLLMRecommendationProvider:
+        def recommend(
+            self,
+            *,
+            catalog: list[dict],
+            payload: RecommendationRequest,
+        ) -> list[RecommendationCard]:
+            recommended = catalog[0]
+            return [
+                RecommendationCard(
+                    catalog_id="llm-generated-01",
+                    title="LLM 推荐课程",
+                    provider="LLM Stub",
+                    level="intermediate",
+                    estimated_hours=3,
+                    fit_score=88,
+                    reasons=["由后续 LLM provider 生成"],
+                    reason_materials=["保留 provider 注入边界"],
+                    next_action={
+                        "type": "confirm_course",
+                        "label": "确认入课并导入资料",
+                    },
+                    default_resource_manifest=[
+                        ResourceManifestItem(
+                            resource_type="mp4",
+                            required=True,
+                            description="主课程视频",
+                        ),
+                        ResourceManifestItem(
+                            resource_type="pdf",
+                            required=True,
+                            description="配套讲义 PDF",
+                        ),
+                    ],
+                ),
+                RecommendationCard(
+                    catalog_id=recommended["catalogId"],
+                    title=recommended["title"],
+                    provider="LLM Stub",
+                    level=recommended["level"],
+                    estimated_hours=recommended["estimatedHours"],
+                    fit_score=88,
+                    reasons=["由后续 LLM provider 选择 catalog 课程"],
+                    reason_materials=["保留 provider 注入边界"],
+                    next_action={
+                        "type": "confirm_course",
+                        "label": "确认入课并导入资料",
+                    },
+                    default_resource_manifest=[
+                        ResourceManifestItem(**resource)
+                        for resource in recommended["defaultResourceManifest"]
+                    ],
+                ),
+            ]
+
+    provider: RecommendationProvider = StubLLMRecommendationProvider()
+    service = RecommendationService(
+        ROOT / "server/seeds/course_catalog.json",
+        provider=provider,
+    )
+    payload = RecommendationRequest(
+        goalText="线性代数期末复习",
+        selfLevel="intermediate",
+        timeBudgetMinutes=180,
+        preferredStyle="exam",
+    )
+
+    recommendations = service.recommend(payload)
+
+    assert recommendations[0].catalog_id in {
+        item["catalogId"] for item in service.load_catalog()
+    }
+    assert service.get_catalog_entry(recommendations[0].catalog_id) is not None
+    assert recommendations[0].next_action["type"] == "confirm_course"
+
+
 def test_dashboard_and_pipeline_status_cover_competition_display_fields():
     create_status, create_body = asyncio.run(
         request(
