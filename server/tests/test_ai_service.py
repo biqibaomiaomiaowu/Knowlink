@@ -470,6 +470,7 @@ def test_registry_loads_root_dotenv_before_reading_provider_env(
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("KNOWLINK_DEEPSEEK_API_KEY=deepseek-from-dotenv\n", encoding="utf-8")
     monkeypatch.setattr(settings_module, "_DOTENV_PATH", dotenv_path)
+    monkeypatch.delenv("KNOWLINK_DISABLE_DOTENV", raising=False)
     monkeypatch.delenv("KNOWLINK_DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_CHAT", raising=False)
     monkeypatch.delenv("KNOWLINK_ENABLE_VIVO_VISION", raising=False)

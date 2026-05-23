@@ -87,6 +87,8 @@ def get_settings() -> Settings:
 
 
 def load_root_dotenv() -> None:
+    if _env_bool("KNOWLINK_DISABLE_DOTENV", False):
+        return
     load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
 
 

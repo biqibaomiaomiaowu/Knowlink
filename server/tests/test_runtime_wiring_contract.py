@@ -218,6 +218,7 @@ def test_settings_loads_root_dotenv_before_reading_environment(monkeypatch, tmp_
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("KNOWLINK_HOST=127.0.0.9\nKNOWLINK_TASK_QUEUE=noop\n", encoding="utf-8")
     monkeypatch.setattr(settings_module, "_DOTENV_PATH", dotenv_path)
+    monkeypatch.delenv("KNOWLINK_DISABLE_DOTENV", raising=False)
     monkeypatch.delenv("KNOWLINK_HOST", raising=False)
     monkeypatch.delenv("KNOWLINK_TASK_QUEUE", raising=False)
     settings_module.get_settings.cache_clear()
@@ -239,6 +240,7 @@ def test_settings_keeps_real_environment_above_dotenv(monkeypatch, tmp_path):
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("KNOWLINK_HOST=127.0.0.9\nKNOWLINK_TASK_QUEUE=noop\n", encoding="utf-8")
     monkeypatch.setattr(settings_module, "_DOTENV_PATH", dotenv_path)
+    monkeypatch.delenv("KNOWLINK_DISABLE_DOTENV", raising=False)
     monkeypatch.setenv("KNOWLINK_HOST", "10.0.0.5")
     monkeypatch.setenv("KNOWLINK_TASK_QUEUE", "dramatiq")
     settings_module.get_settings.cache_clear()
@@ -249,6 +251,26 @@ def test_settings_keeps_real_environment_above_dotenv(monkeypatch, tmp_path):
         settings_module.get_settings.cache_clear()
 
     assert settings.host == "10.0.0.5"
+    assert settings.task_queue == "dramatiq"
+
+
+def test_settings_can_disable_root_dotenv_for_test_isolation(monkeypatch, tmp_path):
+    from server.config import settings as settings_module
+
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("KNOWLINK_HOST=127.0.0.9\nKNOWLINK_TASK_QUEUE=noop\n", encoding="utf-8")
+    monkeypatch.setattr(settings_module, "_DOTENV_PATH", dotenv_path)
+    monkeypatch.setenv("KNOWLINK_DISABLE_DOTENV", "1")
+    monkeypatch.delenv("KNOWLINK_HOST", raising=False)
+    monkeypatch.delenv("KNOWLINK_TASK_QUEUE", raising=False)
+    settings_module.get_settings.cache_clear()
+
+    try:
+        settings = settings_module.get_settings()
+    finally:
+        settings_module.get_settings.cache_clear()
+
+    assert settings.host == "0.0.0.0"
     assert settings.task_queue == "dramatiq"
 
 
