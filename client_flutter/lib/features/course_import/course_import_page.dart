@@ -7,9 +7,12 @@ import '../../core/widgets/app_error_view.dart';
 import '../../core/widgets/app_loading_view.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../core/widgets/knowlink_widgets.dart';
+import '../../shared/models/bilibili_import_models.dart';
+import '../../shared/models/bilibili_import_state.dart';
 import '../../shared/models/course_import_state.dart';
 import '../../shared/models/recommendation_enums.dart';
 import '../../shared/models/resource_upload_models.dart';
+import '../../shared/providers/bilibili_import_provider.dart';
 import '../../shared/providers/course_import_provider.dart';
 
 class CourseImportPage extends ConsumerStatefulWidget {
@@ -28,6 +31,7 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
   late final TextEditingController _titleController;
   late final TextEditingController _goalController;
   late final TextEditingController _examAtController;
+  late final TextEditingController _bilibiliUrlController;
   String? _lastResourceCourseId;
 
   @override
@@ -37,6 +41,7 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
     _titleController = TextEditingController(text: draft.title);
     _goalController = TextEditingController(text: draft.goalText);
     _examAtController = TextEditingController(text: draft.examAtText);
+    _bilibiliUrlController = TextEditingController();
     _scheduleResourceFetch(widget.courseId);
   }
 
@@ -53,6 +58,7 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
     _titleController.dispose();
     _goalController.dispose();
     _examAtController.dispose();
+    _bilibiliUrlController.dispose();
     super.dispose();
   }
 
@@ -60,6 +66,8 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(courseImportProvider);
     final notifier = ref.read(courseImportProvider.notifier);
+    final bilibiliState = ref.watch(bilibiliImportProvider);
+    final bilibiliNotifier = ref.read(bilibiliImportProvider.notifier);
     final createdCourseId =
         state.createdCourse.valueOrNull?.courseId.toString();
     final effectiveCourseId = widget.courseId ?? createdCourseId;
@@ -119,6 +127,67 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
                 ? null
                 : () => notifier.fetchResources(effectiveCourseId),
           );
+          final bilibiliSection = _BilibiliImportSection(
+            courseId: effectiveCourseId,
+            urlController: _bilibiliUrlController,
+            state: bilibiliState,
+            onUrlChanged: bilibiliNotifier.updateSourceUrl,
+            onPreview: effectiveCourseId == null
+                ? null
+                : () => _runBilibiliAction(
+                      () => bilibiliNotifier.preview(effectiveCourseId),
+                    ),
+            onTogglePart: (partId, selected) => bilibiliNotifier.togglePart(
+              partId,
+              selected: selected,
+            ),
+            onCreateImport: effectiveCourseId == null
+                ? null
+                : () => _runBilibiliAction(() async {
+                      await bilibiliNotifier.createImport(effectiveCourseId);
+                      await _refreshResourcesIfBilibiliImported(
+                        effectiveCourseId,
+                      );
+                    }),
+            onCancel: () => _runBilibiliAction(
+              bilibiliNotifier.cancelCurrentRun,
+            ),
+            onRefreshStatus: () {
+              final currentRun = bilibiliState.currentRun.valueOrNull;
+              if (currentRun != null) {
+                _runBilibiliAction(
+                  () async {
+                    await bilibiliNotifier.refreshCurrentRun(
+                      currentRun.importRunId,
+                    );
+                    await _refreshResourcesIfBilibiliImported(
+                      effectiveCourseId,
+                    );
+                  },
+                );
+                return;
+              }
+              if (effectiveCourseId != null) {
+                _runBilibiliAction(
+                  () async {
+                    await bilibiliNotifier.loadInitialState(effectiveCourseId);
+                    await _refreshResourcesIfBilibiliImported(
+                      effectiveCourseId,
+                    );
+                  },
+                );
+              }
+            },
+            onRefreshAuth: () => _runBilibiliAction(
+              bilibiliNotifier.refreshAuthSession,
+            ),
+            onCreateQrSession: () => _runBilibiliAction(
+              bilibiliNotifier.createQrSession,
+            ),
+            onPollQrSession: () => _runBilibiliAction(
+              bilibiliNotifier.pollQrSession,
+            ),
+          );
 
           return ListView(
             children: [
@@ -145,6 +214,8 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
                 const SizedBox(height: 16),
                 uploadSection,
               ],
+              const SizedBox(height: 18),
+              bilibiliSection,
               const SizedBox(height: 18),
               const _ImportGuideCard(),
               const SizedBox(height: 22),
@@ -180,7 +251,31 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
         return;
       }
       ref.read(courseImportProvider.notifier).fetchResources(courseId);
+      ref.read(bilibiliImportProvider.notifier).loadInitialState(courseId);
     });
+  }
+
+  Future<void> _runBilibiliAction(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('B站导入操作失败：$error')),
+      );
+    }
+  }
+
+  Future<void> _refreshResourcesIfBilibiliImported(String? courseId) async {
+    if (courseId == null) {
+      return;
+    }
+    final currentRun = ref.read(bilibiliImportProvider).currentRun.valueOrNull;
+    if (currentRun?.isImported == true) {
+      await ref.read(courseImportProvider.notifier).fetchResources(courseId);
+    }
   }
 }
 
@@ -526,6 +621,453 @@ class _UploadDropZone extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BilibiliImportSection extends StatelessWidget {
+  const _BilibiliImportSection({
+    required this.courseId,
+    required this.urlController,
+    required this.state,
+    required this.onUrlChanged,
+    required this.onPreview,
+    required this.onTogglePart,
+    required this.onCreateImport,
+    required this.onCancel,
+    required this.onRefreshStatus,
+    required this.onRefreshAuth,
+    required this.onCreateQrSession,
+    required this.onPollQrSession,
+  });
+
+  final String? courseId;
+  final TextEditingController urlController;
+  final BilibiliImportState state;
+  final ValueChanged<String> onUrlChanged;
+  final VoidCallback? onPreview;
+  final void Function(String partId, bool selected) onTogglePart;
+  final VoidCallback? onCreateImport;
+  final VoidCallback onCancel;
+  final VoidCallback onRefreshStatus;
+  final VoidCallback onRefreshAuth;
+  final VoidCallback onCreateQrSession;
+  final VoidCallback onPollQrSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentRun = state.currentRun.valueOrNull;
+    final canPreview = courseId != null && state.canPreview;
+    final isImportRunning = currentRun?.canCancel == true;
+    final canCreate =
+        courseId != null && state.canCreateImport && !isImportRunning;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'B站导入',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '刷新状态',
+                  onPressed: courseId == null ? null : onRefreshStatus,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _BilibiliAuthStatus(
+              authSession: state.authSession,
+              qrSession: state.qrSession,
+              onRefreshAuth: onRefreshAuth,
+              onCreateQrSession: onCreateQrSession,
+              onPollQrSession: onPollQrSession,
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: urlController,
+              enabled: courseId != null,
+              decoration: const InputDecoration(
+                labelText: 'B站链接',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: onUrlChanged,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              courseId == null
+                  ? '请先创建课程或从推荐页进入已有课程。'
+                  : '粘贴 B站视频或合集链接后预览可导入分 P。',
+              style: const TextStyle(
+                color: AppTheme.muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed:
+                      canPreview && !state.preview.isLoading ? onPreview : null,
+                  icon: const Icon(Icons.visibility_outlined),
+                  label: Text(
+                    state.preview.isLoading ? '正在预览' : '预览B站资源',
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: canCreate ? onCreateImport : null,
+                  icon: const Icon(Icons.playlist_add_check),
+                  label: Text(
+                    isImportRunning
+                        ? '导入进行中'
+                        : state.currentTask.isLoading
+                            ? '正在创建'
+                            : '创建导入任务',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: courseId == null ? null : onRefreshStatus,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('刷新状态'),
+                ),
+                if (currentRun?.canCancel == true)
+                  OutlinedButton.icon(
+                    onPressed: state.isCanceling ? null : onCancel,
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('取消导入'),
+                  ),
+              ],
+            ),
+            if (state.preview.isLoading) ...[
+              const SizedBox(height: 16),
+              const AppLoadingView(label: '正在预览B站资源'),
+            ] else if (state.preview.hasError) ...[
+              const SizedBox(height: 16),
+              AppErrorView(
+                message: 'B站资源预览失败：${state.preview.error}',
+                onRetry: onPreview,
+              ),
+            ] else if (state.preview.valueOrNull != null) ...[
+              const SizedBox(height: 16),
+              _BilibiliPreviewCard(
+                preview: state.preview.valueOrNull!,
+                selectedPartIds: state.selectedPartIds,
+                onTogglePart: onTogglePart,
+              ),
+            ],
+            const SizedBox(height: 16),
+            _BilibiliRunStatusCard(
+              currentTask: state.currentTask,
+              currentRun: state.currentRun,
+              onRefreshStatus: onRefreshStatus,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BilibiliAuthStatus extends StatelessWidget {
+  const _BilibiliAuthStatus({
+    required this.authSession,
+    required this.qrSession,
+    required this.onRefreshAuth,
+    required this.onCreateQrSession,
+    required this.onPollQrSession,
+  });
+
+  final AsyncValue<BilibiliAuthSessionModel?> authSession;
+  final AsyncValue<BilibiliQrSessionModel?> qrSession;
+  final VoidCallback onRefreshAuth;
+  final VoidCallback onCreateQrSession;
+  final VoidCallback onPollQrSession;
+
+  @override
+  Widget build(BuildContext context) {
+    if (authSession.isLoading) {
+      return const AppLoadingView(label: '正在读取B站登录状态');
+    }
+    if (authSession.hasError) {
+      return AppErrorView(
+        message: 'B站登录状态暂不可用：${authSession.error}',
+        onRetry: onRefreshAuth,
+      );
+    }
+
+    final session = authSession.valueOrNull;
+    final isActive = session?.isActive == true;
+    final label = isActive ? '已登录：${session?.userNickname ?? 'B站账号'}' : '未登录B站';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            StatusPill(
+              label: label,
+              color: isActive ? const Color(0xFF16A34A) : AppTheme.muted,
+              icon: isActive
+                  ? Icons.check_circle_outline
+                  : Icons.account_circle_outlined,
+            ),
+            OutlinedButton.icon(
+              onPressed: onCreateQrSession,
+              icon: const Icon(Icons.qr_code_2),
+              label: const Text('重新扫码'),
+            ),
+          ],
+        ),
+        if (qrSession.isLoading) ...[
+          const SizedBox(height: 10),
+          const AppLoadingView(label: '正在生成扫码会话'),
+        ] else if (qrSession.hasError) ...[
+          const SizedBox(height: 10),
+          AppErrorView(
+            message: '扫码会话创建失败：${qrSession.error}',
+            onRetry: onCreateQrSession,
+          ),
+        ] else if (qrSession.valueOrNull != null) ...[
+          const SizedBox(height: 10),
+          _BilibiliQrSessionView(
+            qrSession: qrSession.valueOrNull!,
+            onPollQrSession: onPollQrSession,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _BilibiliQrSessionView extends StatelessWidget {
+  const _BilibiliQrSessionView({
+    required this.qrSession,
+    required this.onPollQrSession,
+  });
+
+  final BilibiliQrSessionModel qrSession;
+  final VoidCallback onPollQrSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final qrCodeUrl = qrSession.qrCodeUrl;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '扫码状态：${qrSession.status}',
+          style: const TextStyle(
+            color: AppTheme.muted,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (qrCodeUrl == null)
+          const Text(
+            '二维码链接暂不可用',
+            style: TextStyle(
+              color: AppTheme.muted,
+              fontWeight: FontWeight.w600,
+            ),
+          )
+        else ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              qrCodeUrl,
+              width: 132,
+              height: 132,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Text(
+                  '二维码链接：$qrCodeUrl',
+                  style: const TextStyle(
+                    color: AppTheme.brandBlue,
+                    fontWeight: FontWeight.w700,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: qrSession.isTerminal ? null : onPollQrSession,
+          icon: const Icon(Icons.sync),
+          label: const Text('刷新扫码状态'),
+        ),
+      ],
+    );
+  }
+}
+
+class _BilibiliPreviewCard extends StatelessWidget {
+  const _BilibiliPreviewCard({
+    required this.preview,
+    required this.selectedPartIds,
+    required this.onTogglePart,
+  });
+
+  final BilibiliPreviewModel preview;
+  final Set<String> selectedPartIds;
+  final void Function(String partId, bool selected) onTogglePart;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              preview.title,
+              style: const TextStyle(
+                color: AppTheme.ink,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${preview.totalParts} 个分 P · ${preview.sourceType}',
+              style: const TextStyle(
+                color: AppTheme.muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...preview.parts.map(
+              (part) => CheckboxListTile(
+                value: selectedPartIds.contains(part.partId),
+                contentPadding: EdgeInsets.zero,
+                title: Text(part.title),
+                subtitle: Text('P${part.pageNo} · ${part.displayDuration}'),
+                controlAffinity: ListTileControlAffinity.leading,
+                onChanged: (selected) => onTogglePart(
+                  part.partId,
+                  selected ?? false,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BilibiliRunStatusCard extends StatelessWidget {
+  const _BilibiliRunStatusCard({
+    required this.currentTask,
+    required this.currentRun,
+    required this.onRefreshStatus,
+  });
+
+  final AsyncValue<BilibiliImportTaskModel?> currentTask;
+  final AsyncValue<BilibiliImportRunModel?> currentRun;
+  final VoidCallback onRefreshStatus;
+
+  @override
+  Widget build(BuildContext context) {
+    if (currentRun.isLoading || currentTask.isLoading) {
+      return const AppLoadingView(label: '正在读取导入状态');
+    }
+    if (currentRun.hasError) {
+      return AppErrorView(
+        message: '导入状态暂不可用：${currentRun.error}',
+        onRetry: onRefreshStatus,
+      );
+    }
+    if (currentTask.hasError) {
+      return AppErrorView(
+        message: '导入任务创建失败：${currentTask.error}',
+        onRetry: onRefreshStatus,
+      );
+    }
+
+    final run = currentRun.valueOrNull;
+    final task = currentTask.valueOrNull;
+    if (run == null && task == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              '导入状态',
+              style: TextStyle(
+                color: AppTheme.ink,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (task != null) StatusPill(label: task.status),
+                if (run != null) StatusPill(label: run.status),
+                if (run?.recoverable == true)
+                  const StatusPill(
+                    label: '可重试',
+                    color: Color(0xFFF97316),
+                    icon: Icons.refresh,
+                  ),
+              ],
+            ),
+            if (run?.previewTitle != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                run!.previewTitle!,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+            if (run != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${run.stage} · ${run.progressPct}%',
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            if (run?.failureReason != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                run!.failureReason!,
+                style: const TextStyle(
+                  color: Color(0xFFB91C1C),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ],
         ),
       ),

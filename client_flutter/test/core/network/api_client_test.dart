@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
+import 'package:knowlink_client/shared/models/bilibili_import_models.dart';
 import 'package:knowlink_client/shared/models/confirm_recommendation_request.dart';
 import 'package:knowlink_client/shared/models/course_create_request.dart';
 import 'package:knowlink_client/shared/models/course_progress_models.dart';
@@ -190,6 +191,62 @@ void main() {
     expect(
         _headerValue(captured.headers, 'idempotency-key'), 'course-create-1');
     expect(captured.data, request.toJson());
+  });
+
+  test('course detail and switch-current methods use V2 paths', () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        final data = switch (options.path) {
+          '/api/v1/courses/recent' => {
+              'items': [_courseJson()],
+            },
+          '/api/v1/courses/101' => {
+              'course': _courseJson(),
+            },
+          '/api/v1/courses/current' => {
+              'course': _courseJson(),
+            },
+          '/api/v1/courses/101/switch-current' => {
+              'course': _courseJson(),
+            },
+          _ => throw StateError('Unexpected ${options.method} ${options.path}'),
+        };
+        return ResponseBody.fromString(
+          jsonEncode({'data': data}),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'v2-course-token',
+    );
+
+    final recentCourses = await client.fetchRecentCourses();
+    final detail = await client.fetchCourse('101');
+    final current = await client.fetchCurrentCourse();
+    final switched = await client.switchCurrentCourse('101');
+
+    expect(recentCourses.single.courseId, 101);
+    expect(detail.courseId, 101);
+    expect(current.courseId, 101);
+    expect(switched.courseId, 101);
+    expect(adapter.requests.map((request) => request.method), [
+      'GET',
+      'GET',
+      'GET',
+      'POST',
+    ]);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/courses/recent',
+      '/api/v1/courses/101',
+      '/api/v1/courses/current',
+      '/api/v1/courses/101/switch-current',
+    ]);
   });
 
   test('resource upload methods use frozen Week 2 paths', () async {
@@ -1095,6 +1152,227 @@ void main() {
       'lastPositionSec': 180,
     });
   });
+
+  test('Bilibili auth methods use V2 auth paths and parse safe DTOs', () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        final data = switch (options.path) {
+          '/api/v1/bilibili/auth/qr/sessions' => {
+              'sessionId': 'bili_qr_session_001',
+              'status': 'pending_scan',
+              'qrCodeUrl': 'https://passport.bilibili.com/qrcode-demo',
+              'expiresAt': '2026-05-18T12:15:00+00:00',
+            },
+          '/api/v1/bilibili/auth/qr/sessions/bili_qr_session_001' => {
+              'sessionId': 'bili_qr_session_001',
+              'status': 'confirmed',
+              'qrCodeUrl': 'https://passport.bilibili.com/qrcode-demo',
+              'expiresAt': '2026-05-18T12:15:00+00:00',
+            },
+          '/api/v1/bilibili/auth/session' when options.method == 'GET' => {
+              'loginStatus': 'active',
+              'userNickname': 'KnowLink Demo',
+              'expiresAt': '2026-05-18T14:00:00+00:00',
+            },
+          '/api/v1/bilibili/auth/session' when options.method == 'DELETE' => {
+              'deleted': true,
+            },
+          _ => throw StateError('Unexpected ${options.method} ${options.path}'),
+        };
+        return ResponseBody.fromString(
+          jsonEncode({'data': data}),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'v2-bilibili-token',
+    );
+
+    final qr = await client.createBilibiliQrSession();
+    final confirmed = await client.fetchBilibiliQrSession(qr.sessionId);
+    final auth = await client.fetchBilibiliAuthSession();
+    await client.deleteBilibiliAuthSession();
+
+    expect(qr.status, 'pending_scan');
+    expect(confirmed.isConfirmed, isTrue);
+    expect(auth.isActive, isTrue);
+    expect(adapter.requests.map((request) => request.method), [
+      'POST',
+      'GET',
+      'GET',
+      'DELETE',
+    ]);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/bilibili/auth/qr/sessions',
+      '/api/v1/bilibili/auth/qr/sessions/bili_qr_session_001',
+      '/api/v1/bilibili/auth/session',
+      '/api/v1/bilibili/auth/session',
+    ]);
+  });
+
+  test('Bilibili import methods use V2 paths, idempotency key, and payloads',
+      () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        final data = switch (options.path) {
+          '/api/v1/courses/101/resources/imports/bilibili/preview' => {
+              'previewId': 'bili_preview_9101',
+              'sourceUrl': 'https://www.bilibili.com/video/BV1xx411c7mD?p=2',
+              'sourceType': 'multi_p',
+              'title': '课程样例',
+              'coverUrl': 'https://i0.hdslb.com/bfs/archive/demo.jpg',
+              'totalParts': 1,
+              'parts': [
+                {
+                  'partId': 'cid-1001',
+                  'title': 'P1 导论',
+                  'durationSec': 600,
+                  'cid': 1001,
+                  'pageNo': 1,
+                  'selectedByDefault': true,
+                },
+              ],
+              'defaultSelectionMode': 'current_part',
+            },
+          '/api/v1/courses/101/resources/imports/bilibili'
+              when options.method == 'POST' =>
+            {
+              'taskId': 7201,
+              'status': 'queued',
+              'nextAction': 'poll',
+              'entity': {'type': 'bilibili_import_run', 'id': 9101},
+            },
+          '/api/v1/courses/101/resources/imports/bilibili'
+              when options.method == 'GET' =>
+            {
+              'items': [
+                _bilibiliRunJson(status: 'downloading', progressPct: 42),
+              ],
+            },
+          '/api/v1/bilibili-import-runs/9101/status' => _bilibiliRunJson(
+              status: 'merging',
+              progressPct: 70,
+            ),
+          '/api/v1/bilibili-import-runs/9101/cancel' => {
+              'taskId': 7201,
+              'status': 'canceled',
+              'nextAction': 'none',
+              'entity': {'type': 'bilibili_import_run', 'id': 9101},
+            },
+          _ => throw StateError('Unexpected ${options.method} ${options.path}'),
+        };
+        return ResponseBody.fromString(
+          jsonEncode({'data': data}),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'v2-bilibili-token',
+    );
+
+    final preview = await client.previewBilibiliImport(
+      courseId: '101',
+      sourceUrl: 'https://www.bilibili.com/video/BV1xx411c7mD?p=2',
+    );
+    final request = BilibiliImportCreateRequestModel(
+      previewId: preview.previewId,
+      sourceUrl: preview.sourceUrl,
+      selectionMode: 'selected_parts',
+      selectedPartIds: preview.defaultSelectedPartIds,
+    );
+    final task = await client.createBilibiliImport(
+      courseId: '101',
+      request: request,
+      idempotencyKey: 'bili-import-1',
+    );
+    final runs = await client.fetchBilibiliImportRuns('101');
+    final status = await client.fetchBilibiliImportRunStatus(9101);
+    final canceled = await client.cancelBilibiliImportRun(9101);
+
+    expect(preview.defaultSelectedPartIds, ['cid-1001']);
+    expect(task.importRunId, 9101);
+    expect(runs.items.single.status, 'downloading');
+    expect(status.progressPct, 70);
+    expect(canceled.status, 'canceled');
+    expect(adapter.requests.map((request) => request.method), [
+      'POST',
+      'POST',
+      'GET',
+      'GET',
+      'POST',
+    ]);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/courses/101/resources/imports/bilibili/preview',
+      '/api/v1/courses/101/resources/imports/bilibili',
+      '/api/v1/courses/101/resources/imports/bilibili',
+      '/api/v1/bilibili-import-runs/9101/status',
+      '/api/v1/bilibili-import-runs/9101/cancel',
+    ]);
+    expect(adapter.requests.first.data, {
+      'sourceUrl': 'https://www.bilibili.com/video/BV1xx411c7mD?p=2',
+    });
+    expect(adapter.requests[1].data, request.toJson());
+    expect(
+      _headerValue(adapter.requests[1].headers, 'idempotency-key'),
+      'bili-import-1',
+    );
+  });
+}
+
+Map<String, dynamic> _courseJson() {
+  return {
+    'courseId': 101,
+    'title': 'KnowLink 固定联调课',
+    'entryType': 'manual_import',
+    'catalogId': null,
+    'lifecycleStatus': 'learning_ready',
+    'pipelineStage': 'handout',
+    'pipelineStatus': 'succeeded',
+    'updatedAt': '2026-05-11T10:00:00+00:00',
+  };
+}
+
+Map<String, dynamic> _bilibiliRunJson({
+  required String status,
+  required int progressPct,
+}) {
+  return {
+    'importRunId': 9101,
+    'courseId': 101,
+    'sourceUrl': 'https://www.bilibili.com/video/BV1xx411c7mD?p=2',
+    'sourceType': 'multi_p',
+    'status': status,
+    'progressPct': progressPct,
+    'stage': status == 'merging' ? 'ffmpeg' : 'download',
+    'taskId': 7001,
+    'resourceIds': <int>[],
+    'preview': {
+      'title': '线性代数复习',
+      'parts': [
+        {
+          'partId': 'cid-1001',
+          'title': 'P1 行列式',
+          'durationSec': 1800,
+        },
+      ],
+    },
+    'errorCode': null,
+    'failureReason': null,
+    'recoverable': false,
+    'nextAction': 'poll',
+  };
 }
 
 String? _headerValue(Map<String, dynamic> headers, String key) {

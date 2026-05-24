@@ -41,6 +41,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         state: state,
         onRetry: () => ref.read(homeProvider.notifier).loadDashboard(),
         onResumeCourse: _resumeCourse,
+        onSwitchCourse: _switchCourse,
       ),
     );
   }
@@ -82,6 +83,26 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
     context.go('/courses/${course.courseId}/handout');
   }
+
+  Future<void> _switchCourse(CourseSummaryModel course) async {
+    final switched = await ref
+        .read(homeProvider.notifier)
+        .switchCurrentCourse(course.courseId);
+    if (!mounted || switched == null) {
+      if (mounted && ref.read(homeProvider).currentCourseSwitch.hasError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('切换当前课程失败')),
+        );
+      }
+      return;
+    }
+    ref
+        .read(courseFlowProvider.notifier)
+        .startCourse(switched.courseId.toString());
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('当前课程已切换')),
+    );
+  }
 }
 
 class _HomeBody extends StatelessWidget {
@@ -89,11 +110,13 @@ class _HomeBody extends StatelessWidget {
     required this.state,
     required this.onRetry,
     required this.onResumeCourse,
+    required this.onSwitchCourse,
   });
 
   final HomeState state;
   final VoidCallback onRetry;
   final Future<void> Function(CourseSummaryModel course) onResumeCourse;
+  final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
   Widget build(BuildContext context) {
@@ -115,12 +138,16 @@ class _HomeBody extends StatelessWidget {
             ? _HomeWideLayout(
                 dashboard: dashboard,
                 progressByCourseId: state.progressByCourseId,
+                isSwitchingCourse: state.currentCourseSwitch.isLoading,
                 onResumeCourse: onResumeCourse,
+                onSwitchCourse: onSwitchCourse,
               )
             : _HomeNarrowLayout(
                 dashboard: dashboard,
                 progressByCourseId: state.progressByCourseId,
+                isSwitchingCourse: state.currentCourseSwitch.isLoading,
                 onResumeCourse: onResumeCourse,
+                onSwitchCourse: onSwitchCourse,
               );
         return RefreshIndicator(
           onRefresh: () async => onRetry(),
@@ -138,12 +165,16 @@ class _HomeWideLayout extends StatelessWidget {
   const _HomeWideLayout({
     required this.dashboard,
     required this.progressByCourseId,
+    required this.isSwitchingCourse,
     required this.onResumeCourse,
+    required this.onSwitchCourse,
   });
 
   final HomeDashboardModel? dashboard;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
+  final bool isSwitchingCourse;
   final Future<void> Function(CourseSummaryModel course) onResumeCourse;
+  final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
   Widget build(BuildContext context) {
@@ -181,7 +212,9 @@ class _HomeWideLayout extends StatelessWidget {
               child: _RecentLearningCard(
                 recentCourses: dashboard?.recentCourses ?? const [],
                 progressByCourseId: progressByCourseId,
+                isSwitchingCourse: isSwitchingCourse,
                 onResumeCourse: onResumeCourse,
+                onSwitchCourse: onSwitchCourse,
               ),
             ),
             const SizedBox(width: 32),
@@ -217,12 +250,16 @@ class _HomeNarrowLayout extends StatelessWidget {
   const _HomeNarrowLayout({
     required this.dashboard,
     required this.progressByCourseId,
+    required this.isSwitchingCourse,
     required this.onResumeCourse,
+    required this.onSwitchCourse,
   });
 
   final HomeDashboardModel? dashboard;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
+  final bool isSwitchingCourse;
   final Future<void> Function(CourseSummaryModel course) onResumeCourse;
+  final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
   Widget build(BuildContext context) {
@@ -248,7 +285,9 @@ class _HomeNarrowLayout extends StatelessWidget {
         _RecentLearningCard(
           recentCourses: dashboard?.recentCourses ?? const [],
           progressByCourseId: progressByCourseId,
+          isSwitchingCourse: isSwitchingCourse,
           onResumeCourse: onResumeCourse,
+          onSwitchCourse: onSwitchCourse,
         ),
         const SizedBox(height: 16),
         _KnowledgeListCard(
@@ -345,12 +384,16 @@ class _RecentLearningCard extends StatelessWidget {
   const _RecentLearningCard({
     required this.recentCourses,
     required this.progressByCourseId,
+    required this.isSwitchingCourse,
     required this.onResumeCourse,
+    required this.onSwitchCourse,
   });
 
   final List<CourseSummaryModel> recentCourses;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
+  final bool isSwitchingCourse;
   final Future<void> Function(CourseSummaryModel course) onResumeCourse;
+  final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
   Widget build(BuildContext context) {
@@ -371,7 +414,9 @@ class _RecentLearningCard extends StatelessWidget {
               course: course,
               progress: progress,
               progressState: progressByCourseId[course.courseId],
+              isSwitching: isSwitchingCourse,
               onResume: () => onResumeCourse(course),
+              onSwitch: () => onSwitchCourse(course),
             ),
         ],
       ),
@@ -384,13 +429,17 @@ class _RecentLearningDetails extends StatelessWidget {
     required this.course,
     required this.progress,
     required this.progressState,
+    required this.isSwitching,
     required this.onResume,
+    required this.onSwitch,
   });
 
   final CourseSummaryModel course;
   final CourseProgressModel? progress;
   final AsyncValue<CourseProgressModel>? progressState;
+  final bool isSwitching;
   final VoidCallback onResume;
+  final VoidCallback onSwitch;
 
   @override
   Widget build(BuildContext context) {
@@ -453,6 +502,11 @@ class _RecentLearningDetails extends StatelessWidget {
               onPressed: onResume,
               icon: const Icon(Icons.play_arrow_rounded),
               label: const Text('继续学习'),
+            ),
+            OutlinedButton.icon(
+              onPressed: isSwitching ? null : onSwitch,
+              icon: const Icon(Icons.check_circle_outline),
+              label: Text(isSwitching ? '正在切换' : '设为当前课程'),
             ),
           ],
         ),

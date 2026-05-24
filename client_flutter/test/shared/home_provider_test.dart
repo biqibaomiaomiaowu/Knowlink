@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/shared/models/course_progress_models.dart';
+import 'package:knowlink_client/shared/models/course_summary.dart';
 import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 import 'package:knowlink_client/shared/providers/home_provider.dart';
@@ -102,11 +103,60 @@ void main() {
         state.progressByCourseId[101]?.valueOrNull?.lastHandoutBlockId, 4002);
     expect(state.progressSave.valueOrNull?.lastHandoutBlockId, 4002);
   });
+
+  test('switchCurrentCourse calls API and stores switched course', () async {
+    final fakeApiClient = _FakeHomeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    final subscription = container.listen(homeProvider, (_, __) {});
+    addTearDown(subscription.close);
+    addTearDown(container.dispose);
+
+    final course =
+        await container.read(homeProvider.notifier).switchCurrentCourse(101);
+
+    expect(course?.courseId, 101);
+    expect(fakeApiClient.switchedCourseIds, ['101']);
+    expect(
+      container.read(homeProvider).currentCourseSwitch.valueOrNull?.courseId,
+      101,
+    );
+  });
+
+  test('switchCurrentCourse ignores stale responses', () async {
+    final fakeApiClient = _SlowSwitchHomeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    final subscription = container.listen(homeProvider, (_, __) {});
+    addTearDown(subscription.close);
+    addTearDown(container.dispose);
+
+    final first =
+        container.read(homeProvider.notifier).switchCurrentCourse(101);
+    final second =
+        container.read(homeProvider.notifier).switchCurrentCourse(202);
+
+    fakeApiClient.secondSwitch.complete(fakeApiClient.course(202));
+    expect((await second)?.courseId, 202);
+    fakeApiClient.firstSwitch.complete(fakeApiClient.course(101));
+    expect(await first, isNull);
+
+    final state = container.read(homeProvider);
+    expect(fakeApiClient.switchedCourseIds, ['101', '202']);
+    expect(state.currentCourseSwitch.valueOrNull?.courseId, 202);
+  });
 }
 
 class _FakeHomeApiClient extends ApiClient {
   final progressCourseIds = <int>[];
   final savedProgress = <CourseProgressUpdateModel>[];
+  final switchedCourseIds = <String>[];
 
   @override
   Future<HomeDashboardModel> fetchHomeDashboard() async {
@@ -169,6 +219,21 @@ class _FakeHomeApiClient extends ApiClient {
     );
   }
 
+  @override
+  Future<CourseSummaryModel> switchCurrentCourse(String courseId) async {
+    switchedCourseIds.add(courseId);
+    return CourseSummaryModel.fromJson({
+      'courseId': int.parse(courseId),
+      'title': 'KnowLink 固定联调课',
+      'entryType': 'manual_import',
+      'catalogId': null,
+      'lifecycleStatus': 'learning_ready',
+      'pipelineStage': 'handout',
+      'pipelineStatus': 'succeeded',
+      'updatedAt': '2026-05-11T10:00:00+00:00',
+    });
+  }
+
   CourseProgressModel _progress({
     int? blockId = 4001,
     int? positionSec = 180,
@@ -191,6 +256,19 @@ class _FakeHomeApiClient extends ApiClient {
       positionSec: positionSec,
     );
   }
+
+  CourseSummaryModel course(int courseId) {
+    return CourseSummaryModel.fromJson({
+      'courseId': courseId,
+      'title': 'KnowLink 固定联调课',
+      'entryType': 'manual_import',
+      'catalogId': null,
+      'lifecycleStatus': 'learning_ready',
+      'pipelineStage': 'handout',
+      'pipelineStatus': 'succeeded',
+      'updatedAt': '2026-05-11T10:00:00+00:00',
+    });
+  }
 }
 
 class _SlowSaveHomeApiClient extends _FakeHomeApiClient {
@@ -209,5 +287,21 @@ class _SlowSaveHomeApiClient extends _FakeHomeApiClient {
       return firstSave.future;
     }
     return secondSave.future;
+  }
+}
+
+class _SlowSwitchHomeApiClient extends _FakeHomeApiClient {
+  final firstSwitch = Completer<CourseSummaryModel>();
+  final secondSwitch = Completer<CourseSummaryModel>();
+  var switchCalls = 0;
+
+  @override
+  Future<CourseSummaryModel> switchCurrentCourse(String courseId) {
+    switchedCourseIds.add(courseId);
+    switchCalls++;
+    if (switchCalls == 1) {
+      return firstSwitch.future;
+    }
+    return secondSwitch.future;
   }
 }
