@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
+import 'package:knowlink_client/shared/models/bilibili_import_models.dart';
 import 'package:knowlink_client/shared/models/course_create_request.dart';
 import 'package:knowlink_client/shared/models/course_import_state.dart';
 import 'package:knowlink_client/shared/models/course_summary.dart';
@@ -166,6 +167,22 @@ class _Week2FakeApiClient extends ApiClient {
   final List<SaveInquiryAnswersRequestModel> savedInquiryAnswers = [];
 
   var _pipelineIndex = 0;
+
+  @override
+  Future<BilibiliAuthSessionModel> fetchBilibiliAuthSession() async {
+    return const BilibiliAuthSessionModel(
+      loginStatus: 'none',
+      userNickname: null,
+      expiresAt: null,
+    );
+  }
+
+  @override
+  Future<BilibiliImportRunListModel> fetchBilibiliImportRuns(
+    String courseId,
+  ) async {
+    return const BilibiliImportRunListModel(items: []);
+  }
 
   @override
   Future<CourseSummaryModel> createCourse({
