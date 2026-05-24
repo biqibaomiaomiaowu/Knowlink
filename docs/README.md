@@ -17,6 +17,36 @@
 - [v2/phase-plan.md](./v2/phase-plan.md)：第二版阶段计划与负责人分工。
 - [v2/three-phase-design.md](./v2/three-phase-design.md)：第二版三阶段功能设计与技术方案背景。
 - [v2/phase1-cao-le-handoff.md](./v2/phase1-cao-le-handoff.md)：曹乐阶段一后端交接说明。
+- [v2/yang-caiyi-v2-backend-support-tasks.md](./v2/yang-caiyi-v2-backend-support-tasks.md)：杨彩艺 V2 后端辅助与联调任务总表。
+- [v2/yang-caiyi-api-overview.md](./v2/yang-caiyi-api-overview.md)：杨彩艺 V2 接口总览与联调说明。
+
+### V2 杨彩艺辅助文档
+
+| 主题 | 文档 |
+|---|---|
+| 任务总表 | [v2/yang-caiyi-v2-backend-support-tasks.md](./v2/yang-caiyi-v2-backend-support-tasks.md) |
+| V1 已冻结接口总表 | [v2/yang-caiyi-v1-frozen-api-overview.md](./v2/yang-caiyi-v1-frozen-api-overview.md) |
+| 核心状态枚举 | [v2/yang-caiyi-core-status-enums.md](./v2/yang-caiyi-core-status-enums.md) |
+| 推荐接口 DTO | [v2/yang-caiyi-recommendation-dto.md](./v2/yang-caiyi-recommendation-dto.md) |
+| 课程接口 DTO | [v2/yang-caiyi-course-api-dto.md](./v2/yang-caiyi-course-api-dto.md) |
+| 首页 dashboard DTO | [v2/yang-caiyi-home-dashboard-dto.md](./v2/yang-caiyi-home-dashboard-dto.md) |
+| 资源接口 DTO | [v2/yang-caiyi-resource-api-dto.md](./v2/yang-caiyi-resource-api-dto.md) |
+| 播放地址联调 | [v2/yang-caiyi-playback-url-integration.md](./v2/yang-caiyi-playback-url-integration.md) |
+| B站导入 DTO | [v2/yang-caiyi-bilibili-import-dto.md](./v2/yang-caiyi-bilibili-import-dto.md) |
+| B站导入联调记录 | [v2/yang-caiyi-bilibili-import-integration-template.md](./v2/yang-caiyi-bilibili-import-integration-template.md) |
+| 解析任务 DTO | [v2/yang-caiyi-parse-task-dto.md](./v2/yang-caiyi-parse-task-dto.md) |
+| 异步任务 retry DTO | [v2/yang-caiyi-async-task-retry-dto.md](./v2/yang-caiyi-async-task-retry-dto.md) |
+| 问询接口 DTO | [v2/yang-caiyi-inquiry-api-dto.md](./v2/yang-caiyi-inquiry-api-dto.md) |
+| 讲义接口 DTO | [v2/yang-caiyi-handout-api-dto.md](./v2/yang-caiyi-handout-api-dto.md) |
+| QA 接口 DTO | [v2/yang-caiyi-qa-api-dto.md](./v2/yang-caiyi-qa-api-dto.md) |
+| 测验接口 DTO | [v2/yang-caiyi-quiz-api-dto.md](./v2/yang-caiyi-quiz-api-dto.md) |
+| 复习接口 DTO | [v2/yang-caiyi-review-api-dto.md](./v2/yang-caiyi-review-api-dto.md) |
+| 最近学习位置 DTO | [v2/yang-caiyi-progress-api-dto.md](./v2/yang-caiyi-progress-api-dto.md) |
+| 课程 seed 测试数据 | [v2/yang-caiyi-course-seed-data.md](./v2/yang-caiyi-course-seed-data.md) |
+| 固定联调资料 manifest | [v2/yang-caiyi-demo-assets-manifest.md](./v2/yang-caiyi-demo-assets-manifest.md) |
+| Android 后端地址联调 | [v2/yang-caiyi-android-backend-connectivity.md](./v2/yang-caiyi-android-backend-connectivity.md) |
+| server 分层入口 | [v2/yang-caiyi-server-layer-map.md](./v2/yang-caiyi-server-layer-map.md) |
+| 查询字段对齐记录 | [v2/yang-caiyi-query-field-alignment.md](./v2/yang-caiyi-query-field-alignment.md) |
 
 ## V1 历史冻结文档
 
