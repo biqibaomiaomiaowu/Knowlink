@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/home/home_page.dart';
 import 'package:knowlink_client/shared/models/course_progress_models.dart';
+import 'package:knowlink_client/shared/models/course_summary.dart';
 import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
 import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
@@ -104,6 +107,98 @@ void main() {
     expect(container.read(playerStateProvider).positionSec, 0);
   });
 
+  testWidgets('recent learning can switch current course', (tester) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _HomePageFakeApiClient(switchCourseId: 202);
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('设为当前课程'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.switchedCourseIds, ['101']);
+    expect(container.read(courseFlowProvider).courseId, '202');
+    expect(find.text('当前课程已切换'), findsOneWidget);
+  });
+
+  testWidgets('recent learning disables switch button while switching',
+      (tester) async {
+    _useTestSurface(tester);
+    final switchCompleter = Completer<CourseSummaryModel>();
+    final fakeApiClient = _HomePageFakeApiClient(
+      switchCompleter: switchCompleter,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('设为当前课程'));
+    await tester.pump();
+
+    final switchingButton = tester.widget<OutlinedButton>(find.widgetWithText(
+      OutlinedButton,
+      '正在切换',
+    ));
+    expect(switchingButton.onPressed, isNull);
+
+    switchCompleter.complete(_course(101));
+    await tester.pumpAndSettle();
+
+    expect(find.text('设为当前课程'), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '101');
+  });
+
+  testWidgets('recent learning switch failure shows snack bar', (tester) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _HomePageFakeApiClient(
+      switchError: StateError('backend unavailable'),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('设为当前课程'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.switchedCourseIds, ['101']);
+    expect(find.textContaining('切换当前课程失败'), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, isNull);
+  });
+
   testWidgets('home page renders empty dashboard states on mobile', (
     tester,
   ) async {
@@ -141,11 +236,18 @@ class _HomePageFakeApiClient extends ApiClient {
     this.empty = false,
     this.progressBlockId = 4001,
     this.progressPositionSec = 180,
+    this.switchCourseId,
+    this.switchCompleter,
+    this.switchError,
   });
 
   final bool empty;
   final int? progressBlockId;
   final int? progressPositionSec;
+  final int? switchCourseId;
+  final Completer<CourseSummaryModel>? switchCompleter;
+  final Object? switchError;
+  final switchedCourseIds = <String>[];
 
   @override
   Future<HomeDashboardModel> fetchHomeDashboard() async {
@@ -209,4 +311,31 @@ class _HomePageFakeApiClient extends ApiClient {
       'lastActivityAt': '2026-05-11T10:00:00+00:00',
     });
   }
+
+  @override
+  Future<CourseSummaryModel> switchCurrentCourse(String courseId) async {
+    switchedCourseIds.add(courseId);
+    final error = switchError;
+    if (error != null) {
+      throw error;
+    }
+    final completer = switchCompleter;
+    if (completer != null) {
+      return completer.future;
+    }
+    return _course(switchCourseId ?? int.parse(courseId));
+  }
+}
+
+CourseSummaryModel _course(int courseId) {
+  return CourseSummaryModel.fromJson({
+    'courseId': courseId,
+    'title': 'KnowLink 固定联调课',
+    'entryType': 'manual_import',
+    'catalogId': null,
+    'lifecycleStatus': 'learning_ready',
+    'pipelineStage': 'handout',
+    'pipelineStatus': 'succeeded',
+    'updatedAt': '2026-05-11T10:00:00+00:00',
+  });
 }
