@@ -29,12 +29,68 @@ final bilibiliImportIdempotencyStoreProvider =
 class BilibiliImportController
     extends AutoDisposeNotifier<BilibiliImportState> {
   String? _lastCreateFingerprint;
+  String? _activeCourseId;
   var _previewRequestId = 0;
+  var _runRequestId = 0;
+  var _pollRequestId = 0;
+  var _taskRequestId = 0;
+  var _courseStateResetPending = false;
+  var _isDisposed = false;
 
   @override
-  BilibiliImportState build() => const BilibiliImportState();
+  BilibiliImportState build() {
+    _isDisposed = false;
+    ref.onDispose(() {
+      _isDisposed = true;
+    });
+    return const BilibiliImportState();
+  }
+
+  void activateCourse(String courseId, {bool clearState = true}) {
+    if (_activeCourseId == courseId) {
+      if (clearState) {
+        _clearCourseStateIfPending();
+      }
+      return;
+    }
+
+    _activeCourseId = courseId;
+    _lastCreateFingerprint = null;
+    _previewRequestId++;
+    _runRequestId++;
+    _pollRequestId++;
+    _taskRequestId++;
+    _courseStateResetPending = !clearState;
+    if (!clearState || _isDisposed) {
+      return;
+    }
+    _clearCourseState();
+  }
+
+  void _clearCourseStateIfPending() {
+    if (!_courseStateResetPending || _isDisposed) {
+      return;
+    }
+    _clearCourseState();
+  }
+
+  void _clearCourseState() {
+    _courseStateResetPending = false;
+    state = state.copyWith(
+      preview: const AsyncData(null),
+      selectedPartIds: const {},
+      currentTask: const AsyncData(null),
+      currentRun: const AsyncData(null),
+      runList: const AsyncData(null),
+      isCanceling: false,
+      isPollingRun: false,
+      clearLastIdempotencyKey: true,
+    );
+  }
 
   Future<void> loadInitialState(String courseId) async {
+    activateCourse(courseId);
+    final runRequestId = ++_runRequestId;
     final apiClient = ref.read(apiClientProvider);
     state = state.copyWith(
       authSession: const AsyncLoading(),
@@ -44,8 +100,14 @@ class BilibiliImportController
 
     try {
       final authSession = await apiClient.fetchBilibiliAuthSession();
+      if (_isDisposed) {
+        return;
+      }
       state = state.copyWith(authSession: AsyncData(authSession));
     } catch (error, stackTrace) {
+      if (_isDisposed) {
+        return;
+      }
       state = state.copyWith(
         authSession: AsyncError(error, stackTrace),
       );
@@ -53,13 +115,18 @@ class BilibiliImportController
 
     try {
       final runList = await apiClient.fetchBilibiliImportRuns(courseId);
+      if (!_shouldApplyRunRequest(runRequestId, courseId: courseId)) {
+        return;
+      }
+      final currentRun = _selectCurrentRun(runList.items);
       state = state.copyWith(
         runList: AsyncData(runList),
-        currentRun: AsyncData(
-          runList.items.isEmpty ? null : runList.items.first,
-        ),
+        currentRun: AsyncData(currentRun),
       );
     } catch (error, stackTrace) {
+      if (!_shouldApplyRunRequest(runRequestId, courseId: courseId)) {
+        return;
+      }
       state = state.copyWith(
         runList: AsyncError(error, stackTrace),
         currentRun: AsyncError(error, stackTrace),
@@ -135,7 +202,7 @@ class BilibiliImportController
   }
 
   Future<void> preview(String courseId) async {
-    if (!state.canPreview) {
+    if (!_ensureActiveCourse(courseId) || !state.canPreview) {
       return;
     }
 
@@ -195,6 +262,9 @@ class BilibiliImportController
   }
 
   Future<void> createImport(String courseId) async {
+    if (!_ensureActiveCourse(courseId)) {
+      return;
+    }
     final preview = state.preview.valueOrNull;
     if (!state.canCreateImport || preview == null) {
       return;
@@ -219,6 +289,7 @@ class BilibiliImportController
       courseId: courseId,
       fingerprint: fingerprint,
     );
+    final taskRequestId = ++_taskRequestId;
 
     state = state.copyWith(
       currentTask: const AsyncLoading(),
@@ -232,11 +303,17 @@ class BilibiliImportController
             request: request,
             idempotencyKey: idempotencyKey,
           );
+      if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+        return;
+      }
       state = state.copyWith(
         currentTask: AsyncData(task),
         lastIdempotencyKey: idempotencyKey,
       );
     } catch (error, stackTrace) {
+      if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+        return;
+      }
       state = state.copyWith(
         currentTask: AsyncError(error, stackTrace),
         lastIdempotencyKey: idempotencyKey,
@@ -246,21 +323,41 @@ class BilibiliImportController
 
     final importRunId = task.importRunId;
     if (importRunId != null) {
-      await refreshCurrentRun(importRunId);
+      await refreshCurrentRun(importRunId, expectedCourseId: courseId);
     }
   }
 
-  Future<void> refreshCurrentRun(int importRunId) async {
+  Future<BilibiliImportRunModel?> refreshCurrentRun(
+    int importRunId, {
+    String? expectedCourseId,
+  }) async {
+    final runRequestId = ++_runRequestId;
+    if (expectedCourseId != null && !_isActiveCourse(expectedCourseId)) {
+      return null;
+    }
     state = state.copyWith(currentRun: const AsyncLoading());
     try {
       final currentRun = await ref
           .read(apiClientProvider)
           .fetchBilibiliImportRunStatus(importRunId);
+      if (!_shouldApplyRunRequest(
+        runRequestId,
+        courseId: expectedCourseId ?? currentRun.courseId.toString(),
+      )) {
+        return null;
+      }
       state = state.copyWith(
         currentRun: AsyncData(currentRun),
         runList: AsyncData(_replaceRun(state.runList.valueOrNull, currentRun)),
       );
+      return currentRun;
     } catch (error, stackTrace) {
+      if (!_shouldApplyRunRequest(
+        runRequestId,
+        courseId: expectedCourseId,
+      )) {
+        return null;
+      }
       state = state.copyWith(currentRun: AsyncError(error, stackTrace));
       rethrow;
     }
@@ -268,9 +365,15 @@ class BilibiliImportController
 
   Future<void> cancelCurrentRun() async {
     final currentRun = state.currentRun.valueOrNull;
-    if (currentRun == null || !currentRun.canCancel || state.isCanceling) {
+    final courseId = currentRun?.courseId.toString();
+    if (currentRun == null ||
+        courseId == null ||
+        !_isActiveCourse(courseId) ||
+        !currentRun.canCancel ||
+        state.isCanceling) {
       return;
     }
+    final taskRequestId = ++_taskRequestId;
     final previousRun = state.currentRun;
     final previousRunList = state.runList;
 
@@ -282,13 +385,19 @@ class BilibiliImportController
       final task = await ref
           .read(apiClientProvider)
           .cancelBilibiliImportRun(currentRun.importRunId);
+      if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+        return;
+      }
       state = state.copyWith(
         currentTask: AsyncData(task),
       );
       final importRunId = task.importRunId ?? currentRun.importRunId;
       try {
-        await refreshCurrentRun(importRunId);
+        await refreshCurrentRun(importRunId, expectedCourseId: courseId);
       } catch (_) {
+        if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+          return;
+        }
         state = state.copyWith(
           currentRun: previousRun,
           runList: previousRunList,
@@ -296,8 +405,14 @@ class BilibiliImportController
         );
         rethrow;
       }
+      if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+        return;
+      }
       state = state.copyWith(isCanceling: false);
     } catch (error, stackTrace) {
+      if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+        return;
+      }
       state = state.copyWith(
         currentTask: state.currentTask.valueOrNull == null
             ? AsyncError(error, stackTrace)
@@ -305,6 +420,73 @@ class BilibiliImportController
         isCanceling: false,
       );
       rethrow;
+    }
+  }
+
+  Future<void> retryCurrentRun() async {
+    final currentRun = state.currentRun.valueOrNull;
+    final courseId = currentRun?.courseId.toString();
+    final taskId = currentRun?.taskId;
+    if (currentRun == null ||
+        courseId == null ||
+        !_isActiveCourse(courseId) ||
+        !currentRun.canRetry ||
+        taskId == null) {
+      return;
+    }
+    final taskRequestId = ++_taskRequestId;
+
+    state = state.copyWith(currentTask: const AsyncLoading());
+    try {
+      final task = await ref.read(apiClientProvider).retryAsyncTask(taskId);
+      if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+        return;
+      }
+      state = state.copyWith(currentTask: AsyncData(task));
+      final importRunId = task.importRunId ?? currentRun.importRunId;
+      await refreshCurrentRun(importRunId, expectedCourseId: courseId);
+    } catch (error, stackTrace) {
+      if (!_shouldApplyTaskRequest(taskRequestId, courseId)) {
+        return;
+      }
+      state = state.copyWith(currentTask: AsyncError(error, stackTrace));
+      rethrow;
+    }
+  }
+
+  Future<BilibiliImportRunModel?> pollCurrentRunUntilTerminal(
+    int importRunId, {
+    Duration interval = const Duration(seconds: 2),
+    int maxAttempts = 20,
+  }) async {
+    final pollRequestId = ++_pollRequestId;
+    state = state.copyWith(isPollingRun: true);
+    try {
+      BilibiliImportRunModel? latest;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        if (!_shouldApplyPoll(pollRequestId)) {
+          return latest;
+        }
+        if (attempt > 0 && interval > Duration.zero) {
+          await Future<void>.delayed(interval);
+          if (!_shouldApplyPoll(pollRequestId)) {
+            return latest;
+          }
+        }
+        latest = await refreshCurrentRun(importRunId);
+        if (!_shouldApplyPoll(pollRequestId)) {
+          return latest;
+        }
+        latest ??= state.currentRun.valueOrNull;
+        if (latest?.isTerminal == true) {
+          return latest;
+        }
+      }
+      return latest;
+    } finally {
+      if (_shouldApplyPoll(pollRequestId)) {
+        state = state.copyWith(isPollingRun: false);
+      }
     }
   }
 
@@ -320,8 +502,34 @@ class BilibiliImportController
     required int requestId,
     required String sourceUrl,
   }) {
-    return requestId == _previewRequestId &&
+    return !_isDisposed &&
+        requestId == _previewRequestId &&
         sourceUrl == state.sourceUrl.trim();
+  }
+
+  bool _shouldApplyRunRequest(int requestId, {String? courseId}) {
+    return !_isDisposed &&
+        requestId == _runRequestId &&
+        (courseId == null || _isActiveCourse(courseId));
+  }
+
+  bool _shouldApplyPoll(int requestId) {
+    return !_isDisposed && requestId == _pollRequestId;
+  }
+
+  bool _shouldApplyTaskRequest(int requestId, String courseId) {
+    return !_isDisposed &&
+        requestId == _taskRequestId &&
+        _isActiveCourse(courseId);
+  }
+
+  bool _ensureActiveCourse(String courseId) {
+    _activeCourseId ??= courseId;
+    return _isActiveCourse(courseId);
+  }
+
+  bool _isActiveCourse(String courseId) {
+    return _activeCourseId == null || _activeCourseId == courseId;
   }
 
   String _selectionModeFor({
@@ -336,12 +544,28 @@ class BilibiliImportController
     }
 
     final defaultSet = preview.defaultSelectedPartIds.toSet();
-    if (selectedSet.length == defaultSet.length &&
-        selectedSet.containsAll(defaultSet)) {
-      return 'current_part';
+    final isDefaultSelection = selectedSet.length == defaultSet.length &&
+        selectedSet.containsAll(defaultSet);
+    if (isDefaultSelection &&
+        {
+          'current_part',
+          'selected_parts',
+        }.contains(preview.defaultSelectionMode)) {
+      return preview.defaultSelectionMode;
     }
 
     return 'selected_parts';
+  }
+
+  BilibiliImportRunModel? _selectCurrentRun(
+    List<BilibiliImportRunModel> runs,
+  ) {
+    for (final run in runs) {
+      if (run.canCancel) {
+        return run;
+      }
+    }
+    return runs.isEmpty ? null : runs.first;
   }
 
   String _createFingerprint({

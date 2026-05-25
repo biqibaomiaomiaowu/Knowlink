@@ -651,4 +651,13 @@ class ApiClient {
     final data = response.data?['data'] as Map<String, dynamic>;
     return BilibiliImportTaskModel.fromJson(data);
   }
+
+  Future<BilibiliImportTaskModel> retryAsyncTask(int taskId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/async-tasks/$taskId/retry',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliImportTaskModel.fromJson(data);
+  }
 }
