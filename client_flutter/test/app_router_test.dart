@@ -12,6 +12,7 @@ import 'package:knowlink_client/features/parse_progress/parse_progress_page.dart
 import 'package:knowlink_client/features/qa/qa_page.dart';
 import 'package:knowlink_client/features/quiz/quiz_page.dart';
 import 'package:knowlink_client/features/review/review_page.dart';
+import 'package:knowlink_client/shared/models/bilibili_import_models.dart';
 import 'package:knowlink_client/shared/models/course_progress_models.dart';
 import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
@@ -222,6 +223,22 @@ void _useTestSurface(WidgetTester tester, Size size) {
 }
 
 class _RouterFakeApiClient extends ApiClient {
+  @override
+  Future<BilibiliAuthSessionModel> fetchBilibiliAuthSession() async {
+    return const BilibiliAuthSessionModel(
+      loginStatus: 'none',
+      userNickname: null,
+      expiresAt: null,
+    );
+  }
+
+  @override
+  Future<BilibiliImportRunListModel> fetchBilibiliImportRuns(
+    String courseId,
+  ) async {
+    return const BilibiliImportRunListModel(items: []);
+  }
+
   @override
   Future<List<CourseResourceModel>> fetchCourseResources(
       String courseId) async {

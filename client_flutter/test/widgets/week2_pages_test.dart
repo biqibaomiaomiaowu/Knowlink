@@ -5,6 +5,7 @@ import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/course_import/course_import_page.dart';
 import 'package:knowlink_client/features/inquiry/inquiry_page.dart';
 import 'package:knowlink_client/features/parse_progress/parse_progress_page.dart';
+import 'package:knowlink_client/shared/models/bilibili_import_models.dart';
 import 'package:knowlink_client/shared/models/course_create_request.dart';
 import 'package:knowlink_client/shared/models/course_summary.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
@@ -142,6 +143,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('分钟'), findsOneWidget);
+
     final saveButton = find.widgetWithText(FilledButton, '保存问询答案');
     await tester.ensureVisible(saveButton);
     await tester.tap(saveButton);
@@ -177,6 +180,22 @@ class _Week2PageFakeApiClient extends ApiClient {
   int saveInquiryCalls = 0;
   final List<String> fetchedResourceCourseIds = [];
   final List<CourseResourceModel> resources;
+
+  @override
+  Future<BilibiliAuthSessionModel> fetchBilibiliAuthSession() async {
+    return const BilibiliAuthSessionModel(
+      loginStatus: 'none',
+      userNickname: null,
+      expiresAt: null,
+    );
+  }
+
+  @override
+  Future<BilibiliImportRunListModel> fetchBilibiliImportRuns(
+    String courseId,
+  ) async {
+    return const BilibiliImportRunListModel(items: []);
+  }
 
   @override
   Future<CourseSummaryModel> createCourse({

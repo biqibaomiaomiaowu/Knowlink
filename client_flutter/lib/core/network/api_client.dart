@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../../shared/models/bilibili_import_models.dart';
 import '../../shared/models/confirm_recommendation_request.dart';
 import '../../shared/models/confirm_recommendation_result.dart';
 import '../../shared/models/course_create_request.dart';
@@ -98,6 +99,55 @@ class ApiClient {
           'Idempotency-Key': idempotencyKey,
         },
       ),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseSummaryModel.fromJson(
+      Map<String, dynamic>.from(data['course'] as Map),
+    );
+  }
+
+  Future<List<CourseSummaryModel>> fetchRecentCourses() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/recent',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    final items = data['items'] as List<dynamic>;
+    return items
+        .map(
+          (item) => CourseSummaryModel.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<CourseSummaryModel> fetchCourse(String courseId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseSummaryModel.fromJson(
+      Map<String, dynamic>.from(data['course'] as Map),
+    );
+  }
+
+  Future<CourseSummaryModel> fetchCurrentCourse() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/current',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseSummaryModel.fromJson(
+      Map<String, dynamic>.from(data['course'] as Map),
+    );
+  }
+
+  Future<CourseSummaryModel> switchCurrentCourse(String courseId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/switch-current',
     );
 
     final data = response.data?['data'] as Map<String, dynamic>;
@@ -498,5 +548,107 @@ class ApiClient {
 
     final data = response.data?['data'] as Map<String, dynamic>;
     return CourseProgressModel.fromJson(data);
+  }
+
+  Future<BilibiliQrSessionModel> createBilibiliQrSession() async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/bilibili/auth/qr/sessions',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliQrSessionModel.fromJson(data);
+  }
+
+  Future<BilibiliQrSessionModel> fetchBilibiliQrSession(
+    String sessionId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/bilibili/auth/qr/sessions/$sessionId',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliQrSessionModel.fromJson(data);
+  }
+
+  Future<BilibiliAuthSessionModel> fetchBilibiliAuthSession() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/bilibili/auth/session',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliAuthSessionModel.fromJson(data);
+  }
+
+  Future<void> deleteBilibiliAuthSession() async {
+    await _dio.delete<Map<String, dynamic>>(
+      '/api/v1/bilibili/auth/session',
+    );
+  }
+
+  Future<BilibiliPreviewModel> previewBilibiliImport({
+    required String courseId,
+    required String sourceUrl,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/resources/imports/bilibili/preview',
+      data: {
+        'sourceUrl': sourceUrl,
+      },
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliPreviewModel.fromJson(data);
+  }
+
+  Future<BilibiliImportTaskModel> createBilibiliImport({
+    required String courseId,
+    required BilibiliImportCreateRequestModel request,
+    required String idempotencyKey,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/resources/imports/bilibili',
+      data: request.toJson(),
+      options: Options(
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      ),
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliImportTaskModel.fromJson(data);
+  }
+
+  Future<BilibiliImportRunListModel> fetchBilibiliImportRuns(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/resources/imports/bilibili',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliImportRunListModel.fromJson(data);
+  }
+
+  Future<BilibiliImportRunModel> fetchBilibiliImportRunStatus(
+    int importRunId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/bilibili-import-runs/$importRunId/status',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliImportRunModel.fromJson(data);
+  }
+
+  Future<BilibiliImportTaskModel> cancelBilibiliImportRun(
+    int importRunId,
+  ) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/bilibili-import-runs/$importRunId/cancel',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return BilibiliImportTaskModel.fromJson(data);
   }
 }

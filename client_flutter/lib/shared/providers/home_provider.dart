@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/course_progress_models.dart';
+import '../models/course_summary.dart';
 import '../models/home_state.dart';
 import 'course_recommend_provider.dart';
 
@@ -10,6 +11,7 @@ class HomeController extends AutoDisposeNotifier<HomeState> {
   var _isDisposed = false;
   var _latestDashboardRequestId = 0;
   var _latestProgressSaveRequestId = 0;
+  var _latestCurrentCourseSwitchRequestId = 0;
   final Map<int, int> _latestProgressRequestIds = <int, int>{};
   final Map<String, int> _latestProgressSaveRequestIds = <String, int>{};
 
@@ -126,6 +128,32 @@ class HomeController extends AutoDisposeNotifier<HomeState> {
     }
   }
 
+  Future<CourseSummaryModel?> switchCurrentCourse(int courseId) async {
+    final requestId = ++_latestCurrentCourseSwitchRequestId;
+    state = state.copyWith(
+      currentCourseSwitch: const AsyncLoading<CourseSummaryModel?>(),
+    );
+
+    try {
+      final course = await ref
+          .read(apiClientProvider)
+          .switchCurrentCourse(courseId.toString());
+      if (!_shouldApplyCurrentCourseSwitch(requestId)) {
+        return null;
+      }
+      state = state.copyWith(currentCourseSwitch: AsyncData(course));
+      return course;
+    } catch (error, stackTrace) {
+      if (!_shouldApplyCurrentCourseSwitch(requestId)) {
+        return null;
+      }
+      state = state.copyWith(
+        currentCourseSwitch: AsyncError(error, stackTrace),
+      );
+      return null;
+    }
+  }
+
   bool _shouldApplyDashboard(int requestId) {
     return !_isDisposed && requestId == _latestDashboardRequestId;
   }
@@ -140,6 +168,10 @@ class HomeController extends AutoDisposeNotifier<HomeState> {
 
   bool _shouldApplyLatestProgressSave(int requestId) {
     return !_isDisposed && requestId == _latestProgressSaveRequestId;
+  }
+
+  bool _shouldApplyCurrentCourseSwitch(int requestId) {
+    return !_isDisposed && requestId == _latestCurrentCourseSwitchRequestId;
   }
 }
 

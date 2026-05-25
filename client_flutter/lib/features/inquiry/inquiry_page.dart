@@ -333,12 +333,14 @@ class _QuestionField extends StatelessWidget {
     }
 
     if (question.type == 'number') {
+      final suffixText = question.key == 'time_budget_minutes' ? '分钟' : null;
       return _QuestionShell(
         icon: _iconForQuestion(question.key),
         label: question.label,
         child: TextField(
           decoration: InputDecoration(
             hintText: '请选择或输入数值',
+            suffixText: suffixText,
             errorText: errorText,
             border: const OutlineInputBorder(),
           ),
