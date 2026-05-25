@@ -34,7 +34,9 @@
 | 播放地址联调 | [v2/yang-caiyi-playback-url-integration.md](./v2/yang-caiyi-playback-url-integration.md) |
 | B站导入 DTO | [v2/yang-caiyi-bilibili-import-dto.md](./v2/yang-caiyi-bilibili-import-dto.md) |
 | B站导入联调记录 | [v2/yang-caiyi-bilibili-import-integration-template.md](./v2/yang-caiyi-bilibili-import-integration-template.md) |
+| B站导入实际联调记录 | [v2/test-bilibili.md](./v2/test-bilibili.md) |
 | 解析任务 DTO | [v2/yang-caiyi-parse-task-dto.md](./v2/yang-caiyi-parse-task-dto.md) |
+| 解析与讲义实际联调记录 | [v2/test-handout.md](./v2/test-handout.md) |
 | 异步任务 retry DTO | [v2/yang-caiyi-async-task-retry-dto.md](./v2/yang-caiyi-async-task-retry-dto.md) |
 | 问询接口 DTO | [v2/yang-caiyi-inquiry-api-dto.md](./v2/yang-caiyi-inquiry-api-dto.md) |
 | 讲义接口 DTO | [v2/yang-caiyi-handout-api-dto.md](./v2/yang-caiyi-handout-api-dto.md) |
@@ -43,6 +45,7 @@
 | 复习接口 DTO | [v2/yang-caiyi-review-api-dto.md](./v2/yang-caiyi-review-api-dto.md) |
 | 最近学习位置 DTO | [v2/yang-caiyi-progress-api-dto.md](./v2/yang-caiyi-progress-api-dto.md) |
 | 课程 seed 测试数据 | [v2/yang-caiyi-course-seed-data.md](./v2/yang-caiyi-course-seed-data.md) |
+| 课程与资源实际联调记录 | [v2/test-course.md](./v2/test-course.md) |
 | 固定联调资料 manifest | [v2/yang-caiyi-demo-assets-manifest.md](./v2/yang-caiyi-demo-assets-manifest.md) |
 | Android 后端地址联调 | [v2/yang-caiyi-android-backend-connectivity.md](./v2/yang-caiyi-android-backend-connectivity.md) |
 | server 分层入口 | [v2/yang-caiyi-server-layer-map.md](./v2/yang-caiyi-server-layer-map.md) |

@@ -4,6 +4,8 @@
 
 用途：整理解析启动、解析运行状态、课程 pipeline status 和解析摘要接口 DTO，供杨彩艺做状态查询接口说明、联调记录和验收材料。本文只整理 API 请求/响应形态，不改解析策略、worker、AI 或任务队列逻辑。
 
+实际联调记录见 [test-handout.md](./test-handout.md)。该记录包含 PDF 资源解析下的 `partial_success`、`embedding.not_configured`、pipeline steps 和 retry 不可重试错误返回。
+
 ## 接口清单
 
 | 接口 | 方法 | 路径 | 用途 | 幂等要求 |
@@ -96,6 +98,14 @@
 | `outlineItemCount` | number | `3` | 目录项数量 |
 
 说明：Flutter 主轮询入口仍然是 `GET /api/v1/courses/{courseId}/pipeline-status`。
+
+实际联调差异记录：
+
+| Field | Actual | Handling |
+|---|---|---|
+| `latestParseRunId` | `1` | 实际接口返回存在，后续可由后端 owner 确认是否补进 contract |
+| `segmentCount` | parse summary 返回 `0`，parse run summary 返回 `11` | 记录为统计口径待确认，不由杨彩艺修改解析逻辑 |
+| `handoutOutline` | PDF-only pipeline 返回中未出现 | 记录为场景差异，待后端 owner 判断是否允许省略 |
 
 ## 联调记录模板
 

@@ -2,6 +2,8 @@
 
 本文整理任务 15：讲义查询接口 DTO 文档。只整理 latest、outline、blocks、block status、current-block 和 jump-target 字段，不改讲义生成逻辑。
 
+实际联调记录见 [test-handout.md](./test-handout.md)。截至 2026-05-25，已记录 PDF 资源解析和 pipeline 状态；讲义 outline、blocks、jump-target 和 playback 仍待视频资源或讲义生成后补测。
+
 ## Source
 
 | Source | Purpose |

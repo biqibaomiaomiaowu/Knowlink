@@ -4,6 +4,8 @@
 
 用途：整理课程创建、最近课程、课程详情、当前课程和课程切换接口的 DTO 字段，供杨彩艺做接口文档、联调记录和测试数据整理。本文只整理已有 contract 字段，不新增多课程复杂管理字段。
 
+实际联调记录见 [test-course.md](./test-course.md)。该记录包含课程创建、最近课程、当前课程、课程详情、课程切换、首页 dashboard、资源上传和资源删除的实际返回摘要。
+
 ## 接口清单
 
 | 接口 | 方法 | 路径 | 用途 | 幂等要求 |
@@ -132,7 +134,30 @@
 | `pipelineStage` |  |
 | `pipelineStatus` |  |
 | `updatedAt` |  |
+| 额外返回字段 | `activeParseRunId=null`, `activeHandoutVersionId=null`，DTO 未定义，待确认 |
 | 证据 | 响应 JSON、截图或录屏 |
+
+## 实际返回字段差异记录
+
+### POST /api/v1/courses
+
+联调过程中发现实际 response 的 `data.course` 中额外返回以下字段：
+
+| 字段 | 实际值 | DTO 是否已定义 | 处理结论 | 备注 |
+|---|---|---|---|---|
+| `activeParseRunId` | null | 否 | 待确认 | 实际接口返回存在，但当前课程摘要 DTO 未定义 |
+| `activeHandoutVersionId` | null | 否 | 待确认 | 实际接口返回存在，但当前课程摘要 DTO 未定义 |
+
+说明：  
+当前 DTO 文档来源于 `docs/contracts/api-contract.md`，本文只整理已有 contract 字段，不新增复杂管理字段。因此上述字段暂不直接并入课程摘要 DTO，需与后端确认是否属于课程接口正式返回字段。
+
+联调修正：
+
+| 原始记录 | 修正口径 |
+|---|---|
+| `course_id`、`updated_at` | API 对外使用 camelCase：`courseId`、`updatedAt` |
+| `status=active/archived` | 当前课程状态拆为 `lifecycleStatus`、`pipelineStage`、`pipelineStatus` |
+| `status=running` | 属于 pipeline / async task 语义，不应写入课程摘要 DTO |
 
 ## 杨彩艺边界
 
