@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/course_detail/course_detail_page.dart';
 import '../../features/course_import/course_import_page.dart';
 import '../../features/course_recommend/course_recommend_page.dart';
 import '../../features/handout/handout_page.dart';
@@ -34,6 +35,16 @@ class AppRouter {
         GoRoute(
           path: '/recommend',
           builder: (context, state) => const CourseRecommendPage(),
+        ),
+        GoRoute(
+          path: '/courses/:courseId',
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: CourseDetailPage(courseId: courseId),
+            );
+          },
         ),
         GoRoute(
           path: '/courses/:courseId/progress',
