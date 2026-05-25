@@ -168,6 +168,144 @@ void main() {
     );
   });
 
+  testWidgets('recommend card shows reason materials and next action label',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final fetchCompleter = Completer<List<RecommendationCardModel>>();
+    final fakeApiClient = _FakeApiClient(fetchCompleter: fetchCompleter);
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: CourseRecommendPage()),
+      ),
+    );
+
+    await tester.tap(find.byType(FilledButton));
+    await tester.pump();
+    fetchCompleter.complete([
+      _recommendationCard(
+        reasonMaterials: const [
+          '覆盖高频考点',
+          '讲义和视频能组成完整复习闭环',
+        ],
+        nextAction: const RecommendationNextActionModel(
+          type: 'confirm_course',
+          label: '确认入课并导入资料',
+        ),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('课程资料说明'), findsOneWidget);
+    expect(find.text('覆盖高频考点'), findsOneWidget);
+    expect(find.text('讲义和视频能组成完整复习闭环'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '确认入课并导入资料'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, '确认入课并导入资料'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.confirmationRequests, hasLength(1));
+  });
+
+  testWidgets('recommend card limits reason materials to four items',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final fetchCompleter = Completer<List<RecommendationCardModel>>();
+    final fakeApiClient = _FakeApiClient(fetchCompleter: fetchCompleter);
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: CourseRecommendPage()),
+      ),
+    );
+
+    await tester.tap(find.byType(FilledButton));
+    await tester.pump();
+    fetchCompleter.complete([
+      _recommendationCard(
+        reasonMaterials: const [
+          '资料说明 1',
+          '资料说明 2',
+          '资料说明 3',
+          '资料说明 4',
+          '资料说明 5',
+        ],
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('资料说明 1'), findsOneWidget);
+    expect(find.text('资料说明 4'), findsOneWidget);
+    expect(find.text('资料说明 5'), findsNothing);
+  });
+
+  testWidgets('recommend card disables unsupported next action',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final fetchCompleter = Completer<List<RecommendationCardModel>>();
+    final fakeApiClient = _FakeApiClient(fetchCompleter: fetchCompleter);
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: CourseRecommendPage()),
+      ),
+    );
+
+    await tester.tap(find.byType(FilledButton));
+    await tester.pump();
+    fetchCompleter.complete([
+      _recommendationCard(
+        nextAction: const RecommendationNextActionModel(
+          type: 'open_external',
+          label: '查看课程详情',
+        ),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    final actionFinder = find.widgetWithText(FilledButton, '查看课程详情');
+    final actionButton = tester.widget<FilledButton>(actionFinder);
+    expect(actionButton.onPressed, isNull);
+
+    await tester.tap(actionFinder);
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.confirmationRequests, isEmpty);
+  });
+
   testWidgets('draft form locks during fetch and confirm', (tester) async {
     tester.view.physicalSize = const Size(1200, 2200);
     tester.view.devicePixelRatio = 1.0;
@@ -237,6 +375,37 @@ void main() {
     );
     await tester.pumpAndSettle();
   });
+}
+
+RecommendationCardModel _recommendationCard({
+  List<String> reasonMaterials = const [],
+  RecommendationNextActionModel nextAction =
+      const RecommendationNextActionModel(
+    type: 'confirm_course',
+    label: '选择课程并进入导入',
+  ),
+}) {
+  return RecommendationCardModel(
+    catalogId: 'math-final-01',
+    title: _FakeApiClient.recommendationTitle,
+    provider: 'KnowLink Seed',
+    level: 'intermediate',
+    estimatedHours: 4,
+    fitScore: 96,
+    reasons: const [
+      'Difficulty matches the current level',
+      'Duration fits the current budget',
+    ],
+    reasonMaterials: reasonMaterials,
+    nextAction: nextAction,
+    defaultResourceManifest: const [
+      ResourceManifestItemModel(
+        resourceType: ResourceType.mp4,
+        isRequired: true,
+        description: 'Main lesson video',
+      ),
+    ],
+  );
 }
 
 class _FakeApiClient extends ApiClient {
