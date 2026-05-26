@@ -9,7 +9,8 @@ import 'package:knowlink_client/shared/providers/bilibili_import_provider.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
 void main() {
-  test('loadInitialState fetches auth session and latest import run', () async {
+  test('loadInitialState fetches auth session and prefers active import run',
+      () async {
     final fakeApiClient = FakeBilibiliApiClient(
       authSession: const BilibiliAuthSessionModel(
         loginStatus: 'active',
@@ -36,7 +37,7 @@ void main() {
       state.runList.valueOrNull?.items.map((item) => item.importRunId),
       [9102, 9101],
     );
-    expect(state.currentRun.valueOrNull?.importRunId, 9102);
+    expect(state.currentRun.valueOrNull?.importRunId, 9101);
   });
 
   test('loadInitialState keeps auth data when run list fails', () async {
@@ -122,6 +123,36 @@ void main() {
           ?.importRunId,
       9101,
     );
+  });
+
+  test('selected_parts default selection stays selected_parts', () async {
+    final fakeApiClient = FakeBilibiliApiClient(
+      authSession: const BilibiliAuthSessionModel(
+        loginStatus: 'active',
+        userNickname: 'KnowLink Demo',
+        expiresAt: null,
+      ),
+      previewResult: _previewWithMode(
+        defaultSelectionMode: 'selected_parts',
+        defaultSelectedPartIds: const ['cid-1001', 'cid-1003'],
+      ),
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.updateSourceUrl('https://www.bilibili.com/video/BV1xx411c7mD');
+    await notifier.refreshAuthSession();
+    await notifier.preview('101');
+    await notifier.createImport('101');
+
+    expect(
+      fakeApiClient.createCalls.single.request.selectionMode,
+      'selected_parts',
+    );
+    expect(fakeApiClient.createCalls.single.request.selectedPartIds, [
+      'cid-1001',
+      'cid-1003',
+    ]);
   });
 
   test('canCreateImport is false while current run is refreshing', () async {
@@ -224,6 +255,215 @@ void main() {
     expect(fakeApiClient.createCalls, isEmpty);
   });
 
+  test('createImport ignores late task after active course changes', () async {
+    final createStarted = Completer<void>();
+    final createCompleter = Completer<BilibiliImportTaskModel>();
+    final fakeApiClient = FakeBilibiliApiClient(
+      authSession: const BilibiliAuthSessionModel(
+        loginStatus: 'active',
+        userNickname: 'KnowLink Demo',
+        expiresAt: null,
+      ),
+      previewResult: _preview(defaultSelectedPartIds: const ['cid-1002']),
+      onCreateImport: ({
+        required courseId,
+        required request,
+        required idempotencyKey,
+      }) {
+        createStarted.complete();
+        return createCompleter.future;
+      },
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.activateCourse('101');
+    notifier.updateSourceUrl('https://www.bilibili.com/video/BV1xx411c7mD');
+    await notifier.refreshAuthSession();
+    await notifier.preview('101');
+
+    final createFuture = notifier.createImport('101');
+    await createStarted.future;
+
+    notifier.activateCourse('202');
+    createCompleter.complete(_task(
+      taskId: 71,
+      importRunId: 9101,
+      status: 'queued',
+    ));
+    await createFuture;
+
+    final state = container.read(bilibiliImportProvider);
+    expect(fakeApiClient.createCalls.single.courseId, '101');
+    expect(state.currentTask.valueOrNull, isNull);
+    expect(state.currentRun.valueOrNull, isNull);
+    expect(fakeApiClient.runStatusFetchCount, 0);
+  });
+
+  test(
+      'loadInitialState clears deferred task state after page course activation',
+      () async {
+    final createStarted = Completer<void>();
+    final createCompleter = Completer<BilibiliImportTaskModel>();
+    final fakeApiClient = FakeBilibiliApiClient(
+      authSession: const BilibiliAuthSessionModel(
+        loginStatus: 'active',
+        userNickname: 'KnowLink Demo',
+        expiresAt: null,
+      ),
+      previewResult: _preview(defaultSelectedPartIds: const ['cid-1002']),
+      onCreateImport: ({
+        required courseId,
+        required request,
+        required idempotencyKey,
+      }) {
+        createStarted.complete();
+        return createCompleter.future;
+      },
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.activateCourse('101');
+    notifier.updateSourceUrl('https://www.bilibili.com/video/BV1xx411c7mD');
+    await notifier.refreshAuthSession();
+    await notifier.preview('101');
+
+    final createFuture = notifier.createImport('101');
+    await createStarted.future;
+    expect(
+        container.read(bilibiliImportProvider).currentTask.isLoading, isTrue);
+
+    notifier.activateCourse('202', clearState: false);
+    await notifier.loadInitialState('202');
+
+    var state = container.read(bilibiliImportProvider);
+    expect(fakeApiClient.runListCourseIds.last, '202');
+    expect(state.currentTask.isLoading, isFalse);
+    expect(state.currentTask.valueOrNull, isNull);
+    expect(state.currentRun.valueOrNull, isNull);
+    expect(state.runList.valueOrNull?.items, isEmpty);
+    expect(state.selectedPartIds, isEmpty);
+    expect(state.isCanceling, isFalse);
+    expect(state.isPollingRun, isFalse);
+
+    createCompleter.complete(_task(
+      taskId: 71,
+      importRunId: 9101,
+      status: 'queued',
+    ));
+    await createFuture;
+
+    state = container.read(bilibiliImportProvider);
+    expect(state.currentTask.valueOrNull, isNull);
+    expect(state.currentRun.valueOrNull, isNull);
+    expect(fakeApiClient.runStatusFetchCount, 0);
+  });
+
+  test(
+      'loadInitialState clears deferred cancel flag after page course activation',
+      () async {
+    final cancelStarted = Completer<void>();
+    final cancelCompleter = Completer<BilibiliImportTaskModel>();
+    final fakeApiClient = FakeBilibiliApiClient(
+      onCancelRun: (importRunId) {
+        cancelStarted.complete();
+        return cancelCompleter.future;
+      },
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.activateCourse('101');
+    await notifier.refreshCurrentRun(9101, expectedCourseId: '101');
+
+    final cancelFuture = notifier.cancelCurrentRun();
+    await cancelStarted.future;
+    expect(container.read(bilibiliImportProvider).isCanceling, isTrue);
+
+    notifier.activateCourse('202', clearState: false);
+    await notifier.loadInitialState('202');
+
+    final state = container.read(bilibiliImportProvider);
+    expect(fakeApiClient.runListCourseIds.last, '202');
+    expect(state.isCanceling, isFalse);
+    expect(state.currentTask.isLoading, isFalse);
+    expect(state.currentTask.valueOrNull, isNull);
+    expect(state.currentRun.valueOrNull, isNull);
+
+    cancelCompleter.complete(_task(
+      taskId: 73,
+      importRunId: 9101,
+      status: 'canceled',
+    ));
+    await cancelFuture;
+
+    expect(container.read(bilibiliImportProvider).isCanceling, isFalse);
+  });
+
+  test(
+      'loadInitialState clears deferred polling flag after page course activation',
+      () async {
+    final statusStarted = Completer<void>();
+    final statusCompleter = Completer<BilibiliImportRunModel>();
+    final fakeApiClient = FakeBilibiliApiClient(
+      onFetchRunStatus: (_) {
+        statusStarted.complete();
+        return statusCompleter.future;
+      },
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.activateCourse('101');
+    final pollFuture = notifier.pollCurrentRunUntilTerminal(
+      9101,
+      interval: Duration.zero,
+      maxAttempts: 1,
+    );
+    await statusStarted.future;
+    expect(container.read(bilibiliImportProvider).isPollingRun, isTrue);
+
+    notifier.activateCourse('202', clearState: false);
+    await notifier.loadInitialState('202');
+
+    final state = container.read(bilibiliImportProvider);
+    expect(fakeApiClient.runListCourseIds.last, '202');
+    expect(state.isPollingRun, isFalse);
+    expect(state.currentRun.valueOrNull, isNull);
+
+    statusCompleter.complete(_run(importRunId: 9101, status: 'imported'));
+    await pollFuture;
+
+    expect(container.read(bilibiliImportProvider).isPollingRun, isFalse);
+  });
+
+  test('refreshCurrentRun ignores late status after active course changes',
+      () async {
+    final statusStarted = Completer<void>();
+    final statusCompleter = Completer<BilibiliImportRunModel>();
+    final fakeApiClient = FakeBilibiliApiClient(
+      onFetchRunStatus: (_) {
+        statusStarted.complete();
+        return statusCompleter.future;
+      },
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.activateCourse('101');
+    final refreshFuture = notifier.refreshCurrentRun(9101);
+    await statusStarted.future;
+
+    notifier.activateCourse('202');
+    statusCompleter.complete(_run(importRunId: 9101, status: 'imported'));
+    await refreshFuture;
+
+    final state = container.read(bilibiliImportProvider);
+    expect(state.currentRun.valueOrNull, isNull);
+    expect(state.runList.valueOrNull, isNull);
+  });
+
   test('stale preview result is ignored after source URL changes', () async {
     final previewStarted = Completer<void>();
     final previewCompleter = Completer<BilibiliPreviewModel>();
@@ -297,6 +537,148 @@ void main() {
     expect(state.currentRun.valueOrNull?.canCancel, isFalse);
     expect(state.runList.valueOrNull?.items.single.status, 'canceled');
     expect(state.isCanceling, isFalse);
+  });
+
+  test('retryCurrentRun retries recoverable async task and refreshes run',
+      () async {
+    final fakeApiClient = FakeBilibiliApiClient(
+      runStatus: _run(
+        importRunId: 9101,
+        status: 'recoverable',
+        recoverable: true,
+        nextAction: 'retry',
+      ),
+      retryTask: _task(taskId: 71, importRunId: 9101, status: 'queued'),
+      runStatuses: [
+        _run(
+          importRunId: 9101,
+          status: 'recoverable',
+          recoverable: true,
+          nextAction: 'retry',
+        ),
+        _run(importRunId: 9101, status: 'waiting_download'),
+      ],
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    await notifier.refreshCurrentRun(9101);
+    await notifier.retryCurrentRun();
+
+    expect(fakeApiClient.retriedTaskIds, [71]);
+    expect(
+      container.read(bilibiliImportProvider).currentTask.valueOrNull?.status,
+      'queued',
+    );
+    expect(
+      container.read(bilibiliImportProvider).currentRun.valueOrNull?.status,
+      'waiting_download',
+    );
+  });
+
+  test('pollCurrentRunUntilTerminal stops after imported', () async {
+    final fakeApiClient = FakeBilibiliApiClient(
+      runStatuses: [
+        _run(importRunId: 9101, status: 'downloading'),
+        _run(importRunId: 9101, status: 'merging'),
+        _run(importRunId: 9101, status: 'imported'),
+      ],
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    final run = await notifier.pollCurrentRunUntilTerminal(
+      9101,
+      interval: Duration.zero,
+      maxAttempts: 5,
+    );
+
+    expect(run?.status, 'imported');
+    expect(fakeApiClient.runStatusFetchCount, 3);
+    expect(container.read(bilibiliImportProvider).isPollingRun, isFalse);
+  });
+
+  test('pollCurrentRunUntilTerminal ignores late result after disposal',
+      () async {
+    final statusStarted = Completer<void>();
+    final statusCompleter = Completer<BilibiliImportRunModel>();
+    final fakeApiClient = FakeBilibiliApiClient(
+      onFetchRunStatus: (_) {
+        statusStarted.complete();
+        return statusCompleter.future;
+      },
+    );
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    container.listen(
+      bilibiliImportProvider,
+      (previous, next) {},
+    );
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    final future = notifier.pollCurrentRunUntilTerminal(
+      9101,
+      interval: Duration.zero,
+      maxAttempts: 1,
+    );
+    await statusStarted.future;
+
+    container.dispose();
+    statusCompleter.complete(_run(importRunId: 9101, status: 'imported'));
+
+    await expectLater(future, completes);
+  });
+
+  test('newer poll keeps polling flag when older poll completes', () async {
+    var fetchCount = 0;
+    final firstStarted = Completer<void>();
+    final secondStarted = Completer<void>();
+    final firstStatus = Completer<BilibiliImportRunModel>();
+    final secondStatus = Completer<BilibiliImportRunModel>();
+    final fakeApiClient = FakeBilibiliApiClient(
+      onFetchRunStatus: (_) {
+        fetchCount++;
+        if (fetchCount == 1) {
+          firstStarted.complete();
+          return firstStatus.future;
+        }
+        secondStarted.complete();
+        return secondStatus.future;
+      },
+    );
+    final container = _container(fakeApiClient);
+    final subscription = container.listen(
+      bilibiliImportProvider,
+      (previous, next) {},
+    );
+    addTearDown(subscription.close);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    final firstFuture = notifier.pollCurrentRunUntilTerminal(
+      9101,
+      interval: Duration.zero,
+      maxAttempts: 1,
+    );
+    await firstStarted.future;
+    final secondFuture = notifier.pollCurrentRunUntilTerminal(
+      9101,
+      interval: Duration.zero,
+      maxAttempts: 1,
+    );
+    await secondStarted.future;
+
+    firstStatus.complete(_run(importRunId: 9101, status: 'imported'));
+    await firstFuture;
+
+    expect(container.read(bilibiliImportProvider).isPollingRun, isTrue);
+
+    secondStatus.complete(_run(importRunId: 9101, status: 'imported'));
+    await secondFuture;
+
+    expect(container.read(bilibiliImportProvider).isPollingRun, isFalse);
   });
 
   test('cancel failure restores isCanceling and keeps current run', () async {
@@ -491,6 +873,23 @@ BilibiliPreviewModel _preview({
   );
 }
 
+BilibiliPreviewModel _previewWithMode({
+  required String defaultSelectionMode,
+  required List<String> defaultSelectedPartIds,
+}) {
+  final preview = _preview(defaultSelectedPartIds: defaultSelectedPartIds);
+  return BilibiliPreviewModel(
+    previewId: preview.previewId,
+    sourceUrl: preview.sourceUrl,
+    sourceType: preview.sourceType,
+    title: preview.title,
+    coverUrl: preview.coverUrl,
+    totalParts: preview.totalParts,
+    parts: preview.parts,
+    defaultSelectionMode: defaultSelectionMode,
+  );
+}
+
 BilibiliImportTaskModel _task({
   required int taskId,
   required int importRunId,
@@ -510,6 +909,8 @@ BilibiliImportTaskModel _task({
 BilibiliImportRunModel _run({
   required int importRunId,
   required String status,
+  bool recoverable = false,
+  String? nextAction,
 }) {
   return BilibiliImportRunModel(
     importRunId: importRunId,
@@ -533,8 +934,8 @@ BilibiliImportRunModel _run({
     ),
     errorCode: null,
     failureReason: null,
-    recoverable: false,
-    nextAction: status == 'imported' ? null : 'poll',
+    recoverable: recoverable,
+    nextAction: nextAction ?? (status == 'imported' ? null : 'poll'),
   );
 }
 
@@ -562,11 +963,18 @@ class FakeBilibiliApiClient extends ApiClient {
     BilibiliImportRunModel? runStatus,
     List<BilibiliImportRunModel>? runStatuses,
     BilibiliImportTaskModel? cancelTask,
+    BilibiliImportTaskModel? retryTask,
     bool failPreview = false,
     bool failAuthSession = false,
     bool failRunList = false,
     bool failCancel = false,
     Future<BilibiliImportRunModel> Function(int importRunId)? onFetchRunStatus,
+    Future<BilibiliImportTaskModel> Function(int importRunId)? onCancelRun,
+    Future<BilibiliImportTaskModel> Function({
+      required String courseId,
+      required BilibiliImportCreateRequestModel request,
+      required String idempotencyKey,
+    })? onCreateImport,
     Future<BilibiliPreviewModel> Function({
       required String courseId,
       required String sourceUrl,
@@ -581,11 +989,14 @@ class FakeBilibiliApiClient extends ApiClient {
         _runStatus = runStatus,
         _runStatuses = runStatuses == null ? null : Queue.of(runStatuses),
         _cancelTask = cancelTask,
+        _retryTask = retryTask,
         _failPreview = failPreview,
         _failAuthSession = failAuthSession,
         _failRunList = failRunList,
         _failCancel = failCancel,
         _onFetchRunStatus = onFetchRunStatus,
+        _onCancelRun = onCancelRun,
+        _onCreateImport = onCreateImport,
         _onPreviewImport = onPreviewImport,
         super(baseUrl: 'http://127.0.0.1');
 
@@ -599,12 +1010,19 @@ class FakeBilibiliApiClient extends ApiClient {
   final BilibiliImportRunModel? _runStatus;
   final Queue<BilibiliImportRunModel>? _runStatuses;
   final BilibiliImportTaskModel? _cancelTask;
+  final BilibiliImportTaskModel? _retryTask;
   final bool _failPreview;
   final bool _failAuthSession;
   final bool _failRunList;
   final bool _failCancel;
   final Future<BilibiliImportRunModel> Function(int importRunId)?
       _onFetchRunStatus;
+  final Future<BilibiliImportTaskModel> Function(int importRunId)? _onCancelRun;
+  final Future<BilibiliImportTaskModel> Function({
+    required String courseId,
+    required BilibiliImportCreateRequestModel request,
+    required String idempotencyKey,
+  })? _onCreateImport;
   final Future<BilibiliPreviewModel> Function({
     required String courseId,
     required String sourceUrl,
@@ -615,6 +1033,8 @@ class FakeBilibiliApiClient extends ApiClient {
   final polledSessionIds = <String>[];
   final createCalls = <CreateImportCall>[];
   final cancelRunIds = <int>[];
+  final retriedTaskIds = <int>[];
+  var runStatusFetchCount = 0;
 
   @override
   Future<BilibiliAuthSessionModel> fetchBilibiliAuthSession() async {
@@ -688,6 +1108,14 @@ class FakeBilibiliApiClient extends ApiClient {
         idempotencyKey: idempotencyKey,
       ),
     );
+    final onCreateImport = _onCreateImport;
+    if (onCreateImport != null) {
+      return onCreateImport(
+        courseId: courseId,
+        request: request,
+        idempotencyKey: idempotencyKey,
+      );
+    }
     return _createdTask ??
         _task(taskId: 71, importRunId: 9101, status: 'queued');
   }
@@ -696,6 +1124,7 @@ class FakeBilibiliApiClient extends ApiClient {
   Future<BilibiliImportRunModel> fetchBilibiliImportRunStatus(
     int importRunId,
   ) async {
+    runStatusFetchCount++;
     final onFetchRunStatus = _onFetchRunStatus;
     if (onFetchRunStatus != null) {
       return onFetchRunStatus(importRunId);
@@ -715,8 +1144,19 @@ class FakeBilibiliApiClient extends ApiClient {
     if (_failCancel) {
       throw StateError('cancel failed');
     }
+    final onCancelRun = _onCancelRun;
+    if (onCancelRun != null) {
+      return onCancelRun(importRunId);
+    }
     return _cancelTask ??
         _task(taskId: 73, importRunId: importRunId, status: 'canceled');
+  }
+
+  @override
+  Future<BilibiliImportTaskModel> retryAsyncTask(int taskId) async {
+    retriedTaskIds.add(taskId);
+    return _retryTask ??
+        _task(taskId: taskId, importRunId: 9101, status: 'queued');
   }
 
   BilibiliQrSessionModel get _qrSessionDefault =>

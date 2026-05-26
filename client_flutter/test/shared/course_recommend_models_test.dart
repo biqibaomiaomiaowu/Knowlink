@@ -69,6 +69,53 @@ void main() {
     expect(card.defaultResourceManifest.last.resourceType, ResourceType.pptx);
   });
 
+  test('recommendation card parses reason materials and next action', () {
+    final card = RecommendationCardModel.fromJson({
+      'catalogId': 'math-final-01',
+      'title': '高等数学期末冲刺',
+      'provider': 'KnowLink Seed',
+      'level': 'intermediate',
+      'estimatedHours': 4,
+      'fitScore': 96,
+      'reasons': ['难度与当前基础匹配'],
+      'reasonMaterials': [
+        '覆盖高频考点',
+        '讲义和视频能组成完整复习闭环',
+      ],
+      'nextAction': {
+        'type': 'confirm_course',
+        'label': '确认入课并导入资料',
+      },
+      'defaultResourceManifest': const [],
+    });
+
+    expect(card.reasonMaterials, [
+      '覆盖高频考点',
+      '讲义和视频能组成完整复习闭环',
+    ]);
+    expect(card.nextAction.type, 'confirm_course');
+    expect(card.nextAction.label, '确认入课并导入资料');
+    expect(card.nextAction.canConfirmCourse, isTrue);
+  });
+
+  test('recommendation card keeps V1 defaults when V2 fields are absent', () {
+    final card = RecommendationCardModel.fromJson({
+      'catalogId': 'math-final-01',
+      'title': '高等数学期末冲刺',
+      'provider': 'KnowLink Seed',
+      'level': 'intermediate',
+      'estimatedHours': 4,
+      'fitScore': 96,
+      'reasons': ['难度与当前基础匹配'],
+      'defaultResourceManifest': const [],
+    });
+
+    expect(card.reasonMaterials, isEmpty);
+    expect(card.nextAction.type, 'confirm_course');
+    expect(card.nextAction.label, '选择课程并进入导入');
+    expect(card.nextAction.canConfirmCourse, isTrue);
+  });
+
   test('confirm result parses course summary payload', () {
     final result = ConfirmRecommendationResultModel.fromJson({
       'course': {

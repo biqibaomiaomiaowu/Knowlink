@@ -184,6 +184,40 @@ void main() {
     expect(preview.defaultSelectedPartIds, ['cid-1001']);
   });
 
+  test('preview labels cover single video multi p collection and bangumi', () {
+    final cases = {
+      'single_video': '单视频',
+      'multi_p': '多 P 视频',
+      'collection': '合集',
+      'bangumi': '番剧',
+    };
+
+    for (final entry in cases.entries) {
+      final preview = BilibiliPreviewModel.fromJson({
+        'previewId': 'preview-${entry.key}',
+        'sourceUrl': 'https://www.bilibili.com/video/BV1demo',
+        'sourceType': entry.key,
+        'title': '课程样例',
+        'coverUrl': null,
+        'totalParts': 1,
+        'parts': [
+          {
+            'partId': 'part-1',
+            'title': '第一讲',
+            'durationSec': 600,
+            'cid': 1001,
+            'pageNo': 1,
+            'selectedByDefault': true,
+          },
+        ],
+        'defaultSelectionMode': 'selected_parts',
+      });
+
+      expect(preview.sourceTypeLabel, entry.value);
+      expect(preview.defaultSelectionModeLabel, '指定条目');
+    }
+  });
+
   test('create request serializes qualityPreference with android safe default',
       () {
     const request = BilibiliImportCreateRequestModel(
@@ -294,5 +328,30 @@ void main() {
     expect(run.nextAction, isNull);
     expect(run.isTerminal, isTrue);
     expect(run.isFailed, isTrue);
+  });
+
+  test('run status labels and retry helper use frozen fields', () {
+    final run = BilibiliImportRunModel.fromJson({
+      'importRunId': 9101,
+      'courseId': 101,
+      'sourceUrl': 'https://www.bilibili.com/video/BV1demo',
+      'sourceType': 'collection',
+      'status': 'recoverable',
+      'progressPct': 42,
+      'stage': 'download',
+      'taskId': 7201,
+      'resourceIds': [601, 602],
+      'preview': null,
+      'errorCode': 'bilibili.access_denied',
+      'failureReason': '合集内容不可访问',
+      'recoverable': true,
+      'nextAction': 'retry',
+    });
+
+    expect(run.sourceTypeLabel, '合集');
+    expect(run.statusLabel, '可重试');
+    expect(run.stageLabel, '下载音视频');
+    expect(run.canRetry, isTrue);
+    expect(run.resourceIdsLabel, '资源：601、602');
   });
 }

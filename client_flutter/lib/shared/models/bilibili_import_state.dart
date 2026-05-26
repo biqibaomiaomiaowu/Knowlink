@@ -13,6 +13,7 @@ class BilibiliImportState {
     this.currentRun = const AsyncData(null),
     this.runList = const AsyncData(null),
     this.isCanceling = false,
+    this.isPollingRun = false,
     this.lastIdempotencyKey,
   });
 
@@ -25,6 +26,7 @@ class BilibiliImportState {
   final AsyncValue<BilibiliImportRunModel?> currentRun;
   final AsyncValue<BilibiliImportRunListModel?> runList;
   final bool isCanceling;
+  final bool isPollingRun;
   final String? lastIdempotencyKey;
 
   bool get canPreview =>
@@ -51,6 +53,7 @@ class BilibiliImportState {
     AsyncValue<BilibiliImportRunModel?>? currentRun,
     AsyncValue<BilibiliImportRunListModel?>? runList,
     bool? isCanceling,
+    bool? isPollingRun,
     String? lastIdempotencyKey,
     bool clearLastIdempotencyKey = false,
   }) {
@@ -64,6 +67,7 @@ class BilibiliImportState {
       currentRun: currentRun ?? this.currentRun,
       runList: runList ?? this.runList,
       isCanceling: isCanceling ?? this.isCanceling,
+      isPollingRun: isPollingRun ?? this.isPollingRun,
       lastIdempotencyKey: clearLastIdempotencyKey
           ? null
           : lastIdempotencyKey ?? this.lastIdempotencyKey,

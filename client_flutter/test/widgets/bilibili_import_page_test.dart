@@ -38,6 +38,9 @@ void main() {
         userNickname: 'KnowLink Demo',
         expiresAt: null,
       ),
+      runStatuses: [
+        _run(status: 'imported', resourceIds: const [601]),
+      ],
     );
 
     await tester.pumpWidget(
@@ -68,17 +71,17 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '创建导入任务'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('queued'), findsWidgets);
+    expect(find.text('已导入'), findsOneWidget);
     expect(fakeApiClient.createCalls, hasLength(1));
     expect(fakeApiClient.createCalls.single.request.selectedPartIds, [
       'cid-1002',
     ]);
 
-    expect(find.widgetWithText(FilledButton, '导入进行中'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '创建导入任务'), findsOneWidget);
     final createButton = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, '导入进行中'),
+      find.widgetWithText(FilledButton, '创建导入任务'),
     );
-    expect(createButton.onPressed, isNull);
+    expect(createButton.onPressed, isNotNull);
   });
 
   testWidgets('已有进行中 run 时输入和预览后仍禁用创建', (tester) async {
@@ -122,7 +125,7 @@ void main() {
     expect(fakeApiClient.createCalls, isEmpty);
   });
 
-  testWidgets('手动刷新到 imported 后刷新资源列表', (tester) async {
+  testWidgets('创建导入后轮询到 imported 并刷新资源列表', (tester) async {
     _useLargeTestSurface(tester);
     final fakeApiClient = _BilibiliPageFakeApiClient(
       authSession: const BilibiliAuthSessionModel(
@@ -158,34 +161,92 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '创建导入任务'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('queued'), findsWidgets);
-    expect(fakeApiClient.fetchResourcesCount, 1);
-
-    await tester.tap(find.widgetWithText(OutlinedButton, '刷新状态'));
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('imported'), findsWidgets);
+    expect(find.text('已导入'), findsOneWidget);
+    expect(find.text('资源：601'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '进入解析'), findsOneWidget);
     expect(fakeApiClient.fetchResourcesCount, 2);
     expect(find.text('bilibili-import.mp4'), findsOneWidget);
   });
 
-  testWidgets('B站失败导入显示可重试且不显示取消按钮', (tester) async {
+  testWidgets('合集预览显示中文来源和默认选择方式', (tester) async {
     _useLargeTestSurface(tester);
+    final fakeApiClient = _BilibiliPageFakeApiClient(
+      authSession: const BilibiliAuthSessionModel(
+        loginStatus: 'active',
+        userNickname: 'KnowLink Demo',
+        expiresAt: null,
+      ),
+      preview: const BilibiliPreviewModel(
+        previewId: 'preview-collection',
+        sourceUrl:
+            'https://space.bilibili.com/123/channel/collectiondetail?sid=456',
+        sourceType: 'collection',
+        title: '合集样例',
+        coverUrl: null,
+        totalParts: 2,
+        defaultSelectionMode: 'all_parts',
+        parts: [
+          BilibiliPreviewPartModel(
+            partId: 'collection-1',
+            title: '合集第一讲',
+            durationSec: 600,
+            cid: 1001,
+            pageNo: 1,
+            selectedByDefault: true,
+          ),
+          BilibiliPreviewPartModel(
+            partId: 'collection-2',
+            title: '合集第二讲',
+            durationSec: 900,
+            cid: 1002,
+            pageNo: 2,
+            selectedByDefault: true,
+          ),
+        ],
+      ),
+    );
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          apiClientProvider.overrideWithValue(
-            _BilibiliPageFakeApiClient(
-              runList: [
-                _run(
-                  status: 'recoverable',
-                  failureReason: '内容不可访问',
-                  recoverable: true,
-                ),
-              ],
-            ),
-          ),
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: CourseImportPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'B站链接'),
+      'https://space.bilibili.com/123/channel/collectiondetail?sid=456',
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '预览B站资源'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('合集样例'), findsWidgets);
+    expect(find.textContaining('合集 · 2 个条目 · 默认全部条目'), findsOneWidget);
+  });
+
+  testWidgets('B站失败导入显示重试按钮且不显示取消按钮', (tester) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _BilibiliPageFakeApiClient(
+      runList: [
+        _run(
+          status: 'recoverable',
+          failureReason: '内容不可访问',
+          recoverable: true,
+        ),
+      ],
+      runStatuses: [
+        _run(status: 'imported', resourceIds: const [601]),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
         ],
         child: const MaterialApp(home: CourseImportPage(courseId: '101')),
       ),
@@ -194,7 +255,49 @@ void main() {
 
     expect(find.text('内容不可访问'), findsOneWidget);
     expect(find.text('可重试'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '重试导入'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, '取消导入'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '重试导入'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.retriedTaskIds, [7001]);
+    expect(find.text('已导入'), findsOneWidget);
+  });
+
+  testWidgets('B站登录状态错误时仍保留扫码入口', (tester) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _BilibiliPageFakeApiClient(
+      failAuthSession: true,
+      qrSession: const BilibiliQrSessionModel(
+        sessionId: 'qr-error',
+        status: 'pending',
+        qrCodeUrl: 'https://bilibili.test/qr-error.png',
+        expiresAt: null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: CourseImportPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('B站登录状态暂不可用'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '重新扫码'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '重新扫码'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('扫码状态：pending'), findsOneWidget);
+    expect(
+      find.textContaining('二维码链接：https://bilibili.test/qr-error.png'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('未登录时扫码后可刷新扫码状态并更新登录态', (tester) async {
@@ -261,6 +364,8 @@ class _BilibiliPageFakeApiClient extends ApiClient {
     List<BilibiliImportRunModel>? runStatuses,
     BilibiliQrSessionModel? qrSession,
     BilibiliQrSessionModel? polledQrSession,
+    BilibiliPreviewModel? preview,
+    bool failAuthSession = false,
   })  : _authSession = authSession ??
             const BilibiliAuthSessionModel(
               loginStatus: 'none',
@@ -271,7 +376,9 @@ class _BilibiliPageFakeApiClient extends ApiClient {
         _runList = runList,
         _runStatuses = runStatuses == null ? null : List.of(runStatuses),
         _qrSession = qrSession,
-        _polledQrSession = polledQrSession;
+        _polledQrSession = polledQrSession,
+        _preview = preview,
+        _failAuthSession = failAuthSession;
 
   final BilibiliAuthSessionModel _authSession;
   final BilibiliAuthSessionModel? _refreshedAuthSession;
@@ -279,13 +386,19 @@ class _BilibiliPageFakeApiClient extends ApiClient {
   final List<BilibiliImportRunModel>? _runStatuses;
   final BilibiliQrSessionModel? _qrSession;
   final BilibiliQrSessionModel? _polledQrSession;
+  final BilibiliPreviewModel? _preview;
+  final bool _failAuthSession;
   final createCalls = <_CreateImportCall>[];
+  final retriedTaskIds = <int>[];
   var fetchResourcesCount = 0;
   var _runStatusIndex = 0;
   var _hasPolledQrSession = false;
 
   @override
   Future<BilibiliAuthSessionModel> fetchBilibiliAuthSession() async {
+    if (_failAuthSession) {
+      throw StateError('auth failed');
+    }
     if (_hasPolledQrSession && _refreshedAuthSession != null) {
       return _refreshedAuthSession;
     }
@@ -351,33 +464,34 @@ class _BilibiliPageFakeApiClient extends ApiClient {
     required String courseId,
     required String sourceUrl,
   }) async {
-    return const BilibiliPreviewModel(
-      previewId: 'preview-1',
-      sourceUrl: 'https://www.bilibili.com/video/BV1demo',
-      sourceType: 'video',
-      title: '课程样例',
-      coverUrl: null,
-      totalParts: 2,
-      defaultSelectionMode: 'manual',
-      parts: [
-        BilibiliPreviewPartModel(
-          partId: 'cid-1001',
-          title: 'P1 导论',
-          durationSec: 600,
-          cid: 1001,
-          pageNo: 1,
-          selectedByDefault: false,
-        ),
-        BilibiliPreviewPartModel(
-          partId: 'cid-1002',
-          title: 'P2 例题',
-          durationSec: 900,
-          cid: 1002,
-          pageNo: 2,
-          selectedByDefault: true,
-        ),
-      ],
-    );
+    return _preview ??
+        const BilibiliPreviewModel(
+          previewId: 'preview-1',
+          sourceUrl: 'https://www.bilibili.com/video/BV1demo',
+          sourceType: 'single_video',
+          title: '课程样例',
+          coverUrl: null,
+          totalParts: 2,
+          defaultSelectionMode: 'current_part',
+          parts: [
+            BilibiliPreviewPartModel(
+              partId: 'cid-1001',
+              title: 'P1 导论',
+              durationSec: 600,
+              cid: 1001,
+              pageNo: 1,
+              selectedByDefault: false,
+            ),
+            BilibiliPreviewPartModel(
+              partId: 'cid-1002',
+              title: 'P2 例题',
+              durationSec: 900,
+              cid: 1002,
+              pageNo: 2,
+              selectedByDefault: true,
+            ),
+          ],
+        );
   }
 
   @override
@@ -408,6 +522,20 @@ class _BilibiliPageFakeApiClient extends ApiClient {
     }
     return _run(importRunId: importRunId, status: 'queued');
   }
+
+  @override
+  Future<BilibiliImportTaskModel> retryAsyncTask(int taskId) async {
+    retriedTaskIds.add(taskId);
+    return BilibiliImportTaskModel(
+      taskId: taskId,
+      status: 'queued',
+      nextAction: 'poll',
+      entity: const BilibiliImportTaskEntityModel(
+        type: 'bilibili_import_run',
+        id: 9001,
+      ),
+    );
+  }
 }
 
 class _CreateImportCall {
@@ -427,7 +555,7 @@ BilibiliImportRunModel _run({
     importRunId: importRunId,
     courseId: 101,
     sourceUrl: 'https://www.bilibili.com/video/BV1demo',
-    sourceType: 'video',
+    sourceType: 'single_video',
     status: status,
     progressPct: status == 'queued' ? 0 : 100,
     stage: status,

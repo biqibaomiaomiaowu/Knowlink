@@ -238,7 +238,7 @@ class _CourseRecommendPageState extends ConsumerState<CourseRecommendPage> {
           item: item,
           isConfirming:
               isConfirming && activeConfirmCatalogId == item.catalogId,
-          isActionDisabled: isConfirming,
+          isActionDisabled: isConfirming || !item.nextAction.canConfirmCourse,
           onConfirm: () => onConfirm(item.catalogId),
         ),
       );
@@ -792,6 +792,30 @@ class _RecommendationDetail extends StatelessWidget {
               ),
             ),
           ),
+        if (item.reasonMaterials.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          const Text(
+            '课程资料说明',
+            style: TextStyle(
+              color: AppTheme.ink,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final material in item.reasonMaterials.take(4))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                material,
+                style: const TextStyle(
+                  color: Color(0xFF334155),
+                  fontSize: 15,
+                  height: 1.45,
+                ),
+              ),
+            ),
+        ],
         const SizedBox(height: 18),
         LayoutBuilder(
           builder: (context, constraints) {
@@ -859,7 +883,7 @@ class _RecommendationDetail extends StatelessWidget {
             child: FilledButton.icon(
               icon: const Icon(Icons.menu_book_outlined),
               onPressed: isActionDisabled ? null : onConfirm,
-              label: Text(isConfirming ? '确认中...' : '选择课程并进入解析'),
+              label: Text(isConfirming ? '确认中...' : item.nextAction.label),
             ),
           ),
         ),

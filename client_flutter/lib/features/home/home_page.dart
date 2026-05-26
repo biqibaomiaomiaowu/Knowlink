@@ -397,27 +397,29 @@ class _RecentLearningCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final course = recentCourses.isEmpty ? null : recentCourses.first;
-    final progress = course == null
-        ? null
-        : progressByCourseId[course.courseId]?.valueOrNull;
+    final visibleCourses = recentCourses.take(3).toList();
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const _SectionHeader(title: '最近学习'),
           const SizedBox(height: 18),
-          if (course == null)
+          if (visibleCourses.isEmpty)
             const _EmptyText('暂无最近学习课程。')
           else
-            _RecentLearningDetails(
-              course: course,
-              progress: progress,
-              progressState: progressByCourseId[course.courseId],
-              isSwitching: isSwitchingCourse,
-              onResume: () => onResumeCourse(course),
-              onSwitch: () => onSwitchCourse(course),
-            ),
+            for (var index = 0; index < visibleCourses.length; index++) ...[
+              _RecentLearningDetails(
+                course: visibleCourses[index],
+                progress: progressByCourseId[visibleCourses[index].courseId]
+                    ?.valueOrNull,
+                progressState:
+                    progressByCourseId[visibleCourses[index].courseId],
+                isSwitching: isSwitchingCourse,
+                onResume: () => onResumeCourse(visibleCourses[index]),
+                onSwitch: () => onSwitchCourse(visibleCourses[index]),
+              ),
+              if (index < visibleCourses.length - 1) const Divider(height: 28),
+            ],
         ],
       ),
     );
@@ -507,6 +509,11 @@ class _RecentLearningDetails extends StatelessWidget {
               onPressed: isSwitching ? null : onSwitch,
               icon: const Icon(Icons.check_circle_outline),
               label: Text(isSwitching ? '正在切换' : '设为当前课程'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => context.go('/courses/${course.courseId}'),
+              icon: const Icon(Icons.info_outline),
+              label: const Text('课程详情'),
             ),
           ],
         ),

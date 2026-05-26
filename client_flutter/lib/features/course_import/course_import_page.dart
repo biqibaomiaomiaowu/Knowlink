@@ -145,6 +145,44 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
                 ? null
                 : () => _runBilibiliAction(() async {
                       await bilibiliNotifier.createImport(effectiveCourseId);
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
+                      final run = ref
+                          .read(bilibiliImportProvider)
+                          .currentRun
+                          .valueOrNull;
+                      if (run != null && !run.isTerminal) {
+                        await bilibiliNotifier.pollCurrentRunUntilTerminal(
+                          run.importRunId,
+                        );
+                      }
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
+                      await _refreshResourcesIfBilibiliImported(
+                        effectiveCourseId,
+                      );
+                    }),
+            onRetry: effectiveCourseId == null
+                ? null
+                : () => _runBilibiliAction(() async {
+                      await bilibiliNotifier.retryCurrentRun();
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
+                      final run = ref
+                          .read(bilibiliImportProvider)
+                          .currentRun
+                          .valueOrNull;
+                      if (run != null && !run.isTerminal) {
+                        await bilibiliNotifier.pollCurrentRunUntilTerminal(
+                          run.importRunId,
+                        );
+                      }
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
                       await _refreshResourcesIfBilibiliImported(
                         effectiveCourseId,
                       );
@@ -246,6 +284,9 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
       return;
     }
     _lastResourceCourseId = courseId;
+    ref
+        .read(bilibiliImportProvider.notifier)
+        .activateCourse(courseId, clearState: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -269,13 +310,27 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
   }
 
   Future<void> _refreshResourcesIfBilibiliImported(String? courseId) async {
-    if (courseId == null) {
+    if (courseId == null || !_isActiveCourse(courseId)) {
       return;
     }
     final currentRun = ref.read(bilibiliImportProvider).currentRun.valueOrNull;
     if (currentRun?.isImported == true) {
       await ref.read(courseImportProvider.notifier).fetchResources(courseId);
     }
+  }
+
+  bool _isActiveCourse(String? courseId) {
+    if (!mounted || courseId == null) {
+      return false;
+    }
+    final activeCourseId = widget.courseId ??
+        ref
+            .read(courseImportProvider)
+            .createdCourse
+            .valueOrNull
+            ?.courseId
+            .toString();
+    return activeCourseId == courseId;
   }
 }
 
@@ -637,6 +692,7 @@ class _BilibiliImportSection extends StatelessWidget {
     required this.onPreview,
     required this.onTogglePart,
     required this.onCreateImport,
+    required this.onRetry,
     required this.onCancel,
     required this.onRefreshStatus,
     required this.onRefreshAuth,
@@ -651,6 +707,7 @@ class _BilibiliImportSection extends StatelessWidget {
   final VoidCallback? onPreview;
   final void Function(String partId, bool selected) onTogglePart;
   final VoidCallback? onCreateImport;
+  final VoidCallback? onRetry;
   final VoidCallback onCancel;
   final VoidCallback onRefreshStatus;
   final VoidCallback onRefreshAuth;
@@ -711,7 +768,7 @@ class _BilibiliImportSection extends StatelessWidget {
             Text(
               courseId == null
                   ? '请先创建课程或从推荐页进入已有课程。'
-                  : '粘贴 B站视频或合集链接后预览可导入分 P。',
+                  : '粘贴 B站单视频、多 P、合集或番剧链接后预览可导入条目。',
               style: const TextStyle(
                 color: AppTheme.muted,
                 fontWeight: FontWeight.w600,
@@ -776,6 +833,7 @@ class _BilibiliImportSection extends StatelessWidget {
               currentTask: state.currentTask,
               currentRun: state.currentRun,
               onRefreshStatus: onRefreshStatus,
+              onRetry: onRetry,
             ),
           ],
         ),
@@ -804,20 +862,25 @@ class _BilibiliAuthStatus extends StatelessWidget {
     if (authSession.isLoading) {
       return const AppLoadingView(label: '正在读取B站登录状态');
     }
-    if (authSession.hasError) {
-      return AppErrorView(
-        message: 'B站登录状态暂不可用：${authSession.error}',
-        onRetry: onRefreshAuth,
-      );
-    }
-
+    final authError = authSession.hasError ? authSession.error : null;
     final session = authSession.valueOrNull;
     final isActive = session?.isActive == true;
-    final label = isActive ? '已登录：${session?.userNickname ?? 'B站账号'}' : '未登录B站';
+    final label = authError != null
+        ? 'B站登录状态暂不可用'
+        : isActive
+            ? '已登录：${session?.userNickname ?? 'B站账号'}'
+            : '未登录B站';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (authError != null) ...[
+          AppErrorView(
+            message: 'B站登录状态暂不可用：$authError',
+            onRetry: onRefreshAuth,
+          ),
+          const SizedBox(height: 10),
+        ],
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -826,9 +889,11 @@ class _BilibiliAuthStatus extends StatelessWidget {
             StatusPill(
               label: label,
               color: isActive ? const Color(0xFF16A34A) : AppTheme.muted,
-              icon: isActive
-                  ? Icons.check_circle_outline
-                  : Icons.account_circle_outlined,
+              icon: authError != null
+                  ? Icons.error_outline
+                  : isActive
+                      ? Icons.check_circle_outline
+                      : Icons.account_circle_outlined,
             ),
             OutlinedButton.icon(
               onPressed: onCreateQrSession,
@@ -950,7 +1015,8 @@ class _BilibiliPreviewCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '${preview.totalParts} 个分 P · ${preview.sourceType}',
+              '${preview.sourceTypeLabel} · ${preview.totalParts} 个条目 · '
+              '默认${preview.defaultSelectionModeLabel}',
               style: const TextStyle(
                 color: AppTheme.muted,
                 fontWeight: FontWeight.w600,
@@ -982,11 +1048,13 @@ class _BilibiliRunStatusCard extends StatelessWidget {
     required this.currentTask,
     required this.currentRun,
     required this.onRefreshStatus,
+    required this.onRetry,
   });
 
   final AsyncValue<BilibiliImportTaskModel?> currentTask;
   final AsyncValue<BilibiliImportRunModel?> currentRun;
   final VoidCallback onRefreshStatus;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -1031,14 +1099,8 @@ class _BilibiliRunStatusCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (task != null) StatusPill(label: task.status),
-                if (run != null) StatusPill(label: run.status),
-                if (run?.recoverable == true)
-                  const StatusPill(
-                    label: '可重试',
-                    color: Color(0xFFF97316),
-                    icon: Icons.refresh,
-                  ),
+                if (task != null) StatusPill(label: _taskStatusLabel(task)),
+                if (run != null) StatusPill(label: run.statusLabel),
               ],
             ),
             if (run?.previewTitle != null) ...[
@@ -1051,10 +1113,22 @@ class _BilibiliRunStatusCard extends StatelessWidget {
             if (run != null) ...[
               const SizedBox(height: 8),
               Text(
-                '${run.stage} · ${run.progressPct}%',
+                '${run.stageLabel} · ${run.progressPct}%',
                 style: const TextStyle(
                   color: AppTheme.muted,
                   fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ProgressRail(value: run.progressPct / 100),
+            ],
+            if (run?.resourceIdsLabel != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                run!.resourceIdsLabel!,
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -1068,10 +1142,44 @@ class _BilibiliRunStatusCard extends StatelessWidget {
                 ),
               ),
             ],
+            if (run?.canRetry == true) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重试导入'),
+                ),
+              ),
+            ],
+            if (run?.isImported == true) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: () =>
+                      context.go('/courses/${run!.courseId}/progress'),
+                  icon: const Icon(Icons.manage_search),
+                  label: const Text('进入解析'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  String _taskStatusLabel(BilibiliImportTaskModel task) {
+    return switch (task.status) {
+      'queued' => '已入队',
+      'running' => '处理中',
+      'succeeded' => '已完成',
+      'failed' => '失败',
+      'canceled' => '已取消',
+      _ => task.status,
+    };
   }
 }
 

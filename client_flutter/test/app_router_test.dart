@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/app/router/app_router.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
+import 'package:knowlink_client/features/course_detail/course_detail_page.dart';
 import 'package:knowlink_client/features/course_import/course_import_page.dart';
 import 'package:knowlink_client/features/course_recommend/course_recommend_page.dart';
 import 'package:knowlink_client/features/handout/handout_page.dart';
@@ -14,6 +15,7 @@ import 'package:knowlink_client/features/quiz/quiz_page.dart';
 import 'package:knowlink_client/features/review/review_page.dart';
 import 'package:knowlink_client/shared/models/bilibili_import_models.dart';
 import 'package:knowlink_client/shared/models/course_progress_models.dart';
+import 'package:knowlink_client/shared/models/course_summary.dart';
 import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
 import 'package:knowlink_client/shared/models/pipeline_status.dart';
@@ -48,6 +50,7 @@ void main() {
     final routes = <String, Finder>{
       '/import': find.byType(CourseImportPage),
       '/recommend': find.byType(CourseRecommendPage),
+      '/courses/101': find.byType(CourseDetailPage),
       '/courses/101/progress': find.byType(ParseProgressPage),
       '/courses/101/inquiry': find.byType(InquiryPage),
       '/courses/101/handout': find.byType(HandoutPage),
@@ -64,6 +67,9 @@ void main() {
         findsOneWidget,
         reason: 'route ${entry.key} should resolve',
       );
+      if (entry.key == '/courses/101') {
+        expect(find.text('路由课程 101'), findsOneWidget);
+      }
     }
 
     router.go('/courses/205/qa/9876');
@@ -224,6 +230,16 @@ void _useTestSurface(WidgetTester tester, Size size) {
 
 class _RouterFakeApiClient extends ApiClient {
   @override
+  Future<CourseSummaryModel> fetchCourse(String courseId) async {
+    return _course(int.parse(courseId));
+  }
+
+  @override
+  Future<CourseSummaryModel> fetchCurrentCourse() async {
+    return _course(202);
+  }
+
+  @override
   Future<BilibiliAuthSessionModel> fetchBilibiliAuthSession() async {
     return const BilibiliAuthSessionModel(
       loginStatus: 'none',
@@ -307,6 +323,19 @@ class _RouterFakeApiClient extends ApiClient {
     return CourseProgressModel.fromJson({
       'courseId': int.parse(courseId),
       'lastActivityAt': '2026-05-11T10:00:00+00:00',
+    });
+  }
+
+  CourseSummaryModel _course(int courseId) {
+    return CourseSummaryModel.fromJson({
+      'courseId': courseId,
+      'title': '路由课程 $courseId',
+      'entryType': 'recommendation',
+      'catalogId': 'math-final-01',
+      'lifecycleStatus': 'learning_ready',
+      'pipelineStage': 'handout',
+      'pipelineStatus': 'succeeded',
+      'updatedAt': '2026-05-25T10:00:00+08:00',
     });
   }
 }

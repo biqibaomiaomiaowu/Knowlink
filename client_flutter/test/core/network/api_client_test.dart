@@ -1265,6 +1265,12 @@ void main() {
               'nextAction': 'none',
               'entity': {'type': 'bilibili_import_run', 'id': 9101},
             },
+          '/api/v1/async-tasks/7201/retry' => {
+              'taskId': 7201,
+              'status': 'queued',
+              'nextAction': 'poll',
+              'entity': {'type': 'bilibili_import_run', 'id': 9101},
+            },
           _ => throw StateError('Unexpected ${options.method} ${options.path}'),
         };
         return ResponseBody.fromString(
@@ -1300,17 +1306,20 @@ void main() {
     final runs = await client.fetchBilibiliImportRuns('101');
     final status = await client.fetchBilibiliImportRunStatus(9101);
     final canceled = await client.cancelBilibiliImportRun(9101);
+    final retried = await client.retryAsyncTask(7201);
 
     expect(preview.defaultSelectedPartIds, ['cid-1001']);
     expect(task.importRunId, 9101);
     expect(runs.items.single.status, 'downloading');
     expect(status.progressPct, 70);
     expect(canceled.status, 'canceled');
+    expect(retried.status, 'queued');
     expect(adapter.requests.map((request) => request.method), [
       'POST',
       'POST',
       'GET',
       'GET',
+      'POST',
       'POST',
     ]);
     expect(adapter.requests.map((request) => request.path), [
@@ -1319,6 +1328,7 @@ void main() {
       '/api/v1/courses/101/resources/imports/bilibili',
       '/api/v1/bilibili-import-runs/9101/status',
       '/api/v1/bilibili-import-runs/9101/cancel',
+      '/api/v1/async-tasks/7201/retry',
     ]);
     expect(adapter.requests.first.data, {
       'sourceUrl': 'https://www.bilibili.com/video/BV1xx411c7mD?p=2',
