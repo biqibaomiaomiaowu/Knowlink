@@ -819,6 +819,10 @@ V1 当前未实现阶段统一返回：
 }
 ```
 
+失败语义：
+
+- 必填 key 缺失、key 未知、枚举值非法、`number` 类型不是 JSON integer，或 `time_budget_minutes` 超出 30 到 600 时，返回 `422 common.validation_error`。
+
 ### `POST /api/v1/courses/{courseId}/handouts/generate`
 
 响应 `data`：

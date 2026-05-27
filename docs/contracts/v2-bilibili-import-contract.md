@@ -36,7 +36,7 @@
 {
   "sessionId": "bili_qr_session_001",
   "status": "pending_scan",
-  "qrCodeUrl": "https://passport.bilibili.com/qrcode-demo",
+  "qrCodeUrl": "https://account.bilibili.com/h5/account-h5/auth/scan-web?navhide=1&qrcode_key=...",
   "expiresAt": "2026-05-18T12:15:00+00:00"
 }
 ```
@@ -44,6 +44,7 @@
 说明：
 
 - `status` 可取 `pending_scan`、`scanned`、`confirmed`、`expired`、`failed`。
+- `qrCodeUrl` 是需要前端本地编码成二维码的 B站扫码登录 URL，不是 PNG/JPG 图片地址；前端不得把该 URL 作为 `Image.network`、iframe 或页面跳转目标直接请求。
 - 二维码失效后前端重新创建会话，不复用旧 `sessionId`。
 
 ### `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`
@@ -56,7 +57,7 @@
 {
   "sessionId": "bili_qr_session_001",
   "status": "confirmed",
-  "qrCodeUrl": "https://passport.bilibili.com/qrcode-demo",
+  "qrCodeUrl": "https://account.bilibili.com/h5/account-h5/auth/scan-web?navhide=1&qrcode_key=...",
   "expiresAt": "2026-05-18T12:15:00+00:00"
 }
 ```
@@ -69,18 +70,20 @@
 
 ```json
 {
-  "loginStatus": "active",
-  "userNickname": "KnowLink Demo",
-  "expiresAt": "2026-05-18T14:00:00+00:00"
+  "loginStatus": "inactive",
+  "userNickname": null,
+  "expiresAt": null
 }
 ```
 
 响应不得包含 `SESSDATA`、`bili_jct`、`DedeUserID` 或完整 cookie。
 
-失败语义：
+状态语义：
 
-- 未登录返回 `401 bilibili.auth_required`。
-- cookie 已失效返回 `401 bilibili.auth_expired`。
+- 未登录返回 `200`，`loginStatus=inactive`。
+- cookie 已失效或服务端保存状态非 active 时返回 `200`，`loginStatus=expired`。
+- 已登录返回 `200`，`loginStatus=active`。
+- 只有应用鉴权缺失、服务异常或请求本身非法时才返回错误响应。
 
 ### `DELETE /api/v1/bilibili/auth/session`
 
@@ -141,7 +144,8 @@
 失败语义：
 
 - URL 不属于支持范围返回 `422 bilibili.unsupported_url`。
-- 未登录或登录态失效返回 `401 bilibili.auth_required` / `401 bilibili.auth_expired`。
+- 公共可访问 B站视频允许匿名 preview；服务端没有 B站登录态或登录态过期时使用空 cookie。
+- B站实际要求账号态、cookie 失效、会员、付费、DRM、地区限制、账号无权限或风控时，返回 `401 bilibili.auth_required` / `401 bilibili.auth_expired` 或 `403 bilibili.access_denied`。
 - 元数据不可访问返回 `403 bilibili.access_denied` 或 `502 bilibili.metadata_failed`。
 - 服务端必须保存预览快照并返回 `previewId`，创建导入任务时用 `previewId` 复用该快照。
 
@@ -539,12 +543,13 @@ raw/1/{course_id}/bilibili/{import_run_id}/{part_index}-{safe_title}.mp4
 - `recoverable` run 响应必须返回 `nextAction=retry`。
 - B站导入复用通用 `POST /api/v1/async-tasks/{taskId}/retry` 重试入口；该接口会将同一个 `bilibili_import` task 重置为 `queued` 并重新派发。
 - 重新执行 runner 时必须重新获取 playurl，不复用可能已过期的 DASH URL。
-- cookie 失效时返回 `bilibili.auth_expired`，前端应引导重新扫码后再重试。
+- 公共可访问内容可匿名导入；cookie 失效时 runner 忽略过期 cookie 并使用匿名请求，只有 B站实际要求账号态时才返回 `bilibili.auth_required` / `bilibili.auth_expired` 并引导重新扫码。
 
 ## 11. 验收口径
 
 - 固定样例至少覆盖一个可访问的单视频或多 P 链路。
 - 合集和番剧以至少一个可访问样例为准；会员、付费、地区限制或不可观看内容只要求返回明确失败原因。
+- 公共可访问视频未扫码登录也应能完成 preview/import；扫码登录只作为访问账号态内容的可选增强。
 - 导入后必须能在课程资源列表看到来源为 B站的资源。
 - 状态接口必须能展示下载、合并、上传、失败、可恢复失败和取消语义。
 - Android 前端只读取 `qrCodeUrl`、QR `status`、`loginStatus`、`parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds` 等展示字段，不读取 cookie。
