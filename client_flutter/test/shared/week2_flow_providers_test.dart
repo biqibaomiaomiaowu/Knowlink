@@ -109,7 +109,7 @@ void main() {
     final notifier = container.read(inquiryProvider.notifier);
 
     await notifier.fetchQuestions('101');
-    notifier.updateAnswer('time_budget_minutes', '90');
+    notifier.updateAnswer('time_budget_minutes', 90);
     await notifier.submitAnswers('101');
 
     final state = container.read(inquiryProvider);
@@ -130,7 +130,7 @@ void main() {
     final notifier = container.read(inquiryProvider.notifier);
     await notifier.fetchQuestions('101');
 
-    for (final invalidValue in ['1', '99999', '12.5', 'abc']) {
+    for (final invalidValue in ['29', '601', '12.5', 'abc']) {
       notifier.updateAnswer('time_budget_minutes', invalidValue);
       await notifier.submitAnswers('101');
       expect(
@@ -140,7 +140,7 @@ void main() {
       );
     }
 
-    notifier.updateAnswer('time_budget_minutes', '10');
+    notifier.updateAnswer('time_budget_minutes', '90');
     await notifier.submitAnswers('101');
 
     expect(fakeApiClient.savedInquiryAnswers, hasLength(1));
@@ -148,7 +148,7 @@ void main() {
       fakeApiClient.savedInquiryAnswers.single.answers
           .singleWhere((answer) => answer.key == 'time_budget_minutes')
           .value,
-      '10',
+      90,
     );
   });
 }
@@ -304,6 +304,8 @@ class _Week2FakeApiClient extends ApiClient {
           'type': 'number',
           'required': true,
           'options': [],
+          'minValue': 30,
+          'maxValue': 600,
         },
       ],
     });

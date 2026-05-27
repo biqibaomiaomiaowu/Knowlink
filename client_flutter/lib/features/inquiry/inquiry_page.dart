@@ -348,7 +348,17 @@ class _QuestionField extends StatelessWidget {
           inputFormatters: [
             FilteringTextInputFormatter.digitsOnly,
           ],
-          onChanged: onChanged,
+          onChanged: (raw) {
+            final text = raw.trim();
+            if (text.isEmpty) {
+              onChanged('');
+              return;
+            }
+            final number = int.tryParse(text);
+            if (number != null) {
+              onChanged(number);
+            }
+          },
         ),
       );
     }

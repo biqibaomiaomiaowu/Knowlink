@@ -728,7 +728,7 @@ def test_inquiry_answers_reject_raw_non_int_numbers_with_service_error(raw_value
     )
 
     assert status == 422
-    assert body["errorCode"] == "inquiry.answers_invalid"
+    assert body["errorCode"] == "common.validation_error"
 
 
 @pytest.mark.parametrize(
@@ -767,7 +767,7 @@ def test_inquiry_answers_reject_raw_non_string_single_select_values(raw_value, s
     )
 
     assert status == 422
-    assert body["errorCode"] == "inquiry.answers_invalid"
+    assert body["errorCode"] == "common.validation_error"
 
 
 def test_handout_generate_is_idempotent():

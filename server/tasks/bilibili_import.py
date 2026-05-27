@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -348,6 +349,14 @@ class BilibiliImportRunner:
         auth = self.bilibili.get_bilibili_auth_session()
         if not isinstance(auth, dict):
             return {}
+        if str(auth.get("status") or "") != "active":
+            return {}
+        expires_at = auth.get("expiresAt") or auth.get("expires_at")
+        if isinstance(expires_at, datetime):
+            if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at <= datetime.now(timezone.utc):
+                return {}
         cookies = auth.get("cookiesJson") or auth.get("cookies_json") or {}
         return dict(cookies) if isinstance(cookies, dict) else {}
 

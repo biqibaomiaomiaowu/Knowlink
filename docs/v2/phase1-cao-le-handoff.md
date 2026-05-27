@@ -34,16 +34,17 @@
 
 ## 3. 前端快速说明
 
-- 登录页调用 `POST /api/v1/bilibili/auth/qr/sessions` 获取 `qrCodeUrl`，轮询 `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`。
-- 导入前调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview` 展示 `parts`。
+- 登录页调用 `POST /api/v1/bilibili/auth/qr/sessions` 获取 `qrCodeUrl`，前端必须把它作为二维码内容本地编码渲染，不得作为图片/iframe/跳转 URL 直接请求；随后轮询 `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`。
+- 导入前调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview` 展示 `parts`；公共可访问视频不要求先扫码登录。
 - 创建任务调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili`，随后轮询 `GET /api/v1/bilibili-import-runs/{importRunId}/status`。
 - 取消按钮调用 `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`，响应为 async-task 形态。
 - 前端只展示 `status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`，不得读取或保存 B站 cookie。
 
 ## 3.1 给朱春雯
 
-- 页面只需要展示 `qrCodeUrl`、`loginStatus`、`preview.parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`。
+- 页面只需要展示 `qrCodeUrl`、`loginStatus`、`preview.parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`；`qrCodeUrl` 是二维码内容，不是图片地址。
 - 前端不读取、不缓存、不打印 cookie；登录态只通过 `GET /api/v1/bilibili/auth/session` 展示。
+- `GET /api/v1/bilibili/auth/session` 未登录返回 `loginStatus=inactive`，过期返回 `loginStatus=expired`，不作为预览和导入按钮的硬前置。
 - 扫码、资源预览、导入进度、失败提示和取消入口按 contract 字段渲染即可。
 - Android 真机录屏、页面截图、扫码页和进度页交互由朱春雯补充验收证据。
 - 推荐页可读取 `reasonMaterials` 和 `nextAction.type=confirm_course`；课程详情调用 `GET /api/v1/courses/{courseId}`，当前课程调用 `GET /api/v1/courses/current`，切换课程调用 `POST /api/v1/courses/{courseId}/switch-current`。

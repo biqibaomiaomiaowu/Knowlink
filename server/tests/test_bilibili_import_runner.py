@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 import importlib
@@ -16,8 +17,11 @@ from server.tasks.dispatcher import DramatiqTaskDispatcher, InMemoryTaskDispatch
 class FakeClient:
     def __init__(self, *, playurl_error: Exception | None = None) -> None:
         self.playurl_error = playurl_error
+        self.preview_calls: list[dict[str, Any]] = []
+        self.playurl_calls: list[dict[str, Any]] = []
 
     def preview(self, source_url: str, cookies: dict[str, Any]) -> BilibiliPreview:
+        self.preview_calls.append({"sourceUrl": source_url, "cookies": dict(cookies)})
         return BilibiliPreview(
             preview_id="bili_preview_1",
             source_url=source_url,
@@ -41,6 +45,14 @@ class FakeClient:
     def playurl(self, *, source_url: str, part: BilibiliPart, cookies: dict[str, Any], quality_preference: str):
         if self.playurl_error is not None:
             raise self.playurl_error
+        self.playurl_calls.append(
+            {
+                "sourceUrl": source_url,
+                "part": part,
+                "cookies": dict(cookies),
+                "qualityPreference": quality_preference,
+            }
+        )
         return {
             "videoUrl": "https://upos.test/video.m4s",
             "audioUrl": "https://upos.test/audio.m4s",
@@ -237,7 +249,8 @@ def _runner_class():
 def test_runner_imports_bilibili_video_into_course_resource(tmp_path: Path) -> None:
     repo, course, run, task = _build_run()
     storage = FakeStorage()
-    runner = _runner(repo, tmp_path, storage=storage)
+    client = FakeClient()
+    runner = _runner(repo, tmp_path, storage=storage, bili_client=client)
 
     runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
 
@@ -257,7 +270,26 @@ def test_runner_imports_bilibili_video_into_course_resource(tmp_path: Path) -> N
     assert resources[0]["resourceType"] == "mp4"
     assert resources[0]["parsePolicyJson"] == {"source": "bilibili", "importRunId": run["importRunId"]}
     assert storage.uploads[0]["objectKey"].startswith(f"raw/1/{course['courseId']}/bilibili/{run['importRunId']}/")
+    assert client.preview_calls[0]["cookies"] == {}
+    assert client.playurl_calls[0]["cookies"] == {}
     assert not (tmp_path / str(run["importRunId"])).exists()
+
+
+def test_runner_ignores_expired_auth_session_and_uses_anonymous_cookies(tmp_path: Path) -> None:
+    repo, course, run, task = _build_run()
+    repo.save_bilibili_auth_session(
+        cookies_json={"SESSDATA": "expired-cookie"},
+        expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        status="active",
+    )
+    client = FakeClient()
+    runner = _runner(repo, tmp_path, bili_client=client)
+
+    runner.run({"courseId": course["courseId"], "importRunId": run["importRunId"], "taskId": task["taskId"]})
+
+    assert repo.get_bilibili_import_run(run["importRunId"])["status"] == "imported"
+    assert client.preview_calls[0]["cookies"] == {}
+    assert client.playurl_calls[0]["cookies"] == {}
 
 
 def test_runner_uses_bvid_encoded_in_collection_part_id_for_playurl(tmp_path: Path) -> None:

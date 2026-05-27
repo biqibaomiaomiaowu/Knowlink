@@ -114,7 +114,7 @@ def test_save_answers_rejects_contract_drift(answers: list[dict[str, object]], r
         )
 
     assert reason
-    assert exc_info.value.error_code == "inquiry.answers_invalid"
+    assert exc_info.value.error_code == "common.validation_error"
     assert exc_info.value.status_code == 422
     assert repo.saved_answers is None
 

@@ -29,8 +29,8 @@
 ## Bilibili
 
 - `bilibili.not_implemented`: V1 B 站导入与扫码登录接口已预留，但当前服务尚未接通
-- `bilibili.auth_required`: V2 B站导入需要扫码登录后才能继续
-- `bilibili.auth_expired`: V2 B站登录态过期或服务端凭据失效
+- `bilibili.auth_required`: B站实际要求账号态才能访问当前内容；公共可访问内容不得用该错误作为 preview/import 硬前置
+- `bilibili.auth_expired`: B站登录态过期、服务端凭据失效，或 B站请求因 cookie 失效失败；公共可访问内容应优先匿名请求
 - `bilibili.unsupported_url`: V2 B站链接不属于单视频、多 P、合集或番剧支持范围
 - `bilibili.access_denied`: B站内容不可访问，包含付费、会员、DRM、地区限制或账号无权限
 - `bilibili.metadata_failed`: B站元数据、分 P、合集或番剧条目获取失败
