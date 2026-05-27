@@ -348,7 +348,7 @@ def test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape(
         "### `POST /api/v1/courses/{courseId}/resources/imports/bilibili`", 1
     )[1].split("### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`", 1)[0]
     delete_session_section = api_contract.split("### `DELETE /api/v1/bilibili/auth/session`", 1)[1].split(
-        "当前未实现阶段统一返回：", 1
+        "V1 历史 stub 阶段统一返回：", 1
     )[0]
 
     assert '"videoUrl"' in import_section

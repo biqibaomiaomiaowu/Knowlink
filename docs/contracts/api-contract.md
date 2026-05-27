@@ -52,7 +52,7 @@
 - `docs/v2/phase-plan.md` 是第二版的规划和责任口径，不直接等同于已实现 API。
 - V2 新增或重做 B站真实导入、知识图谱、实时流式输出、主观题自动判卷时，必须先补充对应 API / DTO / schema / 错误码 contract，再实施代码。
 - V2 B站真实导入 contract 已单独冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)；该文档覆盖本文 B站 V1 `501` stub 的历史口径。
-- V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示当前第一版实现状态。
+- V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示第一版历史实现状态。
 - V2 状态拼写统一使用 `canceled`，不使用 `cancelled`。外部资料或旧 spec 中出现 `cancelled` 时，进入 API contract 前统一归一化为 `canceled`。
 - V2 B站导入细分状态到 `async_tasks.status` 的完整冻结映射以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准；本文仅保留过渡摘要：
 
@@ -240,7 +240,7 @@
 说明：
 
 - `resourceType` 可取 `mp4`、`pdf`、`pptx`、`docx`、`srt`。
-- `pptx` 与 `docx` 在 MVP 已经占位到 contract 和代码骨架，真实解析保真可渐进增强。
+- `pptx` 与 `docx` 已进入 contract、上传链路和 parser 实现；复杂版面、公式、图片 caption 等保真能力仍可按资料质量继续增强。
 
 ## 5. 课程与首页
 
@@ -482,7 +482,7 @@
 
 ### B 站导入预留接口（V1/MVP）
 
-以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 B站真实导入 contract 已冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)，本文下方示例只作为 V1 历史 stub 形状保留，不作为 V2 字段来源。
+以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract。V1 历史 stub 阶段统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 已按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 进入真实扫码登录、下载、合并、MinIO 上传和课程资源导入实现；V2 B站真实导入 contract 已冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)，本文下方示例只作为 V1 历史 stub 形状保留，不作为 V2 字段来源。
 
 stub 阶段约束：
 
@@ -538,7 +538,7 @@ V1 历史 stub 阶段不会查询真实 B站登录态；V2 auth session DTO 以 
 
 ### `DELETE /api/v1/bilibili/auth/session`
 
-V1 历史 stub 目标响应形状如下；当前未实现阶段仍统一返回 `501`，V2 auth session 删除 DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
+V1 历史 stub 目标响应形状如下；stub 阶段统一返回 `501`，V2 auth session 删除 DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ```json
 {
@@ -546,7 +546,7 @@ V1 历史 stub 目标响应形状如下；当前未实现阶段仍统一返回 `
 }
 ```
 
-V1 当前未实现阶段统一返回：
+V1 历史 stub 阶段统一返回：
 
 ```json
 {
@@ -924,7 +924,7 @@ V1 当前未实现阶段统一返回：
 
 说明：
 
-- 这是视频优先讲义页的首屏读取接口；本轮为破坏性两级 outline API 改动，Flutter 需后续单独适配。
+- 这是视频优先讲义页的首屏读取接口；当前 Flutter 讲义页已按两级 outline read model 消费 `items[*].children[]`。
 - `items[]` 是大标题，只负责语义分组和展开；大标题没有 `blockId`，不可直接生成讲义块，也不作为点击、跳转、高亮或 QA 的目标。
 - `items[*].children[]` 是小标题，也是唯一 leaf item；只有 child 绑定 `blockId`、`generationStatus`、`sourceSegmentKeys` 和 `topicTags`。
 - `items[*].children[*].sourceSegmentKeys` 是 API read model 必返字段，用于后续 block 生成和引用校验；前端可忽略展示。

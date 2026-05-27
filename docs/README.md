@@ -8,7 +8,7 @@
 |---|---|---|
 | 第二版规划、排期、负责人分工 | [v2/phase-plan.md](./v2/phase-plan.md) | V2 当前权威入口；阶段计划、每周任务、负责人和验收口径以此为准 |
 | 第二版功能设计背景 | [v2/three-phase-design.md](./v2/three-phase-design.md) | Superpowers 产出的 V2 设计稿，作为计划的设计背景 |
-| 当前代码落地状态 | [engineering/development-scaffold.md](./engineering/development-scaffold.md) | 第一版已接通范围、工程边界、schema/contract 变更流 |
+| 当前代码落地状态 | [engineering/development-scaffold.md](./engineering/development-scaffold.md) | 第一版已接通范围、V2 当前状态、工程边界、schema/contract 变更流 |
 | API、DTO、错误码 | [contracts/api-contract.md](./contracts/api-contract.md) 与 [contracts/error-codes.md](./contracts/error-codes.md) | 当前主要是 V1/MVP contract；V2 新功能实施前需补 V2 contract |
 | 第一版架构、分工、排期 | [v1/architecture.md](./v1/architecture.md)、[v1/team-division.md](./v1/team-division.md)、[v1/weekly-plan.md](./v1/weekly-plan.md) | V1 历史冻结资料；V2 owner 不直接沿用旧口径 |
 
@@ -37,7 +37,7 @@
 
 ## 工程与研究
 
-- [engineering/development-scaffold.md](./engineering/development-scaffold.md)：工程骨架、当前完成度、变更流和文档优先级。
+- [engineering/development-scaffold.md](./engineering/development-scaffold.md)：工程状态、当前完成度、变更流和文档优先级。
 - [research/vivo-ai-integration.md](./research/vivo-ai-integration.md)：vivo AI 接入研究与第三方能力快照。
 
 ## 根目录保留入口

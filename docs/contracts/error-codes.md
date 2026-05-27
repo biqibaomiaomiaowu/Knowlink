@@ -28,7 +28,7 @@
 
 ## Bilibili
 
-- `bilibili.not_implemented`: V1 B 站导入与扫码登录接口已预留，但当前服务尚未接通
+- `bilibili.not_implemented`: V1 历史 stub 阶段用于表示 B站导入与扫码登录接口已预留但未接通；V2 真实导入不使用该错误码表达能力未实现
 - `bilibili.auth_required`: B站实际要求账号态才能访问当前内容；公共可访问内容不得用该错误作为 preview/import 硬前置
 - `bilibili.auth_expired`: B站登录态过期、服务端凭据失效，或 B站请求因 cookie 失效失败；公共可访问内容应优先匿名请求
 - `bilibili.unsupported_url`: V2 B站链接不属于单视频、多 P、合集或番剧支持范围

@@ -57,7 +57,7 @@ KnowLink 第一版按 `Flutter 移动端 + FastAPI 模块化单体 + Dramatiq Wo
 
 - 鉴权采用单 demo 用户方案：后端种子化 1 个用户，Flutter 通过环境变量 `KNOWLINK_DEMO_TOKEN` 携带固定 Bearer token。
 - 智能课程推荐必须是真实可用能力，而不是页面 mock。
-- 推荐来源固定为 `course_catalog` 种子目录，不接外部课程平台抓取；B 站单视频导入在第一版只冻结接口，不接通下载运行时，V2 将按阶段计划接通真实导入。
+- 推荐来源固定为 `course_catalog` 种子目录，不接外部课程平台抓取；B 站单视频导入在第一版只冻结接口，不接通下载运行时；第二版实现状态以 [`docs/v2/phase-plan.md`](../v2/phase-plan.md) 与 [`docs/contracts/v2-bilibili-import-contract.md`](../contracts/v2-bilibili-import-contract.md) 为准。
 - 推荐策略采用“规则排序 + AI 推荐理由文案”组合，确保 4 周内可稳定落地。
 - 策划书中的“移动端 APP / 快应用”按本仓边界收敛为“Flutter APP 交付优先”，快应用不在当前代码仓实现。
 
