@@ -321,22 +321,6 @@ class BilibiliService:
             )
         return course
 
-    def _require_auth_session(self) -> dict[str, Any]:
-        auth = self.bilibili.get_bilibili_auth_session()
-        if auth is None:
-            raise ServiceError(
-                message="Bilibili auth session is required.",
-                error_code="bilibili.auth_required",
-                status_code=401,
-            )
-        if not self._auth_is_active(auth) or self._is_expired(auth.get("expiresAt") or auth.get("expires_at")):
-            raise ServiceError(
-                message="Bilibili auth session is expired.",
-                error_code="bilibili.auth_expired",
-                status_code=401,
-            )
-        return auth
-
     def _optional_auth_cookies(self) -> dict[str, Any]:
         auth = self.bilibili.get_bilibili_auth_session()
         if not isinstance(auth, dict):
