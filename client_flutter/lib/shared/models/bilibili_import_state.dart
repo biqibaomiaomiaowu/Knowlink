@@ -28,12 +28,10 @@ class BilibiliImportState {
   final String? lastIdempotencyKey;
 
   bool get canPreview =>
-      authSession.valueOrNull?.isActive == true &&
       sourceUrl.trim().isNotEmpty &&
       !preview.isLoading;
 
   bool get canCreateImport =>
-      authSession.valueOrNull?.isActive == true &&
       preview.valueOrNull != null &&
       selectedPartIds.isNotEmpty &&
       !currentTask.isLoading &&

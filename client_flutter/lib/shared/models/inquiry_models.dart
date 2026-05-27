@@ -22,6 +22,8 @@ class InquiryQuestionModel {
     required this.type,
     required this.isRequired,
     required this.options,
+    required this.minValue,
+    required this.maxValue,
   });
 
   final String key;
@@ -29,6 +31,8 @@ class InquiryQuestionModel {
   final String type;
   final bool isRequired;
   final List<InquiryQuestionOptionModel> options;
+  final int? minValue;
+  final int? maxValue;
 
   factory InquiryQuestionModel.fromJson(Map<String, dynamic> json) {
     return InquiryQuestionModel(
@@ -43,8 +47,23 @@ class InquiryQuestionModel {
             ),
           )
           .toList(),
+      minValue: _optionalInt(json['minValue']),
+      maxValue: _optionalInt(json['maxValue']),
     );
   }
+}
+
+int? _optionalInt(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  return int.tryParse(value.toString());
 }
 
 class InquiryQuestionsModel {

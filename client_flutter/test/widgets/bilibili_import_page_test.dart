@@ -32,13 +32,7 @@ void main() {
 
   testWidgets('B站导入区块可预览并创建导入任务', (tester) async {
     _useLargeTestSurface(tester);
-    final fakeApiClient = _BilibiliPageFakeApiClient(
-      authSession: const BilibiliAuthSessionModel(
-        loginStatus: 'active',
-        userNickname: 'KnowLink Demo',
-        expiresAt: null,
-      ),
-    );
+    final fakeApiClient = _BilibiliPageFakeApiClient();
 
     await tester.pumpWidget(
       ProviderScope(
@@ -50,7 +44,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('已登录：KnowLink Demo'), findsOneWidget);
+    expect(find.text('未登录B站'), findsOneWidget);
 
     await tester.enterText(
       find.widgetWithText(TextField, 'B站链接'),
@@ -236,7 +230,8 @@ void main() {
 
     expect(find.text('扫码状态：pending'), findsOneWidget);
     expect(find.textContaining('二维码链接：https://bilibili.test/qr.png'),
-        findsOneWidget);
+        findsNothing);
+    expect(find.byType(Image), findsNothing);
     expect(find.widgetWithText(OutlinedButton, '刷新扫码状态'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(OutlinedButton, '刷新扫码状态'));

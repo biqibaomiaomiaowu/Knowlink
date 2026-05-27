@@ -54,7 +54,10 @@ class InquiryController extends AutoDisposeNotifier<InquiryState> {
         .map(
           (question) => InquiryAnswerModel(
             key: question.key,
-            value: state.answers[question.key]!,
+            value: _coerceAnswerValue(
+              question,
+              state.answers[question.key]!,
+            ),
           ),
         )
         .toList();
@@ -85,11 +88,15 @@ class InquiryController extends AutoDisposeNotifier<InquiryState> {
         final number = int.tryParse(text);
         if (number == null || !RegExp(r'^\d+$').hasMatch(text)) {
           errors[question.key] = '请输入整数';
-        } else if (question.key == 'time_budget_minutes' &&
-            (number < 10 || number > 1440)) {
-          errors[question.key] = '请输入 10 到 1440 之间的整数分钟数';
-        } else if (number <= 0) {
-          errors[question.key] = '请输入大于 0 的整数';
+        } else {
+          final minValue = question.minValue ?? 1;
+          final maxValue = question.maxValue;
+          if (number < minValue ||
+              (maxValue != null && number > maxValue)) {
+            errors[question.key] = maxValue == null
+                ? '请输入不小于 $minValue 的整数'
+                : '请输入 $minValue 到 $maxValue 之间的整数';
+          }
         }
       }
     }
@@ -120,4 +127,15 @@ bool _isBlank(Object? value) {
     return value.trim().isEmpty;
   }
   return false;
+}
+
+Object _coerceAnswerValue(InquiryQuestionModel question, Object value) {
+  if (question.type != 'number') {
+    return value;
+  }
+  if (value is int) {
+    return value;
+  }
+  final parsed = int.tryParse(value.toString().trim());
+  return parsed ?? value;
 }

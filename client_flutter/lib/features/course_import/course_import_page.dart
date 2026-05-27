@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_error_view.dart';
@@ -891,22 +892,20 @@ class _BilibiliQrSessionView extends StatelessWidget {
             ),
           )
         else ...[
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              qrCodeUrl,
-              width: 132,
-              height: 132,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return Text(
-                  '二维码链接：$qrCodeUrl',
-                  style: const TextStyle(
-                    color: AppTheme.brandBlue,
-                    fontWeight: FontWeight.w700,
-                  ),
-                );
-              },
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.line),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: QrImageView(
+                data: qrCodeUrl,
+                version: QrVersions.auto,
+                size: 132,
+                backgroundColor: Colors.white,
+              ),
             ),
           ),
         ],

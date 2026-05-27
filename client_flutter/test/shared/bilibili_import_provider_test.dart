@@ -80,6 +80,38 @@ void main() {
     expect(state.currentRun.valueOrNull?.importRunId, 9102);
   });
 
+  test('preview and create import do not require active B站 auth session',
+      () async {
+    final fakeApiClient = FakeBilibiliApiClient(
+      previewResult: _preview(defaultSelectedPartIds: const ['cid-1002']),
+      createdTask: _task(taskId: 71, importRunId: 9101, status: 'queued'),
+      runStatus: _run(importRunId: 9101, status: 'queued'),
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.updateSourceUrl('https://www.bilibili.com/video/BV1xx411c7mD?p=2');
+
+    var state = container.read(bilibiliImportProvider);
+    expect(state.authSession.valueOrNull, isNull);
+    expect(state.canPreview, isTrue);
+
+    await notifier.preview('101');
+
+    state = container.read(bilibiliImportProvider);
+    expect(state.preview.valueOrNull?.previewId, 'bili_preview_9101');
+    expect(state.selectedPartIds, {'cid-1002'});
+    expect(state.canCreateImport, isTrue);
+
+    await notifier.createImport('101');
+
+    expect(fakeApiClient.createCalls, hasLength(1));
+    expect(
+      fakeApiClient.createCalls.single.request.selectedPartIds,
+      ['cid-1002'],
+    );
+  });
+
   test('preview selects defaults and createImport reuses idempotency key',
       () async {
     final fakeApiClient = FakeBilibiliApiClient(
