@@ -134,45 +134,38 @@ def test_auth_session_response_hides_cookie_values() -> None:
     assert "cookiesJson" not in response
 
 
-def test_auth_session_contract_distinguishes_missing_and_expired_sessions() -> None:
+def test_auth_session_contract_returns_plain_inactive_and_expired_states() -> None:
     service, repo, *_ = build_service()
 
-    with pytest.raises(ServiceError) as missing:
-        service.get_auth_session()
-    assert missing.value.error_code == "bilibili.auth_required"
-    assert missing.value.status_code == 401
+    assert service.get_auth_session() == {
+        "loginStatus": "inactive",
+        "userNickname": None,
+        "expiresAt": None,
+    }
 
     repo.save_bilibili_auth_session(
         cookies_json={"SESSDATA": "expired-cookie"},
         expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
         status="active",
     )
-    with pytest.raises(ServiceError) as expired:
-        service.get_auth_session()
-    assert expired.value.error_code == "bilibili.auth_expired"
-    assert expired.value.status_code == 401
+    expired = service.get_auth_session()
+    assert expired["loginStatus"] == "expired"
+    assert expired["userNickname"] is None
+    assert isinstance(expired["expiresAt"], datetime)
 
     repo.save_bilibili_auth_session(
         cookies_json={"SESSDATA": "inactive-cookie"},
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
         status="expired",
     )
-    with pytest.raises(ServiceError) as inactive:
-        service.preview_import(course_id=create_course(repo), source_url="https://www.bilibili.com/video/BVdemo/")
-    assert inactive.value.error_code == "bilibili.auth_expired"
-    assert inactive.value.status_code == 401
+    inactive = service.get_auth_session()
+    assert inactive["loginStatus"] == "expired"
 
 
-def test_preview_requires_course_and_auth_then_returns_parts() -> None:
+def test_preview_allows_anonymous_public_video_and_returns_parts() -> None:
     service, repo, _, _, client = build_service()
     course_id = create_course(repo)
 
-    with pytest.raises(ServiceError) as missing_auth:
-        service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
-    assert missing_auth.value.error_code == "bilibili.auth_required"
-    assert missing_auth.value.status_code == 401
-
-    save_auth(repo)
     with pytest.raises(ServiceError) as missing_course:
         service.preview_import(course_id=99999, source_url="https://www.bilibili.com/video/BVdemo/")
     assert missing_course.value.error_code == "course.not_found"
@@ -183,13 +176,22 @@ def test_preview_requires_course_and_auth_then_returns_parts() -> None:
     assert preview["previewId"] == "bili_preview_demo"
     assert preview["sourceType"] == "multi_p"
     assert [part["partId"] for part in preview["parts"]] == ["p1", "p2"]
+    assert client.preview_calls[0]["cookies"] == {}
+
+
+def test_preview_uses_active_auth_cookies_when_available() -> None:
+    service, repo, _, _, client = build_service()
+    course_id = create_course(repo)
+    save_auth(repo)
+
+    service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+
     assert client.preview_calls[0]["cookies"]["SESSDATA"] == "secret-cookie"
 
 
 def test_create_import_requires_preview_snapshot_creates_run_task_and_dispatch_payload() -> None:
     service, repo, async_tasks, dispatcher, _ = build_service()
     course_id = create_course(repo)
-    save_auth(repo)
 
     with pytest.raises(ServiceError) as missing_preview:
         service.create_import(

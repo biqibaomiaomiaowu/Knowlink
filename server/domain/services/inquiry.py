@@ -127,7 +127,7 @@ class InquiryService:
     def _raise_invalid_answers(self) -> None:
         raise ServiceError(
             message="Inquiry answers are invalid.",
-            error_code="inquiry.answers_invalid",
+            error_code="common.validation_error",
             status_code=422,
         )
 
