@@ -56,6 +56,37 @@ Start-Process "http://localhost:52853"
 
 然后打开 `http://localhost:52853`，进入智能课程推荐页，获取推荐，确认入课，并验证页面能展示已创建课程结果，且可跳转到自主导入页。已有课程下的自主导入页会展示 B站导入区块；公共可访问视频可直接预览，账号态内容按二维码登录状态处理。
 
+Android 真机 USB 联调：
+
+```powershell
+adb devices
+adb reverse tcp:8000 tcp:8000
+adb reverse tcp:9000 tcp:9000
+adb reverse --list
+
+adb shell curl -sS http://127.0.0.1:8000/health
+adb shell curl -sS http://127.0.0.1:9000/minio/health/live
+
+flutter run -d <device-id> `
+  --dart-define=KNOWLINK_API_BASE_URL=http://127.0.0.1:8000 `
+  --dart-define=KNOWLINK_DEMO_TOKEN=knowlink-demo-token
+```
+
+本地 Docker 默认会把上传和播放用的 MinIO 预签名 URL 签到 `KNOWLINK_MINIO_PUBLIC_ENDPOINT=127.0.0.1:9000`。真机通过 USB 访问本机服务时，必须同时映射 `8000` 和 `9000`；只映射 `8000` 会导致课程创建、上传初始化等 API 成功，但文件 PUT 到对象存储时出现 `Connection refused, address = 127.0.0.1, port = 9000`。
+
+若平板不通过 USB reverse，而是走同一 Wi-Fi 下的宿主机局域网 IP，需要让后端签出设备可达的 MinIO host，并用同一个 host 构建 App：
+
+```powershell
+# .env
+KNOWLINK_MINIO_PUBLIC_ENDPOINT=<host-lan-ip>:9000
+
+docker compose up -d --force-recreate api worker
+
+flutter run -d <device-id> `
+  --dart-define=KNOWLINK_API_BASE_URL=http://<host-lan-ip>:8000 `
+  --dart-define=KNOWLINK_DEMO_TOKEN=knowlink-demo-token
+```
+
 ## 故障排查
 
 - Flutter 会在 `<flutter-sdk>\\bin\\cache` 下写入 SDK cache 锁文件。如果当前进程没有该 SDK 路径的写权限，命令可能会在输出前卡住。
