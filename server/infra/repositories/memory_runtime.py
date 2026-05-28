@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from server.domain.services.idempotency import (
     IDEMPOTENCY_EXPIRES_IN,
@@ -22,6 +22,35 @@ def _scoped_idempotency_record_expired(expires_at: object) -> bool:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return expires_at <= utcnow()
+
+
+def _qa_scope_block_label(block: Mapping[str, Any]) -> str:
+    parts = [
+        str(value).strip()
+        for value in (block.get("title"), block.get("summary"))
+        if isinstance(value, str) and value.strip()
+    ]
+    return " ".join(parts)
+
+
+def _qa_scope_knowledge_point_names(blocks: Sequence[Mapping[str, Any]]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for block in blocks:
+        points = block.get("knowledgePoints")
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if not isinstance(point, Mapping):
+                continue
+            name = point.get("displayName") or point.get("name") or point.get("knowledgePointKey")
+            if not isinstance(name, str):
+                continue
+            normalized = name.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                names.append(normalized)
+    return names
 
 
 @dataclass
@@ -673,6 +702,12 @@ class RuntimeStore:
             "segments": segments,
             "knowledgePointEvidences": [],
             "adjacentBlocks": adjacent_blocks,
+            "courseScope": self._qa_course_scope_from_memory(
+                course=course,
+                course_id=course_id,
+                current_block=block,
+                adjacent_blocks=adjacent_blocks,
+            ),
         }
 
     def save_qa_exchange(
@@ -752,6 +787,37 @@ class RuntimeStore:
             "sourceSegmentKeys": list(block.get("sourceSegmentKeys") or []),
             "knowledgePoints": block.get("knowledgePoints") or [],
             "citations": block.get("citations") or [],
+        }
+
+    def _qa_course_scope_from_memory(
+        self,
+        *,
+        course: dict[str, Any],
+        course_id: int,
+        current_block: dict[str, Any],
+        adjacent_blocks: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        scoped_blocks = [
+            self._qa_block_payload_from_memory(
+                current_block,
+                course_id=course_id,
+                parse_run_id=course.get("activeParseRunId"),
+                handout_version_id=int(course.get("activeHandoutVersionId") or 0),
+            ),
+            *adjacent_blocks,
+        ]
+        handout_titles = [_qa_scope_block_label(block) for block in scoped_blocks]
+        return {
+            "title": course.get("title"),
+            "summary": course.get("summary"),
+            "goalText": course.get("goalText"),
+            "resourceTitles": [
+                str(resource.get("originalName")).strip()
+                for resource in self.resources.get(course_id, [])
+                if str(resource.get("originalName") or "").strip()
+            ],
+            "handoutTitles": [item for item in handout_titles if item],
+            "knowledgePointNames": _qa_scope_knowledge_point_names(scoped_blocks),
         }
 
     def _qa_segments_from_memory_handout(

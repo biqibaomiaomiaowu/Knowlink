@@ -58,6 +58,7 @@ class QaService:
             active_course_id=active_course_id,
             active_parse_run_id=active_parse_run_id,
             active_handout_version_id=active_handout_version_id,
+            course_scope=context.get("courseScope") or {},
             client=self.qa_answer_client,
         )
         refs = build_qa_message_refs(

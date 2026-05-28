@@ -136,6 +136,239 @@ def test_qa_uses_handout_context_when_original_evidence_is_missing():
     assert "集合是确定对象组成的整体" in response["answerMd"]
 
 
+def test_qa_uses_title_summary_handout_context_when_content_is_empty():
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+            "summary": "集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    assert response["answerType"] == "direct_answer"
+    assert response["generationMetadata"]["evidenceTier"] == "handout_context"
+    assert "集合是确定对象组成的整体" in response["answerMd"]
+
+
+def test_qa_answers_course_related_question_without_direct_evidence():
+    response = generate_block_qa_response(
+        "空集为什么也是集合？",
+        current_block={
+            **_current_block(),
+            "title": "",
+            "summary": "",
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "handoutTitles": ["集合的定义"],
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "course_prior"
+    assert "基于当前课程主题的补充解释" in response["answerMd"]
+    assert "空集" in response["answerMd"]
+
+
+def test_qa_rejects_out_of_scope_question_without_direct_evidence():
+    response = generate_block_qa_response(
+        "今天杭州天气怎么样？",
+        current_block={**_current_block(), "citations": [], "sourceSegmentKeys": [], "knowledgePoints": [], "contentMd": ""},
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "handoutTitles": ["集合的定义"],
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "clarification"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+
+def test_qa_does_not_reject_domain_term_when_it_is_in_course_scope():
+    response = generate_block_qa_response(
+        "天气预报为什么会变化？",
+        current_block={**_current_block(), "citations": [], "sourceSegmentKeys": [], "knowledgePoints": [], "contentMd": ""},
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "气象学入门",
+            "goalText": "理解气象观测、气压、降水和预报。",
+            "knowledgePointNames": ["气象", "气压", "降水"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "course_prior"
+
+
+def test_qa_rejects_mixed_course_keyword_out_of_scope_question():
+    response = generate_block_qa_response(
+        "集合今天杭州天气怎么样？",
+        current_block={
+            **_current_block(),
+            "title": "",
+            "summary": "",
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    assert response["answerType"] == "clarification"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+
+def test_qa_keeps_original_evidence_before_out_of_scope_terms():
+    response = generate_block_qa_response(
+        "集合今天杭州天气怎么样？",
+        current_block=_current_block(),
+        segments=_segments(),
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["generationMetadata"]["evidenceTier"] == "original_evidence"
+    assert response["citations"] == [{"resourceId": 1, "refLabel": "\u89c6\u9891 00s-20s", "startSec": 0, "endSec": 20}]
+
+
+def test_qa_keeps_original_evidence_before_stock_and_news_terms():
+    for question in [
+        "\u96c6\u5408\u80a1\u7968\u8d70\u52bf\u600e\u4e48\u770b\uff1f",
+        "\u96c6\u5408\u65b0\u95fb\u70ed\u641c\u662f\u4ec0\u4e48\uff1f",
+    ]:
+        response = generate_block_qa_response(
+            question,
+            current_block=_current_block(),
+            segments=_segments(),
+            knowledge_point_evidences=[],
+            adjacent_blocks=[],
+            active_course_id=101,
+            active_parse_run_id=9001,
+            active_handout_version_id=7001,
+            course_scope={
+                "title": "set theory basics",
+                "goalText": "learn empty sets, subsets, and set operations",
+                "knowledgePointNames": ["set", "empty set"],
+            },
+        )
+
+        QA_RESPONSE_VALIDATOR.validate(response)
+        assert response["answerType"] == "direct_answer"
+        assert response["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert response["citations"] == [{"resourceId": 1, "refLabel": "\u89c6\u9891 00s-20s", "startSec": 0, "endSec": 20}]
+
+
+def test_qa_keeps_legacy_insufficient_evidence_for_out_of_scope_without_course_scope():
+    response = generate_block_qa_response(
+        "今天杭州天气怎么样？",
+        current_block={**_current_block(), "citations": [], "sourceSegmentKeys": [], "knowledgePoints": [], "contentMd": ""},
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "insufficient_evidence"
+    assert response["citations"] == []
+
+
+def test_qa_does_not_reject_course_question_with_generic_time_word():
+    response = generate_block_qa_response(
+        "今天集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+            "title": "集合的定义",
+            "summary": "集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["generationMetadata"]["evidenceTier"] == "handout_context"
+    assert response["citations"] == []
+
+
 def test_block_scoped_qa_refuses_when_candidates_do_not_support_question():
     response = generate_block_qa_response(
         "量子隧穿效应如何证明？",

@@ -1314,6 +1314,11 @@ class SqlAlchemyRuntimeRepository:
             "segments": segments,
             "knowledgePointEvidences": [],
             "adjacentBlocks": adjacent_blocks,
+            "courseScope": self._qa_course_scope(
+                course=course,
+                current_block=current_block,
+                adjacent_blocks=adjacent_blocks,
+            ),
         }
 
     def save_qa_exchange(
@@ -2382,6 +2387,34 @@ class SqlAlchemyRuntimeRepository:
             "citations": block.citations_json or [],
         }
 
+    def _qa_course_scope(
+        self,
+        *,
+        course: Course,
+        current_block: dict[str, Any],
+        adjacent_blocks: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        resources = self.session.scalars(
+            select(CourseResource)
+            .where(CourseResource.course_id == course.id)
+            .order_by(CourseResource.sort_order.asc(), CourseResource.id.asc())
+        ).all()
+        scoped_blocks = [current_block, *adjacent_blocks]
+        handout_titles = [_qa_scope_block_label(block) for block in scoped_blocks]
+        knowledge_point_names = _qa_scope_knowledge_point_names(scoped_blocks)
+        return {
+            "title": course.title,
+            "summary": course.summary,
+            "goalText": course.goal_text,
+            "resourceTitles": [
+                resource.original_name
+                for resource in resources
+                if isinstance(resource.original_name, str) and resource.original_name.strip()
+            ],
+            "handoutTitles": [item for item in handout_titles if item],
+            "knowledgePointNames": knowledge_point_names,
+        }
+
     def _qa_adjacent_blocks(
         self,
         block: HandoutBlock,
@@ -2765,6 +2798,35 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "activeHandoutVersionId": course.active_handout_version_id,
         "updatedAt": course.updated_at,
     }
+
+
+def _qa_scope_block_label(block: Mapping[str, Any]) -> str:
+    parts = [
+        str(value).strip()
+        for value in (block.get("title"), block.get("summary"))
+        if isinstance(value, str) and value.strip()
+    ]
+    return " ".join(parts)
+
+
+def _qa_scope_knowledge_point_names(blocks: Sequence[Mapping[str, Any]]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for block in blocks:
+        points = block.get("knowledgePoints")
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if not isinstance(point, Mapping):
+                continue
+            name = point.get("displayName") or point.get("name") or point.get("knowledgePointKey")
+            if not isinstance(name, str):
+                continue
+            normalized = name.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                names.append(normalized)
+    return names
 
 
 def _normalize_utc_datetime(value: datetime | None) -> datetime | None:

@@ -31,6 +31,11 @@ QaCandidateSource = Literal[
 QaAnswerType = Literal["direct_answer", "clarification", "insufficient_evidence"]
 _DEFAULT_QA_MODEL = "Doubao-Seed-2.0-pro"
 _DEFAULT_QA_TIMEOUT_SEC = 60.0
+_OUT_OF_SCOPE_INTENT_TERM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("天气", "气象", "气温", "温度", "下雨", "降雨", "降水", "气压", "台风", "预报"),
+    ("新闻", "热搜", "娱乐", "明星", "媒体", "报道"),
+    ("股票", "股价", "基金", "彩票", "中奖", "证券", "投资"),
+)
 _QA_SYSTEM_PROMPT = """你是 KnowLink 的块级学习问答助手。只返回 JSON，不要返回 Markdown 代码块或解释。
 JSON 格式固定为：
 {"answerMd":"...","answerType":"direct_answer|clarification|insufficient_evidence","citations":[{"resourceId":1,"segmentKey":"...","pageNo":1,"refLabel":"..."}]}
@@ -221,6 +226,7 @@ def generate_block_qa_response(
     active_course_id: int | None = None,
     active_parse_run_id: int | None = None,
     active_handout_version_id: int | None = None,
+    course_scope: Mapping[str, Any] | None = None,
     client: QaAnswerClient | None = None,
 ) -> dict[str, Any]:
     candidates = build_block_scoped_qa_candidates(
@@ -234,6 +240,7 @@ def generate_block_qa_response(
         active_handout_version_id=active_handout_version_id,
     )
     answer_candidates = _relevant_candidates(question, candidates)
+    has_course_scope = _has_course_scope(course_scope)
     if not answer_candidates:
         handout_contexts = _relevant_handout_contexts(
             question,
@@ -241,6 +248,10 @@ def generate_block_qa_response(
         )
         if handout_contexts:
             return _fallback_handout_context_response(handout_contexts[0], reason="handout_context_match")
+        if has_course_scope:
+            if _question_is_course_related(question, course_scope):
+                return _fallback_course_prior_response(question, reason="course_related_prior")
+            return _out_of_scope_response()
         return insufficient_evidence_response(source="fallback", reason="no_candidate_evidence")
 
     if client is not None:
@@ -606,6 +617,75 @@ def _fallback_handout_context_response(context: HandoutContextCandidate, *, reas
             reason=reason,
             evidence_tier="handout_context",
             handout_context=_handout_context_metadata(context),
+        ),
+    }
+
+
+def _course_scope_text(course_scope: Mapping[str, Any] | None) -> str:
+    if not isinstance(course_scope, Mapping):
+        return ""
+    values: list[str] = []
+    for key in ("title", "summary", "goalText", "goal_text"):
+        value = course_scope.get(key)
+        if isinstance(value, str) and value:
+            values.append(value)
+    for key in ("resourceTitles", "handoutTitles", "knowledgePointNames"):
+        value = course_scope.get(key)
+        if isinstance(value, list):
+            values.extend(str(item) for item in value if str(item).strip())
+    return clean_text("\n".join(values))
+
+
+def _has_course_scope(course_scope: Mapping[str, Any] | None) -> bool:
+    return bool(_course_scope_text(course_scope))
+
+
+def _question_is_course_related(question: str, course_scope: Mapping[str, Any] | None) -> bool:
+    scope_text = _course_scope_text(course_scope)
+    if not scope_text:
+        return False
+    if _question_has_out_of_scope_intent(question, course_scope):
+        return False
+    return _relevance_score(question, scope_text) > 0
+
+
+def _question_has_out_of_scope_intent(question: str, course_scope: Mapping[str, Any] | None = None) -> bool:
+    normalized = clean_text(question).lower()
+    if not normalized:
+        return False
+    scope_text = _course_scope_text(course_scope).lower()
+    for term_group in _OUT_OF_SCOPE_INTENT_TERM_GROUPS:
+        if any(term in normalized for term in term_group) and not any(term in scope_text for term in term_group):
+            return True
+    return False
+
+
+def _fallback_course_prior_response(question: str, *, reason: str) -> dict[str, Any]:
+    answer = clean_text(question)
+    return {
+        "answerMd": (
+            "课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释。\n\n"
+            f"{answer} 可以结合当前课程中的相关概念来理解；请优先回到讲义和原始资料中的定义、例子和符号约定进行核对。"
+        ),
+        "answerType": "direct_answer",
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="fallback",
+            reason=reason,
+            evidence_tier="course_prior",
+        ),
+    }
+
+
+def _out_of_scope_response() -> dict[str, Any]:
+    return {
+        "answerMd": "这个问题超出了当前课程范围。请提问与当前课程内容、讲义或学习目标相关的问题。",
+        "answerType": "clarification",
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="fallback",
+            reason="out_of_scope",
+            evidence_tier="out_of_scope",
         ),
     }
 
