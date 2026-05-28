@@ -66,7 +66,11 @@ def test_block_scoped_qa_prioritizes_current_block_refs_before_other_evidence():
 
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "direct_answer"
-    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
+    assert response["generationMetadata"] == {
+        "source": "fallback",
+        "reason": "model_unavailable",
+        "evidenceTier": "original_evidence",
+    }
     assert response["citations"] == [{"resourceId": 1, "refLabel": "视频 00s-20s", "startSec": 0, "endSec": 20}]
 
 
@@ -267,7 +271,11 @@ def test_schema_valid_client_citation_is_mapped_back_to_candidate():
 
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "direct_answer"
-    assert response["generationMetadata"] == {"source": "model", "reason": "model_response"}
+    assert response["generationMetadata"] == {
+        "source": "model",
+        "reason": "model_response",
+        "evidenceTier": "original_evidence",
+    }
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
 
 
@@ -413,7 +421,11 @@ def test_vivo_qa_bad_json_falls_back_to_candidate():
     )
 
     assert response["answerType"] == "direct_answer"
-    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_output_invalid"}
+    assert response["generationMetadata"] == {
+        "source": "fallback",
+        "reason": "model_output_invalid",
+        "evidenceTier": "original_evidence",
+    }
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
 
 
@@ -464,7 +476,11 @@ def test_qa_maps_ai_provider_error_to_fallback_reason():
         client=client,
     )
 
-    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_provider_error"}
+    assert response["generationMetadata"] == {
+        "source": "fallback",
+        "reason": "model_provider_error",
+        "evidenceTier": "original_evidence",
+    }
 
 
 def test_qa_message_refs_include_only_answer_citations_not_all_candidates():

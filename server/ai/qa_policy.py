@@ -304,6 +304,27 @@ def build_block_scoped_qa_candidates(
             )
         )
 
+    for source_segment_key in _source_segment_keys(current_block):
+        segment = segment_by_key.get(_stable_key(source_segment_key))
+        if segment is None:
+            continue
+        if segment.get("segmentType") != "video_caption":
+            continue
+        if not _matches_course_parse(segment, course_id=course_id, parse_run_id=parse_run_id):
+            continue
+        append(
+            _candidate_from_segment(
+                segment,
+                source="current_block_ref",
+                rank=len(candidates) + 1,
+                handout_block_id=block_id,
+                handout_version_id=handout_version_id,
+                content_override=None,
+                ref_label=None,
+                locator_override=None,
+            )
+        )
+
     current_kp_keys = _current_block_knowledge_point_keys(current_block)
     for evidence in knowledge_point_evidences:
         if not isinstance(evidence, Mapping):
@@ -558,8 +579,22 @@ def _fallback_qa_response(candidates: Sequence[QaEvidenceCandidate], *, reason: 
     }
 
 
-def _generation_metadata(*, source: str, reason: str) -> dict[str, str]:
-    return {"source": source, "reason": reason}
+def _generation_metadata(
+    *,
+    source: str,
+    reason: str,
+    evidence_tier: str = "original_evidence",
+    handout_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"source": source, "reason": reason, "evidenceTier": evidence_tier}
+    if handout_context:
+        metadata["handoutContext"] = {
+            key: value
+            for key, value in handout_context.items()
+            if key in {"handoutBlockId", "outlineKey", "title"} and value not in (None, "")
+        }
+    return metadata
+
 
 
 def _candidate_from_evidence(
@@ -1010,6 +1045,18 @@ def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [clean_text(str(item)) for item in value if clean_text(str(item))]
+
+
+def _source_segment_keys(block: Mapping[str, Any]) -> list[str]:
+    return _string_list(_field_value(block, "sourceSegmentKeys", "source_segment_keys"))
 
 
 def _keywords(text: str) -> set[str]:
