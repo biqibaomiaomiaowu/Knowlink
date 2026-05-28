@@ -34,7 +34,11 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
         )
 
         assert result["answerType"] == "direct_answer"
-        assert result["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
+        assert result["generationMetadata"] == {
+            "source": "fallback",
+            "reason": "model_unavailable",
+            "evidenceTier": "original_evidence",
+        }
         assert result["citations"] == [
             {"resourceId": pdf_segment["resourceId"], "refLabel": "PDF 第 1 页", "pageNo": 1}
         ]
@@ -63,6 +67,79 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
         assert [item["role"] for item in messages["items"]] == ["user", "assistant"]
         assert messages["items"][1]["generationMetadata"] == result["generationMetadata"]
         assert messages["items"][1]["citations"] == result["citations"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_qa_preserves_handout_context_generation_metadata_without_origin_refs():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, block_id = _ready_block_without_origin_refs(repo, session)
+        service = QaService(courses=repo, qa=repo)
+
+        result = service.create_message(
+            payload=_Payload(course_id=course_id, handout_block_id=block_id, question="集合的定义是什么？")
+        )
+
+        assert result["answerType"] == "direct_answer"
+        assert result["citations"] == []
+        assert result["generationMetadata"]["evidenceTier"] == "handout_context"
+        assert result["generationMetadata"]["handoutContext"]["title"] == "集合的定义"
+
+        messages = service.get_session_messages(session_id=result["sessionId"])
+        assistant_message = messages["items"][1]
+        assert assistant_message["generationMetadata"] == result["generationMetadata"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_qa_uses_video_source_segment_keys_before_handout_context_without_citations():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_overlapping_caption_segments(repo)
+        course_segments = Base.metadata.tables["course_segments"]
+        first_segment_id = int(segment_keys[0].removeprefix("segment-"))
+        session.execute(
+            sa.update(course_segments)
+            .where(course_segments.c.id == first_segment_id)
+            .values(text_content="集合的定义是什么？集合是确定对象组成的整体。")
+        )
+        session.commit()
+
+        handout_service = _handout_service(repo)
+        handout_service.generate_handout(course_id=course_id, idempotency_key=None)
+        block = repo.get_latest_handout(course_id)["blocks"][0]
+        source_ref = _source_video_ref(session, block)
+        repo.save_handout_block_result(
+            block["blockId"],
+            {
+                "title": "集合的定义",
+                "summary": "集合定义说明。",
+                "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+                "sourceSegmentKeys": block["sourceSegmentKeys"],
+                "knowledgePoints": [{"knowledgePointKey": "kp-set", "displayName": "集合"}],
+                "citations": [],
+            },
+        )
+        service = QaService(courses=repo, qa=repo)
+
+        result = service.create_message(
+            payload=_Payload(course_id=course_id, handout_block_id=block["blockId"], question="集合的定义是什么？")
+        )
+
+        assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert "handoutContext" not in result["generationMetadata"]
+        assert result["citations"] == [
+            {
+                "resourceId": source_ref["resourceId"],
+                "refLabel": source_ref["refLabel"],
+                "startSec": source_ref["startSec"],
+                "endSec": source_ref["endSec"],
+            }
+        ]
     finally:
         session.close()
         engine.dispose()
@@ -443,6 +520,33 @@ def _ready_block_with_pdf_ref(repo: SqlAlchemyRuntimeRepository) -> tuple[int, i
         },
     )
     return course_id, block["blockId"], pdf_segment
+
+
+def _ready_block_without_origin_refs(repo: SqlAlchemyRuntimeRepository, session) -> tuple[int, int]:
+    course_id, _ = _create_course_with_active_video_segments(repo)
+    handout_service = _handout_service(repo)
+    handout_service.generate_handout(course_id=course_id, idempotency_key=None)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    repo.save_handout_block_result(
+        block["blockId"],
+        {
+            "title": "集合的定义",
+            "summary": "集合定义说明。",
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [{"knowledgePointKey": "kp-set", "displayName": "集合"}],
+            "citations": [],
+        },
+    )
+
+    handout_blocks = Base.metadata.tables["handout_blocks"]
+    session.execute(
+        sa.update(handout_blocks)
+        .where(handout_blocks.c.id == block["blockId"])
+        .values(source_segment_keys_json=[])
+    )
+    session.commit()
+    return course_id, block["blockId"]
 
 
 def _build_sqlite_repository():

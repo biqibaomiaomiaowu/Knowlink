@@ -65,6 +65,16 @@ class QaEvidenceCandidate:
 
 
 @dataclass(frozen=True)
+class HandoutContextCandidate:
+    rank: int
+    content_text: str
+    handout_block_id: int | str | None
+    outline_key: str | None
+    title: str
+    source: Literal["current_handout_block", "adjacent_handout_block"]
+
+
+@dataclass(frozen=True)
 class QaAnswerWithRefs:
     response: dict[str, Any]
     refs: list[dict[str, Any]]
@@ -225,6 +235,12 @@ def generate_block_qa_response(
     )
     answer_candidates = _relevant_candidates(question, candidates)
     if not answer_candidates:
+        handout_contexts = _relevant_handout_contexts(
+            question,
+            _handout_context_candidates(current_block=current_block, adjacent_blocks=adjacent_blocks),
+        )
+        if handout_contexts:
+            return _fallback_handout_context_response(handout_contexts[0], reason="handout_context_match")
         return insufficient_evidence_response(source="fallback", reason="no_candidate_evidence")
 
     if client is not None:
@@ -576,6 +592,21 @@ def _fallback_qa_response(candidates: Sequence[QaEvidenceCandidate], *, reason: 
         "answerType": "direct_answer",
         "citations": [top.to_qa_citation()],
         "generationMetadata": _generation_metadata(source="fallback", reason=reason),
+    }
+
+
+def _fallback_handout_context_response(context: HandoutContextCandidate, *, reason: str) -> dict[str, Any]:
+    answer_text = _truncate(context.content_text, 220)
+    return {
+        "answerMd": f"依据讲义内容回答，未找到可追溯原始资料引用。\n\n{answer_text}",
+        "answerType": "direct_answer",
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="fallback",
+            reason=reason,
+            evidence_tier="handout_context",
+            handout_context=_handout_context_metadata(context),
+        ),
     }
 
 
@@ -934,6 +965,56 @@ def _sorted_adjacent_blocks(
     )
 
 
+def _handout_context_candidates(
+    *,
+    current_block: Mapping[str, Any],
+    adjacent_blocks: Sequence[Mapping[str, Any]],
+) -> list[HandoutContextCandidate]:
+    blocks = [current_block, *_sorted_adjacent_blocks(adjacent_blocks, current_block=current_block)]
+    candidates: list[HandoutContextCandidate] = []
+    for block in blocks:
+        text = _block_text(block)
+        if not text:
+            continue
+        candidates.append(
+            HandoutContextCandidate(
+                rank=len(candidates) + 1,
+                content_text=text,
+                handout_block_id=_field_value(block, "handoutBlockId", "handout_block_id", "blockId", "block_id"),
+                outline_key=_field_value(block, "outlineKey", "outline_key"),
+                title=_handout_context_title(block),
+                source="current_handout_block" if block is current_block else "adjacent_handout_block",
+            )
+        )
+    return candidates
+
+
+def _relevant_handout_contexts(
+    question: str,
+    contexts: Sequence[HandoutContextCandidate],
+) -> list[HandoutContextCandidate]:
+    relevant = [context for context in contexts if _relevance_score(question, context.content_text) > 0]
+    return [
+        HandoutContextCandidate(
+            rank=index,
+            content_text=context.content_text,
+            handout_block_id=context.handout_block_id,
+            outline_key=context.outline_key,
+            title=context.title,
+            source=context.source,
+        )
+        for index, context in enumerate(relevant, start=1)
+    ]
+
+
+def _handout_context_metadata(context: HandoutContextCandidate) -> dict[str, Any]:
+    return {
+        "handoutBlockId": context.handout_block_id,
+        "outlineKey": context.outline_key,
+        "title": context.title,
+    }
+
+
 def _rank_document_segments(segments: Sequence[Mapping[str, Any]], question: str) -> list[Mapping[str, Any]]:
     scored: list[tuple[int, int, str, Mapping[str, Any]]] = []
     for segment in segments:
@@ -992,6 +1073,22 @@ def _block_text(block: Mapping[str, Any]) -> str:
             for key in ("title", "summary", "contentMd")
         )
     )
+
+
+def _handout_context_title(block: Mapping[str, Any]) -> str:
+    title = clean_text(str(_field_value(block, "title") or ""))
+    heading = _first_markdown_heading(_field_value(block, "contentMd", "content_md"))
+    if heading and (not title or title in heading):
+        return heading
+    return title or heading or "讲义块"
+
+
+def _first_markdown_heading(markdown: Any) -> str:
+    for line in str(markdown or "").splitlines():
+        match = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if match:
+            return clean_text(match.group(1))
+    return ""
 
 
 def _locator(payload: Mapping[str, Any]) -> dict[str, Any]:

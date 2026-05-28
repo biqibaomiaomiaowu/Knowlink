@@ -2377,6 +2377,7 @@ class SqlAlchemyRuntimeRepository:
             "title": block.title,
             "summary": block.summary,
             "contentMd": block.content_md,
+            "sourceSegmentKeys": list(block.source_segment_keys_json or []),
             "knowledgePoints": block.knowledge_points_json or [],
             "citations": block.citations_json or [],
         }
@@ -3273,7 +3274,35 @@ def _generation_metadata_from_response(payload: Mapping[str, Any]) -> dict[str, 
     reason = metadata.get("reason")
     if source not in {"model", "fallback"} or not isinstance(reason, str) or not reason.strip():
         return None
-    return {"source": source, "reason": reason.strip()}
+    output: dict[str, Any] = {"source": source, "reason": reason.strip()}
+    evidence_tier = metadata.get("evidenceTier")
+    if evidence_tier in {"original_evidence", "handout_context", "course_prior", "out_of_scope"}:
+        output["evidenceTier"] = evidence_tier
+
+    handout_context = metadata.get("handoutContext")
+    if isinstance(handout_context, Mapping):
+        clean_context: dict[str, Any] = {}
+        for key in ("handoutBlockId", "outlineKey", "title"):
+            value = _clean_handout_context_metadata_value(key, handout_context.get(key))
+            if value is not None:
+                clean_context[key] = value
+        if clean_context:
+            output["handoutContext"] = clean_context
+    return output
+
+
+def _clean_handout_context_metadata_value(key: str, value: Any) -> Any | None:
+    if key == "handoutBlockId":
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _vector_document_dict(document: VectorDocument) -> dict[str, Any]:

@@ -109,6 +109,33 @@ def test_block_scoped_qa_refuses_when_no_candidate_evidence_exists():
     assert response["citations"] == []
 
 
+def test_qa_uses_handout_context_when_original_evidence_is_missing():
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "handout_context"
+    assert response["generationMetadata"]["handoutContext"]["title"] == "集合的定义"
+    assert "依据讲义内容回答" in response["answerMd"]
+    assert "集合是确定对象组成的整体" in response["answerMd"]
+
+
 def test_block_scoped_qa_refuses_when_candidates_do_not_support_question():
     response = generate_block_qa_response(
         "量子隧穿效应如何证明？",

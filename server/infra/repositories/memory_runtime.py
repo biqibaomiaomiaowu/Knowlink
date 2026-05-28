@@ -749,6 +749,7 @@ class RuntimeStore:
             "title": block["title"],
             "summary": block["summary"],
             "contentMd": block.get("contentMd") or block["summary"],
+            "sourceSegmentKeys": list(block.get("sourceSegmentKeys") or []),
             "knowledgePoints": block.get("knowledgePoints") or [],
             "citations": block.get("citations") or [],
         }
