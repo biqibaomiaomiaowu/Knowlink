@@ -466,6 +466,8 @@ def test_phase5_async_enqueue_and_retry_errors_are_documented():
     assert "`503 async_task.enqueue_failed`" in api_contract
     assert "`POST /api/v1/async-tasks/{taskId}/retry`" in api_contract
     assert "只有 `failed`、`queued` 状态可通过该接口重新入队" in api_contract
+    assert "响应必须返回 `entity.type` / `entity.id`" in api_contract
+    assert "B站导入重试固定返回 `entity.type=bilibili_import_run`" in api_contract
     assert "`retrying` 等可重试任务" not in api_contract
     assert "任务状态重置为 `queued` 时发现记录已变化或不可写" in api_contract
     assert "任务状态更新为 retry 时" not in api_contract

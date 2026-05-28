@@ -675,15 +675,19 @@ V1 历史 stub 阶段统一返回：
 {
   "taskId": 7001,
   "status": "queued",
-  "nextAction": "poll"
+  "nextAction": "poll",
+  "entity": {
+    "type": "bilibili_import_run",
+    "id": 9101
+  }
 }
 ```
 
 说明：
 
-- 这是后端和演示排障用辅助接口，不作为页面主流程依赖。
 - 只有 `failed`、`queued` 状态可通过该接口重新入队；`succeeded`、`canceled`、`retrying` 或未知状态不得重试。
 - 当前支持重新入队的任务类型包括 `parse_pipeline`、`handout_generate`、`handout_block_generate`、`quiz_generate`、`review_refresh` 和 `bilibili_import`。
+- 若任务记录包含 `targetType` / `targetId`，响应必须返回 `entity.type` / `entity.id`，用于前端继续轮询目标实体；B站导入重试固定返回 `entity.type=bilibili_import_run`。
 - 重新入队前会把任务状态重置为 `queued`、清空旧错误并将 `progressPct` 置 0；如果 enqueue 失败，任务会被标记为 `failed` 且写入 `async_task.enqueue_failed`，客户端可继续展示重试入口。
 
 错误：

@@ -1163,16 +1163,6 @@ def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:
             cookies: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             self.calls.append({"url": url, "params": params, "cookies": cookies})
-            if url == NAV_API_URL:
-                return {
-                    "code": 0,
-                    "data": {
-                        "wbi_img": {
-                            "img_url": "https://i0.hdslb.com/bfs/wbi/0123456789abcdef0123456789abcdef.png",
-                            "sub_url": "https://i0.hdslb.com/bfs/wbi/fedcba9876543210fedcba9876543210.png",
-                        }
-                    },
-                }
             return self.playurl_response
 
     transport = FakeTransport()
@@ -1180,16 +1170,18 @@ def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:
 
     data = client.playurl(bvid="BV1xx411c7mD", cid=102, cookies={"SESSDATA": "secret"})
 
-    assert transport.calls[0]["url"] == NAV_API_URL
-    assert transport.calls[1]["url"] == PLAYURL_API_URL
-    assert transport.calls[1]["cookies"] == {"SESSDATA": "secret"}
-    assert transport.calls[1]["params"] | {
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["url"] == PLAYURL_API_URL
+    assert transport.calls[0]["cookies"] == {"SESSDATA": "secret"}
+    assert transport.calls[0]["params"] | {
         "bvid": "BV1xx411c7mD",
         "cid": 102,
-        "fnval": 16,
-    } == transport.calls[1]["params"]
-    assert "wts" in transport.calls[1]["params"]
-    assert "w_rid" in transport.calls[1]["params"]
+        "fnval": 4048,
+        "fnver": 0,
+        "fourk": 1,
+    } == transport.calls[0]["params"]
+    assert "wts" not in transport.calls[0]["params"]
+    assert "w_rid" not in transport.calls[0]["params"]
     assert data == {
         "dash": {
             "video": [{"baseUrl": "https://upos.example/video.m4s"}],
@@ -1201,6 +1193,52 @@ def test_bili_client_playurl_uses_transport_and_maps_failures() -> None:
     with pytest.raises(ServiceError) as exc:
         client.playurl(bvid="BV1xx411c7mD", cid=102, cookies={"SESSDATA": "secret"})
     assert exc.value.error_code == "bilibili.playurl_failed"
+
+
+def test_bili_client_playurl_uses_legacy_endpoint_without_wbi_metadata() -> None:
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_json(
+            self,
+            url: str,
+            *,
+            params: dict[str, Any] | None = None,
+            cookies: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append({"url": url, "params": params, "cookies": cookies})
+            if url == NAV_API_URL:
+                raise AssertionError("playurl should not fetch WBI metadata for public playback")
+            return {
+                "code": 0,
+                "data": {
+                    "dash": {
+                        "video": [{"baseUrl": "https://upos.example/video.m4s"}],
+                        "audio": [{"baseUrl": "https://upos.example/audio.m4s"}],
+                    }
+                },
+            }
+
+    transport = FakeTransport()
+    client = BiliClient(transport=transport)
+
+    data = client.playurl(bvid="BV1xx411c7mD", cid=102, cookies={}, qn=80)
+
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["url"] == PLAYURL_API_URL
+    assert transport.calls[0]["cookies"] == {}
+    assert transport.calls[0]["params"] == {
+        "bvid": "BV1xx411c7mD",
+        "cid": 102,
+        "fnval": 4048,
+        "fnver": 0,
+        "fourk": 1,
+        "qn": 80,
+    }
+    assert "wts" not in transport.calls[0]["params"]
+    assert "w_rid" not in transport.calls[0]["params"]
+    assert data["dash"]["video"][0]["baseUrl"] == "https://upos.example/video.m4s"
 
 
 def test_bili_client_maps_auth_and_access_errors() -> None:

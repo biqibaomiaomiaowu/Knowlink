@@ -16,7 +16,7 @@ from server.infra.bilibili.url import BilibiliUrlKind, ParsedBilibiliUrl, parse_
 
 
 VIEW_API_URL = "https://api.bilibili.com/x/web-interface/view"
-PLAYURL_API_URL = "https://api.bilibili.com/x/player/wbi/playurl"
+PLAYURL_API_URL = "https://api.bilibili.com/x/player/playurl"
 COLLECTION_API_URL = "https://api.bilibili.com/x/polymer/web-space/seasons_archives_list"
 BANGUMI_SEASON_API_URL = "https://api.bilibili.com/pgc/view/web/season"
 NAV_API_URL = "https://api.bilibili.com/x/web-interface/nav"
@@ -434,10 +434,15 @@ class BiliClient:
         cookies: dict[str, Any],
         qn: int | None = None,
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"bvid": bvid, "cid": cid, "fnval": 16}
+        params: dict[str, Any] = {
+            "bvid": bvid,
+            "cid": cid,
+            "fnval": 4048,
+            "fnver": 0,
+            "fourk": 1,
+        }
         if qn is not None:
             params["qn"] = qn
-        params = self._with_wbi_signature(params, cookies=cookies)
         return self._require_success(
             self.transport.get_json(PLAYURL_API_URL, params=params, cookies=cookies),
             error_code="bilibili.playurl_failed",

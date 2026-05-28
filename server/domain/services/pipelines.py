@@ -309,7 +309,11 @@ class PipelineService:
             task_id=task_id,
             enqueue=lambda: enqueue(payload),
         )
-        return {"taskId": task_id, "status": "queued", "nextAction": "poll"}
+        response: dict[str, object] = {"taskId": task_id, "status": "queued", "nextAction": "poll"}
+        entity = _async_task_entity(updated)
+        if entity is not None:
+            response["entity"] = entity
+        return response
 
     def _retry_enqueue_callable(
         self,
@@ -765,6 +769,14 @@ def _value(record: dict[str, Any] | None, *keys: str, default: Any = None) -> An
 def _dict_value(record: dict[str, Any] | None, *keys: str) -> dict[str, Any]:
     value = _value(record, *keys, default={})
     return value if isinstance(value, dict) else {}
+
+
+def _async_task_entity(task: dict[str, Any]) -> dict[str, object] | None:
+    target_type = _value(task, "targetType", "target_type")
+    target_id = _int_value(task, "targetId", "target_id")
+    if target_type is None or target_id is None:
+        return None
+    return {"type": str(target_type), "id": target_id}
 
 
 def _int_value(record: dict[str, Any] | None, *keys: str, default: int | None = None) -> int | None:

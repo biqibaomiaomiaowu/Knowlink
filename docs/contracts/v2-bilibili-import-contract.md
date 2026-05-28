@@ -542,6 +542,7 @@ raw/1/{course_id}/bilibili/{import_run_id}/{part_index}-{safe_title}.mp4
 
 - `recoverable` run 响应必须返回 `nextAction=retry`。
 - B站导入复用通用 `POST /api/v1/async-tasks/{taskId}/retry` 重试入口；该接口会将同一个 `bilibili_import` task 重置为 `queued` 并重新派发。
+- B站导入 retry 响应必须保留 `entity.type=bilibili_import_run` 和 `entity.id=importRunId`，前端据此刷新同一个 run，不得返回缺少 `entity` 的通用空任务响应。
 - 重新执行 runner 时必须重新获取 playurl，不复用可能已过期的 DASH URL。
 - 公共可访问内容可匿名导入；cookie 失效时 runner 忽略过期 cookie 并使用匿名请求，只有 B站实际要求账号态时才返回 `bilibili.auth_required` / `bilibili.auth_expired` 并引导重新扫码。
 

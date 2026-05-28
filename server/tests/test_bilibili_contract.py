@@ -223,6 +223,7 @@ def test_v2_bilibili_contract_marks_collection_and_bangumi_runtime_path_and_real
         '"sourceType": "collection"',
         '"sourceType": "bangumi"',
         "B站导入复用通用 `POST /api/v1/async-tasks/{taskId}/retry` 重试入口",
+        "B站导入 retry 响应必须保留 `entity.type=bilibili_import_run`",
         "`waiting_download` 是下载槽位队列预留状态",
     ):
         assert token in contract

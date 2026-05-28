@@ -1531,6 +1531,34 @@ def test_retry_async_task_reenqueues_supported_task_types(
     assert dispatcher.calls == [(expected_dispatcher_key, 42, payload)]
 
 
+def test_retry_async_task_returns_bilibili_import_entity_from_target() -> None:
+    repo = _PipelineRepo()
+    repo.tasks[42] = {
+        "taskId": 42,
+        "courseId": 201,
+        "taskType": "bilibili_import",
+        "status": "failed",
+        "progressPct": 100,
+        "payloadJson": {"courseId": 201, "importRunId": 15},
+        "targetType": "bilibili_import_run",
+        "targetId": 15,
+    }
+    dispatcher = _RecordingDispatcher()
+    service = _pipeline_service(repo, dispatcher)
+
+    result = service.retry_async_task(task_id=42)
+
+    assert result == {
+        "taskId": 42,
+        "status": "queued",
+        "nextAction": "poll",
+        "entity": {"type": "bilibili_import_run", "id": 15},
+    }
+    assert dispatcher.calls == [
+        ("bilibili_import", 42, {"courseId": 201, "importRunId": 15}),
+    ]
+
+
 def test_retry_async_task_clears_previous_error_fields():
     repo = _PipelineRepo()
     repo.tasks[42] = {
