@@ -74,6 +74,8 @@ flutter run -d <device-id> `
 
 本地 Docker 默认会把上传和播放用的 MinIO 预签名 URL 签到 `KNOWLINK_MINIO_PUBLIC_ENDPOINT=127.0.0.1:9000`。真机通过 USB 访问本机服务时，必须同时映射 `8000` 和 `9000`；只映射 `8000` 会导致课程创建、上传初始化等 API 成功，但文件 PUT 到对象存储时出现 `Connection refused, address = 127.0.0.1, port = 9000`。
 
+讲义页播放器使用 Android 原生 `video_player` / ExoPlayer 访问 MinIO 预签名地址，`android/app/src/main/AndroidManifest.xml` 必须允许本地 HTTP cleartext。否则 API 请求可以成功，但视频会因 `Cleartext HTTP traffic to 127.0.0.1 not permitted` 加载失败。
+
 若平板不通过 USB reverse，而是走同一 Wi-Fi 下的宿主机局域网 IP，需要让后端签出设备可达的 MinIO host，并用同一个 host 构建 App：
 
 ```powershell
