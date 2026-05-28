@@ -187,6 +187,46 @@ void main() {
     ]);
   });
 
+  test('bulk selection can clear and select all preview parts', () async {
+    final fakeApiClient = FakeBilibiliApiClient(
+      authSession: const BilibiliAuthSessionModel(
+        loginStatus: 'active',
+        userNickname: 'KnowLink Demo',
+        expiresAt: null,
+      ),
+      previewResult: _preview(defaultSelectedPartIds: const ['cid-1002']),
+      createdTask: _task(taskId: 71, importRunId: 9101, status: 'queued'),
+      runStatus: _run(importRunId: 9101, status: 'queued'),
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.updateSourceUrl('https://www.bilibili.com/video/BV1xx411c7mD');
+    await notifier.refreshAuthSession();
+    await notifier.preview('101');
+
+    notifier.clearSelectedParts();
+
+    var state = container.read(bilibiliImportProvider);
+    expect(state.selectedPartIds, isEmpty);
+    expect(state.canCreateImport, isFalse);
+
+    notifier.selectAllParts();
+    state = container.read(bilibiliImportProvider);
+    expect(state.selectedPartIds, {'cid-1001', 'cid-1002', 'cid-1003'});
+    expect(state.canCreateImport, isTrue);
+
+    await notifier.createImport('101');
+
+    expect(fakeApiClient.createCalls, hasLength(1));
+    expect(fakeApiClient.createCalls.single.request.selectionMode, 'all_parts');
+    expect(fakeApiClient.createCalls.single.request.selectedPartIds, [
+      'cid-1001',
+      'cid-1002',
+      'cid-1003',
+    ]);
+  });
+
   test('canCreateImport is false while current run is refreshing', () async {
     final runStatusStarted = Completer<void>();
     final runStatusCompleter = Completer<BilibiliImportRunModel>();

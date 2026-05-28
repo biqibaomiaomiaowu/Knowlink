@@ -261,6 +261,28 @@ class BilibiliImportController
     );
   }
 
+  void selectAllParts() {
+    final preview = state.preview.valueOrNull;
+    if (preview == null) {
+      return;
+    }
+    _setSelectedPartIds(
+      preview.parts.map((part) => part.partId).toSet(),
+    );
+  }
+
+  void clearSelectedParts() {
+    _setSelectedPartIds(const {});
+  }
+
+  void _setSelectedPartIds(Set<String> selectedPartIds) {
+    _lastCreateFingerprint = null;
+    state = state.copyWith(
+      selectedPartIds: selectedPartIds,
+      clearLastIdempotencyKey: true,
+    );
+  }
+
   Future<void> createImport(String courseId) async {
     if (!_ensureActiveCourse(courseId)) {
       return;

@@ -223,6 +223,102 @@ void main() {
     expect(find.textContaining('合集 · 2 个条目 · 默认全部条目'), findsOneWidget);
   });
 
+  testWidgets('B站预览默认全选时可取消全选再全选', (tester) async {
+    _useLargeTestSurface(tester);
+    final fakeApiClient = _BilibiliPageFakeApiClient(
+      runStatuses: [
+        _run(status: 'imported'),
+      ],
+      preview: const BilibiliPreviewModel(
+        previewId: 'preview-all',
+        sourceUrl: 'https://www.bilibili.com/video/BV1demo',
+        sourceType: 'multi_p',
+        title: '多 P 样例',
+        coverUrl: null,
+        totalParts: 2,
+        defaultSelectionMode: 'all_parts',
+        parts: [
+          BilibiliPreviewPartModel(
+            partId: 'cid-1001',
+            title: 'P1 导论',
+            durationSec: 600,
+            cid: 1001,
+            pageNo: 1,
+            selectedByDefault: true,
+          ),
+          BilibiliPreviewPartModel(
+            partId: 'cid-1002',
+            title: 'P2 例题',
+            durationSec: 900,
+            cid: 1002,
+            pageNo: 2,
+            selectedByDefault: true,
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: CourseImportPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'B站链接'),
+      'https://www.bilibili.com/video/BV1demo',
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '预览B站资源'));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(OutlinedButton, '全选'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '取消全选'), findsOneWidget);
+    expect(
+      tester
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '全选'))
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '取消全选'));
+    await tester.pump();
+
+    var createButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '创建导入任务'),
+    );
+    expect(createButton.onPressed, isNull);
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, '取消全选'),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '全选'));
+    await tester.pump();
+
+    createButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '创建导入任务'),
+    );
+    expect(createButton.onPressed, isNotNull);
+
+    await tester.tap(find.widgetWithText(FilledButton, '创建导入任务'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.createCalls.single.request.selectionMode, 'all_parts');
+    expect(fakeApiClient.createCalls.single.request.selectedPartIds, [
+      'cid-1001',
+      'cid-1002',
+    ]);
+  });
+
   testWidgets('B站失败导入显示重试按钮且不显示取消按钮', (tester) async {
     _useLargeTestSurface(tester);
     final fakeApiClient = _BilibiliPageFakeApiClient(

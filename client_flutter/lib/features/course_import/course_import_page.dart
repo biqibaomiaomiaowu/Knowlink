@@ -142,6 +142,8 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
               partId,
               selected: selected,
             ),
+            onSelectAllParts: bilibiliNotifier.selectAllParts,
+            onClearSelectedParts: bilibiliNotifier.clearSelectedParts,
             onCreateImport: effectiveCourseId == null
                 ? null
                 : () => _runBilibiliAction(() async {
@@ -692,6 +694,8 @@ class _BilibiliImportSection extends StatelessWidget {
     required this.onUrlChanged,
     required this.onPreview,
     required this.onTogglePart,
+    required this.onSelectAllParts,
+    required this.onClearSelectedParts,
     required this.onCreateImport,
     required this.onRetry,
     required this.onCancel,
@@ -707,6 +711,8 @@ class _BilibiliImportSection extends StatelessWidget {
   final ValueChanged<String> onUrlChanged;
   final VoidCallback? onPreview;
   final void Function(String partId, bool selected) onTogglePart;
+  final VoidCallback onSelectAllParts;
+  final VoidCallback onClearSelectedParts;
   final VoidCallback? onCreateImport;
   final VoidCallback? onRetry;
   final VoidCallback onCancel;
@@ -827,6 +833,8 @@ class _BilibiliImportSection extends StatelessWidget {
                 preview: state.preview.valueOrNull!,
                 selectedPartIds: state.selectedPartIds,
                 onTogglePart: onTogglePart,
+                onSelectAllParts: onSelectAllParts,
+                onClearSelectedParts: onClearSelectedParts,
               ),
             ],
             const SizedBox(height: 16),
@@ -990,14 +998,25 @@ class _BilibiliPreviewCard extends StatelessWidget {
     required this.preview,
     required this.selectedPartIds,
     required this.onTogglePart,
+    required this.onSelectAllParts,
+    required this.onClearSelectedParts,
   });
 
   final BilibiliPreviewModel preview;
   final Set<String> selectedPartIds;
   final void Function(String partId, bool selected) onTogglePart;
+  final VoidCallback onSelectAllParts;
+  final VoidCallback onClearSelectedParts;
 
   @override
   Widget build(BuildContext context) {
+    final allPartIds = preview.parts.map((part) => part.partId).toSet();
+    final selectedCount =
+        allPartIds.where((partId) => selectedPartIds.contains(partId)).length;
+    final hasParts = allPartIds.isNotEmpty;
+    final isAllSelected = hasParts && selectedCount == allPartIds.length;
+    final isNoneSelected = selectedCount == 0;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1020,6 +1039,28 @@ class _BilibiliPreviewCard extends StatelessWidget {
                 color: AppTheme.muted,
                 fontWeight: FontWeight.w600,
               ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                StatusPill(
+                  label: '已选 $selectedCount/${preview.totalParts}',
+                  icon: Icons.check_circle_outline,
+                ),
+                OutlinedButton.icon(
+                  onPressed: isAllSelected ? null : onSelectAllParts,
+                  icon: const Icon(Icons.select_all),
+                  label: const Text('全选'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: isNoneSelected ? null : onClearSelectedParts,
+                  icon: const Icon(Icons.deselect),
+                  label: const Text('取消全选'),
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             ...preview.parts.map(
