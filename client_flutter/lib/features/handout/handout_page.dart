@@ -163,6 +163,15 @@ class _HandoutWorkspace extends StatelessWidget {
     required this.onSubmitQuestion,
   });
 
+  static const double _stackedBreakpoint = 900;
+  static const double _compactThreeColumnBreakpoint = 1120;
+  static const double _wideOutlineWidth = 294;
+  static const double _compactOutlineWidth = 260;
+  static const double _wideRightPanelWidth = 352;
+  static const double _compactRightPanelWidth = 300;
+  static const double _wideColumnGap = 16;
+  static const double _compactColumnGap = 12;
+
   final String courseId;
   final HandoutState state;
   final PlayerState player;
@@ -184,7 +193,7 @@ class _HandoutWorkspace extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 1120) {
+        if (constraints.maxWidth < _stackedBreakpoint) {
           return ListView(
             key: const Key('handout_stacked_workspace'),
             children: [
@@ -221,11 +230,21 @@ class _HandoutWorkspace extends StatelessWidget {
           );
         }
 
+        final useCompactColumns =
+            constraints.maxWidth < _compactThreeColumnBreakpoint;
+        final outlineWidth =
+            useCompactColumns ? _compactOutlineWidth : _wideOutlineWidth;
+        final rightPanelWidth = useCompactColumns
+            ? _compactRightPanelWidth
+            : _wideRightPanelWidth;
+        final columnGap =
+            useCompactColumns ? _compactColumnGap : _wideColumnGap;
+
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              width: 294,
+              width: outlineWidth,
               child: _OutlinePanel(
                 state: state,
                 highlightedBlockId: highlightedChild?.blockId,
@@ -235,7 +254,7 @@ class _HandoutWorkspace extends StatelessWidget {
                 onGenerate: onGenerate,
               ),
             ),
-            const SizedBox(width: 16),
+            SizedBox(width: columnGap),
             Expanded(
               child: _LearningCenterPanel(
                 courseId: courseId,
@@ -250,9 +269,9 @@ class _HandoutWorkspace extends StatelessWidget {
                 onCitationTap: onCitationTap,
               ),
             ),
-            const SizedBox(width: 16),
+            SizedBox(width: columnGap),
             SizedBox(
-              width: 352,
+              width: rightPanelWidth,
               child: _RightStudyPanel(
                 state: state,
                 selectedBlock: selectedBlock,

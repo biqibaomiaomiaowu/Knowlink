@@ -424,6 +424,40 @@ void main() {
     expect(find.byTooltip('展开讲义块信息'), findsOneWidget);
   });
 
+  testWidgets('handout page keeps three columns on tablet landscape', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1024, 768);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(_HandoutPageFakeApiClient()),
+          handoutVideoControllerFactoryProvider.overrideWithValue(
+            (uri) => _FakeHandoutVideoController(uri),
+          ),
+        ],
+        child: const MaterialApp(home: HandoutPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('handout_stacked_workspace')), findsNothing);
+
+    final outlineTitle = find.text('讲义结构');
+    final qaTitle = find.textContaining('当前块 QA');
+    expect(outlineTitle, findsOneWidget);
+    expect(qaTitle, findsOneWidget);
+
+    final outlinePosition = tester.getTopLeft(outlineTitle);
+    final qaPosition = tester.getTopLeft(qaTitle);
+    expect(qaPosition.dx, greaterThan(outlinePosition.dx));
+    expect((qaPosition.dy - outlinePosition.dy).abs(), lessThan(96));
+  });
+
   testWidgets('handout page keeps stacked narrow layout bounded', (
     tester,
   ) async {

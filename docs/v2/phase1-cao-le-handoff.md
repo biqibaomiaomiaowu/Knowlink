@@ -169,4 +169,4 @@ KNOWLINK_ENABLE_VIVO_VISION=false KNOWLINK_ENABLE_VIVO_ASR=false KNOWLINK_ENABLE
 
 - 平板端联调基本通过；当前已验证的核心功能入口、网络访问、资源上传和阶段一主流程未发现功能性阻塞。
 - 平板 USB 联调需要同时映射 FastAPI 与 MinIO：`adb reverse tcp:8000 tcp:8000`、`adb reverse tcp:9000 tcp:9000`。只映射 `8000` 时，上传初始化可以成功，但文件 PUT 到 `127.0.0.1:9000` 的 MinIO 预签名 URL 会失败。
-- 当前唯一必须立即修复的问题是讲义页平板端布局：页面在平板上变成上下结构，而不是预期的左 / 中 / 右三栏结构。该问题属于 Flutter 平板 UI 适配与讲义页交互体验，应作为进入完整阶段一平板验收前的高优先级问题关闭。
+- 讲义页平板端布局问题已修复：平板横屏可用宽度保持左 / 中 / 右三栏结构，手机和窄屏仍使用上下结构。回归测试已覆盖 tablet landscape 三栏和 narrow stacked 两种场景。
