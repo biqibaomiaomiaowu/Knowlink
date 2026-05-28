@@ -158,6 +158,44 @@ def test_block_citation_locator_is_normalized_from_reverse_lookup_segment():
     assert candidates[0].to_qa_citation() == {"resourceId": 2, "refLabel": "bad-page", "pageNo": 1}
 
 
+def test_video_only_block_uses_source_segment_keys_when_citations_are_missing():
+    candidates = build_block_scoped_qa_candidates(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "knowledgePoints": [],
+            "sourceSegmentKeys": ["mp4-c1"],
+        },
+        segments=[_segments()[0]],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    assert [candidate.segment_key for candidate in candidates] == ["mp4-c1"]
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "knowledgePoints": [],
+            "sourceSegmentKeys": ["mp4-c1"],
+        },
+        segments=[_segments()[0]],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == [
+        {"resourceId": 1, "refLabel": "视频 00s-20s", "startSec": 0, "endSec": 20}
+    ]
+
+
 def test_block_video_citation_allows_subrange_but_rejects_cross_segment_time():
     video_segments = [_segments()[0]]
     subrange_candidates = build_block_scoped_qa_candidates(
