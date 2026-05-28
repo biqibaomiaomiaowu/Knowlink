@@ -14,6 +14,7 @@
 - [schemas/parse/normalized_document.schema.json](../../schemas/parse/normalized_document.schema.json)
 - [schemas/ai/handout_outline.schema.json](../../schemas/ai/handout_outline.schema.json)
 - [schemas/ai/handout_block.schema.json](../../schemas/ai/handout_block.schema.json)
+- [schemas/ai/qa_response.schema.json](../../schemas/ai/qa_response.schema.json)
 - [schemas/ai/knowledge_point_extraction.schema.json](../../schemas/ai/knowledge_point_extraction.schema.json)
 
 `schemas/ai/handout_blocks.schema.json` 作为 Week 1 整包讲义 legacy schema 保留，只用于历史 citation contract 和混合定位校验；Week 2 起视频优先讲义目录和单块懒生成以 `handout_outline` / `handout_block` 两个 schema 为权威。
@@ -138,8 +139,14 @@
 
 - QA 可选通过 `KNOWLINK_QA_PROVIDER` 接入 vivo 或 DeepSeek 模型，但前端请求 / 响应结构不因模型接入改变。
 - 模型只接收当前 active course、active parse run、active handout version 和当前 block 范围内的候选证据。
-- 模型只能返回 `answerMd`、`answerType`、`citations` JSON；`citations` 必须由服务端反查候选证据后再归一化为前端可见引用。
+- 模型原始输出只允许包含 `answerMd`、`answerType`、`citations` JSON；`generationMetadata` 是服务端归一化后补充的响应元数据，不是模型可自由返回的字段；`citations` 必须由服务端反查候选证据后再归一化为前端可见引用。
 - 坏 JSON、候选外引用、空引用或无候选证据时，不得编造答案；服务端必须降级为本地 fallback 或 `insufficient_evidence`。
+- QA 回答按 `generationMetadata.evidenceTier` 三层递进：`original_evidence`、`handout_context`、`course_prior`；课程无关问题返回 `generationMetadata.evidenceTier="out_of_scope"`。`out_of_scope` 不是 `answerType`，`answerType` 仍保持现有枚举 `direct_answer` / `clarification` / `insufficient_evidence`。
+- `citations` 只允许 `original_evidence` 非空；讲义上下文回答和课程补充回答不得伪造引用。
+- 当前 block 的 `sourceSegmentKeys` 是原始证据反查入口；若其指向当前 active parse run 的 `video_caption` segment，该 segment 作为当前块证据进入 QA。
+- 讲义块内容若能通过 `citations`、`sourceSegmentKeys`、知识点 evidence 或同范围 segment 反查到原始资料，必须归入 `original_evidence`，不得降级为讲义证据。
+- 原始资料证据不足但讲义内容可回答时，返回 `handout_context`，`citations=[]`，并在回答正文中说明依据讲义内容。
+- 原始资料和讲义都无直接证据但问题属于当前课程时，返回 `course_prior`，`citations=[]`，并说明这是基于当前课程主题的补充解释。
 
 ### 1.3 `knowledge_points`
 
