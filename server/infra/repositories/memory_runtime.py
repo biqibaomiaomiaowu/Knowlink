@@ -859,7 +859,46 @@ class RuntimeStore:
                         **locator,
                     }
                 )
+            if block.get("citations"):
+                continue
+            source_resource = self._memory_source_resource(course_id, block)
+            source_locator = {
+                key: block[key]
+                for key in ("startSec", "endSec")
+                if block.get(key) not in (None, "")
+            }
+            if source_resource is None or set(source_locator) != {"startSec", "endSec"}:
+                continue
+            emitted_segment_keys: set[str] = set()
+            for source_index, source_segment_key in enumerate(block.get("sourceSegmentKeys") or [], start=1):
+                segment_key = str(source_segment_key or "").strip()
+                if not segment_key or segment_key in emitted_segment_keys:
+                    continue
+                emitted_segment_keys.add(segment_key)
+                segments.append(
+                    {
+                        "courseId": course_id,
+                        "parseRunId": parse_run_id,
+                        "resourceId": source_resource["resourceId"],
+                        "segmentId": None,
+                        "segmentKey": segment_key,
+                        "segmentType": "video_caption",
+                        "resourceType": source_resource.get("resourceType") or "mp4",
+                        "textContent": text_content or block["summary"],
+                        "orderNo": block_index * 100 + 50 + source_index,
+                        **source_locator,
+                    }
+                )
         return segments
+
+    def _memory_source_resource(self, course_id: int, block: Mapping[str, Any]) -> dict[str, Any] | None:
+        resources = self.resources.get(course_id, [])
+        if not resources or block.get("startSec") in (None, "") or block.get("endSec") in (None, ""):
+            return None
+        for resource in resources:
+            if resource.get("resourceType") == "mp4":
+                return resource
+        return None
 
     def _memory_segment_type(self, locator: dict[str, Any]) -> str:
         if "startSec" in locator and "endSec" in locator:

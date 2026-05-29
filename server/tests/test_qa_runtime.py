@@ -172,6 +172,119 @@ def test_memory_qa_uses_course_scope_for_out_of_scope_questions():
     assert assistant_message["generationMetadata"]["evidenceTier"] == "out_of_scope"
 
 
+def test_memory_qa_uses_source_segment_keys_without_block_citations_for_original_evidence():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="calculus basics",
+        entry_type="manual_import",
+        goal_text="learn derivative definitions and applications",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "mp4",
+            "objectKey": f"raw/1/{course_id}/derivative.mp4",
+            "originalName": "derivative.mp4",
+            "mimeType": "video/mp4",
+            "sizeBytes": 1024,
+            "checksum": "sha256:memory-derivative",
+        },
+    )
+    repo.create_parse_run(course_id)
+    repo.create_handout(course_id)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    block["title"] = "Derivative definition"
+    block["summary"] = "A derivative measures instantaneous rate of change."
+    block["contentMd"] = "A derivative measures instantaneous rate of change at a point."
+    block["knowledgePoints"] = [{"knowledgePointKey": "kp-derivative", "displayName": "derivative"}]
+    block["citations"] = []
+
+    result = QaService(courses=repo, qa=repo).create_message(
+        payload=_Payload(
+            course_id=course_id,
+            handout_block_id=block["blockId"],
+            question="What is a derivative?",
+        )
+    )
+
+    assert result["answerType"] == "direct_answer"
+    assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+    assert len(result["citations"]) == 1
+    assert result["citations"][0]["resourceId"] == resource["resourceId"]
+    assert result["citations"][0]["startSec"] == block["startSec"]
+    assert result["citations"][0]["endSec"] == block["endSec"]
+    assert result["citations"][0]["refLabel"]
+
+    messages = repo.get_qa_session_messages(result["sessionId"])
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[0]["citations"] == []
+    assert "refs" not in messages[0]
+    assert "refs" not in messages[1]
+    assert messages[1]["generationMetadata"]["evidenceTier"] == "original_evidence"
+    assert messages[1]["citations"] == result["citations"]
+    assert messages[1]["citations"] == [
+        {
+            "resourceId": resource["resourceId"],
+            "refLabel": result["citations"][0]["refLabel"],
+            "startSec": block["startSec"],
+            "endSec": block["endSec"],
+        }
+    ]
+
+
+def test_memory_qa_does_not_emit_video_source_segment_for_pdf_only_course():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="calculus basics",
+        entry_type="manual_import",
+        goal_text="learn derivative definitions and applications",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    pdf_resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/derivative.pdf",
+            "originalName": "derivative.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:memory-derivative-pdf",
+        },
+    )
+    repo.create_parse_run(course_id)
+    repo.create_handout(course_id)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    block["title"] = "Derivative definition"
+    block["summary"] = "A derivative measures instantaneous rate of change."
+    block["contentMd"] = "A derivative measures instantaneous rate of change at a point."
+    block["knowledgePoints"] = [{"knowledgePointKey": "kp-derivative", "displayName": "derivative"}]
+    block["citations"] = []
+
+    result = QaService(courses=repo, qa=repo).create_message(
+        payload=_Payload(
+            course_id=course_id,
+            handout_block_id=block["blockId"],
+            question="What is a derivative?",
+        )
+    )
+
+    assert result["generationMetadata"]["evidenceTier"] != "original_evidence"
+    assert result["citations"] == []
+    assert not any(
+        citation.get("resourceId") == pdf_resource["resourceId"]
+        and citation.get("startSec") == block["startSec"]
+        and citation.get("endSec") == block["endSec"]
+        for citation in result["citations"]
+    )
+
+    messages = repo.get_qa_session_messages(result["sessionId"])
+    assert messages[1]["generationMetadata"] == result["generationMetadata"]
+    assert messages[1]["citations"] == result["citations"]
+
+
 def test_sql_qa_uses_video_source_segment_keys_before_handout_context_without_citations():
     repo, session, engine = _build_sqlite_repository()
     try:
