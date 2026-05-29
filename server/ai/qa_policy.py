@@ -29,6 +29,7 @@ QaCandidateSource = Literal[
     "course_document_segment",
 ]
 QaAnswerType = Literal["direct_answer", "clarification", "insufficient_evidence"]
+UnreferencedEvidenceTier = Literal["handout_context", "course_prior"]
 _DEFAULT_QA_MODEL = "Doubao-Seed-2.0-pro"
 _DEFAULT_QA_TIMEOUT_SEC = 60.0
 _OUT_OF_SCOPE_INTENT_TERM_GROUPS: tuple[tuple[str, ...], ...] = (
@@ -45,6 +46,15 @@ JSON 格式固定为：
 3. citations 只能从 evidenceCandidates 中选择，必须保留候选的 resourceId、segmentId 或 segmentKey、locator 和 refLabel。
 4. 每个 citation 只能使用一种定位：pageNo、slideNo、anchorKey、或 startSec/endSec。
 5. answerMd 使用中文 Markdown，简洁回答用户问题。
+"""
+_UNREFERENCED_QA_SYSTEM_PROMPT = """你是 KnowLink 的课程学习问答助手。只返回 JSON，不要返回 Markdown 代码块或解释。
+JSON 格式固定为：
+{"answerMd":"...","answerType":"direct_answer|clarification","citations":[]}
+规则：
+1. citations 必须返回空数组，不得编造或返回任何引用。
+2. evidenceTier 为 handout_context 时，只能依据输入的讲义上下文回答；answerMd 必须说明“依据讲义内容回答，未找到可追溯原始资料引用”；上下文不足时返回 clarification。
+3. evidenceTier 为 course_prior 时，只能回答与当前课程范围相关的问题；answerMd 必须说明“课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释”；超出课程范围或无法判断时返回 clarification。
+4. answerMd 使用中文 Markdown，简洁回答用户问题。
 """
 
 
@@ -88,6 +98,16 @@ class QaAnswerWithRefs:
 class QaAnswerClient(Protocol):
     def generate_answer(self, question: str, candidates: Sequence[QaEvidenceCandidate]) -> dict[str, Any]:
         """Return a raw QA response generated only from the provided candidates."""
+
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: UnreferencedEvidenceTier,
+        course_scope: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a raw QA response without citations for non-original evidence tiers."""
 
 
 def get_configured_qa_answer_client() -> QaAnswerClient | None:
@@ -167,6 +187,40 @@ class VivoQaAnswerClient:
             label="vivo qa",
         )
 
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: UnreferencedEvidenceTier,
+        course_scope: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._throttle()
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="vivo",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_UNREFERENCED_QA_SYSTEM_PROMPT),
+                    ChatMessage(
+                        role="user",
+                        content=_build_unreferenced_qa_prompt(
+                            question,
+                            context_text=context_text,
+                            evidence_tier=evidence_tier,
+                            course_scope=course_scope,
+                        ),
+                    ),
+                ],
+                temperature=0.1,
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 2048, "stream": False, "request_id": str(uuid.uuid4())},
+            ),
+            label="vivo unreferenced qa",
+        )
+
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_at
         if elapsed < self._min_request_interval_sec:
@@ -215,6 +269,38 @@ class DeepSeekQaAnswerClient:
             label="deepseek qa",
         )
 
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: UnreferencedEvidenceTier,
+        course_scope: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="deepseek",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_UNREFERENCED_QA_SYSTEM_PROMPT),
+                    ChatMessage(
+                        role="user",
+                        content=_build_unreferenced_qa_prompt(
+                            question,
+                            context_text=context_text,
+                            evidence_tier=evidence_tier,
+                            course_scope=course_scope,
+                        ),
+                    ),
+                ],
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 4096, "reasoning_effort": self._reasoning_effort},
+            ),
+            label="deepseek unreferenced qa",
+        )
+
 
 def generate_block_qa_response(
     question: str,
@@ -247,9 +333,40 @@ def generate_block_qa_response(
             _handout_context_candidates(current_block=current_block, adjacent_blocks=adjacent_blocks),
         )
         if handout_contexts:
+            if client is not None:
+                try:
+                    return _normalize_unreferenced_qa_response(
+                        client.generate_unreferenced_answer(
+                            question,
+                            context_text=handout_contexts[0].content_text,
+                            evidence_tier="handout_context",
+                        ),
+                        evidence_tier="handout_context",
+                        reason="handout_context_match",
+                        handout_context=handout_contexts[0],
+                    )
+                except Exception as exc:
+                    return _fallback_handout_context_response(
+                        handout_contexts[0],
+                        reason=fallback_reason_for_error(exc),
+                    )
             return _fallback_handout_context_response(handout_contexts[0], reason="handout_context_match")
         if has_course_scope:
             if _question_is_course_related(question, course_scope):
+                if client is not None:
+                    try:
+                        return _normalize_unreferenced_qa_response(
+                            client.generate_unreferenced_answer(
+                                question,
+                                context_text=_course_scope_text(course_scope),
+                                evidence_tier="course_prior",
+                                course_scope=course_scope,
+                            ),
+                            evidence_tier="course_prior",
+                            reason="course_related_prior",
+                        )
+                    except Exception as exc:
+                        return _fallback_course_prior_response(question, reason=fallback_reason_for_error(exc))
                 return _fallback_course_prior_response(question, reason="course_related_prior")
             return _out_of_scope_response()
         return insufficient_evidence_response(source="fallback", reason="no_candidate_evidence")
@@ -591,6 +708,53 @@ def _normalize_qa_response_payload(payload: Mapping[str, Any], *, candidates: Se
         "citations": citations,
         "generationMetadata": _generation_metadata(source="model", reason="model_response"),
     }
+
+
+def _normalize_unreferenced_qa_response(
+    payload: Mapping[str, Any],
+    *,
+    evidence_tier: UnreferencedEvidenceTier,
+    reason: str,
+    handout_context: HandoutContextCandidate | None = None,
+) -> dict[str, Any]:
+    answer_type = str(payload.get("answerType") or payload.get("answer_type") or "direct_answer")
+    if answer_type not in {"direct_answer", "clarification"}:
+        answer_type = "direct_answer"
+    answer_md = clean_text(str(payload.get("answerMd") or payload.get("answer_md") or ""))
+    if not answer_md:
+        raise AIOutputParseError("unreferenced qa answerMd is required")
+    answer_md = _ensure_unreferenced_disclosure(answer_md, evidence_tier=evidence_tier)
+    return {
+        "answerMd": answer_md,
+        "answerType": answer_type,
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="model",
+            reason=reason,
+            evidence_tier=evidence_tier,
+            handout_context=_handout_context_metadata(handout_context) if handout_context is not None else None,
+        ),
+    }
+
+
+def _ensure_unreferenced_disclosure(answer_md: str, *, evidence_tier: UnreferencedEvidenceTier) -> str:
+    if evidence_tier == "handout_context":
+        if _has_handout_context_disclosure(answer_md):
+            return answer_md
+        return f"依据讲义内容回答，未找到可追溯原始资料引用。\n\n{answer_md}"
+    if _has_course_prior_disclosure(answer_md):
+        return answer_md
+    return f"课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释。\n\n{answer_md}"
+
+
+def _has_handout_context_disclosure(answer_md: str) -> bool:
+    return "讲义" in answer_md and ("未找到可追溯原始资料引用" in answer_md or "无原始资料引用" in answer_md)
+
+
+def _has_course_prior_disclosure(answer_md: str) -> bool:
+    return ("无直接证据" in answer_md or "未找到直接证据" in answer_md) and (
+        "基于当前课程主题" in answer_md or "补充解释" in answer_md
+    )
 
 
 def _fallback_qa_response(candidates: Sequence[QaEvidenceCandidate], *, reason: str) -> dict[str, Any]:
@@ -1342,6 +1506,31 @@ def _build_qa_prompt(question: str, candidates: Sequence[QaEvidenceCandidate], *
             f"用户问题：{clean_text(question)}",
             "请只基于 evidenceCandidates 回答，并只引用 evidenceCandidates 内的候选。",
             f"evidenceCandidates：{json.dumps(evidence, ensure_ascii=False, sort_keys=True)}",
+        ]
+    )
+
+
+def _build_unreferenced_qa_prompt(
+    question: str,
+    *,
+    context_text: str,
+    evidence_tier: UnreferencedEvidenceTier,
+    course_scope: Mapping[str, Any] | None = None,
+    max_context_chars: int = 1600,
+) -> str:
+    payload: dict[str, Any] = {
+        "question": clean_text(question),
+        "evidenceTier": evidence_tier,
+        "contextText": _truncate(context_text, max_context_chars),
+        "requiredCitations": [],
+    }
+    scope_text = _course_scope_text(course_scope)
+    if scope_text:
+        payload["courseScope"] = _truncate(scope_text, max_context_chars)
+    return "\n".join(
+        [
+            "请基于以下 JSON 输入回答，并保持 citations 为空数组。",
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
         ]
     )
 
