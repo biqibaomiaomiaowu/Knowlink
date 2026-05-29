@@ -487,6 +487,35 @@ def test_qa_rejects_mixed_course_keyword_out_of_scope_question():
     assert response["generationMetadata"]["evidenceTier"] == "out_of_scope"
 
 
+def test_qa_rejects_out_of_scope_before_handout_context_when_no_original_evidence():
+    response = generate_block_qa_response(
+        "集合今天杭州天气怎么样？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "clarification"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+
 def test_qa_keeps_original_evidence_before_out_of_scope_terms():
     response = generate_block_qa_response(
         "集合今天杭州天气怎么样？",

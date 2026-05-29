@@ -328,6 +328,8 @@ def generate_block_qa_response(
     answer_candidates = _relevant_candidates(question, candidates)
     has_course_scope = _has_course_scope(course_scope)
     if not answer_candidates:
+        if has_course_scope and _question_has_out_of_scope_intent(question, course_scope):
+            return _out_of_scope_response()
         handout_contexts = _relevant_handout_contexts(
             question,
             _handout_context_candidates(current_block=current_block, adjacent_blocks=adjacent_blocks),

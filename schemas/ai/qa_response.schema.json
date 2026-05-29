@@ -81,7 +81,7 @@
     },
     "generationMetadata": {
       "type": "object",
-      "required": ["source", "reason"],
+      "required": ["source", "reason", "evidenceTier"],
       "properties": {
         "source": {
           "type": "string",

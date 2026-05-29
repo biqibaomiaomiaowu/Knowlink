@@ -612,7 +612,11 @@ def test_collaboration_docs_expose_change_flow_and_priority_matrices():
                     {"resourceId": 503, "refLabel": "DOCX 积分部分", "anchorKey": "section-integral"},
                     {"resourceId": 504, "refLabel": "视频 02:00-04:00", "startSec": 120, "endSec": 240},
                 ],
-                "generationMetadata": {"source": "model", "reason": "model_response"},
+                "generationMetadata": {
+                    "source": "model",
+                    "reason": "model_response",
+                    "evidenceTier": "original_evidence",
+                },
             },
         ),
     ],
@@ -640,6 +644,22 @@ def test_qa_response_schema_accepts_generation_metadata_evidence_tier():
             },
         }
     )
+
+
+def test_qa_response_schema_rejects_missing_generation_metadata_evidence_tier():
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                "answerMd": "集合是确定对象组成的整体。",
+                "answerType": "direct_answer",
+                "citations": [{"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}],
+                "generationMetadata": {
+                    "source": "model",
+                    "reason": "model_response",
+                },
+            }
+        )
 
 
 @pytest.mark.parametrize("evidence_tier", ["handout_context", "course_prior", "out_of_scope"])
