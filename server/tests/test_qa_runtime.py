@@ -73,7 +73,7 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
         engine.dispose()
 
 
-def test_sql_qa_preserves_handout_context_generation_metadata_without_origin_refs():
+def test_sql_qa_uses_course_wide_original_segments_without_block_origin_refs():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, block_id = _ready_block_without_origin_refs(repo, session)
@@ -84,9 +84,8 @@ def test_sql_qa_preserves_handout_context_generation_metadata_without_origin_ref
         )
 
         assert result["answerType"] == "direct_answer"
-        assert result["citations"] == []
-        assert result["generationMetadata"]["evidenceTier"] == "handout_context"
-        assert result["generationMetadata"]["handoutContext"]["title"] == "集合的定义"
+        assert result["citations"]
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
 
         messages = service.get_session_messages(session_id=result["sessionId"])
         assistant_message = messages["items"][1]
@@ -158,7 +157,7 @@ def test_memory_qa_uses_course_scope_for_out_of_scope_questions():
     service = QaService(courses=repo, qa=repo)
 
     result = service.create_message(
-        payload=_Payload(course_id=course_id, handout_block_id=block["blockId"], question="浠婂ぉ鏉窞澶╂皵鎬庝箞鏍凤紵")
+        payload=_Payload(course_id=course_id, handout_block_id=block["blockId"], question="今天杭州天气怎么样？")
     )
 
     assert result["answerType"] == "clarification"
@@ -470,12 +469,13 @@ def test_sql_qa_uses_active_adjacent_handout_block_vector_content():
 
         assert result["answerType"] == "direct_answer"
         assert "向量提示说明集合定义" in result["answerMd"]
+        adjacent_ref = _source_video_ref(session, adjacent_block)
         assert result["citations"] == [
             {
-                "resourceId": _source_video_ref(session, adjacent_block)["resourceId"],
-                "refLabel": _source_video_ref(session, adjacent_block)["refLabel"],
-                "startSec": _source_video_ref(session, adjacent_block)["startSec"],
-                "endSec": _source_video_ref(session, adjacent_block)["endSec"],
+                "resourceId": adjacent_ref["resourceId"],
+                "refLabel": adjacent_ref["refLabel"],
+                "startSec": adjacent_ref["startSec"],
+                "endSec": adjacent_ref["endSec"],
             }
         ]
     finally:
@@ -483,7 +483,7 @@ def test_sql_qa_uses_active_adjacent_handout_block_vector_content():
         engine.dispose()
 
 
-def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
+def test_sql_qa_uses_non_adjacent_ready_block_as_course_wide_handout_context():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_three_blocks(repo)
@@ -493,12 +493,18 @@ def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
         blocks = repo.get_latest_handout(course_id)["blocks"]
         for block in blocks:
             source_ref = _source_video_ref(session, block)
+            is_far_block = block["blockId"] == blocks[2]["blockId"]
+            content_md = (
+                "## 远端课程级讲义提示\n\n远端课程级讲义提示说明 superkey 可以被课程级 QA 跨块命中。"
+                if is_far_block
+                else "## 普通内容"
+            )
             repo.save_handout_block_result(
                 block["blockId"],
                 {
                     "title": block["title"],
-                    "summary": block["summary"],
-                    "contentMd": "## 普通内容",
+                    "summary": "远端课程级讲义提示说明 superkey 可以被课程级 QA 跨块命中。" if is_far_block else block["summary"],
+                    "contentMd": content_md,
                     "sourceSegmentKeys": block["sourceSegmentKeys"],
                     "knowledgePoints": [],
                     "citations": [source_ref],
@@ -510,17 +516,19 @@ def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
             handout_version_id=repo.get_course(course_id)["activeHandoutVersionId"],
             owner_type="handout_block",
             owner_id=blocks[2]["blockId"],
-            content_text="远端提示不应被第一个 block 的 QA 命中。",
+            content_text="远端课程级讲义提示说明 superkey 可以被课程级 QA 跨块命中。",
             metadata_json={"outlineKey": blocks[2]["outlineKey"]},
         )
 
         result = QaService(courses=repo, qa=repo).create_message(
-            payload=_Payload(course_id=course_id, handout_block_id=blocks[0]["blockId"], question="远端提示是什么？")
+            payload=_Payload(course_id=course_id, handout_block_id=blocks[0]["blockId"], question="远端课程级讲义提示是什么？")
         )
 
-        assert result["answerType"] == "clarification"
+        assert result["answerType"] == "direct_answer"
+        assert "远端课程级讲义提示" in result["answerMd"]
         assert result["citations"] == []
-        assert result["generationMetadata"]["evidenceTier"] == "out_of_scope"
+        assert result["generationMetadata"]["evidenceTier"] == "handout_context"
+        assert result["generationMetadata"]["handoutContext"]["handoutBlockId"] == blocks[2]["blockId"]
     finally:
         session.close()
         engine.dispose()

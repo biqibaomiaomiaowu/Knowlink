@@ -29,6 +29,7 @@ from server.infra.db.models import (
 from server.infra.db.session import create_session
 from server.infra.storage import ObjectStorage, ObjectStorageError
 from server.parsers import parse_resource
+from server.tasks.vector_backfill import build_search_text
 
 
 DOCUMENT_RESOURCE_TYPES = {"pdf", "pptx", "docx"}
@@ -460,7 +461,24 @@ def _vectorize_segments(
         session.commit()
         return "failed", 0, {"code": "embedding.count_mismatch"}
 
+    embedding_model = _embedding_model_name(client)
+    for embedding in embeddings:
+        if len(embedding) != VectorDocument.EMBEDDING_DIM:
+            _finish_step(
+                step_task,
+                status="failed",
+                progress_pct=100,
+                error_code="embedding.dimension_mismatch",
+                error_message=(
+                    f"Embedding provider returned vector dimension {len(embedding)}, "
+                    f"expected {VectorDocument.EMBEDDING_DIM}."
+                ),
+            )
+            session.commit()
+            return "failed", 0, {"code": "embedding.dimension_mismatch"}
+
     for item, embedding in zip(inputs, embeddings, strict=True):
+        embedding_vector = list(embedding)
         session.add(
             VectorDocument(
                 course_id=int(item.course_id or 0),
@@ -471,7 +489,13 @@ def _vectorize_segments(
                 resource_id=item.resource_id,
                 content_text=item.content_text,
                 metadata_json=item.metadata_json,
-                embedding=embedding,
+                embedding=embedding_vector,
+                embedding_vector=embedding_vector,
+                embedding_model=embedding_model,
+                embedding_dim=VectorDocument.EMBEDDING_DIM,
+                embedding_status="ready",
+                embedding_error=None,
+                search_text=build_search_text(item.content_text, item.metadata_json),
             )
         )
     _finish_step(
@@ -482,6 +506,14 @@ def _vectorize_segments(
     )
     session.commit()
     return "succeeded", len(inputs), None
+
+
+def _embedding_model_name(client: Any) -> str:
+    for attr in ("model", "model_name"):
+        value = getattr(client, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "unknown"
 
 
 def _finish_pipeline(

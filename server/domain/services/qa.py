@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from server.ai.qa_policy import (
-    QaAnswerClient,
-    build_block_scoped_qa_candidates,
-    build_qa_message_refs,
-    generate_block_qa_response,
-)
+from server.ai.qa_orchestrator import QaOrchestrator
+from server.ai.qa_policy import QaAnswerClient
 from server.domain.repositories import CourseRepository, QaRepository
 from server.domain.services.errors import ServiceError
 
@@ -16,11 +12,14 @@ class QaService:
         *,
         courses: CourseRepository,
         qa: QaRepository,
+        embedding_client: object | None = None,
         qa_answer_client: QaAnswerClient | None = None,
+        answer_client: QaAnswerClient | None = None,
     ) -> None:
         self.courses = courses
         self.qa = qa
-        self.qa_answer_client = qa_answer_client
+        self.embedding_client = embedding_client
+        self.qa_answer_client = qa_answer_client if qa_answer_client is not None else answer_client
 
     def create_message(self, *, payload) -> dict[str, object]:
         if self.courses.get_course(payload.course_id) is None:
@@ -36,44 +35,25 @@ class QaService:
                 error_code="qa.block_not_found",
                 status_code=404,
             )
-        active_course_id = int(context["activeCourseId"])
-        active_parse_run_id = int(context["activeParseRunId"])
-        active_handout_version_id = int(context["activeHandoutVersionId"])
-        candidates = build_block_scoped_qa_candidates(
+        generation_result = QaOrchestrator(
+            retrieval_repository=self.qa,
+            embedding_client=self.embedding_client,
+            qa_answer_client=self.qa_answer_client,
+        ).answer(
             payload.question,
-            current_block=context["currentBlock"],
-            segments=context.get("segments") or [],
-            knowledge_point_evidences=context.get("knowledgePointEvidences") or [],
-            adjacent_blocks=context.get("adjacentBlocks") or [],
-            active_course_id=active_course_id,
-            active_parse_run_id=active_parse_run_id,
-            active_handout_version_id=active_handout_version_id,
+            context,
         )
-        response = generate_block_qa_response(
-            payload.question,
-            current_block=context["currentBlock"],
-            segments=context.get("segments") or [],
-            knowledge_point_evidences=context.get("knowledgePointEvidences") or [],
-            adjacent_blocks=context.get("adjacentBlocks") or [],
-            active_course_id=active_course_id,
-            active_parse_run_id=active_parse_run_id,
-            active_handout_version_id=active_handout_version_id,
-            course_scope=context.get("courseScope") or {},
-            client=self.qa_answer_client,
-        )
-        refs = build_qa_message_refs(
-            response,
-            candidates,
-            active_course_id=active_course_id,
-            active_parse_run_id=active_parse_run_id,
-            active_handout_version_id=active_handout_version_id,
-        )
+        response = generation_result.response
+        refs = generation_result.refs
+        if response.get("generationMetadata", {}).get("evidenceTier") != "original_evidence":
+            response = {**response, "citations": []}
+            refs = []
         result = self.qa.save_qa_exchange(
             context,
             payload.question,
             response,
             refs,
-            len(candidates),
+            generation_result.candidate_count,
         )
         return result
 

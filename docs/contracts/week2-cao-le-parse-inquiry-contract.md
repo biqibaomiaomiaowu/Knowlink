@@ -1,5 +1,13 @@
 # 曹乐 Week 2 解析与问询契约
 
+## Task 7B Hybrid RAG vector note
+
+- Retrieval mode: current-block-prioritized course-wide Hybrid RAG.
+- Scope: active parse run and active handout version are mandatory retrieval version boundaries.
+- Ranking: current block 是 boost，不是 filter.
+- Evidence tiers: handout_context citations=[]; source-fact intent 不进入 course_prior.
+- `vector_documents` writers must fill `embedding_vector`, `embedding_model`, `embedding_dim`, `embedding_status`, `embedding_error`, and `search_text`; backfill may rebuild only `search_text` and pending status unless an embedding client is provided.
+
 本文件冻结曹乐 Week 2 负责的解析产物、解析步骤、`pipeline-status` 语义和问询题到 `learning_preferences` 的映射。它只定义业务 contract，不要求同步完成 FastAPI、worker、仓储或 Flutter 实现。
 
 - 适用时间：2026-04-27 至 2026-05-03
