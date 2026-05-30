@@ -682,7 +682,9 @@ def test_video_only_block_uses_source_segment_keys_when_citations_are_missing():
         active_handout_version_id=7001,
     )
 
-    assert [candidate.segment_key for candidate in candidates] == ["mp4-c1"]
+    assert [(candidate.source, candidate.segment_key) for candidate in candidates] == [
+        ("current_block_source_segment", "mp4-c1")
+    ]
 
     response = generate_block_qa_response(
         "集合的定义是什么？",

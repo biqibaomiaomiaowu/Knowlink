@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import re
 from threading import Lock
 from typing import Any, Mapping, Sequence
 
+from server.ai.qa_types import LexicalSearchHit, QaScope, VectorSearchHit
 from server.domain.services.idempotency import (
     IDEMPOTENCY_EXPIRES_IN,
     raise_idempotency_body_mismatch,
     raise_idempotency_in_progress,
 )
+from server.parsers.base import clean_text
 
 
 def utcnow() -> datetime:
@@ -687,6 +690,16 @@ class RuntimeStore:
             if adjacent["blockId"] != handout_block_id
             and abs(int(adjacent.get("startSec") or 0) - int(block.get("startSec") or 0)) <= 300
         ]
+        ready_blocks = [
+            self._qa_block_payload_from_memory(
+                ready_block,
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout_version_id=handout_version_id,
+            )
+            for ready_block in handout["blocks"]
+            if ready_block.get("status") == "ready" or ready_block.get("generationStatus") == "ready"
+        ]
         return {
             "courseId": course_id,
             "activeCourseId": course_id,
@@ -702,6 +715,7 @@ class RuntimeStore:
             "segments": segments,
             "knowledgePointEvidences": [],
             "adjacentBlocks": adjacent_blocks,
+            "readyBlocks": ready_blocks,
             "courseScope": self._qa_course_scope_from_memory(
                 course=course,
                 course_id=course_id,
@@ -709,6 +723,186 @@ class RuntimeStore:
                 adjacent_blocks=adjacent_blocks,
             ),
         }
+
+    def search_course_wide_original_segments(
+        self,
+        *,
+        question: str,
+        course_id: int | None,
+        parse_run_id: int | None,
+        handout_version_id: int | None = None,
+        handout_block_id: int | str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        active_course_id = _as_positive_int(course_id)
+        if active_course_id is None:
+            return []
+        course = self.courses.get(active_course_id)
+        handout = self.get_latest_handout(active_course_id)
+        if course is None or handout is None:
+            return []
+        active_parse_run_id = _as_positive_int(parse_run_id) or _as_positive_int(course.get("activeParseRunId"))
+        if active_parse_run_id is None or handout.get("sourceParseRunId") != active_parse_run_id:
+            return []
+        normalized_limit = _normalized_search_limit(limit)
+        if normalized_limit <= 0:
+            return []
+        scored: list[tuple[float, int, str, dict[str, Any]]] = []
+        for segment in self._qa_segments_from_memory_handout(
+            course_id=active_course_id,
+            parse_run_id=active_parse_run_id,
+            handout=handout,
+        ):
+            score = _qa_lexical_overlap_score(question, str(segment.get("textContent") or ""))
+            if score <= 0:
+                continue
+            scored.append(
+                (
+                    score,
+                    int(segment.get("orderNo") or 0),
+                    str(segment.get("segmentKey") or ""),
+                    segment,
+                )
+            )
+        return [
+            segment
+            for _score, _order_no, _key, segment in sorted(
+                scored,
+                key=lambda item: (-item[0], item[1], item[2]),
+            )[:normalized_limit]
+        ]
+
+    def search_vector_segments(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        return []
+
+    def search_lexical_segments(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        active_course_id = _as_positive_int(scope.course_id)
+        active_parse_run_id = _as_positive_int(scope.active_parse_run_id)
+        normalized_limit = _normalized_search_limit(limit)
+        if active_course_id is None or active_parse_run_id is None or normalized_limit <= 0:
+            return []
+        course = self.courses.get(active_course_id)
+        handout = self.get_latest_handout(active_course_id)
+        if course is None or handout is None or handout.get("sourceParseRunId") != active_parse_run_id:
+            return []
+
+        scored: list[tuple[float, int, LexicalSearchHit]] = []
+        for segment in self._qa_segments_from_memory_handout(
+            course_id=active_course_id,
+            parse_run_id=active_parse_run_id,
+            handout=handout,
+        ):
+            text = str(segment.get("textContent") or "")
+            score = _qa_lexical_overlap_score(query, text)
+            if score <= 0:
+                continue
+            segment_key = str(segment.get("segmentKey") or "").strip() or None
+            scored.append(
+                (
+                    score,
+                    int(segment.get("orderNo") or 0),
+                    LexicalSearchHit(
+                        identity_key=f"segment:{segment_key}",
+                        score=score,
+                        text=text,
+                        segment_key=segment_key,
+                        resource_id=_as_positive_int(segment.get("resourceId")),
+                        owner_type="segment",
+                        course_id=active_course_id,
+                        parse_run_id=active_parse_run_id,
+                        metadata_json={"segmentType": segment.get("segmentType")},
+                        locator=_segment_locator_from_payload(segment),
+                    ),
+                )
+            )
+        return [
+            _ranked_lexical_hit(hit, rank=index)
+            for index, (_score, _order_no, hit) in enumerate(
+                sorted(scored, key=lambda item: (-item[0], item[1], item[2].identity_key))[:normalized_limit],
+                start=1,
+            )
+        ]
+
+    def search_vector_handout_blocks(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        return []
+
+    def search_lexical_handout_blocks(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        active_course_id = _as_positive_int(scope.course_id)
+        active_parse_run_id = _as_positive_int(scope.active_parse_run_id)
+        active_handout_version_id = _as_positive_int(scope.active_handout_version_id)
+        normalized_limit = _normalized_search_limit(limit)
+        if (
+            active_course_id is None
+            or active_parse_run_id is None
+            or active_handout_version_id is None
+            or normalized_limit <= 0
+        ):
+            return []
+        handout = self.get_latest_handout(active_course_id)
+        if (
+            handout is None
+            or handout.get("sourceParseRunId") != active_parse_run_id
+            or handout.get("handoutVersionId") != active_handout_version_id
+        ):
+            return []
+
+        scored: list[tuple[float, int, LexicalSearchHit]] = []
+        for block in handout.get("blocks") or []:
+            if block.get("status") != "ready" and block.get("generationStatus") != "ready":
+                continue
+            search_text = " ".join(
+                item
+                for item in (block.get("title"), block.get("summary"), block.get("contentMd"))
+                if isinstance(item, str) and item
+            )
+            score = _qa_lexical_overlap_score(query, search_text)
+            if score <= 0:
+                continue
+            block_id = block.get("blockId")
+            scored.append(
+                (
+                    score,
+                    int(block.get("sortNo") or 0),
+                    LexicalSearchHit(
+                        identity_key=f"handout:{block_id}",
+                        score=score,
+                        text=str(block.get("contentMd") or block.get("summary") or block.get("title") or ""),
+                        owner_type="handout_block",
+                        handout_block_id=block_id,
+                        course_id=active_course_id,
+                        parse_run_id=active_parse_run_id,
+                        handout_version_id=active_handout_version_id,
+                        metadata_json={"outlineKey": block.get("outlineKey"), "title": block.get("title")},
+                    ),
+                )
+            )
+        return [
+            _ranked_lexical_hit(hit, rank=index)
+            for index, (_score, _sort_no, hit) in enumerate(
+                sorted(scored, key=lambda item: (-item[0], item[1], item[2].identity_key))[:normalized_limit],
+                start=1,
+            )
+        ]
 
     def save_qa_exchange(
         self,
@@ -1192,6 +1386,76 @@ class RuntimeStore:
 
     def get_progress(self, course_id: int) -> dict[str, Any]:
         return self.progress.get(course_id, {"courseId": course_id, "lastActivityAt": utcnow()})
+
+
+def _as_positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _normalized_search_limit(limit: int) -> int:
+    if isinstance(limit, bool):
+        return 0
+    try:
+        return max(0, min(int(limit), 50))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _qa_lexical_overlap_score(query: str, text: str) -> float:
+    query_tokens = _qa_search_tokens(query)
+    if not query_tokens:
+        return 0.0
+    text_tokens = _qa_search_tokens(text)
+    compact_text = clean_text(text).lower()
+    if not text_tokens and not compact_text:
+        return 0.0
+    overlap = (query_tokens & text_tokens) | {token for token in query_tokens if token in compact_text}
+    if not overlap:
+        return 0.0
+    return float(len(overlap)) + (len(overlap) / len(query_tokens))
+
+
+def _qa_search_tokens(value: str) -> set[str]:
+    normalized = clean_text(value).lower()
+    tokens = {token for token in re.findall(r"[a-z0-9_]{2,}", normalized) if token.strip()}
+    for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
+        if len(run) == 1:
+            tokens.add(run)
+        else:
+            tokens.update(run[index : index + 2] for index in range(len(run) - 1))
+    return tokens
+
+
+def _segment_locator_from_payload(segment: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: segment[key]
+        for key in ("pageNo", "slideNo", "anchorKey", "startSec", "endSec")
+        if segment.get(key) not in (None, "")
+    }
+
+
+def _ranked_lexical_hit(hit: LexicalSearchHit, *, rank: int) -> LexicalSearchHit:
+    return LexicalSearchHit(
+        identity_key=hit.identity_key,
+        score=hit.score,
+        text=hit.text,
+        segment_key=hit.segment_key,
+        resource_id=hit.resource_id,
+        owner_type=hit.owner_type,
+        handout_block_id=hit.handout_block_id,
+        segment_id=hit.segment_id,
+        course_id=hit.course_id,
+        parse_run_id=hit.parse_run_id,
+        handout_version_id=hit.handout_version_id,
+        metadata_json=hit.metadata_json,
+        locator=hit.locator,
+        distance=hit.distance,
+        rank=rank,
+    )
 
 
 runtime_store = RuntimeStore()

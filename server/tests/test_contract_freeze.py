@@ -74,6 +74,16 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
         assert token in week2_contract
 
     for token in (
+        "current-block-prioritized course-wide Hybrid RAG",
+        "current block 是 boost，不是 filter",
+        "active parse run",
+        "active handout version",
+        "handout_context citations=[]",
+        "source-fact intent 不进入 course_prior",
+    ):
+        assert token in week2_contract
+
+    for token in (
         "`course_segments`",
         "`handout_outline`",
         "`handout_blocks`",

@@ -6,7 +6,7 @@ import hashlib
 import re
 from typing import Any, TypeVar
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, literal_column, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from server.domain.services.idempotency import (
     raise_idempotency_body_mismatch,
     raise_idempotency_in_progress,
 )
+from server.ai.qa_types import LexicalSearchHit, QaScope, VectorSearchHit
 from server.parsers.base import clean_text
 from server.infra.db.base import utcnow
 from server.infra.db.models import (
@@ -117,6 +118,11 @@ class SqlAlchemyRuntimeRepository:
         self.session = session
         self.user_id = user_id
         self._idempotency_depth = 0
+
+    @property
+    def _is_postgresql(self) -> bool:
+        bind = self.session.get_bind()
+        return bind.dialect.name == "postgresql"
 
     def run_idempotent(self, action: str, key: str | None, factory: Callable[[], T]) -> T:
         if not key:
@@ -1304,6 +1310,11 @@ class SqlAlchemyRuntimeRepository:
             version=version,
             vector_documents=active_block_vectors,
         )
+        ready_blocks = self._qa_ready_blocks(
+            course=course,
+            version=version,
+            vector_documents=active_block_vectors,
+        )
         return {
             "courseId": course.id,
             "activeCourseId": course.id,
@@ -1314,12 +1325,301 @@ class SqlAlchemyRuntimeRepository:
             "segments": segments,
             "knowledgePointEvidences": [],
             "adjacentBlocks": adjacent_blocks,
+            "readyBlocks": ready_blocks,
             "courseScope": self._qa_course_scope(
                 course=course,
                 current_block=current_block,
                 adjacent_blocks=adjacent_blocks,
             ),
         }
+
+    def search_vector_segments(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        course_id = _as_positive_int(scope.course_id)
+        parse_run_id = _as_positive_int(scope.active_parse_run_id)
+        normalized_limit = _normalized_search_limit(limit)
+        if course_id is None or parse_run_id is None or normalized_limit <= 0 or not self._is_postgresql:
+            return []
+
+        self.session.execute(text("SET LOCAL hnsw.ef_search = :value"), {"value": 80})
+        distance = VectorDocument.embedding_vector.cosine_distance(list(embedding))
+        rows = self.session.execute(
+            select(VectorDocument, CourseSegment, distance.label("distance"))
+            .join(CourseSegment, CourseSegment.id == VectorDocument.owner_id)
+            .where(
+                VectorDocument.course_id == course_id,
+                VectorDocument.parse_run_id == parse_run_id,
+                VectorDocument.owner_type == "segment",
+                VectorDocument.embedding_status == "ready",
+                VectorDocument.embedding_vector.is_not(None),
+                CourseSegment.course_id == course_id,
+                CourseSegment.parse_run_id == parse_run_id,
+                CourseSegment.is_active.is_(True),
+            )
+            .order_by(distance.asc(), VectorDocument.id.asc())
+            .limit(normalized_limit)
+        ).all()
+        return [
+            _vector_document_vector_hit(
+                document,
+                distance_value=distance_value,
+                rank=index,
+                active_handout_version_id=scope.active_handout_version_id,
+            )
+            for index, (document, _segment, distance_value) in enumerate(rows, start=1)
+        ]
+
+    def search_lexical_segments(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        course_id = _as_positive_int(scope.course_id)
+        parse_run_id = _as_positive_int(scope.active_parse_run_id)
+        normalized_limit = _normalized_search_limit(limit)
+        if course_id is None or parse_run_id is None or normalized_limit <= 0:
+            return []
+        if self._is_postgresql:
+            fts_query = _postgres_fts_query(query)
+            if not fts_query:
+                return []
+            search_tsv = literal_column("vector_documents.search_tsv")
+            tsquery = func.websearch_to_tsquery("simple", fts_query)
+            rank = func.ts_rank_cd(search_tsv, tsquery)
+            rows = self.session.execute(
+                select(VectorDocument, CourseSegment, rank.label("rank_score"))
+                .join(CourseSegment, CourseSegment.id == VectorDocument.owner_id)
+                .where(
+                    VectorDocument.course_id == course_id,
+                    VectorDocument.parse_run_id == parse_run_id,
+                    VectorDocument.owner_type == "segment",
+                    search_tsv.op("@@")(tsquery),
+                    CourseSegment.course_id == course_id,
+                    CourseSegment.parse_run_id == parse_run_id,
+                    CourseSegment.is_active.is_(True),
+                )
+                .order_by(rank.desc(), VectorDocument.id.asc())
+                .limit(normalized_limit)
+            ).all()
+            return [
+                _vector_document_lexical_hit(
+                    document,
+                    score_value=rank_score,
+                    rank=index,
+                    active_handout_version_id=scope.active_handout_version_id,
+                )
+                for index, (document, _segment, rank_score) in enumerate(rows, start=1)
+            ]
+
+        scored: list[tuple[float, int, LexicalSearchHit]] = []
+        for segment in self._qa_segments(course_id=course_id, parse_run_id=parse_run_id):
+            text = str(segment.get("textContent") or "")
+            score = _qa_lexical_overlap_score(query, text)
+            if score <= 0:
+                continue
+            segment_id = _as_positive_int(segment.get("segmentId"))
+            segment_key = str(segment.get("segmentKey") or "").strip() or None
+            identity = f"segment:{segment_id}" if segment_id is not None else f"segment:{segment_key}"
+            scored.append(
+                (
+                    score,
+                    int(segment.get("orderNo") or 0),
+                    LexicalSearchHit(
+                        identity_key=identity,
+                        score=score,
+                        text=text,
+                        segment_key=segment_key,
+                        resource_id=_as_positive_int(segment.get("resourceId")),
+                        owner_type="segment",
+                        segment_id=segment_id,
+                        course_id=course_id,
+                        parse_run_id=parse_run_id,
+                        handout_version_id=scope.active_handout_version_id,
+                        metadata_json={"segmentType": segment.get("segmentType")},
+                        locator=_segment_locator_from_payload(segment),
+                    ),
+                )
+            )
+
+        return [
+            _ranked_lexical_hit(hit, rank=index)
+            for index, (_score, _order_no, hit) in enumerate(
+                sorted(scored, key=lambda item: (-item[0], item[1], item[2].identity_key))[:normalized_limit],
+                start=1,
+            )
+        ]
+
+    def search_vector_handout_blocks(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        course_id = _as_positive_int(scope.course_id)
+        parse_run_id = _as_positive_int(scope.active_parse_run_id)
+        handout_version_id = _as_positive_int(scope.active_handout_version_id)
+        normalized_limit = _normalized_search_limit(limit)
+        if (
+            course_id is None
+            or parse_run_id is None
+            or handout_version_id is None
+            or normalized_limit <= 0
+            or not self._is_postgresql
+        ):
+            return []
+
+        self.session.execute(text("SET LOCAL hnsw.ef_search = :value"), {"value": 80})
+        distance = VectorDocument.embedding_vector.cosine_distance(list(embedding))
+        rows = self.session.execute(
+            select(VectorDocument, distance.label("distance"))
+            .join(HandoutBlock, HandoutBlock.id == VectorDocument.owner_id)
+            .where(
+                VectorDocument.course_id == course_id,
+                VectorDocument.parse_run_id == parse_run_id,
+                VectorDocument.handout_version_id == handout_version_id,
+                VectorDocument.owner_type == "handout_block",
+                VectorDocument.embedding_status == "ready",
+                VectorDocument.embedding_vector.is_not(None),
+                HandoutBlock.handout_version_id == handout_version_id,
+                HandoutBlock.status == "ready",
+            )
+            .order_by(distance.asc(), VectorDocument.id.asc())
+            .limit(normalized_limit)
+        ).all()
+        return [
+            _vector_document_vector_hit(document, distance_value=distance_value, rank=index)
+            for index, (document, distance_value) in enumerate(rows, start=1)
+        ]
+
+    def search_lexical_handout_blocks(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        course_id = _as_positive_int(scope.course_id)
+        parse_run_id = _as_positive_int(scope.active_parse_run_id)
+        handout_version_id = _as_positive_int(scope.active_handout_version_id)
+        normalized_limit = _normalized_search_limit(limit)
+        if course_id is None or parse_run_id is None or handout_version_id is None or normalized_limit <= 0:
+            return []
+        if self._is_postgresql:
+            fts_query = _postgres_fts_query(query)
+            if not fts_query:
+                return []
+            search_tsv = literal_column("vector_documents.search_tsv")
+            tsquery = func.websearch_to_tsquery("simple", fts_query)
+            rank = func.ts_rank_cd(search_tsv, tsquery)
+            rows = self.session.execute(
+                select(VectorDocument, HandoutBlock, rank.label("rank_score"))
+                .join(HandoutBlock, HandoutBlock.id == VectorDocument.owner_id)
+                .where(
+                    VectorDocument.course_id == course_id,
+                    VectorDocument.parse_run_id == parse_run_id,
+                    VectorDocument.handout_version_id == handout_version_id,
+                    VectorDocument.owner_type == "handout_block",
+                    search_tsv.op("@@")(tsquery),
+                    HandoutBlock.handout_version_id == handout_version_id,
+                    HandoutBlock.status == "ready",
+                )
+                .order_by(rank.desc(), VectorDocument.id.asc())
+                .limit(normalized_limit)
+            ).all()
+            return [
+                _vector_document_lexical_hit(document, score_value=rank_score, rank=index)
+                for index, (document, _block, rank_score) in enumerate(rows, start=1)
+            ]
+
+        rows = self.session.scalars(
+            select(HandoutBlock)
+            .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
+            .join(Course, Course.id == HandoutVersion.course_id)
+            .where(
+                Course.id == course_id,
+                Course.active_parse_run_id == parse_run_id,
+                Course.active_handout_version_id == handout_version_id,
+                HandoutVersion.source_parse_run_id == parse_run_id,
+                HandoutBlock.handout_version_id == handout_version_id,
+                HandoutBlock.status == "ready",
+            )
+            .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
+        ).all()
+
+        scored: list[tuple[float, int, LexicalSearchHit]] = []
+        for block in rows:
+            search_text = " ".join(
+                item for item in (block.title, block.summary, block.content_md) if isinstance(item, str) and item
+            )
+            score = _qa_lexical_overlap_score(query, search_text)
+            if score <= 0:
+                continue
+            text = block.content_md or block.summary or block.title
+            scored.append(
+                (
+                    score,
+                    block.sort_no,
+                    LexicalSearchHit(
+                        identity_key=f"handout:{block.id}",
+                        score=score,
+                        text=text,
+                        owner_type="handout_block",
+                        handout_block_id=block.id,
+                        course_id=course_id,
+                        parse_run_id=parse_run_id,
+                        handout_version_id=handout_version_id,
+                        metadata_json={"outlineKey": block.outline_key, "title": block.title},
+                    ),
+                )
+            )
+
+        return [
+            _ranked_lexical_hit(hit, rank=index)
+            for index, (_score, _sort_no, hit) in enumerate(
+                sorted(scored, key=lambda item: (-item[0], item[1], item[2].identity_key))[:normalized_limit],
+                start=1,
+            )
+        ]
+
+    def search_course_wide_original_segments(
+        self,
+        *,
+        question: str,
+        course_id: int | None,
+        parse_run_id: int | None,
+        handout_version_id: int | None = None,
+        handout_block_id: int | str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        active_course_id = _as_positive_int(course_id)
+        active_parse_run_id = _as_positive_int(parse_run_id)
+        normalized_limit = _normalized_search_limit(limit)
+        if active_course_id is None or active_parse_run_id is None or normalized_limit <= 0:
+            return []
+        scored: list[tuple[float, int, str, dict[str, Any]]] = []
+        for segment in self._qa_segments(course_id=active_course_id, parse_run_id=active_parse_run_id):
+            score = _qa_lexical_overlap_score(question, str(segment.get("textContent") or ""))
+            if score <= 0:
+                continue
+            scored.append(
+                (
+                    score,
+                    int(segment.get("orderNo") or 0),
+                    str(segment.get("segmentKey") or segment.get("segmentId") or ""),
+                    segment,
+                )
+            )
+        return [
+            segment
+            for _score, _order_no, _key, segment in sorted(
+                scored,
+                key=lambda item: (-item[0], item[1], item[2]),
+            )[:normalized_limit]
+        ]
 
     def save_qa_exchange(
         self,
@@ -2450,6 +2750,37 @@ class SqlAlchemyRuntimeRepository:
             payloads.append(payload)
         return payloads
 
+    def _qa_ready_blocks(
+        self,
+        *,
+        course: Course,
+        version: HandoutVersion,
+        vector_documents: Sequence[VectorDocument],
+    ) -> list[dict[str, Any]]:
+        vector_by_owner_id = {
+            int(document.owner_id): document
+            for document in vector_documents
+            if document.owner_type == "handout_block"
+            and document.handout_version_id == version.id
+            and document.parse_run_id == course.active_parse_run_id
+        }
+        rows = self.session.scalars(
+            select(HandoutBlock)
+            .where(
+                HandoutBlock.handout_version_id == version.id,
+                HandoutBlock.status == "ready",
+            )
+            .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
+        ).all()
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            payload = self._qa_block_payload(row, course=course, version=version)
+            vector_document = vector_by_owner_id.get(row.id)
+            if vector_document is not None:
+                payload["contentMd"] = vector_document.content_text
+            payloads.append(payload)
+        return payloads
+
     def _active_handout_block_vectors(self, *, course: Course, version: HandoutVersion) -> list[VectorDocument]:
         if course.active_parse_run_id is None:
             return []
@@ -3380,6 +3711,144 @@ def _vector_document_dict(document: VectorDocument) -> dict[str, Any]:
         "metadataJson": document.metadata_json,
         "embedding": document.embedding,
     }
+
+
+def _normalized_search_limit(limit: int) -> int:
+    if isinstance(limit, bool):
+        return 0
+    try:
+        return max(0, min(int(limit), 50))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _qa_lexical_overlap_score(query: str, text: str) -> float:
+    query_tokens = _qa_search_tokens(query)
+    if not query_tokens:
+        return 0.0
+    text_tokens = _qa_search_tokens(text)
+    compact_text = clean_text(text).lower()
+    if not text_tokens and not compact_text:
+        return 0.0
+    overlap = (query_tokens & text_tokens) | {token for token in query_tokens if token in compact_text}
+    if not overlap:
+        return 0.0
+    return float(len(overlap)) + (len(overlap) / len(query_tokens))
+
+
+def _qa_search_tokens(value: str) -> set[str]:
+    normalized = clean_text(value).lower()
+    tokens = {token for token in re.findall(r"[a-z0-9_]{2,}", normalized) if token.strip()}
+    for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
+        if len(run) == 1:
+            tokens.add(run)
+        else:
+            tokens.update(run[index : index + 2] for index in range(len(run) - 1))
+    return tokens
+
+
+def _postgres_fts_query(value: str) -> str:
+    tokens = sorted(_qa_search_tokens(value))
+    return " OR ".join(tokens[:32])
+
+
+def _segment_locator_from_payload(segment: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: segment[key]
+        for key in ("pageNo", "slideNo", "anchorKey", "startSec", "endSec")
+        if segment.get(key) not in (None, "")
+    }
+
+
+def _ranked_lexical_hit(hit: LexicalSearchHit, *, rank: int) -> LexicalSearchHit:
+    return LexicalSearchHit(
+        identity_key=hit.identity_key,
+        score=hit.score,
+        text=hit.text,
+        segment_key=hit.segment_key,
+        resource_id=hit.resource_id,
+        owner_type=hit.owner_type,
+        handout_block_id=hit.handout_block_id,
+        segment_id=hit.segment_id,
+        course_id=hit.course_id,
+        parse_run_id=hit.parse_run_id,
+        handout_version_id=hit.handout_version_id,
+        metadata_json=hit.metadata_json,
+        locator=hit.locator,
+        distance=hit.distance,
+        rank=rank,
+    )
+
+
+def _vector_document_vector_hit(
+    document: VectorDocument,
+    *,
+    distance_value: Any,
+    rank: int,
+    active_handout_version_id: int | None = None,
+) -> VectorSearchHit:
+    distance = float(distance_value or 0.0)
+    owner_id = _as_positive_int(document.owner_id)
+    owner_prefix = "handout" if document.owner_type == "handout_block" else "segment"
+    metadata = document.metadata_json or {}
+    segment_key = metadata.get("segmentKey") if isinstance(metadata.get("segmentKey"), str) else None
+    return VectorSearchHit(
+        identity_key=f"{owner_prefix}:{owner_id or document.id}",
+        score=1.0 - distance,
+        text=document.content_text,
+        segment_key=segment_key,
+        resource_id=document.resource_id,
+        owner_type=document.owner_type,
+        handout_block_id=owner_id if document.owner_type == "handout_block" else None,
+        segment_id=owner_id if document.owner_type == "segment" else None,
+        course_id=document.course_id,
+        parse_run_id=document.parse_run_id,
+        handout_version_id=document.handout_version_id
+        if document.handout_version_id is not None
+        else active_handout_version_id,
+        metadata_json=metadata,
+        locator=_vector_document_locator(metadata),
+        distance=distance,
+        rank=rank,
+    )
+
+
+def _vector_document_lexical_hit(
+    document: VectorDocument,
+    *,
+    score_value: Any,
+    rank: int,
+    active_handout_version_id: int | None = None,
+) -> LexicalSearchHit:
+    metadata = document.metadata_json or {}
+    owner_id = _as_positive_int(document.owner_id)
+    owner_prefix = "handout" if document.owner_type == "handout_block" else "segment"
+    segment_key = metadata.get("segmentKey") if isinstance(metadata.get("segmentKey"), str) else None
+    return LexicalSearchHit(
+        identity_key=f"{owner_prefix}:{owner_id or document.id}",
+        score=float(score_value or 0.0),
+        text=document.content_text,
+        segment_key=segment_key,
+        resource_id=document.resource_id,
+        owner_type=document.owner_type,
+        handout_block_id=owner_id if document.owner_type == "handout_block" else None,
+        segment_id=owner_id if document.owner_type == "segment" else None,
+        course_id=document.course_id,
+        parse_run_id=document.parse_run_id,
+        handout_version_id=document.handout_version_id
+        if document.handout_version_id is not None
+        else active_handout_version_id,
+        metadata_json=metadata,
+        locator=_vector_document_locator(metadata),
+        rank=rank,
+    )
+
+
+def _vector_document_locator(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
+    locator = metadata.get("locator")
+    if isinstance(locator, dict):
+        return locator
+    return _segment_locator_from_payload(metadata)
 
 
 def _async_task_changes(changes: dict[str, Any]) -> dict[str, Any]:
