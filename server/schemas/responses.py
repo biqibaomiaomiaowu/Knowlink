@@ -33,6 +33,63 @@ class CourseSummary(CamelModel):
     updated_at: datetime
 
 
+class CourseLibraryItem(CamelModel):
+    course_id: int
+    title: str
+    is_current: bool = False
+    entry_type: str
+    learning_status: str
+    last_activity_at: datetime | None = None
+    lesson_count: int = 0
+    course_resource_count: int = 0
+    current_lesson_id: int | None = None
+    current_lesson_title: str | None = None
+    overall_mastery_score: float | None = None
+    pending_review_count: int = 0
+    pipeline_stage: str
+    pipeline_status: str
+    lifecycle_status: str
+    archived_at: datetime | None = None
+
+
+class CourseQuickEntry(CamelModel):
+    key: str
+    title: str
+    status: str
+    enabled: bool = True
+    target: str | None = None
+
+
+class CourseProgressSummary(CamelModel):
+    lesson_count: int = 0
+    completed_lesson_count: int = 0
+    resource_count: int = 0
+    course_resource_count: int = 0
+    lesson_resource_count: int = 0
+    overall_mastery_score: float | None = None
+    pending_review_count: int = 0
+    completion_percent: int = 0
+    last_activity_at: datetime | None = None
+
+
+class CourseDeleteImpactData(CamelModel):
+    course_id: int
+    can_delete: bool
+    blocker_count: int
+    blockers: dict[str, int]
+
+
+class CourseWorkbenchData(CamelModel):
+    course: dict[str, object]
+    progress: CourseProgressSummary
+    current_lesson: dict[str, object] | None = None
+    lessons: list[dict[str, object]]
+    course_resources: list[dict[str, object]]
+    quick_entries: list[CourseQuickEntry]
+    next_actions: list[dict[str, object]] = Field(default_factory=list)
+    placeholder_states: dict[str, dict[str, object]] = Field(default_factory=dict)
+
+
 class AsyncTriggerData(CamelModel):
     task_id: int
     status: str

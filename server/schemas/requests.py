@@ -52,6 +52,18 @@ class CreateCourseRequest(CamelModel):
         return _require_timezone_aware(value)
 
 
+class UpdateCourseRequest(CamelModel):
+    title: str | None = None
+    goal_text: str | None = None
+    exam_at: datetime | None = None
+    preferred_style: Literal["balanced", "exam", "detailed", "quick"] | None = None
+
+    @field_validator("exam_at")
+    @classmethod
+    def _exam_at_must_include_timezone(cls, value: datetime | None) -> datetime | None:
+        return _require_timezone_aware(value)
+
+
 class UploadInitRequest(CamelModel):
     resource_type: Literal["mp4", "pdf", "srt", "pptx", "docx"]
     filename: str

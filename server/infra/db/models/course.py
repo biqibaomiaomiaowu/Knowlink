@@ -14,6 +14,8 @@ class Course(Base, TimestampMixin):
         Index("ix_courses_user_updated", "user_id", "updated_at"),
         Index("ix_courses_user_lifecycle", "user_id", "lifecycle_status"),
         Index("ix_courses_user_current", "user_id", "is_current"),
+        Index("ix_courses_user_archived", "user_id", "archived_at"),
+        Index("ix_courses_user_deleted", "user_id", "deleted_at"),
     )
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
@@ -29,6 +31,8 @@ class Course(Base, TimestampMixin):
     cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     lifecycle_status: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
     pipeline_stage: Mapped[str] = mapped_column(String(50), default="idle", nullable=False)

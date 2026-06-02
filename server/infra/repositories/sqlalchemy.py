@@ -262,18 +262,111 @@ class SqlAlchemyRuntimeRepository:
         return _course_dict(course)
 
     def list_recent_courses(self) -> list[dict[str, Any]]:
-        courses = self.session.scalars(
-            select(Course)
-            .where(Course.user_id == self.user_id)
-            .order_by(Course.updated_at.desc(), Course.id.desc())
-        ).all()
-        return [_course_dict(course) for course in courses]
+        return self.list_courses({"archived": "exclude", "sort": "recent_activity_desc"})
+
+    def list_courses(self, filters: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+        normalized_filters = filters or {}
+        archived_mode = normalized_filters.get("archived") or "exclude"
+        query = str(normalized_filters.get("q") or "").strip()
+        learning_status = normalized_filters.get("learningStatus") or normalized_filters.get("learning_status")
+        source = normalized_filters.get("source")
+        sort = normalized_filters.get("sort") or "recent_activity_desc"
+        stmt = select(Course).where(Course.user_id == self.user_id, Course.deleted_at.is_(None))
+        if archived_mode == "only":
+            stmt = stmt.where(Course.archived_at.is_not(None))
+        elif archived_mode != "include":
+            stmt = stmt.where(Course.archived_at.is_(None))
+        if query:
+            like_query = f"%{query}%"
+            stmt = stmt.where(Course.title.ilike(like_query) | Course.goal_text.ilike(like_query))
+        if learning_status:
+            stmt = stmt.where(Course.lifecycle_status == str(learning_status))
+        if source:
+            stmt = stmt.where(Course.entry_type == str(source))
+        if sort == "created_at_desc":
+            stmt = stmt.order_by(Course.created_at.desc(), Course.id.desc())
+        elif sort == "exam_at_asc":
+            stmt = stmt.order_by(Course.exam_at.is_(None).asc(), Course.exam_at.asc(), Course.id.asc())
+        elif sort == "title_asc":
+            stmt = stmt.order_by(Course.title.asc(), Course.id.asc())
+        else:
+            stmt = stmt.order_by(Course.updated_at.desc(), Course.id.desc())
+        courses = self.session.scalars(stmt).all()
+        return [self._course_with_library_counts(_course_dict(course)) for course in courses]
 
     def get_course(self, course_id: int) -> dict[str, Any] | None:
         course = self._get_course_model(course_id)
         if course is None:
             return None
-        return _course_dict(course)
+        return self._course_with_library_counts(_course_dict(course))
+
+    def update_course(self, course_id: int, changes: Mapping[str, Any]) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        field_map = {
+            "title": "title",
+            "goal_text": "goal_text",
+            "goalText": "goal_text",
+            "exam_at": "exam_at",
+            "examAt": "exam_at",
+            "preferred_style": "preferred_style",
+            "preferredStyle": "preferred_style",
+        }
+        for key, value in changes.items():
+            target = field_map.get(key)
+            if target is not None:
+                setattr(course, target, _normalize_datetime_change(target, value))
+        course.updated_at = utcnow()
+        self._commit_or_flush()
+        return self.get_course(course_id)
+
+    def archive_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        now = utcnow()
+        course.archived_at = course.archived_at or now
+        course.updated_at = now
+        self._commit_or_flush()
+        return self.get_course(course_id)
+
+    def restore_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        course.archived_at = None
+        course.updated_at = utcnow()
+        self._commit_or_flush()
+        return self.get_course(course_id)
+
+    def get_course_delete_impact(self, course_id: int) -> dict[str, Any] | None:
+        if self._get_course_model(course_id) is None:
+            return None
+        blockers = self._course_delete_blockers(course_id)
+        blocker_count = sum(blockers.values())
+        return {
+            "courseId": course_id,
+            "canDelete": blocker_count == 0,
+            "blockerCount": blocker_count,
+            "blockers": blockers,
+        }
+
+    def delete_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        impact = self.get_course_delete_impact(course_id)
+        if impact is not None and not impact["canDelete"]:
+            raise ValueError("course.delete_blocked")
+        now = utcnow()
+        course.deleted_at = now
+        course.archived_at = None
+        course.lifecycle_status = "deleted"
+        course.is_current = False
+        course.updated_at = now
+        self._commit_or_flush()
+        return {"courseId": course_id, "deleted": True, "deletedAt": _normalize_utc_datetime(now)}
 
     def set_current_course(self, course_id: int) -> dict[str, Any] | None:
         course = self._get_course_model(course_id)
@@ -292,19 +385,19 @@ class SqlAlchemyRuntimeRepository:
     def get_current_course(self) -> dict[str, Any] | None:
         explicit = self.session.scalar(
             select(Course)
-            .where(Course.user_id == self.user_id, Course.is_current.is_(True))
+            .where(Course.user_id == self.user_id, Course.is_current.is_(True), Course.deleted_at.is_(None))
             .order_by(Course.updated_at.desc(), Course.id.desc())
         )
         if explicit is not None:
-            return _course_dict(explicit)
+            return self._course_with_library_counts(_course_dict(explicit))
         course = self.session.scalar(
             select(Course)
-            .where(Course.user_id == self.user_id)
+            .where(Course.user_id == self.user_id, Course.deleted_at.is_(None), Course.archived_at.is_(None))
             .order_by(Course.updated_at.desc(), Course.id.desc())
         )
         if course is None:
             return None
-        return _course_dict(course)
+        return self._course_with_library_counts(_course_dict(course))
 
     def create_lesson(
         self,
@@ -2820,10 +2913,11 @@ class SqlAlchemyRuntimeRepository:
         resource = self.session.get(CourseResource, resource_id)
         return resource.resource_type if resource is not None else None
 
-    def _get_course_model(self, course_id: int) -> Course | None:
-        return self.session.scalar(
-            select(Course).where(Course.id == course_id, Course.user_id == self.user_id)
-        )
+    def _get_course_model(self, course_id: int, *, include_deleted: bool = False) -> Course | None:
+        stmt = select(Course).where(Course.id == course_id, Course.user_id == self.user_id)
+        if not include_deleted:
+            stmt = stmt.where(Course.deleted_at.is_(None))
+        return self.session.scalar(stmt)
 
     def _get_handout_version_model(self, handout_version_id: int) -> HandoutVersion | None:
         return self.session.scalar(
@@ -3051,6 +3145,86 @@ class SqlAlchemyRuntimeRepository:
         elif version.outline_status == "ready":
             version.status = "outline_ready"
 
+    def _course_delete_blockers(self, course_id: int) -> dict[str, int]:
+        return {
+            "lessons": int(
+                self.session.scalar(
+                    select(func.count(CourseLesson.id)).where(
+                        CourseLesson.course_id == course_id,
+                        CourseLesson.lesson_status != "deleted",
+                    )
+                )
+                or 0
+            ),
+            "resources": int(
+                self.session.scalar(select(func.count(CourseResource.id)).where(CourseResource.course_id == course_id))
+                or 0
+            ),
+            "asyncTasks": int(
+                self.session.scalar(select(func.count(AsyncTask.id)).where(AsyncTask.course_id == course_id))
+                or 0
+            ),
+            "handouts": int(
+                self.session.scalar(select(func.count(HandoutVersion.id)).where(HandoutVersion.course_id == course_id))
+                or 0
+            ),
+            "qaSessions": int(
+                self.session.scalar(select(func.count(QaSession.id)).where(QaSession.course_id == course_id))
+                or 0
+            ),
+            "quizzes": int(
+                self.session.scalar(select(func.count(Quiz.id)).where(Quiz.course_id == course_id))
+                or 0
+            ),
+            "reviewTasks": int(
+                self.session.scalar(select(func.count(ReviewTask.id)).where(ReviewTask.course_id == course_id))
+                or 0
+            ),
+        }
+
+    def _course_with_library_counts(self, course: dict[str, Any]) -> dict[str, Any]:
+        course_id = int(course["courseId"])
+        lessons = self.list_lessons(course_id)
+        resources = self.list_resources(course_id)
+        progress_items = [
+            progress
+            for lesson in lessons
+            if (progress := self.get_user_lesson_progress(course_id=course_id, lesson_id=int(lesson["lessonId"])))
+            is not None
+        ]
+        current_lesson = self._current_library_lesson(course_id=course_id, lessons=lessons)
+        pending_review_count = sum(1 for progress in progress_items if progress.get("reviewStatus") == "due")
+        activity_times = [
+            value
+            for value in [course.get("updatedAt"), *(progress.get("lastActivityAt") for progress in progress_items)]
+            if value is not None
+        ]
+        item = dict(course)
+        item["lessonCount"] = len(lessons)
+        item["courseResourceCount"] = len([resource for resource in resources if resource.get("scopeType") == "course"])
+        item["currentLessonId"] = current_lesson.get("lessonId") if current_lesson else None
+        item["currentLessonTitle"] = current_lesson.get("title") if current_lesson else None
+        item["overallMasteryScore"] = self._overall_mastery_score(lessons)
+        item["pendingReviewCount"] = pending_review_count
+        item["lastActivityAt"] = max(activity_times) if activity_times else course.get("updatedAt")
+        return item
+
+    def _current_library_lesson(
+        self,
+        *,
+        course_id: int,
+        lessons: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        for lesson in lessons:
+            progress = self.get_user_lesson_progress(course_id=course_id, lesson_id=int(lesson["lessonId"]))
+            if lesson.get("lessonStatus") != "completed" and (progress or {}).get("quizStatus") != "completed":
+                return lesson
+        return lessons[0] if lessons else None
+
+    def _overall_mastery_score(self, lessons: list[dict[str, Any]]) -> float | None:
+        scores = [float(lesson["masteryScore"]) for lesson in lessons if lesson.get("masteryScore") is not None]
+        return round(sum(scores) / len(scores), 2) if scores else None
+
     def _commit_or_flush(self) -> None:
         try:
             self.session.flush()
@@ -3189,11 +3363,15 @@ def _course_dict(course: Course) -> dict[str, Any]:
         "goalText": course.goal_text,
         "examAt": _normalize_utc_datetime(course.exam_at),
         "preferredStyle": course.preferred_style,
+        "isCurrent": course.is_current,
         "lifecycleStatus": course.lifecycle_status,
         "pipelineStage": course.pipeline_stage,
         "pipelineStatus": course.pipeline_status,
         "activeParseRunId": course.active_parse_run_id,
         "activeHandoutVersionId": course.active_handout_version_id,
+        "archivedAt": _normalize_utc_datetime(course.archived_at),
+        "deletedAt": _normalize_utc_datetime(course.deleted_at),
+        "createdAt": _normalize_utc_datetime(course.created_at),
         "updatedAt": course.updated_at,
     }
 

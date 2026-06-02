@@ -2,12 +2,13 @@
 
 日期：2026-06-02
 
-本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结与 Task 2 后端 schema / repository 原语；后续任务继续补充实际 API、Flutter 页面和验收证据。
+本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结、Task 2 后端 schema / repository 原语，以及 Task 3 课程库 / 课程管理 / 删除影响 / 课程工作台后端 API；后续任务继续补充 lesson API、分层导入、分层学习产物 API、Flutter 页面和最终验收证据。
 
 ## Implemented Scope
 
 - Task 1：冻结 V2 Phase 2 课程 / 节课工作台契约、错误码和 handoff 骨架。
 - Task 2：新增 lesson、user lesson progress、分层资源和分层 artifact 的后端模型、迁移、仓储协议、memory / SQL 仓储实现与测试。
+- Task 3：新增完整课程库 `GET /api/v1/courses`、课程 PATCH、归档 / 恢复、删除影响、soft delete 阻塞判断，以及 `GET /api/v1/courses/{courseId}/workbench` 聚合 read model。
 - 契约入口：`docs/contracts/v2-course-lesson-workbench-contract.md`。
 
 ## Non-goals And Placeholders
@@ -21,7 +22,7 @@
 
 | Area | Contract | Implementation status | Tests |
 |---|---|---|---|
-| Course library / workbench | `GET /api/v1/courses`, `GET /api/v1/courses/{courseId}/workbench` | Pending | Pending |
+| Course library / workbench | `GET /api/v1/courses`, `GET /api/v1/courses/{courseId}/workbench` | Done for Task 3 backend API | `server/tests/test_course_workbench_api.py` |
 | Lessons | lesson CRUD, reorder, primary video, merge, split | Repository primitives done; API pending | `server/tests/test_lesson_repository.py` |
 | Resource scope | `scopeType`, `lessonId`, `usageRole` | Repository primitives done; API pending | `server/tests/test_lesson_repository.py` |
 | Scoped artifacts | handout, QA, quiz, review, graph, report, export | Schema and repository placeholders done; API pending | `server/tests/test_lesson_repository.py` |
@@ -55,11 +56,13 @@
 - 固定课程和 lesson seed。
 - MP4 自动创建 lesson 的接口记录。
 - PDF / PPTX / DOCX / SRT course scope 与 lesson scope 样例。
-- Course workbench 响应样例。
+- Course workbench 响应样例已由 `server/tests/test_course_workbench_api.py` 固定：course info、progress、lessons、courseResources、quickEntries、placeholderStates。
 - Lesson detail 响应样例。
 - Course QA 与 lesson QA 独立入口截图或测试证据。
 - 无单资料 QA 入口的检查证据。
 - 后端 pytest 命令和结果：`server/tests/test_lesson_repository.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py server/tests/test_resource_deletion_semantics.py server/tests/test_sql_runtime_contract.py` 通过。
+- Task 3 后端 pytest 命令和结果：`.venv/bin/python -m pytest -q server/tests/test_course_workbench_api.py server/tests/test_api.py` 通过。
+- Task 3 repository / migration 回归：`.venv/bin/python -m pytest -q server/tests/test_lesson_repository.py server/tests/test_lesson_migration.py server/tests/test_scaffold_consistency.py server/tests/test_sql_runtime_contract.py` 通过。
 - Alembic 临时 SQLite 升降级：`upgrade head -> downgrade c8d9e0f1a2b3 -> upgrade head` 通过。
 - Flutter test 命令和结果。
 

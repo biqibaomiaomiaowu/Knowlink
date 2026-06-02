@@ -9,6 +9,7 @@ from server.ai.qa_policy import get_configured_qa_answer_client
 from server.config.settings import Settings, get_settings
 from server.domain.services import (
     BilibiliService,
+    CourseWorkbenchService,
     CourseService,
     HandoutService,
     HomeService,
@@ -155,7 +156,20 @@ async def get_catalog_service() -> RecommendationService:
 async def get_course_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> CourseService:
-    return CourseService(courses=repo, idempotency=repo)
+    course_repo = getattr(repo, "store", repo)
+    return CourseService(courses=course_repo, idempotency=course_repo)
+
+
+async def get_course_workbench_service(
+    repo=Depends(get_week2_runtime_repository),
+) -> CourseWorkbenchService:
+    course_repo = getattr(repo, "store", repo)
+    return CourseWorkbenchService(
+        courses=course_repo,
+        lessons=course_repo,
+        resources=course_repo,
+        lesson_progress=course_repo,
+    )
 
 
 async def get_bilibili_service(

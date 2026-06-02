@@ -166,9 +166,13 @@ class RuntimeStore:
             "goalText": goal_text,
             "examAt": exam_at,
             "preferredStyle": preferred_style,
+            "isCurrent": False,
             "lifecycleStatus": "draft",
             "pipelineStage": "idle",
             "pipelineStatus": "idle",
+            "archivedAt": None,
+            "deletedAt": None,
+            "createdAt": utcnow(),
             "updatedAt": utcnow(),
         }
         self.courses[course_id] = course
@@ -177,22 +181,190 @@ class RuntimeStore:
         return course
 
     def list_recent_courses(self) -> list[dict[str, Any]]:
+        return self.list_courses({"archived": "exclude", "sort": "recent_activity_desc"})
+
+    def list_courses(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        normalized_filters = filters or {}
+        archived_mode = normalized_filters.get("archived") or "exclude"
+        query = str(normalized_filters.get("q") or "").strip().lower()
+        learning_status = normalized_filters.get("learningStatus") or normalized_filters.get("learning_status")
+        source = normalized_filters.get("source")
+        sort = normalized_filters.get("sort") or "recent_activity_desc"
+        courses = [
+            self._course_with_library_counts(course)
+            for course in self.courses.values()
+            if course.get("deletedAt") is None
+        ]
+        if archived_mode == "only":
+            courses = [course for course in courses if course.get("archivedAt") is not None]
+        elif archived_mode != "include":
+            courses = [course for course in courses if course.get("archivedAt") is None]
+        if query:
+            courses = [
+                course
+                for course in courses
+                if query in str(course.get("title") or "").lower()
+                or query in str(course.get("goalText") or "").lower()
+            ]
+        if learning_status:
+            courses = [course for course in courses if course.get("lifecycleStatus") == learning_status]
+        if source:
+            courses = [course for course in courses if course.get("entryType") == source]
+        return self._sort_courses(courses, sort)
+
+    def _sort_courses(self, courses: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
+        if sort == "created_at_desc":
+            return sorted(courses, key=lambda course: (course.get("createdAt") or utcnow(), course["courseId"]), reverse=True)
+        if sort == "exam_at_asc":
+            return sorted(
+                courses,
+                key=lambda course: (
+                    course.get("examAt") is None,
+                    course.get("examAt") or utcnow(),
+                    course["courseId"],
+                ),
+            )
+        if sort == "title_asc":
+            return sorted(courses, key=lambda course: (str(course.get("title") or ""), course["courseId"]))
         return sorted(
-            self.courses.values(),
-            key=lambda course: course["updatedAt"],
+            courses,
+            key=lambda course: (course.get("lastActivityAt") or course.get("updatedAt") or utcnow(), course["courseId"]),
             reverse=True,
         )
 
     def get_course(self, course_id: int) -> dict[str, Any] | None:
-        return self.courses.get(course_id)
+        course = self.courses.get(course_id)
+        if course is None or course.get("deletedAt") is not None:
+            return None
+        return self._course_with_library_counts(course)
+
+    def update_course(self, course_id: int, changes: dict[str, Any]) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        field_map = {
+            "title": "title",
+            "goal_text": "goalText",
+            "goalText": "goalText",
+            "exam_at": "examAt",
+            "examAt": "examAt",
+            "preferred_style": "preferredStyle",
+            "preferredStyle": "preferredStyle",
+        }
+        for key, value in changes.items():
+            target = field_map.get(key)
+            if target is not None:
+                self.courses[course_id][target] = value
+        self.courses[course_id]["updatedAt"] = utcnow()
+        return self.get_course(course_id)
+
+    def archive_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        self.courses[course_id]["archivedAt"] = self.courses[course_id].get("archivedAt") or utcnow()
+        self.courses[course_id]["updatedAt"] = utcnow()
+        return self.get_course(course_id)
+
+    def restore_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        self.courses[course_id]["archivedAt"] = None
+        self.courses[course_id]["updatedAt"] = utcnow()
+        return self.get_course(course_id)
+
+    def get_course_delete_impact(self, course_id: int) -> dict[str, Any] | None:
+        if self.get_course(course_id) is None:
+            return None
+        blockers = self._course_delete_blockers(course_id)
+        blocker_count = sum(blockers.values())
+        return {
+            "courseId": course_id,
+            "canDelete": blocker_count == 0,
+            "blockerCount": blocker_count,
+            "blockers": blockers,
+        }
+
+    def delete_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        impact = self.get_course_delete_impact(course_id)
+        if impact is not None and not impact["canDelete"]:
+            raise ValueError("course.delete_blocked")
+        now = utcnow()
+        self.courses[course_id]["deletedAt"] = now
+        self.courses[course_id]["archivedAt"] = None
+        self.courses[course_id]["lifecycleStatus"] = "deleted"
+        self.courses[course_id]["updatedAt"] = now
+        if self.current_course_id == course_id:
+            self.current_course_id = None
+        return {"courseId": course_id, "deleted": True, "deletedAt": now}
+
+    def _course_delete_blockers(self, course_id: int) -> dict[str, int]:
+        return {
+            "lessons": len(self.list_lessons(course_id)),
+            "resources": len(self.resources.get(course_id, [])),
+            "asyncTasks": len([task for task in self.async_tasks.values() if task.get("courseId") == course_id]),
+            "handouts": 1 if course_id in self.handout_by_course else 0,
+            "qaSessions": len([session for session in self.qa_sessions.values() if session.get("courseId") == course_id]),
+            "quizzes": len([quiz for quiz in self.quizzes.values() if quiz.get("courseId") == course_id]),
+            "reviewTasks": len(self.review_tasks.get(course_id, [])),
+        }
+
+    def _course_with_library_counts(self, course: dict[str, Any]) -> dict[str, Any]:
+        course_id = int(course["courseId"])
+        lessons = self.list_lessons(course_id)
+        resources = self.resources.get(course_id, [])
+        current_lesson = self._current_library_lesson(course_id, lessons)
+        progress_items = [
+            progress
+            for (progress_course_id, _lesson_id), progress in self.user_lesson_progress.items()
+            if progress_course_id == course_id
+        ]
+        pending_review_count = sum(1 for progress in progress_items if progress.get("reviewStatus") == "due")
+        activity_times = [
+            value
+            for value in [course.get("updatedAt"), *(progress.get("lastActivityAt") for progress in progress_items)]
+            if value is not None
+        ]
+        item = dict(course)
+        item["isCurrent"] = course_id == self.current_course_id or bool(course.get("isCurrent", False))
+        item["lessonCount"] = len(lessons)
+        item["courseResourceCount"] = len([resource for resource in resources if resource.get("scopeType") == "course"])
+        item["currentLessonId"] = current_lesson.get("lessonId") if current_lesson else None
+        item["currentLessonTitle"] = current_lesson.get("title") if current_lesson else None
+        item["overallMasteryScore"] = self._overall_mastery_score(lessons)
+        item["pendingReviewCount"] = pending_review_count
+        item["lastActivityAt"] = max(activity_times) if activity_times else course.get("updatedAt")
+        return item
+
+    def _current_library_lesson(
+        self,
+        course_id: int,
+        lessons: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        for lesson in lessons:
+            progress = self.get_user_lesson_progress(course_id=course_id, lesson_id=lesson["lessonId"])
+            if lesson.get("lessonStatus") != "completed" and (progress or {}).get("quizStatus") != "completed":
+                return lesson
+        return lessons[0] if lessons else None
+
+    def _overall_mastery_score(self, lessons: list[dict[str, Any]]) -> float | None:
+        scores = [float(lesson["masteryScore"]) for lesson in lessons if lesson.get("masteryScore") is not None]
+        return round(sum(scores) / len(scores), 2) if scores else None
 
     def set_current_course(self, course_id: int) -> dict[str, Any] | None:
         course = self.get_course(course_id)
         if course is None:
             return None
-        course["updatedAt"] = utcnow()
+        for item in self.courses.values():
+            item["isCurrent"] = False
+        self.courses[course_id]["isCurrent"] = True
+        self.courses[course_id]["updatedAt"] = utcnow()
         self.current_course_id = course_id
-        return course
+        return self.get_course(course_id)
 
     def get_current_course(self) -> dict[str, Any] | None:
         if self.current_course_id is not None:

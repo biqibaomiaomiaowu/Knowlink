@@ -4,6 +4,7 @@ from server.api.deps import get_current_user
 from server.api.routers import (
     bilibili,
     courses,
+    course_workbench,
     handouts,
     health,
     home,
@@ -26,6 +27,7 @@ def build_router() -> APIRouter:
     api_v1.include_router(home.router)
     api_v1.include_router(recommendations.router)
     api_v1.include_router(courses.router)
+    api_v1.include_router(course_workbench.router)
     api_v1.include_router(resources.router)
     api_v1.include_router(resources.playback_router)
     api_v1.include_router(bilibili.router)
