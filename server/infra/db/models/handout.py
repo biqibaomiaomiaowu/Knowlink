@@ -16,6 +16,9 @@ class HandoutVersion(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(30), default="course", nullable=False)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
+    artifact_kind: Mapped[str] = mapped_column(String(80), default="course_summary_handout", nullable=False)
     source_parse_run_id: Mapped[int | None] = mapped_column(ForeignKey("parse_runs.id"), nullable=True)
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)

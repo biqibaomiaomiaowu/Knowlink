@@ -7,8 +7,11 @@ from server.infra.db.models.bilibili import (
     BilibiliQrSession,
 )
 from server.infra.db.models.course import Course
+from server.infra.db.models.export import ExportRun
+from server.infra.db.models.graph import GraphSnapshot
 from server.infra.db.models.handout import HandoutBlock, HandoutBlockRef, HandoutOutline, HandoutVersion
 from server.infra.db.models.idempotency import IdempotencyRecord
+from server.infra.db.models.lesson import CourseLesson, UserLessonProgress
 from server.infra.db.models.parse_run import ParseRun
 from server.infra.db.models.preference import LearningPreference
 from server.infra.db.models.qa import QaMessage, QaMessageRef, QaSession
@@ -32,8 +35,11 @@ __all__ = [
     "BilibiliPreviewSnapshot",
     "BilibiliQrSession",
     "Course",
+    "CourseLesson",
     "CourseResource",
     "CourseSegment",
+    "ExportRun",
+    "GraphSnapshot",
     "HandoutBlock",
     "HandoutBlockRef",
     "HandoutOutline",
@@ -54,5 +60,6 @@ __all__ = [
     "ReviewTaskRef",
     "ReviewTaskRun",
     "UserCourseProgress",
+    "UserLessonProgress",
     "VectorDocument",
 ]

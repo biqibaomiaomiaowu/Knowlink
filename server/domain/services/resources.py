@@ -7,7 +7,7 @@ from urllib.parse import unquote
 from server.domain.repositories import CourseRepository, IdempotencyRepository, ResourceRepository
 from server.domain.services.errors import ServiceError
 from server.domain.services.idempotency import result_matches_course, run_fingerprinted_idempotent
-from server.infra.repositories.memory_runtime import utcnow
+from server.infra.db.base import utcnow
 from server.infra.storage import ObjectNotFoundError, ObjectStat, ObjectStorage, ObjectStorageError
 
 
@@ -69,7 +69,7 @@ class ResourceService:
             self._validate_uploaded_object(course_id=course_id, payload=payload)
             return self.resources.create_resource(
                 course_id,
-                payload.model_dump(by_alias=True),
+                self._upload_complete_payload(payload),
             )
 
         return run_fingerprinted_idempotent(
@@ -81,6 +81,13 @@ class ResourceService:
             legacy_action="resources.upload_complete",
             legacy_matches=lambda result: result_matches_course(result, course_id=course_id),
         )
+
+    def _upload_complete_payload(self, payload) -> dict[str, object]:
+        data = payload.model_dump(by_alias=True)
+        data.setdefault("scopeType", "course")
+        data.setdefault("usageRole", "course_material")
+        data.setdefault("visibleToCourseQa", True)
+        return data
 
     def list_resources(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)

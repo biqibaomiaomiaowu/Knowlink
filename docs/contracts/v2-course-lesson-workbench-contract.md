@@ -357,6 +357,8 @@ GET  /api/v1/courses/{courseId}/exam-review
 - `lessonId`
 - `evidenceChainJson`
 
+`mastery_records` stores course-scope rows as `lessonId=null` and lesson-scope rows with a concrete `lessonId`. Course-scope uniqueness is `(userId, courseId, knowledgePointKey)` where `lessonId=null`; lesson-scope uniqueness is `(userId, courseId, lessonId, knowledgePointKey)`.
+
 Review task fields:
 
 - `reasonText`
@@ -432,6 +434,7 @@ PUT /api/v1/courses/{courseId}/lessons/{lessonId}/progress
 - `nextAction`
 
 Course progress remains an aggregate. `user_lesson_progress` stores lesson position, handout reading position, quiz status and review status.
+`lastHandoutBlockId` must reference a handout block visible to the current course or lesson scope; unknown or cross-course block ids are invalid.
 
 `user_lesson_progress` fields:
 

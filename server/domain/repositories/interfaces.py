@@ -56,6 +56,47 @@ class ResourceRepository(Protocol):
     def delete_resource(self, course_id: int, resource_id: int) -> bool: ...
 
 
+class LessonRepository(Protocol):
+    def create_lesson(
+        self,
+        *,
+        course_id: int,
+        title: str,
+        source_type: str = "manual",
+        source_ref_json: dict[str, Any] | None = None,
+        primary_video_resource_id: int | None = None,
+        primary_video_start_sec: int | None = None,
+        primary_video_end_sec: int | None = None,
+    ) -> dict[str, Any]: ...
+
+    def list_lessons(self, course_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]: ...
+
+    def get_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None: ...
+
+    def reorder_lessons(self, *, course_id: int, lesson_ids: Sequence[int]) -> list[dict[str, Any]]: ...
+
+    def soft_delete_lesson(self, *, course_id: int, lesson_id: int) -> dict[str, Any]: ...
+
+
+class ScopedArtifactRepository(Protocol):
+    def create_scoped_artifact(
+        self,
+        *,
+        artifact_type: str,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+    ) -> dict[str, Any]: ...
+
+
 class ParseRunRepository(Protocol):
     def create_parse_run(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
@@ -285,3 +326,15 @@ class ProgressRepository(Protocol):
     def get_progress(self, course_id: int) -> dict[str, Any]: ...
 
     def update_progress(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class LessonProgressRepository(Protocol):
+    def upsert_user_lesson_progress(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]: ...
+
+    def get_user_lesson_progress(self, *, course_id: int, lesson_id: int) -> dict[str, Any] | None: ...

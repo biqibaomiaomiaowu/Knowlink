@@ -2,11 +2,12 @@
 
 日期：2026-06-02
 
-本文件用于记录课程 / 节课工作台实现后的交接状态。当前为 Task 1 skeleton；后续任务完成后必须补充实际 API、迁移、测试和验收证据。
+本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结与 Task 2 后端 schema / repository 原语；后续任务继续补充实际 API、Flutter 页面和验收证据。
 
 ## Implemented Scope
 
-- 待 Task 2-9 补充。
+- Task 1：冻结 V2 Phase 2 课程 / 节课工作台契约、错误码和 handoff 骨架。
+- Task 2：新增 lesson、user lesson progress、分层资源和分层 artifact 的后端模型、迁移、仓储协议、memory / SQL 仓储实现与测试。
 - 契约入口：`docs/contracts/v2-course-lesson-workbench-contract.md`。
 
 ## Non-goals And Placeholders
@@ -21,10 +22,10 @@
 | Area | Contract | Implementation status | Tests |
 |---|---|---|---|
 | Course library / workbench | `GET /api/v1/courses`, `GET /api/v1/courses/{courseId}/workbench` | Pending | Pending |
-| Lessons | lesson CRUD, reorder, primary video, merge, split | Pending | Pending |
-| Resource scope | `scopeType`, `lessonId`, `usageRole` | Pending | Pending |
-| Scoped artifacts | handout, QA, quiz, review, graph, report, export | Pending | Pending |
-| Home / progress | continue into lesson, lesson progress | Pending | Pending |
+| Lessons | lesson CRUD, reorder, primary video, merge, split | Repository primitives done; API pending | `server/tests/test_lesson_repository.py` |
+| Resource scope | `scopeType`, `lessonId`, `usageRole` | Repository primitives done; API pending | `server/tests/test_lesson_repository.py` |
+| Scoped artifacts | handout, QA, quiz, review, graph, report, export | Schema and repository placeholders done; API pending | `server/tests/test_lesson_repository.py` |
+| Home / progress | continue into lesson, lesson progress | User lesson progress repository done; API pending | `server/tests/test_lesson_repository.py` |
 
 ## Flutter Contract Table
 
@@ -41,6 +42,9 @@
 
 - 新表和新增 nullable scope 字段应可独立回滚。
 - 旧 course-centric rows 迁移为 `scopeType=course`、`lessonId=null`。
+- `mastery_records` 使用 course-scope 与 lesson-scope 两个 partial unique indexes，避免 nullable `lesson_id` 破坏课程级唯一性。
+- `user_lesson_progress.last_handout_block_id` 会校验 handout block 归属，不接受未知或跨课程引用。
+- Downgrade 会删除旧 V1 schema 无法表达的 QA / quiz scoped placeholder 行，再恢复旧的非空 handout 外键。
 - 不删除旧列，不破坏 V1 course-level 路由。
 - 若 B站 auto lesson binding 不稳定，可先保留资源 course scope，并通过修复脚本或 service 方法后补 lesson 绑定。
 
@@ -55,7 +59,8 @@
 - Lesson detail 响应样例。
 - Course QA 与 lesson QA 独立入口截图或测试证据。
 - 无单资料 QA 入口的检查证据。
-- 后端 pytest 命令和结果。
+- 后端 pytest 命令和结果：`server/tests/test_lesson_repository.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py server/tests/test_resource_deletion_semantics.py server/tests/test_sql_runtime_contract.py` 通过。
+- Alembic 临时 SQLite 升降级：`upgrade head -> downgrade c8d9e0f1a2b3 -> upgrade head` 通过。
 - Flutter test 命令和结果。
 
 ## Known Risks
@@ -65,4 +70,3 @@
 - B站导入重试需要幂等记录 `sourcePartId` 与 `lessonId`，否则可能重复创建 lesson。
 - Flutter 与后端并行时必须以冻结 DTO 为准，避免页面层拼接低级接口。
 - 当前本地 Flutter 验证依赖 Windows SDK；若 WSL wrapper 或 Windows Dart compiler 崩溃，需要在最终交接中记录环境证据。
-
