@@ -40,6 +40,11 @@ async def create_bilibili_import(
             selection_mode=payload.selection_mode,
             selected_part_ids=payload.selected_part_ids,
             quality_preference=payload.quality_preference,
+            lesson_mode=payload.lesson_mode,
+            target_lesson_id=payload.target_lesson_id,
+            part_lesson_titles=payload.part_lesson_titles,
+            part_lesson_map=payload.part_lesson_map,
+            create_lesson_if_missing=payload.create_lesson_if_missing,
             idempotency_key=request.headers.get("Idempotency-Key"),
         ),
     )

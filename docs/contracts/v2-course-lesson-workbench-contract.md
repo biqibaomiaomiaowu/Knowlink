@@ -230,6 +230,8 @@ GET  /api/v1/courses/{courseId}/resources?scopeType=&lessonId=
 - `scopeType=lesson` 时 `lessonId` 必须存在且属于当前课程；不匹配返回 `400 resource.lesson_mismatch`。
 - `scopeType=course` 时 `lessonId=null`，默认 `usageRole=course_material`。
 - MP4 默认 `lessonPlacement=auto_create`，创建 lesson 并设置 `usageRole=primary_video`；也可以 `bind_existing` 绑定已有 lesson。
+- `upload-init` 返回的 `headers` 必须包含 `x-amz-meta-scope-type`；当请求已确定 `lessonId` 时，还必须包含 `x-amz-meta-lesson-id`。
+- `upload-complete` 返回资源行必须携带 `scopeType`、`lessonId`、`usageRole`、`sourceType`、`sourcePartId`、`visibleToCourseQa`、`durationSec`。
 - 课程级资料可被全课程 QA、课程总讲义、综合测验、总复习和课程图谱读取，也可作为节课产物的辅助证据。
 - 节课独享资料默认只被本节讲义、本节 QA、本节测验、本节复习读取。
 
@@ -238,8 +240,12 @@ Bilibili import fields:
 - `lessonMode`: `auto_per_video|bind_existing|course_material`
 - `targetLessonId`
 - `partLessonTitles`
+- `partLessonMap`: 可选的 part-level 初始映射，键为 `sourcePartId`，值可包含 `lessonId`、`sourcePartId`。
+- 请求期 `partLessonMap` 不允许客户端提交 `resourceId`；`resourceId` 只能由导入 runner 在资源落库后写入。
 - `createLessonIfMissing`
-- import item 必须记录 `sourcePartId` 和 `lessonId`。
+- import item 必须记录 `sourcePartId`、`lessonId`，导入完成后记录 `resourceId`。
+- import run list/status 响应必须返回 `partLessonMap` 与 `items`，其中 `items[*]` 至少包含 `itemKey`、`lessonId`、`resourceId`、`status`、`progressPct`、`metadataJson.sourcePartId`。
+- import run 的 `selection.partLessonMap` 记录 part-level 映射，键为 `sourcePartId`，值至少包含 `lessonId`，导入完成后包含 `resourceId`。
 
 单视频、多 P、合集、番剧默认一视频一节课。重试不得为同一 import run item 重复创建 lesson。
 

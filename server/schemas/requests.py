@@ -118,6 +118,21 @@ class UploadInitRequest(CamelModel):
     mime_type: str
     size_bytes: int = Field(gt=0)
     checksum: str
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    usage_role: Literal[
+        "course_material",
+        "primary_video",
+        "lesson_material",
+        "transcript",
+        "supplement",
+    ] | None = None
+    lesson_placement: Literal["auto_create", "bind_existing", "course_material"] | None = None
+    lesson_title: str | None = Field(default=None, min_length=1)
+    visible_to_course_qa: bool | None = None
+    source_part_id: str | None = None
+    duration_sec: int | None = Field(default=None, ge=0)
+    sort_order: int | None = Field(default=None, ge=0)
 
 
 class UploadCompleteRequest(CamelModel):
@@ -127,6 +142,21 @@ class UploadCompleteRequest(CamelModel):
     mime_type: str
     size_bytes: int = Field(gt=0)
     checksum: str
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    usage_role: Literal[
+        "course_material",
+        "primary_video",
+        "lesson_material",
+        "transcript",
+        "supplement",
+    ] | None = None
+    lesson_placement: Literal["auto_create", "bind_existing", "course_material"] | None = None
+    lesson_title: str | None = Field(default=None, min_length=1)
+    visible_to_course_qa: bool | None = None
+    source_part_id: str | None = None
+    duration_sec: int | None = Field(default=None, ge=0)
+    sort_order: int | None = Field(default=None, ge=0)
 
 
 class BilibiliPreviewRequest(CamelModel):
@@ -139,11 +169,42 @@ class BilibiliImportRequest(CamelModel):
     selection_mode: Literal["current_part", "all_parts", "selected_parts"] = "current_part"
     selected_part_ids: list[str] = Field(default_factory=list)
     quality_preference: Literal["android_safe"] = "android_safe"
+    lesson_mode: Literal["auto_per_video", "bind_existing", "course_material"] = "auto_per_video"
+    target_lesson_id: int | None = None
+    part_lesson_titles: dict[str, str] = Field(default_factory=dict)
+    part_lesson_map: dict[str, dict[str, int | str | None]] = Field(default_factory=dict)
+    create_lesson_if_missing: bool = True
 
     @field_validator("selected_part_ids")
     @classmethod
     def _clean_selected_part_ids(cls, value: list[str]) -> list[str]:
         return [item.strip() for item in value if item.strip()]
+
+    @field_validator("part_lesson_titles")
+    @classmethod
+    def _clean_part_lesson_titles(cls, value: dict[str, str]) -> dict[str, str]:
+        return {
+            str(part_id).strip(): str(title).strip()
+            for part_id, title in value.items()
+            if str(part_id).strip() and str(title).strip()
+        }
+
+    @field_validator("part_lesson_map")
+    @classmethod
+    def _clean_part_lesson_map(cls, value: dict[str, dict[str, int | str | None]]) -> dict[str, dict[str, int | str | None]]:
+        clean: dict[str, dict[str, int | str | None]] = {}
+        for part_id, mapping in value.items():
+            key = str(part_id).strip()
+            if not key or not isinstance(mapping, dict):
+                continue
+            clean_mapping = {
+                str(field).strip(): field_value
+                for field, field_value in mapping.items()
+                if str(field).strip() and field_value not in ("", [])
+            }
+            if clean_mapping:
+                clean[key] = clean_mapping
+        return clean
 
     @model_validator(mode="after")
     def _selected_parts_must_include_ids(self) -> BilibiliImportRequest:

@@ -367,7 +367,9 @@
   "filename": "chapter-1.pdf",
   "mimeType": "application/pdf",
   "sizeBytes": 32768,
-  "checksum": "sha256:demo"
+  "checksum": "sha256:demo",
+  "scopeType": "course",
+  "usageRole": "course_material"
 }
 ```
 
@@ -378,11 +380,20 @@
   "uploadUrl": "http://127.0.0.1:9000/knowlink/raw/1/101/temp/chapter-1.pdf?...",
   "objectKey": "raw/1/101/temp/chapter-1.pdf",
   "headers": {
-    "x-amz-meta-course-id": "101"
+    "x-amz-meta-course-id": "101",
+    "x-amz-meta-scope-type": "course"
   },
   "expiresAt": "2026-04-18T15:15:00+00:00"
 }
 ```
+
+V2 课程/节课工作台要求上传资料必须显式归属：
+
+- PDF / PPTX / DOCX / SRT 必须传 `scopeType=course|lesson`；缺失返回 `400 resource.scope_required`。
+- `scopeType=lesson` 时必须传当前课程内的 `lessonId`，否则返回 `400 resource.lesson_mismatch`。
+- MP4 可使用 `lessonPlacement=auto_create|bind_existing|course_material`；`auto_create` 会在 `upload-complete` 创建 lesson 并设为主视频。
+- `headers` 必须包含 `x-amz-meta-scope-type`；当请求已确定 `lessonId` 时，还必须包含 `x-amz-meta-lesson-id`。
+- 完整字段和用法见 [v2-course-lesson-workbench-contract.md](./v2-course-lesson-workbench-contract.md#4-resource-scope-and-import-placement)。
 
 本地 Docker 联调时，`uploadUrl` 必须使用浏览器可访问的 `KNOWLINK_MINIO_PUBLIC_ENDPOINT`
 签名，例如 `http://127.0.0.1:9000/...`；不能返回容器内 hostname `minio:9000`。
@@ -403,7 +414,10 @@
   "originalName": "chapter-1.pdf",
   "mimeType": "application/pdf",
   "sizeBytes": 32768,
-  "checksum": "sha256:demo"
+  "checksum": "sha256:demo",
+  "scopeType": "course",
+  "usageRole": "course_material",
+  "visibleToCourseQa": true
 }
 ```
 
@@ -412,9 +426,17 @@
 ```json
 {
   "resourceId": 501,
+  "courseId": 101,
+  "scopeType": "course",
+  "lessonId": null,
+  "usageRole": "course_material",
+  "sourceType": "upload",
+  "sourcePartId": null,
   "ingestStatus": "ready",
   "validationStatus": "passed",
-  "processingStatus": "pending"
+  "processingStatus": "pending",
+  "visibleToCourseQa": true,
+  "durationSec": null
 }
 ```
 
@@ -427,12 +449,20 @@
   "items": [
     {
       "resourceId": 501,
+      "courseId": 101,
       "resourceType": "pdf",
+      "scopeType": "course",
+      "lessonId": null,
+      "usageRole": "course_material",
+      "sourceType": "upload",
+      "sourcePartId": null,
       "originalName": "chapter-1.pdf",
       "objectKey": "raw/1/101/temp/chapter-1.pdf",
       "ingestStatus": "ready",
       "validationStatus": "passed",
-      "processingStatus": "pending"
+      "processingStatus": "pending",
+      "visibleToCourseQa": true,
+      "durationSec": null
     }
   ]
 }

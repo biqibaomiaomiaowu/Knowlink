@@ -350,6 +350,13 @@ class ResourceStatusData(CamelModel):
     resource_type: str | None = None
     original_name: str | None = None
     object_key: str | None = None
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    usage_role: str | None = None
+    source_type: str | None = None
+    source_part_id: str | None = None
+    visible_to_course_qa: bool | None = None
+    duration_sec: int | None = None
     ingest_status: str
     validation_status: str
     processing_status: str
@@ -382,6 +389,8 @@ class BilibiliPreviewPart(CamelModel):
     cid: int
     page_no: int
     selected_by_default: bool
+    lesson_id: int | None = None
+    lesson_title: str | None = None
 
 
 class BilibiliPreviewData(CamelModel):
@@ -433,6 +442,10 @@ class BilibiliImportRunSummary(CamelModel):
     stage: BilibiliResponseStage
     task_id: int | None = None
     resource_ids: list[int] = Field(default_factory=list)
+    lesson_mode: Literal["auto_per_video", "bind_existing", "course_material"] | None = None
+    target_lesson_id: int | None = None
+    part_lesson_map: dict[str, dict[str, object]] = Field(default_factory=dict)
+    items: list[dict[str, object]] = Field(default_factory=list)
     preview: BilibiliPreviewData | None = None
     next_action: str | None = None
     error_code: str | None = None
@@ -454,6 +467,10 @@ class BilibiliImportRunStatusData(CamelModel):
     stage: BilibiliResponseStage
     task_id: int | None = None
     resource_ids: list[int] = Field(default_factory=list)
+    lesson_mode: Literal["auto_per_video", "bind_existing", "course_material"] | None = None
+    target_lesson_id: int | None = None
+    part_lesson_map: dict[str, dict[str, object]] = Field(default_factory=dict)
+    items: list[dict[str, object]] = Field(default_factory=list)
     preview: BilibiliPreviewData | None = None
     next_action: str | None = None
     error_code: str | None = None

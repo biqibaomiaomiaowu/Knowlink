@@ -20,6 +20,7 @@ from server.infra.db.base import utcnow
 from server.infra.db.models import (
     AsyncTask,
     BilibiliAuthSession,
+    BilibiliImportItem,
     BilibiliImportRun,
     BilibiliPreviewSnapshot,
     BilibiliQrSession,
@@ -719,7 +720,7 @@ class SqlAlchemyRuntimeRepository:
         )
         self.session.add(import_run)
         self._commit_or_flush()
-        return _bilibili_import_run_dict(import_run)
+        return _bilibili_import_run_dict(import_run, items=[])
 
     def get_bilibili_import_run(self, import_run_id: int) -> dict[str, Any] | None:
         import_run = self.session.scalar(
@@ -727,7 +728,7 @@ class SqlAlchemyRuntimeRepository:
         )
         if import_run is None:
             return None
-        return _bilibili_import_run_dict(import_run)
+        return _bilibili_import_run_dict(import_run, items=self.list_bilibili_import_items(import_run.id))
 
     def list_bilibili_import_runs(self, course_id: int) -> list[dict[str, Any]]:
         import_runs = self.session.scalars(
@@ -735,7 +736,10 @@ class SqlAlchemyRuntimeRepository:
             .where(BilibiliImportRun.course_id == course_id)
             .order_by(BilibiliImportRun.created_at.desc(), BilibiliImportRun.id.desc())
         ).all()
-        return [_bilibili_import_run_dict(import_run) for import_run in import_runs]
+        return [
+            _bilibili_import_run_dict(import_run, items=self.list_bilibili_import_items(import_run.id))
+            for import_run in import_runs
+        ]
 
     def update_bilibili_import_run(self, import_run_id: int, **changes: Any) -> dict[str, Any] | None:
         import_run = self.session.scalar(
@@ -755,7 +759,72 @@ class SqlAlchemyRuntimeRepository:
         ):
             import_run.finished_at = utcnow()
         self._commit_or_flush()
-        return _bilibili_import_run_dict(import_run)
+        return _bilibili_import_run_dict(import_run, items=self.list_bilibili_import_items(import_run.id))
+
+    def upsert_bilibili_import_item(
+        self,
+        *,
+        import_run_id: int,
+        course_id: int,
+        source_url: str,
+        item_key: str | None = None,
+        title: str | None = None,
+        part_no: int | None = None,
+        status: str = "pending",
+        progress_pct: int = 0,
+        lesson_id: int | None = None,
+        resource_id: int | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        import_run = self.session.scalar(
+            select(BilibiliImportRun).where(BilibiliImportRun.id == import_run_id)
+        )
+        if import_run is None:
+            raise ValueError("bilibili.import_run_not_found")
+        normalized_key = str(item_key) if item_key is not None else None
+        item = None
+        if normalized_key is not None:
+            item = self.session.scalar(
+                select(BilibiliImportItem).where(
+                    BilibiliImportItem.import_run_id == import_run_id,
+                    BilibiliImportItem.item_key == normalized_key,
+                )
+            )
+        if item is None:
+            item = BilibiliImportItem(
+                import_run_id=import_run_id,
+                course_id=course_id,
+                source_url=source_url,
+                item_key=normalized_key,
+            )
+            self.session.add(item)
+        item.course_id = course_id
+        item.resource_id = resource_id
+        item.lesson_id = lesson_id
+        item.source_url = source_url
+        item.title = title
+        item.part_no = part_no
+        item.status = status
+        item.progress_pct = progress_pct
+        item.metadata_json = metadata_json or {}
+        item.error_code = error_code
+        item.failure_reason = failure_reason
+        if status in {"imported", "failed", "canceled"} and item.finished_at is None:
+            item.finished_at = utcnow()
+        if status not in {"imported", "failed", "canceled"}:
+            item.finished_at = None
+        self._commit_or_flush()
+        return _bilibili_import_item_dict(item)
+
+    def list_bilibili_import_items(self, import_run_id: int) -> list[dict[str, Any]]:
+        items = self.session.scalars(
+            select(BilibiliImportItem)
+            .where(BilibiliImportItem.import_run_id == import_run_id)
+            .order_by(BilibiliImportItem.part_no.asc(), BilibiliImportItem.id.asc())
+        ).all()
+        return [_bilibili_import_item_dict(item) for item in items]
 
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         scope_type = _payload_value(payload, "scopeType", "scope_type")
@@ -3626,7 +3695,11 @@ def _bilibili_preview_snapshot_dict(snapshot: BilibiliPreviewSnapshot) -> dict[s
     }
 
 
-def _bilibili_import_run_dict(import_run: BilibiliImportRun) -> dict[str, Any]:
+def _bilibili_import_run_dict(
+    import_run: BilibiliImportRun,
+    *,
+    items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "importRunId": import_run.id,
         "courseId": import_run.course_id,
@@ -3645,8 +3718,31 @@ def _bilibili_import_run_dict(import_run: BilibiliImportRun) -> dict[str, Any]:
         "failureReason": import_run.failure_reason,
         "startedAt": _normalize_utc_datetime(import_run.started_at),
         "finishedAt": _normalize_utc_datetime(import_run.finished_at),
+        "items": list(items or []),
         "createdAt": _normalize_utc_datetime(import_run.created_at),
         "updatedAt": _normalize_utc_datetime(import_run.updated_at),
+    }
+
+
+def _bilibili_import_item_dict(item: BilibiliImportItem) -> dict[str, Any]:
+    return {
+        "importItemId": item.id,
+        "importRunId": item.import_run_id,
+        "courseId": item.course_id,
+        "resourceId": item.resource_id,
+        "lessonId": item.lesson_id,
+        "sourceUrl": item.source_url,
+        "itemKey": item.item_key,
+        "title": item.title,
+        "partNo": item.part_no,
+        "status": item.status,
+        "progressPct": item.progress_pct,
+        "metadataJson": item.metadata_json or {},
+        "errorCode": item.error_code,
+        "failureReason": item.failure_reason,
+        "finishedAt": _normalize_utc_datetime(item.finished_at),
+        "createdAt": _normalize_utc_datetime(item.created_at),
+        "updatedAt": _normalize_utc_datetime(item.updated_at),
     }
 
 

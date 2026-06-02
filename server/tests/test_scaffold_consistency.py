@@ -212,6 +212,7 @@ def test_dashboard_and_pipeline_status_cover_competition_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "dashboard-upload-1"},
             json_body={
                 "resourceType": "pdf",
+                "scopeType": "course",
                 "objectKey": f"raw/1/{course_id}/high-math.pdf",
                 "originalName": "high-math.pdf",
                 "mimeType": "application/pdf",
@@ -269,6 +270,7 @@ def test_upload_contract_accepts_pptx_and_docx():
                 headers=AUTH_HEADERS,
                 json_body={
                     "resourceType": resource_type,
+                    "scopeType": "course",
                     "filename": f"demo.{resource_type}",
                     "mimeType": "application/octet-stream",
                     "sizeBytes": 1024,
@@ -286,6 +288,7 @@ def test_upload_contract_accepts_pptx_and_docx():
                 headers=AUTH_HEADERS | {"idempotency-key": f"upload-{resource_type}-1"},
                 json_body={
                     "resourceType": resource_type,
+                    "scopeType": "course",
                     "objectKey": upload_init["data"]["objectKey"],
                     "originalName": f"demo.{resource_type}",
                     "mimeType": "application/octet-stream",
@@ -336,6 +339,7 @@ def test_handout_qa_and_jump_target_keep_single_locator_per_citation():
             headers=AUTH_HEADERS | {"idempotency-key": "mixed-citation-upload"},
             json_body={
                 "resourceType": "pdf",
+                "scopeType": "course",
                 "objectKey": f"raw/1/{course_id}/demo.pdf",
                 "originalName": "demo.pdf",
                 "mimeType": "application/pdf",
@@ -454,6 +458,7 @@ def test_inquiry_and_quiz_generate_cover_planning_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "planning-display-upload"},
             json_body={
                 "resourceType": "pdf",
+                "scopeType": "course",
                 "objectKey": f"raw/1/{course_id}/planning-display.pdf",
                 "originalName": "planning-display.pdf",
                 "mimeType": "application/pdf",

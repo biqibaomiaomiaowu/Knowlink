@@ -191,9 +191,11 @@ async def get_bilibili_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> BilibiliService:
+    lesson_repo = getattr(repo, "store", repo)
     return BilibiliService(
         courses=repo,
         bilibili=repo,
+        lessons=lesson_repo,
         async_tasks=async_tasks,
         task_dispatcher=task_dispatcher,
         bili_client=_get_bili_client(),
@@ -216,10 +218,12 @@ async def get_recommendation_flow_service(
 async def get_resource_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> ResourceService:
+    lesson_repo = getattr(repo, "store", repo)
     return ResourceService(
         courses=repo,
         resources=repo,
         idempotency=repo,
+        lessons=lesson_repo,
         storage=_get_object_storage(),
     )
 

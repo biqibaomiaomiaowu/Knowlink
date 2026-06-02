@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
-from server.domain.repositories import CourseRepository, IdempotencyRepository, ResourceRepository
+from server.domain.repositories import CourseRepository, IdempotencyRepository, LessonRepository, ResourceRepository
 from server.domain.services.errors import ServiceError
 from server.domain.services.idempotency import result_matches_course, run_fingerprinted_idempotent
 from server.infra.db.base import utcnow
@@ -15,6 +17,7 @@ UPLOAD_EXPIRES_IN = timedelta(minutes=15)
 PLAYBACK_EXPIRES_IN = timedelta(hours=1)
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 VIDEO_RESOURCE_TYPES = {"mp4"}
+NON_VIDEO_RESOURCE_TYPES = {"pdf", "pptx", "docx", "srt"}
 
 
 class ResourceService:
@@ -24,18 +27,21 @@ class ResourceService:
         courses: CourseRepository,
         resources: ResourceRepository,
         idempotency: IdempotencyRepository,
+        lessons: LessonRepository | None = None,
         storage: ObjectStorage | None = None,
     ) -> None:
         self.courses = courses
         self.resources = resources
         self.idempotency = idempotency
+        self.lessons = lessons
         self.storage = storage
 
     def upload_init(self, *, course_id: int, payload, request_host: str) -> dict[str, object]:
         self._ensure_course(course_id)
+        scope = self._normalize_scope(course_id=course_id, payload=payload, require_non_video_scope=True)
         storage = self._require_storage()
         object_key = self._build_object_key(course_id=course_id, payload=payload)
-        headers = self._upload_headers(course_id, payload)
+        headers = self._upload_headers(course_id, payload, scope=scope)
         try:
             upload_url = storage.presigned_put_url(
                 object_key,
@@ -66,11 +72,9 @@ class ResourceService:
         self._ensure_course(course_id)
 
         def factory() -> dict[str, object]:
+            scope = self._normalize_scope(course_id=course_id, payload=payload, require_non_video_scope=True)
             self._validate_uploaded_object(course_id=course_id, payload=payload)
-            return self.resources.create_resource(
-                course_id,
-                self._upload_complete_payload(payload),
-            )
+            return self._create_completed_resource(course_id=course_id, payload=payload, scope=scope)
 
         return run_fingerprinted_idempotent(
             self.idempotency,
@@ -82,16 +86,34 @@ class ResourceService:
             legacy_matches=lambda result: result_matches_course(result, course_id=course_id),
         )
 
-    def _upload_complete_payload(self, payload) -> dict[str, object]:
+    def _upload_complete_payload(self, payload, *, scope: dict[str, object]) -> dict[str, object]:
         data = payload.model_dump(by_alias=True)
-        data.setdefault("scopeType", "course")
-        data.setdefault("usageRole", "course_material")
-        data.setdefault("visibleToCourseQa", True)
+        data["scopeType"] = scope["scopeType"]
+        data["lessonId"] = scope.get("lessonId")
+        data["usageRole"] = scope["usageRole"]
+        data["sourceType"] = scope.get("sourceType") or "upload"
+        if scope.get("visibleToCourseQa") is not None:
+            data["visibleToCourseQa"] = scope["visibleToCourseQa"]
+        else:
+            data.setdefault("visibleToCourseQa", scope["scopeType"] == "course")
+        if scope.get("sourcePartId") is not None:
+            data["sourcePartId"] = scope["sourcePartId"]
         return data
 
-    def list_resources(self, *, course_id: int) -> dict[str, object]:
+    def list_resources(
+        self,
+        *,
+        course_id: int,
+        scope_type: str | None = None,
+        lesson_id: int | None = None,
+    ) -> dict[str, object]:
         self._ensure_course(course_id)
-        return {"items": self.resources.list_resources(course_id)}
+        items = self.resources.list_resources(course_id)
+        if scope_type is not None:
+            items = [item for item in items if item.get("scopeType") == scope_type]
+        if lesson_id is not None:
+            items = [item for item in items if item.get("lessonId") == lesson_id]
+        return {"items": items}
 
     def get_playback(self, *, resource_id: int) -> dict[str, object]:
         resource = self.resources.get_resource(resource_id)
@@ -159,6 +181,185 @@ class ResourceService:
             )
         return course
 
+    def _ensure_lesson(self, *, course_id: int, lesson_id: int | None) -> dict[str, Any]:
+        if lesson_id is None or self.lessons is None:
+            raise ServiceError(
+                message="Resource lesson scope requires a lesson in this course.",
+                error_code="resource.lesson_mismatch",
+                status_code=400,
+            )
+        lesson = self.lessons.get_lesson(course_id=course_id, lesson_id=int(lesson_id))
+        if lesson is None:
+            raise ServiceError(
+                message="Resource lesson scope requires a lesson in this course.",
+                error_code="resource.lesson_mismatch",
+                status_code=400,
+            )
+        return lesson
+
+    def _normalize_scope(
+        self,
+        *,
+        course_id: int,
+        payload,
+        require_non_video_scope: bool,
+    ) -> dict[str, object]:
+        resource_type = str(payload.resource_type)
+        if resource_type in VIDEO_RESOURCE_TYPES:
+            return self._normalize_video_scope(course_id=course_id, payload=payload)
+        return self._normalize_non_video_scope(
+            course_id=course_id,
+            payload=payload,
+            require_scope=require_non_video_scope,
+        )
+
+    def _normalize_non_video_scope(
+        self,
+        *,
+        course_id: int,
+        payload,
+        require_scope: bool,
+    ) -> dict[str, object]:
+        scope_type = payload.scope_type
+        if scope_type is None:
+            if require_scope:
+                raise ServiceError(
+                    message="Resource scope is required for document uploads.",
+                    error_code="resource.scope_required",
+                    status_code=400,
+                )
+            scope_type = "course"
+        if scope_type == "lesson":
+            lesson = self._ensure_lesson(course_id=course_id, lesson_id=payload.lesson_id)
+            usage_role = payload.usage_role or ("transcript" if payload.resource_type == "srt" else "lesson_material")
+            return {
+                "scopeType": "lesson",
+                "lessonId": int(lesson["lessonId"]),
+                "usageRole": usage_role,
+                "visibleToCourseQa": payload.visible_to_course_qa
+                if payload.visible_to_course_qa is not None
+                else False,
+                "sourcePartId": payload.source_part_id,
+                "sourceType": "upload",
+            }
+        return {
+            "scopeType": "course",
+            "lessonId": None,
+            "usageRole": payload.usage_role or "course_material",
+            "visibleToCourseQa": payload.visible_to_course_qa
+            if payload.visible_to_course_qa is not None
+            else True,
+            "sourcePartId": payload.source_part_id,
+            "sourceType": "upload",
+        }
+
+    def _normalize_video_scope(self, *, course_id: int, payload) -> dict[str, object]:
+        placement = payload.lesson_placement
+        if placement is None:
+            if payload.scope_type == "course":
+                placement = "course_material"
+            elif payload.scope_type == "lesson" and payload.lesson_id is not None:
+                placement = "bind_existing"
+            else:
+                placement = "auto_create"
+        if placement == "course_material":
+            return {
+                "scopeType": "course",
+                "lessonId": None,
+                "usageRole": payload.usage_role or "course_material",
+                "visibleToCourseQa": payload.visible_to_course_qa
+                if payload.visible_to_course_qa is not None
+                else True,
+                "sourcePartId": payload.source_part_id,
+                "sourceType": "local_video",
+                "lessonPlacement": placement,
+            }
+        if placement == "bind_existing":
+            lesson = self._ensure_lesson(course_id=course_id, lesson_id=payload.lesson_id)
+            return {
+                "scopeType": "lesson",
+                "lessonId": int(lesson["lessonId"]),
+                "usageRole": "primary_video",
+                "visibleToCourseQa": payload.visible_to_course_qa
+                if payload.visible_to_course_qa is not None
+                else False,
+                "sourcePartId": payload.source_part_id,
+                "sourceType": "local_video",
+                "lessonPlacement": placement,
+            }
+        return {
+            "scopeType": "lesson",
+            "lessonId": None,
+            "usageRole": "primary_video",
+            "visibleToCourseQa": payload.visible_to_course_qa
+            if payload.visible_to_course_qa is not None
+            else False,
+            "sourcePartId": payload.source_part_id,
+            "sourceType": "local_video",
+            "lessonPlacement": "auto_create",
+        }
+
+    def _create_completed_resource(
+        self,
+        *,
+        course_id: int,
+        payload,
+        scope: dict[str, object],
+    ) -> dict[str, object]:
+        if payload.resource_type != "mp4":
+            return self.resources.create_resource(course_id, self._upload_complete_payload(payload, scope=scope))
+        if scope.get("lessonPlacement") == "auto_create":
+            lesson = self._create_video_lesson(course_id=course_id, payload=payload)
+            scope = {**scope, "lessonId": lesson["lessonId"]}
+            resource = self.resources.create_resource(course_id, self._upload_complete_payload(payload, scope=scope))
+            self._set_lesson_primary_video(course_id=course_id, lesson_id=int(lesson["lessonId"]), resource=resource)
+            return resource
+        resource = self.resources.create_resource(course_id, self._upload_complete_payload(payload, scope=scope))
+        if scope.get("lessonPlacement") == "bind_existing" and scope.get("lessonId") is not None:
+            self._set_lesson_primary_video(course_id=course_id, lesson_id=int(scope["lessonId"]), resource=resource)
+        return resource
+
+    def _create_video_lesson(self, *, course_id: int, payload) -> dict[str, Any]:
+        if self.lessons is None:
+            raise ServiceError(
+                message="Lesson repository is unavailable for video placement.",
+                error_code="resource.lesson_mismatch",
+                status_code=400,
+            )
+        title = payload.lesson_title or self._lesson_title_from_upload(payload.original_name)
+        return self.lessons.create_lesson(
+            course_id=course_id,
+            title=title,
+            source_type="local_video",
+            source_ref_json={
+                "objectKey": payload.object_key,
+                "originalName": payload.original_name,
+            },
+        )
+
+    def _set_lesson_primary_video(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        resource: dict[str, object],
+    ) -> None:
+        if self.lessons is None:
+            return
+        self.lessons.update_lesson(
+            course_id=course_id,
+            lesson_id=lesson_id,
+            changes={
+                "primary_video_resource_id": int(resource["resourceId"]),
+                "lesson_status": "resource_ready",
+            },
+        )
+
+    @staticmethod
+    def _lesson_title_from_upload(original_name: str) -> str:
+        title = Path(original_name.replace("\\", "/").rsplit("/", 1)[-1]).stem.strip()
+        return title or "未命名视频"
+
     def _build_object_key(self, *, course_id: int, payload) -> str:
         filename = payload.filename.replace("\\", "/").rsplit("/", 1)[-1]
         safe_filename = SAFE_FILENAME_RE.sub("_", filename).strip(" .")
@@ -166,8 +367,11 @@ class ResourceService:
             safe_filename = f"upload.{payload.resource_type}"
         return f"raw/1/{course_id}/temp/{payload.resource_type}/{safe_filename}"
 
-    def _upload_headers(self, course_id: int, payload) -> dict[str, str]:
+    def _upload_headers(self, course_id: int, payload, *, scope: dict[str, object]) -> dict[str, str]:
         headers = {"x-amz-meta-course-id": str(course_id)}
+        headers["x-amz-meta-scope-type"] = str(scope["scopeType"])
+        if scope.get("lessonId") is not None:
+            headers["x-amz-meta-lesson-id"] = str(scope["lessonId"])
         checksum = self._normalize_checksum(payload.checksum)
         if checksum is not None:
             headers["x-amz-meta-checksum"] = checksum

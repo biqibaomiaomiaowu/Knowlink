@@ -54,6 +54,7 @@ class RuntimeStore:
             "review_run": 8300,
             "review_task": 8400,
             "bilibili_import_run": 9100,
+            "bilibili_import_item": 9150,
             "bilibili_qr_session": 9200,
             "bilibili_preview": 9300,
             "lesson": 1000,
@@ -81,6 +82,7 @@ class RuntimeStore:
     bilibili_auth_session: dict[str, Any] | None = None
     bilibili_preview_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
     bilibili_import_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
+    bilibili_import_items: dict[tuple[int, str], dict[str, Any]] = field(default_factory=dict)
     current_course_id: int | None = None
 
     def next_id(self, key: str) -> int:
@@ -906,19 +908,21 @@ class RuntimeStore:
             "failureReason": None,
             "startedAt": now,
             "finishedAt": None,
+            "items": [],
             "createdAt": now,
             "updatedAt": now,
         }
         self.bilibili_import_runs[import_run_id] = run
-        return run
+        return self._bilibili_import_run_with_items(run)
 
     def get_bilibili_import_run(self, import_run_id: int) -> dict[str, Any] | None:
-        return self.bilibili_import_runs.get(import_run_id)
+        run = self.bilibili_import_runs.get(import_run_id)
+        return self._bilibili_import_run_with_items(run) if run is not None else None
 
     def list_bilibili_import_runs(self, course_id: int) -> list[dict[str, Any]]:
         return sorted(
             [
-                run
+                self._bilibili_import_run_with_items(run)
                 for run in self.bilibili_import_runs.values()
                 if run["courseId"] == course_id
             ],
@@ -967,6 +971,74 @@ class RuntimeStore:
         ):
             run["finishedAt"] = utcnow()
         run["updatedAt"] = utcnow()
+        return self._bilibili_import_run_with_items(run)
+
+    def upsert_bilibili_import_item(
+        self,
+        *,
+        import_run_id: int,
+        course_id: int,
+        source_url: str,
+        item_key: str | None = None,
+        title: str | None = None,
+        part_no: int | None = None,
+        status: str = "pending",
+        progress_pct: int = 0,
+        lesson_id: int | None = None,
+        resource_id: int | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        if import_run_id not in self.bilibili_import_runs:
+            raise ValueError("bilibili.import_run_not_found")
+        normalized_key = str(item_key or f"item-{self.next_id('bilibili_import_item')}")
+        slot = (import_run_id, normalized_key)
+        now = utcnow()
+        existing = self.bilibili_import_items.get(slot)
+        item = {
+            "importItemId": (existing or {}).get("importItemId") or self.next_id("bilibili_import_item"),
+            "importRunId": import_run_id,
+            "courseId": course_id,
+            "resourceId": resource_id,
+            "lessonId": lesson_id,
+            "sourceUrl": source_url,
+            "itemKey": normalized_key,
+            "title": title,
+            "partNo": part_no,
+            "status": status,
+            "progressPct": progress_pct,
+            "metadataJson": dict(metadata_json or {}),
+            "errorCode": error_code,
+            "failureReason": failure_reason,
+            "finishedAt": (existing or {}).get("finishedAt"),
+            "createdAt": (existing or {}).get("createdAt", now),
+            "updatedAt": now,
+        }
+        if status in {"imported", "failed", "canceled"} and item["finishedAt"] is None:
+            item["finishedAt"] = now
+        self.bilibili_import_items[slot] = item
+        run = self.bilibili_import_runs[import_run_id]
+        run["items"] = self.list_bilibili_import_items(import_run_id)
+        run["updatedAt"] = now
+        return item
+
+    def list_bilibili_import_items(self, import_run_id: int) -> list[dict[str, Any]]:
+        return sorted(
+            [
+                item
+                for (run_id, _item_key), item in self.bilibili_import_items.items()
+                if run_id == import_run_id
+            ],
+            key=lambda item: (
+                item.get("partNo") is None,
+                item.get("partNo") or 0,
+                item["importItemId"],
+            ),
+        )
+
+    def _bilibili_import_run_with_items(self, run: dict[str, Any]) -> dict[str, Any]:
+        run["items"] = self.list_bilibili_import_items(int(run["importRunId"]))
         return run
 
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:

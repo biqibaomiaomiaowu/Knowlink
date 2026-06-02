@@ -159,6 +159,42 @@ class MemoryScaffoldRepository:
     def update_bilibili_import_run(self, import_run_id: int, **changes: Any) -> dict[str, Any] | None:
         return self.store.update_bilibili_import_run(import_run_id, **changes)
 
+    def upsert_bilibili_import_item(
+        self,
+        *,
+        import_run_id: int,
+        course_id: int,
+        source_url: str,
+        item_key: str | None = None,
+        title: str | None = None,
+        part_no: int | None = None,
+        status: str = "pending",
+        progress_pct: int = 0,
+        lesson_id: int | None = None,
+        resource_id: int | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        return self.store.upsert_bilibili_import_item(
+            import_run_id=import_run_id,
+            course_id=course_id,
+            source_url=source_url,
+            item_key=item_key,
+            title=title,
+            part_no=part_no,
+            status=status,
+            progress_pct=progress_pct,
+            lesson_id=lesson_id,
+            resource_id=resource_id,
+            metadata_json=metadata_json,
+            error_code=error_code,
+            failure_reason=failure_reason,
+        )
+
+    def list_bilibili_import_items(self, import_run_id: int) -> list[dict[str, Any]]:
+        return self.store.list_bilibili_import_items(import_run_id)
+
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.store.create_resource(course_id, payload)
 

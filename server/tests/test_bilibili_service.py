@@ -225,13 +225,23 @@ def test_create_import_requires_preview_snapshot_creates_run_task_and_dispatch_p
     assert run["preview"]["previewId"] == preview["previewId"]
     assert {
         key: run["selection"][key]
-        for key in ("selectionMode", "selectedPartIds", "qualityPreference", "previewId")
+        for key in (
+            "selectionMode",
+            "selectedPartIds",
+            "qualityPreference",
+            "previewId",
+            "lessonMode",
+            "targetLessonId",
+        )
     } == {
         "selectionMode": "selected_parts",
         "selectedPartIds": ["p1"],
         "qualityPreference": "android_safe",
         "previewId": preview["previewId"],
+        "lessonMode": "auto_per_video",
+        "targetLessonId": None,
     }
+    assert run["selection"]["partLessonMap"] == {}
     assert isinstance(run["selection"]["requestFingerprint"], str)
     task = async_tasks.get_async_task(response["taskId"])
     assert task["taskType"] == "bilibili_import"
@@ -242,6 +252,9 @@ def test_create_import_requires_preview_snapshot_creates_run_task_and_dispatch_p
         "importRunId": run["importRunId"],
         "sourceUrl": preview["sourceUrl"],
         "qualityPreference": "android_safe",
+        "lessonMode": "auto_per_video",
+        "targetLessonId": None,
+        "partLessonMap": {},
     }
     assert dispatcher.enqueued == [{"taskId": response["taskId"], "payload": task["payloadJson"]}]
 
@@ -271,6 +284,54 @@ def test_create_import_uses_persisted_preview_snapshot_across_service_instances(
 
     run = repo.get_bilibili_import_run(response["entity"]["id"])
     assert run["preview"]["previewId"] == preview["previewId"]
+
+
+def test_create_import_persists_part_level_lesson_mapping() -> None:
+    service, repo, *_ = build_service()
+    course_id = create_course(repo)
+    lesson = repo.store.create_lesson(course_id=course_id, title="已建第一讲")
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+
+    response = service.create_import(
+        course_id=course_id,
+        preview_id=preview["previewId"],
+        source_url=preview["sourceUrl"],
+        selection_mode="selected_parts",
+        selected_part_ids=["p1"],
+        quality_preference="android_safe",
+        part_lesson_map={"p1": {"lessonId": lesson["lessonId"], "sourcePartId": "p1"}},
+        idempotency_key="bili-create-part-map",
+    )
+
+    run = repo.get_bilibili_import_run(response["entity"]["id"])
+    assert run["selection"]["partLessonMap"] == {
+        "p1": {"lessonId": lesson["lessonId"], "sourcePartId": "p1"}
+    }
+    assert isinstance(run["selection"]["requestFingerprint"], str)
+
+
+def test_create_import_rejects_client_supplied_part_resource_mapping() -> None:
+    service, repo, *_ = build_service()
+    course_id = create_course(repo)
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+
+    with pytest.raises(ServiceError) as exc:
+        service.create_import(
+            course_id=course_id,
+            preview_id=preview["previewId"],
+            source_url=preview["sourceUrl"],
+            selection_mode="selected_parts",
+            selected_part_ids=["p1"],
+            quality_preference="android_safe",
+            part_lesson_map={"p1": {"resourceId": 501, "sourcePartId": "p1"}},
+            idempotency_key="bili-create-reject-resource-map",
+        )
+
+    assert exc.value.error_code == "bilibili.selection_invalid"
+    assert exc.value.status_code == 422
+    assert repo.list_bilibili_import_runs(course_id) == []
 
 
 def test_create_import_same_idempotency_key_rejects_different_request_body() -> None:
