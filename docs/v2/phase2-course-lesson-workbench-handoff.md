@@ -2,7 +2,7 @@
 
 日期：2026-06-02
 
-本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结、Task 2 后端 schema / repository 原语、Task 3 课程库 / 课程管理 / 删除影响 / 课程工作台后端 API、Task 4 lesson API、Task 5 资源 scope / 上传 placement / B站导入自动建 lesson、Task 6 分层学习产物 / placeholder API、Task 7 Flutter 课程 / 节课 IA 页面，以及 Task 8 首页继续学习 / 课程内推荐 / 报告导出占位；后续任务继续补充最终验收证据。
+本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结、Task 2 后端 schema / repository 原语、Task 3 课程库 / 课程管理 / 删除影响 / 课程工作台后端 API、Task 4 lesson API、Task 5 资源 scope / 上传 placement / B站导入自动建 lesson、Task 6 分层学习产物 / placeholder API、Task 7 Flutter 课程 / 节课 IA 页面、Task 8 首页继续学习 / 课程内推荐 / 报告导出占位，以及 Task 9 文档 / scaffold consistency / focused final verification。
 
 ## Implemented Scope
 
@@ -56,9 +56,39 @@
 - 不删除旧列，不破坏 V1 course-level 路由。
 - B站 import run 的 `selection.partLessonMap` 记录 `sourcePartId -> {lessonId, resourceId}`，`bilibili_import_items.lesson_id` 同步保存 item 级 lesson 归属。若 part 上传中途失败，已创建的 lesson 会保留，retry 必须复用该 `lessonId`，不得重复创建 lesson。
 
-## Fixed Demo Data And Acceptance Evidence
+## Demo Routes And Manual Acceptance Checklist
 
-后续实现完成后补充：
+Demo route list:
+
+- `/courses`
+- `/courses/:courseId`
+- `/courses/:courseId/qa`
+- `/courses/:courseId/graph`
+- `/courses/:courseId/review`
+- `/courses/:courseId/review?kind=report`
+- `/courses/:courseId/review?kind=comprehensive_quiz`
+- `/courses/:courseId/review?kind=subjective_grading`
+- `/courses/:courseId/exports`
+- `/courses/:courseId/lessons/:lessonId`
+- `/courses/:courseId/lessons/:lessonId/qa`
+- `/courses/:courseId/lessons/:lessonId/handout`
+- `/courses/:courseId/lessons/:lessonId/review`
+- `/courses/:courseId/lessons/:lessonId/graph`
+
+Manual acceptance checklist:
+
+- Create course.
+- Upload MP4 and verify lesson auto-created.
+- Upload PDF to course scope.
+- Upload PPTX / PDF to lesson scope.
+- Open course workbench.
+- Open lesson detail.
+- Use course QA entry and lesson QA entry as distinct pages.
+- Verify no resource QA entry exists.
+- Archive and restore course.
+- Confirm home continues into lesson.
+
+## Fixed Demo Data And Acceptance Evidence
 
 - 固定课程和 lesson seed。
 - MP4 自动创建 lesson 的接口记录。
@@ -73,11 +103,12 @@
 - Task 7 Flutter 验证命令（规格修复后复跑）：`flutter test test/app_router_test.dart test/widgets/course_library_page_test.dart test/widgets/course_workbench_page_test.dart test/widgets/lesson_detail_page_test.dart test/shared/course_lesson_api_test.dart` 通过；`flutter analyze` 通过。当前 WSL Flutter shell wrapper 有 CRLF 问题，实际验证在 D 盘临时副本通过 Windows Flutter SDK 执行。
 - Task 8 首页 / 推荐 / 报告导出占位验证命令：`.venv/bin/python -m pytest -q server/tests/test_home_lesson_continuation.py server/tests/test_course_workbench_api.py` 通过。
 - Task 8 scoped artifact 回归验证命令：`.venv/bin/python -m pytest -q server/tests/test_scoped_learning_artifacts.py` 通过。
+- Task 9 focused backend suite：`.venv/bin/python -m pytest -q server/tests/test_course_lesson_contract.py server/tests/test_lesson_repository.py server/tests/test_lessons_api.py server/tests/test_course_workbench_api.py server/tests/test_resource_scope_import.py server/tests/test_scoped_learning_artifacts.py server/tests/test_home_lesson_continuation.py server/tests/test_api.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py` 通过。
+- Task 9 Flutter suite：`flutter test` 通过；`flutter analyze` 通过。当前 WSL Flutter shell wrapper 有 CRLF 问题，实际验证在 D 盘临时副本通过 Windows Flutter SDK 执行。
 - 后端 pytest 命令和结果：`server/tests/test_lesson_repository.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py server/tests/test_resource_deletion_semantics.py server/tests/test_sql_runtime_contract.py` 通过。
 - Task 3 后端 pytest 命令和结果：`.venv/bin/python -m pytest -q server/tests/test_course_workbench_api.py server/tests/test_api.py` 通过。
 - Task 3 repository / migration 回归：`.venv/bin/python -m pytest -q server/tests/test_lesson_repository.py server/tests/test_lesson_migration.py server/tests/test_scaffold_consistency.py server/tests/test_sql_runtime_contract.py` 通过。
 - Alembic 临时 SQLite 升降级：`upgrade head -> downgrade c8d9e0f1a2b3 -> upgrade head` 通过。
-- Flutter test 命令和结果。
 
 ## Known Risks
 
