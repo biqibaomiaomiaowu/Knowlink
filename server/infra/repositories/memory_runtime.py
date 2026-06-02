@@ -439,6 +439,58 @@ class RuntimeStore:
             return lesson
         return None
 
+    def update_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        changes: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        lesson = self.get_lesson(course_id=course_id, lesson_id=lesson_id)
+        if lesson is None:
+            return None
+        field_map = {
+            "title": "title",
+            "lessonStatus": "lessonStatus",
+            "lesson_status": "lessonStatus",
+            "primaryVideoResourceId": "primaryVideoResourceId",
+            "primary_video_resource_id": "primaryVideoResourceId",
+            "primaryVideoStartSec": "primaryVideoStartSec",
+            "primary_video_start_sec": "primaryVideoStartSec",
+            "primaryVideoEndSec": "primaryVideoEndSec",
+            "primary_video_end_sec": "primaryVideoEndSec",
+            "sourceType": "sourceType",
+            "source_type": "sourceType",
+            "sourceRefJson": "sourceRefJson",
+            "source_ref_json": "sourceRefJson",
+            "handoutStatus": "handoutStatus",
+            "handout_status": "handoutStatus",
+            "quizStatus": "quizStatus",
+            "quiz_status": "quizStatus",
+            "reviewStatus": "reviewStatus",
+            "review_status": "reviewStatus",
+            "masteryScore": "masteryScore",
+            "mastery_score": "masteryScore",
+            "lastPositionSec": "lastPositionSec",
+            "last_position_sec": "lastPositionSec",
+            "lastActivityAt": "lastActivityAt",
+            "last_activity_at": "lastActivityAt",
+            "nextAction": "nextAction",
+            "next_action": "nextAction",
+            "metaJson": "metaJson",
+            "meta_json": "metaJson",
+        }
+        for key, value in changes.items():
+            target = field_map.get(key)
+            if target is not None:
+                lesson[target] = value
+        now = utcnow()
+        lesson["updatedAt"] = now
+        course = self.courses.get(course_id)
+        if course is not None:
+            course["updatedAt"] = now
+        return lesson
+
     def reorder_lessons(self, *, course_id: int, lesson_ids: list[int]) -> list[dict[str, Any]]:
         active_lessons = self.list_lessons(course_id)
         active_ids = {lesson["lessonId"] for lesson in active_lessons}
@@ -606,6 +658,50 @@ class RuntimeStore:
         artifact.update(extra)
         self.scoped_artifacts[artifact_id] = artifact
         return artifact
+
+    def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "artifactId": artifact["artifactId"],
+                "artifactType": artifact["artifactType"],
+                "courseId": artifact["courseId"],
+                "scopeType": artifact["scopeType"],
+                "lessonId": artifact.get("lessonId"),
+                "startLessonId": artifact.get("startLessonId"),
+                "endLessonId": artifact.get("endLessonId"),
+                "status": artifact["status"],
+            }
+            for artifact in sorted(self.scoped_artifacts.values(), key=lambda item: item["artifactId"])
+            if artifact.get("courseId") == course_id
+            and artifact.get("scopeType") == "lesson"
+            and artifact.get("lessonId") == lesson_id
+        ]
+
+    def mark_lesson_artifacts_stale(self, *, course_id: int, lesson_ids: list[int]) -> list[dict[str, Any]]:
+        lesson_id_set = set(lesson_ids)
+        stale_artifacts: list[dict[str, Any]] = []
+        now = utcnow()
+        for artifact in sorted(self.scoped_artifacts.values(), key=lambda item: item["artifactId"]):
+            if (
+                artifact.get("courseId") == course_id
+                and artifact.get("scopeType") == "lesson"
+                and artifact.get("lessonId") in lesson_id_set
+            ):
+                artifact["status"] = "stale"
+                artifact["updatedAt"] = now
+                stale_artifacts.append(
+                    {
+                        "artifactId": artifact["artifactId"],
+                        "artifactType": artifact["artifactType"],
+                        "courseId": artifact["courseId"],
+                        "scopeType": artifact["scopeType"],
+                        "lessonId": artifact.get("lessonId"),
+                        "startLessonId": artifact.get("startLessonId"),
+                        "endLessonId": artifact.get("endLessonId"),
+                        "status": artifact["status"],
+                    }
+                )
+        return stale_artifacts
 
     def _validate_artifact_type_scope(self, *, artifact_type: str, scope_type: str) -> None:
         allowed_scopes = _SCOPED_ARTIFACT_ALLOWED_SCOPES.get(artifact_type)

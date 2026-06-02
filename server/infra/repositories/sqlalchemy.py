@@ -126,6 +126,38 @@ _SCOPED_ARTIFACT_ALLOWED_SCOPES = {
     "export_run": {"course", "lesson"},
 }
 
+_LESSON_CHANGE_FIELDS = {
+    "title": "title",
+    "lessonStatus": "lesson_status",
+    "lesson_status": "lesson_status",
+    "primaryVideoResourceId": "primary_video_resource_id",
+    "primary_video_resource_id": "primary_video_resource_id",
+    "primaryVideoStartSec": "primary_video_start_sec",
+    "primary_video_start_sec": "primary_video_start_sec",
+    "primaryVideoEndSec": "primary_video_end_sec",
+    "primary_video_end_sec": "primary_video_end_sec",
+    "sourceType": "source_type",
+    "source_type": "source_type",
+    "sourceRefJson": "source_ref_json",
+    "source_ref_json": "source_ref_json",
+    "handoutStatus": "handout_status",
+    "handout_status": "handout_status",
+    "quizStatus": "quiz_status",
+    "quiz_status": "quiz_status",
+    "reviewStatus": "review_status",
+    "review_status": "review_status",
+    "masteryScore": "mastery_score",
+    "mastery_score": "mastery_score",
+    "lastPositionSec": "last_position_sec",
+    "last_position_sec": "last_position_sec",
+    "lastActivityAt": "last_activity_at",
+    "last_activity_at": "last_activity_at",
+    "nextAction": "next_action",
+    "next_action": "next_action",
+    "metaJson": "meta_json",
+    "meta_json": "meta_json",
+}
+
 
 class SqlAlchemyRuntimeRepository:
     def __init__(self, session: Session, *, user_id: int = 1) -> None:
@@ -409,6 +441,7 @@ class SqlAlchemyRuntimeRepository:
         primary_video_resource_id: int | None = None,
         primary_video_start_sec: int | None = None,
         primary_video_end_sec: int | None = None,
+        meta_json: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._ensure_course_owned(course_id)
         next_order = (
@@ -433,8 +466,10 @@ class SqlAlchemyRuntimeRepository:
             handout_status="not_generated",
             quiz_status="not_generated",
             review_status="not_due",
+            meta_json=meta_json,
         )
         self.session.add(lesson)
+        self._touch_course(course_id)
         self._commit_or_flush()
         return _lesson_dict(lesson)
 
@@ -458,6 +493,24 @@ class SqlAlchemyRuntimeRepository:
             return None
         return _lesson_dict(lesson)
 
+    def update_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        changes: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        lesson = self._get_lesson_model(course_id=course_id, lesson_id=lesson_id)
+        if lesson is None:
+            return None
+        for key, value in changes.items():
+            column_name = _LESSON_CHANGE_FIELDS.get(key)
+            if column_name is not None:
+                setattr(lesson, column_name, _normalize_datetime_change(column_name, value))
+        self._touch_course(course_id)
+        self._commit_or_flush()
+        return self.get_lesson(course_id=course_id, lesson_id=lesson_id)
+
     def reorder_lessons(self, *, course_id: int, lesson_ids: Sequence[int]) -> list[dict[str, Any]]:
         active_lessons = self.session.scalars(
             select(CourseLesson)
@@ -478,6 +531,7 @@ class SqlAlchemyRuntimeRepository:
         self.session.flush()
         for index, lesson_id in enumerate(requested_ids, start=1):
             lessons_by_id[lesson_id].order_index = index
+        self._touch_course(course_id)
         self._commit_or_flush()
         return self.list_lessons(course_id)
 
@@ -497,6 +551,7 @@ class SqlAlchemyRuntimeRepository:
         ).all()
         for index, active_lesson in enumerate(active_lessons, start=1):
             active_lesson.order_index = index
+        self._touch_course(course_id)
         self._commit_or_flush()
         return deleted
 
@@ -2311,6 +2366,8 @@ class SqlAlchemyRuntimeRepository:
         lesson_id: int | None = None,
         start_lesson_id: int | None = None,
         end_lesson_id: int | None = None,
+        status: str = "placeholder",
+        **extra: Any,
     ) -> dict[str, Any]:
         self._validate_artifact_type_scope(artifact_type=artifact_type, scope_type=scope_type)
         lesson_id, start_lesson_id, end_lesson_id = self._validate_artifact_scope(
@@ -2328,8 +2385,9 @@ class SqlAlchemyRuntimeRepository:
                 artifact_kind="lesson_handout" if scope_type == "lesson" else "course_summary_handout",
                 title="Scoped handout placeholder",
                 summary="placeholder",
-                status="placeholder",
+                status=status,
                 outline_status="not_generated",
+                meta_json=extra.get("metaJson") or extra.get("meta_json"),
             )
         elif artifact_type == "qa_session":
             artifact = QaSession(
@@ -2338,7 +2396,7 @@ class SqlAlchemyRuntimeRepository:
                 scope_type=scope_type,
                 lesson_id=lesson_id,
                 title="Scoped QA placeholder",
-                status="active",
+                status=status,
                 context_snapshot_json={},
             )
         elif artifact_type == "quiz":
@@ -2350,7 +2408,7 @@ class SqlAlchemyRuntimeRepository:
                 end_lesson_id=end_lesson_id,
                 quiz_mode="objective",
                 quiz_type="practice",
-                status="placeholder",
+                status=status,
             )
         elif artifact_type == "review_task_run":
             artifact = ReviewTaskRun(
@@ -2358,7 +2416,7 @@ class SqlAlchemyRuntimeRepository:
                 course_id=course_id,
                 scope_type=scope_type,
                 lesson_id=lesson_id,
-                status="placeholder",
+                status=status,
                 generated_count=0,
                 evidence_chain_json=[],
             )
@@ -2378,7 +2436,7 @@ class SqlAlchemyRuntimeRepository:
                 knowledge_point="placeholder",
                 mastery_score=0.0,
                 confidence_score=0.0,
-                status="placeholder",
+                status=status,
                 source_question_keys_json=[],
             )
         elif artifact_type == "graph_snapshot":
@@ -2386,7 +2444,7 @@ class SqlAlchemyRuntimeRepository:
                 course_id=course_id,
                 scope_type=scope_type,
                 lesson_id=lesson_id,
-                status="placeholder",
+                status=status,
                 nodes_json=[],
                 edges_json=[],
                 citations_json=[],
@@ -2397,7 +2455,7 @@ class SqlAlchemyRuntimeRepository:
                 scope_type=scope_type,
                 lesson_id=lesson_id,
                 export_type="course_summary",
-                status="placeholder",
+                status=status,
             )
         else:
             raise ValueError("artifact.scope_invalid")
@@ -2412,6 +2470,123 @@ class SqlAlchemyRuntimeRepository:
             start_lesson_id=start_lesson_id,
             end_lesson_id=end_lesson_id,
         )
+
+    def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]:
+        self._ensure_course_owned(course_id)
+        artifacts: list[dict[str, Any]] = []
+        artifacts.extend(
+            self._lesson_scoped_artifact_rows(
+                artifact_type="handout_version",
+                model=HandoutVersion,
+                course_id=course_id,
+                lesson_id=lesson_id,
+            )
+        )
+        artifacts.extend(
+            self._lesson_scoped_artifact_rows(
+                artifact_type="qa_session",
+                model=QaSession,
+                course_id=course_id,
+                lesson_id=lesson_id,
+            )
+        )
+        artifacts.extend(
+            self._lesson_scoped_artifact_rows(
+                artifact_type="quiz",
+                model=Quiz,
+                course_id=course_id,
+                lesson_id=lesson_id,
+            )
+        )
+        artifacts.extend(
+            self._lesson_scoped_artifact_rows(
+                artifact_type="review_task_run",
+                model=ReviewTaskRun,
+                course_id=course_id,
+                lesson_id=lesson_id,
+            )
+        )
+        artifacts.extend(
+            self._lesson_scoped_artifact_rows(
+                artifact_type="mastery_record",
+                model=MasteryRecord,
+                course_id=course_id,
+                lesson_id=lesson_id,
+                has_scope_type=False,
+            )
+        )
+        artifacts.extend(
+            self._lesson_scoped_artifact_rows(
+                artifact_type="graph_snapshot",
+                model=GraphSnapshot,
+                course_id=course_id,
+                lesson_id=lesson_id,
+            )
+        )
+        artifacts.extend(
+            self._lesson_scoped_artifact_rows(
+                artifact_type="export_run",
+                model=ExportRun,
+                course_id=course_id,
+                lesson_id=lesson_id,
+            )
+        )
+        return artifacts
+
+    def mark_lesson_artifacts_stale(self, *, course_id: int, lesson_ids: Sequence[int]) -> list[dict[str, Any]]:
+        self._ensure_course_owned(course_id)
+        normalized_ids = [int(lesson_id) for lesson_id in lesson_ids]
+        stale_artifacts: list[dict[str, Any]] = []
+        for artifact_type, model, has_scope_type in (
+            ("handout_version", HandoutVersion, True),
+            ("qa_session", QaSession, True),
+            ("quiz", Quiz, True),
+            ("review_task_run", ReviewTaskRun, True),
+            ("mastery_record", MasteryRecord, False),
+            ("graph_snapshot", GraphSnapshot, True),
+            ("export_run", ExportRun, True),
+        ):
+            stmt = select(model).where(model.course_id == course_id, model.lesson_id.in_(normalized_ids))
+            if has_scope_type:
+                stmt = stmt.where(model.scope_type == "lesson")
+            rows = self.session.scalars(stmt.order_by(model.id.asc())).all()
+            for row in rows:
+                row.status = "stale"
+                stale_artifacts.append(
+                    _scoped_artifact_dict(
+                        row,
+                        artifact_type=artifact_type,
+                        course_id=course_id,
+                        scope_type="lesson",
+                        lesson_id=int(row.lesson_id),
+                    )
+                )
+        self._commit_or_flush()
+        return stale_artifacts
+
+    def _lesson_scoped_artifact_rows(
+        self,
+        *,
+        artifact_type: str,
+        model: Any,
+        course_id: int,
+        lesson_id: int,
+        has_scope_type: bool = True,
+    ) -> list[dict[str, Any]]:
+        stmt = select(model).where(model.course_id == course_id, model.lesson_id == lesson_id)
+        if has_scope_type:
+            stmt = stmt.where(model.scope_type == "lesson")
+        rows = self.session.scalars(stmt.order_by(model.id.asc())).all()
+        return [
+            _scoped_artifact_dict(
+                row,
+                artifact_type=artifact_type,
+                course_id=course_id,
+                scope_type="lesson",
+                lesson_id=lesson_id,
+            )
+            for row in rows
+        ]
 
     def _validate_artifact_type_scope(self, *, artifact_type: str, scope_type: str) -> None:
         allowed_scopes = _SCOPED_ARTIFACT_ALLOWED_SCOPES.get(artifact_type)
@@ -2918,6 +3093,11 @@ class SqlAlchemyRuntimeRepository:
         if not include_deleted:
             stmt = stmt.where(Course.deleted_at.is_(None))
         return self.session.scalar(stmt)
+
+    def _touch_course(self, course_id: int) -> None:
+        course = self._get_course_model(course_id)
+        if course is not None:
+            course.updated_at = utcnow()
 
     def _get_handout_version_model(self, handout_version_id: int) -> HandoutVersion | None:
         return self.session.scalar(

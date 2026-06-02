@@ -156,6 +156,94 @@ def test_soft_delete_missing_lesson_raises_consistently(repo: Any) -> None:
         repo.soft_delete_lesson(course_id=course_id, lesson_id=999999)
 
 
+def test_update_lesson_and_mark_lesson_artifacts_stale(repo: Any) -> None:
+    course_id = _create_course(repo)
+    lesson = repo.create_lesson(course_id=course_id, title="旧标题")
+
+    updated = repo.update_lesson(
+        course_id=course_id,
+        lesson_id=lesson["lessonId"],
+        changes={"title": "新标题", "primaryVideoStartSec": 10, "primaryVideoEndSec": 120},
+    )
+    artifact = repo.create_scoped_artifact(
+        artifact_type="handout_version",
+        course_id=course_id,
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        status="ready",
+    )
+
+    stale_artifacts = repo.mark_lesson_artifacts_stale(course_id=course_id, lesson_ids=[lesson["lessonId"]])
+    artifacts = repo.list_lesson_artifacts(course_id=course_id, lesson_id=lesson["lessonId"])
+
+    assert updated["title"] == "新标题"
+    assert updated["primaryVideoStartSec"] == 10
+    assert updated["primaryVideoEndSec"] == 120
+    assert stale_artifacts == [
+        {
+            "artifactId": artifact["artifactId"],
+            "artifactType": "handout_version",
+            "courseId": course_id,
+            "scopeType": "lesson",
+            "lessonId": lesson["lessonId"],
+            "startLessonId": None,
+            "endLessonId": None,
+            "status": "stale",
+        }
+    ]
+    assert artifacts[0]["artifactId"] == artifact["artifactId"]
+    assert artifacts[0]["artifactType"] == "handout_version"
+    assert artifacts[0]["scopeType"] == "lesson"
+    assert artifacts[0]["lessonId"] == lesson["lessonId"]
+    assert artifacts[0]["status"] == "stale"
+
+
+def test_mark_lesson_artifacts_stale_returns_type_disambiguated_rows(repo: Any) -> None:
+    course_id = _create_course(repo)
+    lesson = repo.create_lesson(course_id=course_id, title="第 1 节")
+    handout = repo.create_scoped_artifact(
+        artifact_type="handout_version",
+        course_id=course_id,
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        status="ready",
+    )
+    quiz = repo.create_scoped_artifact(
+        artifact_type="quiz",
+        course_id=course_id,
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        status="ready",
+    )
+
+    stale_artifacts = repo.mark_lesson_artifacts_stale(course_id=course_id, lesson_ids=[lesson["lessonId"]])
+
+    assert {
+        (artifact["artifactType"], artifact["artifactId"], artifact["status"])
+        for artifact in stale_artifacts
+    } == {
+        ("handout_version", handout["artifactId"], "stale"),
+        ("quiz", quiz["artifactId"], "stale"),
+    }
+
+
+def test_lesson_mutations_refresh_course_recent_activity(repo: Any) -> None:
+    touched_course = _create_course(repo, title="待操作课程")
+    newer_course = _create_course(repo, title="暂时较新课程")
+
+    first = repo.create_lesson(course_id=touched_course, title="第 1 节")
+    second = repo.create_lesson(course_id=touched_course, title="第 2 节")
+    assert repo.list_courses({"sort": "recent_activity_desc"})[0]["courseId"] == touched_course
+
+    repo.update_course(newer_course, {"title": "暂时较新课程 2"})
+    repo.reorder_lessons(course_id=touched_course, lesson_ids=[second["lessonId"], first["lessonId"]])
+    assert repo.list_courses({"sort": "recent_activity_desc"})[0]["courseId"] == touched_course
+
+    repo.update_course(newer_course, {"title": "暂时较新课程 3"})
+    repo.soft_delete_lesson(course_id=touched_course, lesson_id=first["lessonId"])
+    assert repo.list_courses({"sort": "recent_activity_desc"})[0]["courseId"] == touched_course
+
+
 def test_resource_scope_validation_and_storage(repo: Any) -> None:
     course_id = _create_course(repo)
     lesson = repo.create_lesson(course_id=course_id, title="关系模型")

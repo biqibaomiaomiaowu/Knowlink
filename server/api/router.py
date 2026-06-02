@@ -9,6 +9,7 @@ from server.api.routers import (
     health,
     home,
     inquiry,
+    lessons,
     pipelines,
     progress,
     qa,
@@ -28,6 +29,7 @@ def build_router() -> APIRouter:
     api_v1.include_router(recommendations.router)
     api_v1.include_router(courses.router)
     api_v1.include_router(course_workbench.router)
+    api_v1.include_router(lessons.router)
     api_v1.include_router(resources.router)
     api_v1.include_router(resources.playback_router)
     api_v1.include_router(bilibili.router)

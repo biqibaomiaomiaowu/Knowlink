@@ -90,6 +90,64 @@ class CourseWorkbenchData(CamelModel):
     placeholder_states: dict[str, dict[str, object]] = Field(default_factory=dict)
 
 
+class LessonSummary(CamelModel):
+    lesson_id: int
+    course_id: int
+    title: str
+    order_index: int
+    lesson_status: str
+    primary_video_resource_id: int | None = None
+    primary_video_start_sec: int | None = None
+    primary_video_end_sec: int | None = None
+    handout_status: str
+    quiz_status: str
+    review_status: str
+    mastery_score: float | None = None
+    last_position_sec: int | None = None
+    last_activity_at: datetime | None = None
+    next_action: dict[str, object] | None = None
+
+
+class LessonArtifactSummary(CamelModel):
+    artifact_id: int
+    artifact_type: str
+    scope_type: str
+    lesson_id: int | None = None
+    status: str
+
+
+class LessonProgressSummary(CamelModel):
+    last_position_sec: int | None = None
+    last_handout_block_id: int | None = None
+    handout_read_percent: int = 0
+    quiz_status: str = "not_generated"
+    review_status: str = "not_due"
+    last_activity_at: datetime | None = None
+
+
+class LessonSourceOverview(CamelModel):
+    scope_type: str = "lesson"
+    lesson_id: int | None = None
+    resource_count: int
+    primary_video_resource_id: int | None = None
+    has_primary_video: bool = False
+    lesson_resource_count: int = 0
+    course_resource_count: int = 0
+
+
+class LessonDetailData(CamelModel):
+    lesson: LessonSummary
+    primary_video: dict[str, object] | None = None
+    lesson_resources: list[dict[str, object]]
+    artifact_summaries: list[LessonArtifactSummary]
+    progress: LessonProgressSummary
+    citations: list[dict[str, object]]
+    source_overview: LessonSourceOverview
+    knowledge_point_placeholders: list[dict[str, object]]
+    weakness_placeholders: list[dict[str, object]]
+    next_action: dict[str, object] | None = None
+
+
 class AsyncTriggerData(CamelModel):
     task_id: int
     status: str

@@ -64,6 +64,54 @@ class UpdateCourseRequest(CamelModel):
         return _require_timezone_aware(value)
 
 
+class CreateLessonRequest(CamelModel):
+    title: str = Field(min_length=1)
+    source_type: Literal[
+        "manual",
+        "local_video",
+        "bilibili_part",
+        "bilibili_collection_item",
+        "bilibili_bangumi_item",
+    ] = "manual"
+    source_ref_json: dict[str, Any] | None = None
+    primary_video_resource_id: int | None = None
+    primary_video_start_sec: int | None = Field(default=None, ge=0)
+    primary_video_end_sec: int | None = Field(default=None, ge=0)
+
+
+class UpdateLessonRequest(CamelModel):
+    title: str | None = Field(default=None, min_length=1)
+    lesson_status: Literal[
+        "draft",
+        "resource_ready",
+        "learning_ready",
+        "completed",
+        "stale",
+    ] | None = None
+    meta_json: dict[str, Any] | None = None
+
+
+class ReorderLessonsRequest(CamelModel):
+    lesson_ids: list[int]
+
+
+class SetPrimaryVideoRequest(CamelModel):
+    resource_id: int
+    start_sec: int | None = Field(default=None, ge=0)
+    end_sec: int | None = Field(default=None, ge=0)
+
+
+class MergeLessonsRequest(CamelModel):
+    lesson_ids: list[int]
+    target_title: str | None = Field(default=None, min_length=1)
+
+
+class SplitLessonRequest(CamelModel):
+    split_at_sec: int = Field(ge=0)
+    first_title: str | None = Field(default=None, min_length=1)
+    second_title: str | None = Field(default=None, min_length=1)
+
+
 class UploadInitRequest(CamelModel):
     resource_type: Literal["mp4", "pdf", "srt", "pptx", "docx"]
     filename: str

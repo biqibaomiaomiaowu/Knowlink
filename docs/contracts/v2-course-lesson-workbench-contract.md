@@ -127,11 +127,15 @@ POST   /api/v1/courses/{courseId}/lessons/{lessonId}/split
 - `primaryVideoStartSec`
 - `primaryVideoEndSec`
 
+`primaryVideoStartSec` / `primaryVideoEndSec` 必须随 `primaryVideoResourceId` 一起提交；`end` 必须大于 `start` 且不得超过视频时长。
+
 `UpdateLessonRequest`:
 
 - `title`
 - `lessonStatus`
 - `metaJson`
+
+`UpdateLessonRequest.lessonStatus` 只允许 `draft|resource_ready|learning_ready|completed|stale`；`deleted` 只能通过 `DELETE /api/v1/courses/{courseId}/lessons/{lessonId}` 产生，以保证 `deletedAt` 和排序压缩一致。
 
 `ReorderLessonsRequest`:
 
@@ -162,6 +166,8 @@ POST   /api/v1/courses/{courseId}/lessons/{lessonId}/split
 - `orderIndex`
 - `lessonStatus`
 - `primaryVideoResourceId`
+- `primaryVideoStartSec`
+- `primaryVideoEndSec`
 - `handoutStatus`
 - `quizStatus`
 - `reviewStatus`
@@ -183,12 +189,19 @@ POST   /api/v1/courses/{courseId}/lessons/{lessonId}/split
 - `weaknessPlaceholders`
 - `nextAction`
 
-Merge / split 不物理删除已生成产物；受影响的 lesson-scoped artifacts 必须标记 `stale` 或写入等价 stale metadata。
+Merge / split 不物理删除已生成产物；受影响的 lesson-scoped artifacts 必须标记 `stale` 或写入等价 stale metadata。响应返回 `staleArtifacts` 详情和类型化 `staleArtifactIds`，`staleArtifactIds` 使用 `{artifactType}:{artifactId}` 格式，避免 SQL 多表 id 重叠。
 
 Frozen route tokens:
 
 - GET /api/v1/courses/{courseId}/lessons
 - POST /api/v1/courses/{courseId}/lessons
+- GET /api/v1/courses/{courseId}/lessons/{lessonId}
+- PATCH /api/v1/courses/{courseId}/lessons/{lessonId}
+- DELETE /api/v1/courses/{courseId}/lessons/{lessonId}
+- POST /api/v1/courses/{courseId}/lessons/reorder
+- POST /api/v1/courses/{courseId}/lessons/{lessonId}/primary-video
+- POST /api/v1/courses/{courseId}/lessons/merge
+- POST /api/v1/courses/{courseId}/lessons/{lessonId}/split
 
 ## 4. Resource Scope And Import Placement
 

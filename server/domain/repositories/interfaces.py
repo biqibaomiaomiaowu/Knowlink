@@ -79,6 +79,7 @@ class LessonRepository(Protocol):
         primary_video_resource_id: int | None = None,
         primary_video_start_sec: int | None = None,
         primary_video_end_sec: int | None = None,
+        meta_json: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
     def list_lessons(self, course_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]: ...
@@ -95,6 +96,14 @@ class LessonRepository(Protocol):
 
     def soft_delete_lesson(self, *, course_id: int, lesson_id: int) -> dict[str, Any]: ...
 
+    def update_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        changes: Mapping[str, Any],
+    ) -> dict[str, Any] | None: ...
+
 
 class ScopedArtifactRepository(Protocol):
     def create_scoped_artifact(
@@ -107,6 +116,15 @@ class ScopedArtifactRepository(Protocol):
         start_lesson_id: int | None = None,
         end_lesson_id: int | None = None,
     ) -> dict[str, Any]: ...
+
+    def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]: ...
+
+    def mark_lesson_artifacts_stale(
+        self,
+        *,
+        course_id: int,
+        lesson_ids: Sequence[int],
+    ) -> list[dict[str, Any]]: ...
 
 
 class ParseRunRepository(Protocol):

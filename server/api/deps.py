@@ -14,6 +14,7 @@ from server.domain.services import (
     HandoutService,
     HomeService,
     InquiryService,
+    LessonService,
     PipelineService,
     ProgressService,
     QaService,
@@ -169,6 +170,19 @@ async def get_course_workbench_service(
         lessons=course_repo,
         resources=course_repo,
         lesson_progress=course_repo,
+    )
+
+
+async def get_lesson_service(
+    repo=Depends(get_week2_runtime_repository),
+) -> LessonService:
+    course_repo = getattr(repo, "store", repo)
+    return LessonService(
+        courses=course_repo,
+        lessons=course_repo,
+        resources=course_repo,
+        lesson_progress=course_repo,
+        scoped_artifacts=course_repo,
     )
 
 

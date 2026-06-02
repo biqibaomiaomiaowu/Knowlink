@@ -6,6 +6,7 @@ from server.domain.services.errors import ServiceError
 from server.domain.services.handouts import HandoutService
 from server.domain.services.home import HomeService
 from server.domain.services.inquiry import InquiryService
+from server.domain.services.lessons import LessonService
 from server.domain.services.pipelines import PipelineService
 from server.domain.services.progress import ProgressService
 from server.domain.services.qa import QaService
@@ -21,6 +22,7 @@ __all__ = [
     "HandoutService",
     "HomeService",
     "InquiryService",
+    "LessonService",
     "PipelineService",
     "ProgressService",
     "QaService",
