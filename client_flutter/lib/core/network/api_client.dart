@@ -6,6 +6,7 @@ import '../../shared/models/bilibili_import_models.dart';
 import '../../shared/models/confirm_recommendation_request.dart';
 import '../../shared/models/confirm_recommendation_result.dart';
 import '../../shared/models/course_create_request.dart';
+import '../../shared/models/course_lesson_models.dart';
 import '../../shared/models/course_progress_models.dart';
 import '../../shared/models/course_summary.dart';
 import '../../shared/models/handout_models.dart';
@@ -660,4 +661,301 @@ class ApiClient {
     final data = response.data?['data'] as Map<String, dynamic>;
     return BilibiliImportTaskModel.fromJson(data);
   }
+
+  Future<List<CourseLibraryItemModel>> fetchCourseLibrary({
+    String? query,
+    String? learningStatus,
+    String? source,
+    String archived = 'exclude',
+    String sort = 'recent_activity_desc',
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses',
+      queryParameters: {
+        if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+        if (learningStatus != null && learningStatus.isNotEmpty)
+          'learningStatus': learningStatus,
+        if (source != null && source.isNotEmpty) 'source': source,
+        'archived': archived,
+        'sort': sort,
+      },
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    final items = data['items'] as List<dynamic>? ?? const [];
+    return items
+        .map(
+          (item) => CourseLibraryItemModel.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<CourseWorkbenchModel> fetchCourseWorkbench(String courseId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/workbench',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseWorkbenchModel.fromJson(data);
+  }
+
+  Future<List<LessonSummaryModel>> fetchLessons(String courseId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    final items = data['items'] as List<dynamic>? ?? const [];
+    return items
+        .map(
+          (item) => LessonSummaryModel.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<LessonDetailModel> fetchLessonDetail({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return LessonDetailModel.fromJson(data);
+  }
+
+  Future<LessonSummaryModel> createLesson({
+    required String courseId,
+    required Map<String, dynamic> request,
+    String? idempotencyKey,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons',
+      data: request,
+      options: idempotencyKey == null
+          ? null
+          : Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return LessonSummaryModel.fromJson(_firstPayload(data, 'lesson'));
+  }
+
+  Future<LessonSummaryModel> updateLesson({
+    required String courseId,
+    required String lessonId,
+    required Map<String, dynamic> request,
+  }) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId',
+      data: request,
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return LessonSummaryModel.fromJson(_firstPayload(data, 'lesson'));
+  }
+
+  Future<void> deleteLesson({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    await _dio.delete<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId',
+    );
+  }
+
+  Future<List<LessonSummaryModel>> reorderLessons({
+    required String courseId,
+    required List<String> lessonIds,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/reorder',
+      data: {'lessonIds': lessonIds},
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    final items = data['items'] as List<dynamic>? ?? const [];
+    return items
+        .map(
+          (item) => LessonSummaryModel.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<LessonSummaryModel> setLessonPrimaryVideo({
+    required String courseId,
+    required String lessonId,
+    required String resourceId,
+    required int startSec,
+    required int endSec,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId/primary-video',
+      data: {
+        'resourceId': resourceId,
+        'startSec': startSec,
+        'endSec': endSec,
+      },
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return LessonSummaryModel.fromJson(_firstPayload(data, 'lesson'));
+  }
+
+  Future<Map<String, dynamic>> mergeLessons({
+    required String courseId,
+    required List<String> lessonIds,
+    String? targetTitle,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/merge',
+      data: {
+        'lessonIds': lessonIds,
+        if (targetTitle != null) 'targetTitle': targetTitle,
+      },
+    );
+    return Map<String, dynamic>.from(response.data?['data'] as Map);
+  }
+
+  Future<Map<String, dynamic>> splitLesson({
+    required String courseId,
+    required String lessonId,
+    required int splitAtSec,
+    String? firstTitle,
+    String? secondTitle,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId/split',
+      data: {
+        'splitAtSec': splitAtSec,
+        if (firstTitle != null) 'firstTitle': firstTitle,
+        if (secondTitle != null) 'secondTitle': secondTitle,
+      },
+    );
+    return Map<String, dynamic>.from(response.data?['data'] as Map);
+  }
+
+  Future<LessonProgressModel> fetchLessonProgress({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId/progress',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return LessonProgressModel.fromJson(data);
+  }
+
+  Future<LessonProgressModel> updateLessonProgress({
+    required String courseId,
+    required String lessonId,
+    required Map<String, dynamic> request,
+  }) async {
+    final response = await _dio.put<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId/progress',
+      data: request,
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return LessonProgressModel.fromJson(data);
+  }
+
+  Future<PlaceholderEntryModel> fetchCourseQaPlaceholder(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/qa/sessions',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return _placeholderFromData(
+      data,
+      fallbackKey: 'course_qa',
+      fallbackTitle: '全课程 QA',
+    );
+  }
+
+  Future<PlaceholderEntryModel> fetchLessonQaPlaceholder({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId/qa/sessions',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return _placeholderFromData(
+      data,
+      fallbackKey: 'lesson_qa',
+      fallbackTitle: '本节 QA',
+    );
+  }
+
+  Future<PlaceholderEntryModel> fetchCourseGraphPlaceholder(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/graph',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return _placeholderFromData(
+      data,
+      fallbackKey: 'course_graph',
+      fallbackTitle: '课程图谱',
+    );
+  }
+
+  Future<PlaceholderEntryModel> fetchLessonGraphPlaceholder({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId/graph',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return _placeholderFromData(
+      data,
+      fallbackKey: 'lesson_graph',
+      fallbackTitle: '本节图谱',
+    );
+  }
+
+  Future<PlaceholderEntryModel> fetchCourseExportPlaceholder(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/exports',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return _placeholderFromData(
+      data,
+      fallbackKey: 'export',
+      fallbackTitle: '课程导出',
+    );
+  }
+}
+
+Map<String, dynamic> _firstPayload(Map<String, dynamic> data, String key) {
+  return Map<String, dynamic>.from((data[key] as Map?) ?? data);
+}
+
+PlaceholderEntryModel _placeholderFromData(
+  Map<String, dynamic> data, {
+  required String fallbackKey,
+  required String fallbackTitle,
+}) {
+  final placeholder = data['placeholder'];
+  if (placeholder is Map) {
+    return PlaceholderEntryModel.fromJson(
+      Map<String, dynamic>.from(placeholder),
+    );
+  }
+  return PlaceholderEntryModel(
+    key: fallbackKey,
+    title: fallbackTitle,
+    status: data['status'] as String? ??
+        data['summaryStatus'] as String? ??
+        'placeholder',
+    message: data['message'] as String? ?? '暂无会话',
+  );
 }

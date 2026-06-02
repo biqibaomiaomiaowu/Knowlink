@@ -138,13 +138,44 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
     );
   }
 
+  void updateQueuedFileScope({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId = false,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement = false,
+    String? lessonTitle,
+    bool clearLessonTitle = false,
+  }) {
+    state = state.copyWith(
+      uploadQueue: state.uploadQueue.map((item) {
+        if (item.id != itemId || item.isUploading) {
+          return item;
+        }
+        return item.copyWith(
+          scopeType: scopeType,
+          lessonId: lessonId,
+          clearLessonId: clearLessonId,
+          usageRole: usageRole,
+          lessonPlacement: lessonPlacement,
+          clearLessonPlacement: clearLessonPlacement,
+          lessonTitle: lessonTitle,
+          clearLessonTitle: clearLessonTitle,
+        );
+      }).toList(),
+    );
+  }
+
   Future<void> uploadPendingFiles(String courseId) async {
     if (state.isUploading) {
       return;
     }
 
     final pendingItems = state.uploadQueue
-        .where((item) => item.isPending || item.hasFailed)
+        .where((item) =>
+            (item.isPending || item.hasFailed) && item.hasRequiredScope)
         .toList();
     for (final item in pendingItems) {
       await _uploadItem(courseId: courseId, item: item);
@@ -171,6 +202,12 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
           mimeType: item.mimeType,
           sizeBytes: item.sizeBytes,
           checksum: item.checksum,
+          scopeType: item.scopeType,
+          lessonId: item.lessonId,
+          usageRole: item.usageRole,
+          lessonPlacement: item.lessonPlacement,
+          lessonTitle: item.lessonTitle,
+          visibleToCourseQa: item.visibleToCourseQa,
         ),
       );
 
@@ -190,6 +227,12 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
           mimeType: item.mimeType,
           sizeBytes: item.sizeBytes,
           checksum: item.checksum,
+          scopeType: item.scopeType,
+          lessonId: item.lessonId,
+          usageRole: item.usageRole,
+          lessonPlacement: item.lessonPlacement,
+          lessonTitle: item.lessonTitle,
+          visibleToCourseQa: item.visibleToCourseQa,
         ),
         idempotencyKey: 'upload-complete-$courseId-${item.id}',
       );
@@ -234,6 +277,14 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
       sizeBytes: file.size,
       checksum: 'sha256:${sha256.convert(bytes).toString()}',
       bytes: Uint8List.fromList(bytes),
+      scopeType: resourceType == ResourceType.mp4 ? 'lesson' : 'course',
+      usageRole: resourceType == ResourceType.mp4
+          ? 'primary_video'
+          : 'course_material',
+      lessonPlacement: resourceType == ResourceType.mp4 ? 'auto_create' : null,
+      lessonTitle: resourceType == ResourceType.mp4
+          ? file.name.replaceAll(RegExp(r'\.[^.]+$'), '')
+          : null,
     );
   }
 }

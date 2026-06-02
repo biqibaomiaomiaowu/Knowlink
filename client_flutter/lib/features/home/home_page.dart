@@ -79,8 +79,18 @@ class _HomePageState extends ConsumerState<HomePage> {
             blockId: blockId,
           );
     ref.read(playerStateProvider.notifier).state = PlayerState(
-      positionSec: progress?.lastPositionSec ?? 0,
+      positionSec: progress?.lastPositionSec ?? course.lastPositionSec ?? 0,
     );
+    final lessonId = progress?.currentLessonId ?? course.currentLessonId;
+    if (lessonId != null && lessonId.isNotEmpty) {
+      ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+        courseId: course.courseId.toString(),
+        lessonId: lessonId,
+        positionSec: progress?.lastPositionSec ?? course.lastPositionSec ?? 0,
+      );
+      context.go('/courses/${course.courseId}/lessons/$lessonId');
+      return;
+    }
     context.go('/courses/${course.courseId}/handout');
   }
 
@@ -445,7 +455,7 @@ class _RecentLearningDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final resumeText = _resumeText(progress);
+    final resumeText = _resumeText(progress, course);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -784,11 +794,18 @@ class _EmptyText extends StatelessWidget {
   }
 }
 
-String _resumeText(CourseProgressModel? progress) {
+String _resumeText(CourseProgressModel? progress, CourseSummaryModel course) {
+  final lessonTitle = progress?.currentLessonTitle ?? course.currentLessonTitle;
   if (progress == null || !progress.hasResumeTarget) {
+    if (lessonTitle != null && lessonTitle.isNotEmpty) {
+      return '上次学习：$lessonTitle';
+    }
     return '还没有最近学习位置，点击继续学习会进入讲义页。';
   }
   final parts = <String>[];
+  if (lessonTitle != null && lessonTitle.isNotEmpty) {
+    parts.add(lessonTitle);
+  }
   if (progress.lastHandoutBlockId != null) {
     parts.add('讲义块 ${progress.lastHandoutBlockId}');
   }
