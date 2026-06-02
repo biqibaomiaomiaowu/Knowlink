@@ -1090,6 +1090,7 @@ def _upload_payload(course_id: int, suffix: str) -> UploadCompleteRequest:
         mime_type="application/pdf",
         size_bytes=1024,
         checksum="sha256:new",
+        scope_type="course",
     )
 
 
