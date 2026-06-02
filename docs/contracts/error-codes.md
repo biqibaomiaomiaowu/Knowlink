@@ -20,11 +20,21 @@
 ## Course And Resource
 
 - `course.not_found`: 课程不存在
+- `course.delete_blocked`: 删除课程前发现资源、节课、学习产物、进度或引用 blocker，不能安全删除
 - `resource.not_found`: 资源不存在
 - `resource.has_dependents`: 资源已被后端解析产物、引用或学习进度依赖，当前不能安全删除
 - `resource.invalid_payload`: 上传完成回调字段不完整
 - `resource.not_video`: 资源不是可播放视频
 - `resource.playback_unavailable`: 播放地址生成失败
+- `resource.scope_required`: 上传或导入资料未声明 `scopeType`
+- `resource.lesson_mismatch`: 资料声明的 lesson 不存在或不属于当前课程
+
+## Lesson
+
+- `lesson.not_found`: 节课不存在或不属于当前课程
+- `lesson.scope_required`: 请求需要明确 lesson scope 或 lesson id
+- `lesson.order_conflict`: 节课排序请求缺失、重复、跨课程或违反同课程唯一顺序
+- `lesson.has_dependents`: 节课存在无法安全级联的资源、产物、进度或引用
 
 ## Bilibili
 
@@ -91,5 +101,10 @@
 ## QA / Quiz / Review
 
 - `qa.block_not_found`: 讲义块不存在
+- `qa.scope_invalid`: QA session 或消息请求 scope 与 course / lesson 不匹配
 - `quiz.not_found`: 测验不存在
 - `review.run_not_found`: 复习任务重算记录不存在
+
+## Artifact Scope
+
+- `artifact.scope_invalid`: 讲义、测验、复习、图谱、报告或导出请求 scope 非法

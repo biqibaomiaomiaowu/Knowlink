@@ -52,6 +52,7 @@
 - `docs/v2/phase-plan.md` 是第二版的规划和责任口径，不直接等同于已实现 API。
 - V2 新增或重做 B站真实导入、知识图谱、实时流式输出、主观题自动判卷时，必须先补充对应 API / DTO / schema / 错误码 contract，再实施代码。
 - V2 B站真实导入 contract 已单独冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)；该文档覆盖本文 B站 V1 `501` stub 的历史口径。
+- V2 Phase 2 课程库、节课、工作台、分层资料和分层学习产物 contract 已单独冻结在 [v2-course-lesson-workbench-contract.md](./v2-course-lesson-workbench-contract.md)；课程列表、course workbench、lesson detail、resource scope、course QA、lesson QA、quiz / review / graph / export placeholder 和 home continue-learning 以该文档为准。
 - V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示第一版历史实现状态。
 - V2 状态拼写统一使用 `canceled`，不使用 `cancelled`。外部资料或旧 spec 中出现 `cancelled` 时，进入 API contract 前统一归一化为 `canceled`。
 - V2 B站导入细分状态到 `async_tasks.status` 的完整冻结映射以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准；本文仅保留过渡摘要：
