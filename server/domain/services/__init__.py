@@ -1,5 +1,6 @@
 """Domain service exports."""
 from server.domain.services.bilibili import BilibiliService
+from server.domain.services.course_recommendations import CourseRecommendationService
 from server.domain.services.course_workbench import CourseWorkbenchService
 from server.domain.services.courses import CourseService
 from server.domain.services.errors import ServiceError
@@ -18,6 +19,7 @@ from server.domain.services.reviews import ReviewService
 
 __all__ = [
     "BilibiliService",
+    "CourseRecommendationService",
     "CourseWorkbenchService",
     "CourseService",
     "ExportService",

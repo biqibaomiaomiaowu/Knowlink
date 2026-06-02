@@ -37,15 +37,15 @@ class ExportService:
 
     def get_course_report_summary(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
-        return self._report_placeholder(scope_type="course")
+        return self._report_placeholder(course_id=course_id, scope_type="course")
 
     def get_lesson_report_summary(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
         self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
-        return self._report_placeholder(scope_type="lesson", lesson_id=lesson_id)
+        return self._report_placeholder(course_id=course_id, scope_type="lesson", lesson_id=lesson_id)
 
     def list_exports(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
-        return self._export_placeholder(scope_type="course")
+        return self._export_placeholder(course_id=course_id, scope_type="course")
 
     def create_export(self, *, course_id: int, payload) -> dict[str, object]:
         self._ensure_course(course_id)
@@ -76,6 +76,7 @@ class ExportService:
                 raise self._service_error_from_value_error(exc) from exc
             export_id = int(artifact["artifactId"])
         return self._export_placeholder(
+            course_id=course_id,
             scope_type=scope_type,
             lesson_id=lesson_id,
             export_type=payload.export_type,
@@ -121,10 +122,17 @@ class ExportService:
             "edges": [],
         }
 
-    def _report_placeholder(self, *, scope_type: str, lesson_id: int | None = None) -> dict[str, object]:
+    def _report_placeholder(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> dict[str, object]:
         return {
             "summaryStatus": "placeholder",
             "scopeType": scope_type,
+            "courseId": course_id,
             "lessonId": lesson_id,
             "metrics": [],
             "message": "学习报告本轮仅提供占位摘要。",
@@ -133,6 +141,7 @@ class ExportService:
     def _export_placeholder(
         self,
         *,
+        course_id: int,
         scope_type: str,
         lesson_id: int | None = None,
         export_type: str | None = None,
@@ -142,6 +151,7 @@ class ExportService:
             "availableExportTypes": AVAILABLE_EXPORT_TYPES,
             "status": "placeholder",
             "scopeType": scope_type,
+            "courseId": course_id,
             "lessonId": lesson_id,
             "exportType": export_type,
             "exportId": export_id,

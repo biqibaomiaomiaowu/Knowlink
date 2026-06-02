@@ -437,6 +437,7 @@ class GraphPlaceholderData(PlaceholderData):
 class ReportSummaryPlaceholderData(CamelModel):
     summary_status: Literal["placeholder"] = "placeholder"
     scope_type: Literal["course", "lesson"]
+    course_id: int
     lesson_id: int | None = None
     metrics: list[dict[str, object]] = Field(default_factory=list)
     message: str
@@ -448,11 +449,39 @@ class ExportPlaceholderData(CamelModel):
     ]
     status: Literal["placeholder"] = "placeholder"
     scope_type: Literal["course", "lesson"] = "course"
+    course_id: int
     lesson_id: int | None = None
     export_type: str | None = None
     export_id: int | None = None
     download_url: str | None = None
     message: str
+
+
+class ContinueLearningData(CamelModel):
+    course_id: int
+    lesson_id: int
+    last_position_sec: int
+    last_handout_block_id: int | None = None
+    next_route: str
+    next_action: dict[str, object]
+
+
+class CourseRecommendationAction(CamelModel):
+    type: str
+    scope_type: str
+    course_id: int
+    lesson_id: int | None = None
+    title: str
+    reason: str
+    reason_placeholders: dict[str, str] = Field(default_factory=dict)
+    next_route: str
+
+
+class CourseRecommendationListData(CamelModel):
+    course_id: int
+    scope_type: Literal["course", "lesson"]
+    lesson_id: int | None = None
+    items: list[CourseRecommendationAction]
 
 
 class DashboardData(CamelModel):
@@ -461,6 +490,14 @@ class DashboardData(CamelModel):
     recommendation_entry_enabled: bool = True
     daily_recommended_knowledge_points: list[dict[str, object]] = []
     learning_stats: dict[str, object] | None = None
+    current_course: dict[str, object] | None = None
+    current_lesson: dict[str, object] | None = None
+    continue_learning: ContinueLearningData | None = None
+    next_step: dict[str, object] | None = None
+    today_review_tasks: list[dict[str, object]] = Field(default_factory=list)
+    recommended_next_lesson: dict[str, object] | None = None
+    recommended_stage_quiz: dict[str, object] | None = None
+    course_quick_entries: list[CourseQuickEntry] = Field(default_factory=list)
 
 
 class ResourceStatusData(CamelModel):

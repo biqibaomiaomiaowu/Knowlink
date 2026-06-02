@@ -2,7 +2,7 @@
 
 日期：2026-06-02
 
-本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结、Task 2 后端 schema / repository 原语、Task 3 课程库 / 课程管理 / 删除影响 / 课程工作台后端 API、Task 4 lesson API、Task 5 资源 scope / 上传 placement / B站导入自动建 lesson、Task 6 分层学习产物 / placeholder API，以及 Task 7 Flutter 课程 / 节课 IA 页面；后续任务继续补充首页推荐和最终验收证据。
+本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结、Task 2 后端 schema / repository 原语、Task 3 课程库 / 课程管理 / 删除影响 / 课程工作台后端 API、Task 4 lesson API、Task 5 资源 scope / 上传 placement / B站导入自动建 lesson、Task 6 分层学习产物 / placeholder API、Task 7 Flutter 课程 / 节课 IA 页面，以及 Task 8 首页继续学习 / 课程内推荐 / 报告导出占位；后续任务继续补充最终验收证据。
 
 ## Implemented Scope
 
@@ -13,6 +13,7 @@
 - Task 5：新增资源上传 scope 校验、本地 MP4 自动建 lesson / 绑定既有 lesson、B站导入 per-video lesson mapping 与重试复用。
 - Task 6：新增 course / lesson 讲义、QA、测验、复习、进度、图谱、报告和导出 placeholder API，并保留 V1 course-level 兼容入口。
 - Task 7：新增 Flutter 课程库、课程工作台、节课详情、全课程 / 节课 QA、graph / report / export / handout placeholder 页面、课程导入 scope 控件和继续学习跳转；默认 `/courses/:courseId/review` 保留既有真实复习任务页，report / 综合测验 / 主观题判卷通过 query 进入占位状态；前端模型对齐冻结 DTO 的 `artifactSummaries` list、`nextAction.type/route`、lesson progress 和 lesson 操作门面。
+- Task 8：新增首页 `continueLearning` 具体节课定位、current course / current lesson / next step / today review tasks / course quick entries；新增 course / lesson `recommendations/next-actions` 确定性规则推荐；报告和导出 placeholder 响应补齐 `courseId` / `lessonId` scope 字段。
 - 契约入口：`docs/contracts/v2-course-lesson-workbench-contract.md`。
 
 ## Non-goals And Placeholders
@@ -30,7 +31,8 @@
 | Lessons | lesson CRUD, reorder, primary video, merge, split | Done for Task 4 backend API | `server/tests/test_lessons_api.py`, `server/tests/test_lesson_repository.py` |
 | Resource scope | `scopeType`, `lessonId`, `usageRole`, `lessonPlacement` | Done for Task 5 upload API and B站 import binding | `server/tests/test_resource_scope_import.py` |
 | Scoped artifacts | handout, QA, quiz, review, graph, report, export | Done for Task 6 placeholder API | `server/tests/test_scoped_learning_artifacts.py`, `server/tests/test_lesson_repository.py` |
-| Home / progress | continue into lesson, lesson progress | Lesson progress API done; home continue-learning pending Task 8 | `server/tests/test_scoped_learning_artifacts.py`, `server/tests/test_lesson_repository.py` |
+| Home / progress | continue into lesson, lesson progress | Done for Task 8 home continue-learning and lesson-scoped next actions | `server/tests/test_home_lesson_continuation.py`, `server/tests/test_scoped_learning_artifacts.py`, `server/tests/test_lesson_repository.py` |
+| In-course recommendations | course / lesson next-actions placeholder rules | Done for Task 8 deterministic rule-based recommendations; graph-driven reasons remain placeholder | `server/tests/test_home_lesson_continuation.py` |
 
 ## Flutter Contract Table
 
@@ -69,6 +71,8 @@
 - 无单资料 QA 入口检查证据：`server/tests/test_scoped_learning_artifacts.py::test_course_and_lesson_qa_sessions_are_separate_and_lesson_citations_are_scoped` 断言 `/courses/{courseId}/resources/{resourceId}/qa/messages` 返回 404。
 - Task 6 分层产物 API 验证命令：`.venv/bin/python -m pytest -q server/tests/test_scoped_learning_artifacts.py server/tests/test_qa_policy.py server/tests/test_quiz_strategy.py server/tests/test_api.py server/tests/test_lesson_repository.py`。
 - Task 7 Flutter 验证命令（规格修复后复跑）：`flutter test test/app_router_test.dart test/widgets/course_library_page_test.dart test/widgets/course_workbench_page_test.dart test/widgets/lesson_detail_page_test.dart test/shared/course_lesson_api_test.dart` 通过；`flutter analyze` 通过。当前 WSL Flutter shell wrapper 有 CRLF 问题，实际验证在 D 盘临时副本通过 Windows Flutter SDK 执行。
+- Task 8 首页 / 推荐 / 报告导出占位验证命令：`.venv/bin/python -m pytest -q server/tests/test_home_lesson_continuation.py server/tests/test_course_workbench_api.py` 通过。
+- Task 8 scoped artifact 回归验证命令：`.venv/bin/python -m pytest -q server/tests/test_scoped_learning_artifacts.py` 通过。
 - 后端 pytest 命令和结果：`server/tests/test_lesson_repository.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py server/tests/test_resource_deletion_semantics.py server/tests/test_sql_runtime_contract.py` 通过。
 - Task 3 后端 pytest 命令和结果：`.venv/bin/python -m pytest -q server/tests/test_course_workbench_api.py server/tests/test_api.py` 通过。
 - Task 3 repository / migration 回归：`.venv/bin/python -m pytest -q server/tests/test_lesson_repository.py server/tests/test_lesson_migration.py server/tests/test_scaffold_consistency.py server/tests/test_sql_runtime_contract.py` 通过。
