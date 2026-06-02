@@ -5,6 +5,8 @@ from server.domain.repositories import (
     CourseRepository,
     HandoutRepository,
     IdempotencyRepository,
+    LessonRepository,
+    ResourceRepository,
     TaskDispatcher,
 )
 from server.domain.services.async_tasks import (
@@ -26,6 +28,8 @@ class HandoutService:
         courses: CourseRepository,
         handouts: HandoutRepository,
         idempotency: IdempotencyRepository,
+        lessons: LessonRepository | None = None,
+        resources: ResourceRepository | None = None,
         task_dispatcher: TaskDispatcher | None = None,
         outline_client: HandoutOutlineClient | None = None,
         async_tasks: AsyncTaskRepository | None = None,
@@ -33,9 +37,58 @@ class HandoutService:
         self.courses = courses
         self.handouts = handouts
         self.idempotency = idempotency
+        self.lessons = lessons
+        self.resources = resources
         self.task_dispatcher = task_dispatcher
         self.outline_client = outline_client
         self.async_tasks = resolve_async_tasks(async_tasks, handouts)
+
+    def get_course_summary_placeholder(self, *, course_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        return {
+            "scopeType": "course",
+            "lessonId": None,
+            "artifactKind": "course_summary_handout",
+            "status": "placeholder",
+            "canGenerate": True,
+            "requiredSources": ["lessons", "course_resources", "lesson_handouts"],
+            "message": "课程总结讲义将在后续生成任务中汇总课程资料、节课讲义和测验复习结果。",
+            "availableActions": ["generate"],
+            "citations": [],
+        }
+
+    def generate_course_summary_placeholder(self, *, course_id: int) -> dict[str, object]:
+        return self.get_course_summary_placeholder(course_id=course_id)
+
+    def get_lesson_handout_placeholder(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        lesson = self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        lesson_resources = self._lesson_resources(course_id=course_id, lesson_id=lesson_id)
+        has_primary_video = lesson.get("primaryVideoResourceId") is not None or any(
+            resource.get("usageRole") == "primary_video" or resource.get("resourceType") == "mp4"
+            for resource in lesson_resources
+        )
+        can_generate = has_primary_video or bool(lesson_resources)
+        required_sources = []
+        if not has_primary_video:
+            required_sources.append("primary_video")
+        if not lesson_resources:
+            required_sources.append("lesson_resources")
+        if not required_sources:
+            required_sources = ["primary_video", "lesson_resources"]
+        return {
+            "scopeType": "lesson",
+            "lessonId": lesson_id,
+            "artifactKind": "lesson_handout",
+            "status": "placeholder",
+            "canGenerate": can_generate,
+            "requiredSources": required_sources,
+            "message": "节课讲义将在后续生成任务中基于本节主视频、本节资料和必要课程级资料生成。",
+            "availableActions": ["generate"] if can_generate else ["upload_primary_video", "upload_lesson_resource"],
+            "citations": [],
+        }
+
+    def generate_lesson_handout_placeholder(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        return self.get_lesson_handout_placeholder(course_id=course_id, lesson_id=lesson_id)
 
     def generate_handout(self, *, course_id: int, idempotency_key: str | None) -> dict[str, object]:
         course = self._ensure_course(course_id)
@@ -341,6 +394,32 @@ class HandoutService:
                 status_code=404,
             )
         return course
+
+    def _ensure_lesson(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        if self.lessons is None:
+            raise ServiceError(
+                message="Lesson repository is unavailable.",
+                error_code="lesson.not_found",
+                status_code=404,
+            )
+        lesson = self.lessons.get_lesson(course_id=course_id, lesson_id=lesson_id)
+        if lesson is None:
+            raise ServiceError(
+                message="Lesson was not found.",
+                error_code="lesson.not_found",
+                status_code=404,
+            )
+        return lesson
+
+    def _lesson_resources(self, *, course_id: int, lesson_id: int) -> list[dict[str, object]]:
+        if self.resources is None:
+            return []
+        return [
+            resource
+            for resource in self.resources.list_resources(course_id)
+            if resource.get("scopeType") == "lesson" and resource.get("lessonId") == lesson_id
+        ]
 
 
 def _entity_id(trigger: dict[str, object]) -> int | None:

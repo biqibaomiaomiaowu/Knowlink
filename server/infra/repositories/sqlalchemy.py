@@ -1774,21 +1774,168 @@ class SqlAlchemyRuntimeRepository:
             result["generationMetadata"] = generation_metadata
         return result
 
+    def list_scoped_qa_sessions(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if self._get_course_model(course_id) is None:
+            return []
+        stmt = (
+            select(QaSession)
+            .where(
+                QaSession.user_id == self.user_id,
+                QaSession.course_id == course_id,
+                QaSession.scope_type == scope_type,
+                QaSession.handout_version_id.is_(None),
+                QaSession.handout_block_id.is_(None),
+            )
+            .order_by(QaSession.id.asc())
+        )
+        if scope_type == "lesson":
+            stmt = stmt.where(QaSession.lesson_id == lesson_id)
+        else:
+            stmt = stmt.where(QaSession.lesson_id.is_(None))
+        return [
+            {
+                "sessionId": session.id,
+                "courseId": session.course_id,
+                "scopeType": session.scope_type,
+                "lessonId": session.lesson_id,
+                "title": session.title,
+                "lastMessageAt": _aware_datetime(session.last_message_at),
+            }
+            for session in self.session.scalars(stmt).all()
+        ]
+
+    def create_scoped_qa_exchange(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        question: str,
+        answer_md: str,
+        citations: Sequence[dict[str, Any]],
+        session_id: int | None = None,
+    ) -> dict[str, Any]:
+        if self._get_course_model(course_id) is None:
+            raise ValueError("course.not_found")
+        if scope_type == "lesson":
+            if lesson_id is None or self._get_lesson_model(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("qa.scope_invalid")
+        elif scope_type != "course" or lesson_id is not None:
+            raise ValueError("qa.scope_invalid")
+
+        now = utcnow()
+        if session_id is None:
+            qa_session = QaSession(
+                user_id=self.user_id,
+                course_id=course_id,
+                scope_type=scope_type,
+                lesson_id=lesson_id if scope_type == "lesson" else None,
+                title=question[:80],
+                status="active",
+                context_snapshot_json={"source": "scoped_placeholder"},
+                message_count=0,
+                last_message_at=now,
+            )
+            self.session.add(qa_session)
+            self.session.flush()
+        else:
+            qa_session = self.session.scalar(
+                select(QaSession).where(
+                    QaSession.id == session_id,
+                    QaSession.user_id == self.user_id,
+                    QaSession.course_id == course_id,
+                    QaSession.scope_type == scope_type,
+                    QaSession.lesson_id == (lesson_id if scope_type == "lesson" else None),
+                    QaSession.handout_version_id.is_(None),
+                    QaSession.handout_block_id.is_(None),
+                )
+            )
+            if qa_session is None:
+                raise ValueError("qa.scope_invalid")
+
+        user_message = QaMessage(
+            session_id=qa_session.id,
+            role="user",
+            content_md=question,
+            content_text=clean_text(question),
+            answer_type=None,
+        )
+        self.session.add(user_message)
+        self.session.flush()
+        assistant_message = QaMessage(
+            session_id=qa_session.id,
+            role="assistant",
+            content_md=answer_md,
+            content_text=clean_text(answer_md),
+            answer_type="placeholder",
+        )
+        self.session.add(assistant_message)
+        self.session.flush()
+        for sort_no, citation in enumerate(citations, start=1):
+            resource_id = _as_positive_int(_payload_value(citation, "resourceId", "resource_id"))
+            if resource_id is None:
+                continue
+            self.session.add(
+                QaMessageRef(
+                    qa_message_id=assistant_message.id,
+                    resource_id=resource_id,
+                    segment_id=None,
+                    ref_type="scoped_placeholder",
+                    quote_text=None,
+                    page_no=_as_positive_int(_payload_value(citation, "pageNo", "page_no")),
+                    slide_no=_as_positive_int(_payload_value(citation, "slideNo", "slide_no")),
+                    anchor_key=_payload_value(citation, "anchorKey", "anchor_key"),
+                    start_sec=_as_positive_int(_payload_value(citation, "startSec", "start_sec")),
+                    end_sec=_as_positive_int(_payload_value(citation, "endSec", "end_sec")),
+                    bbox_json=None,
+                    ref_label=str(_payload_value(citation, "refLabel", "ref_label", default="引用资料")),
+                    sort_no=sort_no,
+                    rank=sort_no,
+                )
+            )
+        qa_session.message_count += 2
+        qa_session.last_message_at = now
+        self._commit_or_flush()
+        return {
+            "sessionId": qa_session.id,
+            "messageId": assistant_message.id,
+            "courseId": course_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "answerMd": answer_md,
+            "answerType": "placeholder",
+            "citations": list(citations),
+            "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+        }
+
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         qa_session = self.session.scalar(
             select(QaSession)
             .join(Course, Course.id == QaSession.course_id)
-            .join(HandoutVersion, HandoutVersion.id == QaSession.handout_version_id)
             .where(
                 QaSession.id == session_id,
                 QaSession.user_id == self.user_id,
                 Course.user_id == self.user_id,
-                Course.active_handout_version_id == QaSession.handout_version_id,
-                HandoutVersion.source_parse_run_id == Course.active_parse_run_id,
             )
         )
         if qa_session is None:
             return None
+        if qa_session.handout_version_id is not None:
+            course = self.session.get(Course, qa_session.course_id)
+            version = self.session.get(HandoutVersion, qa_session.handout_version_id)
+            if (
+                course is None
+                or version is None
+                or course.active_handout_version_id != qa_session.handout_version_id
+                or version.source_parse_run_id != course.active_parse_run_id
+            ):
+                return None
         messages = self.session.scalars(
             select(QaMessage)
             .where(QaMessage.session_id == session_id)
@@ -2523,7 +2670,7 @@ class SqlAlchemyRuntimeRepository:
                 course_id=course_id,
                 scope_type=scope_type,
                 lesson_id=lesson_id,
-                export_type="course_summary",
+                export_type=str(extra.get("exportType") or extra.get("export_type") or "course_summary"),
                 status=status,
             )
         else:
@@ -3854,6 +4001,11 @@ def _quiz_dict(quiz: Quiz, *, questions: Sequence[dict[str, Any]]) -> dict[str, 
     return {
         "quizId": quiz.id,
         "courseId": quiz.course_id,
+        "scopeType": quiz.scope_type,
+        "lessonId": quiz.lesson_id,
+        "startLessonId": quiz.start_lesson_id,
+        "endLessonId": quiz.end_lesson_id,
+        "quizMode": quiz.quiz_mode,
         "status": quiz.status,
         "questionCount": quiz.question_count,
         "questions": list(questions),
@@ -4000,7 +4152,7 @@ def _scoped_artifact_dict(
     start_lesson_id: int | None = None,
     end_lesson_id: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "artifactId": artifact.id,
         "artifactType": artifact_type,
         "courseId": course_id,
@@ -4010,6 +4162,9 @@ def _scoped_artifact_dict(
         "endLessonId": end_lesson_id,
         "status": getattr(artifact, "status", "placeholder"),
     }
+    if artifact_type == "export_run":
+        result["exportType"] = getattr(artifact, "export_type", None)
+    return result
 
 
 def _mastery_recommendation_reason(record: MasteryRecord) -> str:

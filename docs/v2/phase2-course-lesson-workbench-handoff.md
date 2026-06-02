@@ -2,7 +2,7 @@
 
 日期：2026-06-02
 
-本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结、Task 2 后端 schema / repository 原语、Task 3 课程库 / 课程管理 / 删除影响 / 课程工作台后端 API、Task 4 lesson API，以及 Task 5 资源 scope / 上传 placement / B站导入自动建 lesson；后续任务继续补充分层学习产物 API、Flutter 页面和最终验收证据。
+本文件用于记录课程 / 节课工作台实现后的交接状态。当前已完成 Task 1 契约冻结、Task 2 后端 schema / repository 原语、Task 3 课程库 / 课程管理 / 删除影响 / 课程工作台后端 API、Task 4 lesson API、Task 5 资源 scope / 上传 placement / B站导入自动建 lesson，以及 Task 6 分层学习产物 / placeholder API；后续任务继续补充 Flutter 页面、首页推荐和最终验收证据。
 
 ## Implemented Scope
 
@@ -11,6 +11,7 @@
 - Task 3：新增完整课程库 `GET /api/v1/courses`、课程 PATCH、归档 / 恢复、删除影响、soft delete 阻塞判断，以及 `GET /api/v1/courses/{courseId}/workbench` 聚合 read model。
 - Task 4：新增 lesson CRUD、reorder、primary video、merge、split，以及 lesson detail 聚合 read model。
 - Task 5：新增资源上传 scope 校验、本地 MP4 自动建 lesson / 绑定既有 lesson、B站导入 per-video lesson mapping 与重试复用。
+- Task 6：新增 course / lesson 讲义、QA、测验、复习、进度、图谱、报告和导出 placeholder API，并保留 V1 course-level 兼容入口。
 - 契约入口：`docs/contracts/v2-course-lesson-workbench-contract.md`。
 
 ## Non-goals And Placeholders
@@ -27,8 +28,8 @@
 | Course library / workbench | `GET /api/v1/courses`, `GET /api/v1/courses/{courseId}/workbench` | Done for Task 3 backend API | `server/tests/test_course_workbench_api.py` |
 | Lessons | lesson CRUD, reorder, primary video, merge, split | Done for Task 4 backend API | `server/tests/test_lessons_api.py`, `server/tests/test_lesson_repository.py` |
 | Resource scope | `scopeType`, `lessonId`, `usageRole`, `lessonPlacement` | Done for Task 5 upload API and B站 import binding | `server/tests/test_resource_scope_import.py` |
-| Scoped artifacts | handout, QA, quiz, review, graph, report, export | Schema and repository placeholders done; API pending | `server/tests/test_lesson_repository.py` |
-| Home / progress | continue into lesson, lesson progress | User lesson progress repository done; API pending | `server/tests/test_lesson_repository.py` |
+| Scoped artifacts | handout, QA, quiz, review, graph, report, export | Done for Task 6 placeholder API | `server/tests/test_scoped_learning_artifacts.py`, `server/tests/test_lesson_repository.py` |
+| Home / progress | continue into lesson, lesson progress | Lesson progress API done; home continue-learning pending Task 8 | `server/tests/test_scoped_learning_artifacts.py`, `server/tests/test_lesson_repository.py` |
 
 ## Flutter Contract Table
 
@@ -62,8 +63,9 @@
 - Lesson detail 响应样例已由 `server/tests/test_lessons_api.py` 固定：lesson、primaryVideo、lessonResources、artifactSummaries、progress、placeholder 和 nextAction。
 - Task 5 资源 / 导入证据：`.venv/bin/python -m pytest -q server/tests/test_resource_scope_import.py server/tests/test_bilibili_service.py server/tests/test_bilibili_import_runner.py` 通过。
 - Task 5 upload smoke：`.venv/bin/python -m pytest -q server/tests/test_api.py -k "upload_complete or upload_contract or resource_playback or bilibili_import"` 通过。
-- Course QA 与 lesson QA 独立入口截图或测试证据。
-- 无单资料 QA 入口的检查证据。
+- Course QA 与 lesson QA 独立入口测试证据：`server/tests/test_scoped_learning_artifacts.py::test_course_and_lesson_qa_sessions_are_separate_and_lesson_citations_are_scoped`。
+- 无单资料 QA 入口检查证据：`server/tests/test_scoped_learning_artifacts.py::test_course_and_lesson_qa_sessions_are_separate_and_lesson_citations_are_scoped` 断言 `/courses/{courseId}/resources/{resourceId}/qa/messages` 返回 404。
+- Task 6 分层产物 API 验证命令：`.venv/bin/python -m pytest -q server/tests/test_scoped_learning_artifacts.py server/tests/test_qa_policy.py server/tests/test_quiz_strategy.py server/tests/test_api.py server/tests/test_lesson_repository.py`。
 - 后端 pytest 命令和结果：`server/tests/test_lesson_repository.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py server/tests/test_resource_deletion_semantics.py server/tests/test_sql_runtime_contract.py` 通过。
 - Task 3 后端 pytest 命令和结果：`.venv/bin/python -m pytest -q server/tests/test_course_workbench_api.py server/tests/test_api.py` 通过。
 - Task 3 repository / migration 回归：`.venv/bin/python -m pytest -q server/tests/test_lesson_repository.py server/tests/test_lesson_migration.py server/tests/test_scaffold_consistency.py server/tests/test_sql_runtime_contract.py` 通过。

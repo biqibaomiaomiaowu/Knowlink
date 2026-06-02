@@ -11,6 +11,7 @@ from server.domain.services import (
     BilibiliService,
     CourseWorkbenchService,
     CourseService,
+    ExportService,
     HandoutService,
     HomeService,
     InquiryService,
@@ -254,10 +255,13 @@ async def get_handout_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> HandoutService:
+    lesson_repo = getattr(repo, "store", repo)
     return HandoutService(
         courses=repo,
         handouts=repo,
         idempotency=repo,
+        lessons=lesson_repo,
+        resources=repo,
         task_dispatcher=task_dispatcher,
         async_tasks=async_tasks,
     )
@@ -266,7 +270,14 @@ async def get_handout_service(
 async def get_qa_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> QaService:
-    return QaService(courses=repo, qa=repo, qa_answer_client=get_configured_qa_answer_client())
+    lesson_repo = getattr(repo, "store", repo)
+    return QaService(
+        courses=repo,
+        qa=repo,
+        lessons=lesson_repo,
+        resources=repo,
+        qa_answer_client=get_configured_qa_answer_client(),
+    )
 
 
 async def get_quiz_service(
@@ -274,10 +285,13 @@ async def get_quiz_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> QuizService:
+    lesson_repo = getattr(repo, "store", repo)
     return QuizService(
         courses=repo,
         quizzes=repo,
         idempotency=repo,
+        lessons=lesson_repo,
+        scoped_artifacts=lesson_repo,
         task_dispatcher=task_dispatcher,
         async_tasks=async_tasks,
     )
@@ -288,10 +302,12 @@ async def get_review_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> ReviewService:
+    lesson_repo = getattr(repo, "store", repo)
     return ReviewService(
         courses=repo,
         reviews=repo,
         idempotency=repo,
+        lessons=lesson_repo,
         task_dispatcher=task_dispatcher,
         async_tasks=async_tasks,
     )
@@ -300,7 +316,15 @@ async def get_review_service(
 async def get_progress_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> ProgressService:
-    return ProgressService(courses=repo, progress=repo)
+    lesson_repo = getattr(repo, "store", repo)
+    return ProgressService(courses=repo, progress=repo, lessons=lesson_repo, lesson_progress=lesson_repo)
+
+
+async def get_export_service(
+    repo=Depends(get_week2_runtime_repository),
+) -> ExportService:
+    lesson_repo = getattr(repo, "store", repo)
+    return ExportService(courses=repo, lessons=lesson_repo, scoped_artifacts=lesson_repo)
 
 
 def _build_object_storage(settings: Settings) -> ObjectStorage | None:

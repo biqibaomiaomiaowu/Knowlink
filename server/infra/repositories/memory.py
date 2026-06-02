@@ -432,6 +432,36 @@ class MemoryScaffoldRepository:
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         return self.store.get_qa_session_messages(session_id)
 
+    def list_scoped_qa_sessions(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.store.list_scoped_qa_sessions(course_id=course_id, scope_type=scope_type, lesson_id=lesson_id)
+
+    def create_scoped_qa_exchange(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        question: str,
+        answer_md: str,
+        citations: Sequence[dict[str, Any]],
+        session_id: int | None = None,
+    ) -> dict[str, Any]:
+        return self.store.create_scoped_qa_exchange(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            question=question,
+            answer_md=answer_md,
+            citations=list(citations),
+            session_id=session_id,
+        )
+
     def create_quiz(
         self,
         course_id: int,
@@ -526,6 +556,47 @@ class MemoryScaffoldRepository:
 
     def update_progress(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.store.update_progress(course_id, payload)
+
+    def upsert_user_lesson_progress(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.store.upsert_user_lesson_progress(course_id=course_id, lesson_id=lesson_id, payload=payload)
+
+    def get_user_lesson_progress(self, *, course_id: int, lesson_id: int) -> dict[str, Any] | None:
+        return self.store.get_user_lesson_progress(course_id=course_id, lesson_id=lesson_id)
+
+    def create_scoped_artifact(
+        self,
+        *,
+        artifact_type: str,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        status: str = "placeholder",
+        **extra: Any,
+    ) -> dict[str, Any]:
+        return self.store.create_scoped_artifact(
+            artifact_type=artifact_type,
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+            status=status,
+            **extra,
+        )
+
+    def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]:
+        return self.store.list_lesson_artifacts(course_id=course_id, lesson_id=lesson_id)
+
+    def mark_lesson_artifacts_stale(self, *, course_id: int, lesson_ids: Sequence[int]) -> list[dict[str, Any]]:
+        return self.store.mark_lesson_artifacts_stale(course_id=course_id, lesson_ids=list(lesson_ids))
 
 
 def _sync_memory_handout_statuses(handout: dict[str, Any]) -> None:

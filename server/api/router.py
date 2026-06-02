@@ -5,6 +5,7 @@ from server.api.routers import (
     bilibili,
     courses,
     course_workbench,
+    exports,
     handouts,
     health,
     home,
@@ -40,5 +41,6 @@ def build_router() -> APIRouter:
     api_v1.include_router(quizzes.router)
     api_v1.include_router(reviews.router)
     api_v1.include_router(progress.router)
+    api_v1.include_router(exports.router)
     root.include_router(api_v1)
     return root

@@ -642,7 +642,7 @@ class RuntimeStore:
         else:
             knowledge_point_key = None
         now = utcnow()
-        artifact_id = self.next_id("scoped_artifact")
+        artifact_id = self.next_id("quiz") if artifact_type == "quiz" else self.next_id("scoped_artifact")
         artifact = {
             "artifactId": artifact_id,
             "artifactType": artifact_type,
@@ -659,6 +659,19 @@ class RuntimeStore:
             artifact["knowledgePointKey"] = knowledge_point_key
         artifact.update(extra)
         self.scoped_artifacts[artifact_id] = artifact
+        if artifact_type == "quiz":
+            self.quizzes[artifact_id] = {
+                "quizId": artifact_id,
+                "courseId": course_id,
+                "scopeType": scope_type,
+                "lessonId": artifact.get("lessonId"),
+                "startLessonId": artifact.get("startLessonId"),
+                "endLessonId": artifact.get("endLessonId"),
+                "quizMode": artifact.get("quizMode") or artifact.get("quiz_mode") or "objective",
+                "status": status,
+                "questionCount": 0,
+                "questions": [],
+            }
         return artifact
 
     def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]:
@@ -1406,6 +1419,112 @@ class RuntimeStore:
         }
         return payload
 
+    def list_scoped_qa_sessions(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        sessions = []
+        for session in self.qa_sessions.values():
+            if session.get("courseId") != course_id or session.get("scopeType") != scope_type:
+                continue
+            if scope_type == "lesson" and session.get("lessonId") != lesson_id:
+                continue
+            if scope_type == "course" and session.get("lessonId") is not None:
+                continue
+            sessions.append(
+                {
+                    "sessionId": session["sessionId"],
+                    "courseId": session["courseId"],
+                    "scopeType": session["scopeType"],
+                    "lessonId": session.get("lessonId"),
+                    "title": session.get("title"),
+                    "lastMessageAt": session.get("lastMessageAt"),
+                }
+            )
+        return sorted(sessions, key=lambda item: item["sessionId"])
+
+    def create_scoped_qa_exchange(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        question: str,
+        answer_md: str,
+        citations: list[dict[str, Any]],
+        session_id: int | None = None,
+    ) -> dict[str, Any]:
+        if self.get_course(course_id) is None:
+            raise ValueError("course.not_found")
+        if scope_type == "lesson":
+            if lesson_id is None or self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("qa.scope_invalid")
+        elif scope_type != "course" or lesson_id is not None:
+            raise ValueError("qa.scope_invalid")
+
+        now = utcnow()
+        if session_id is None:
+            session_id = self.next_id("qa_session")
+            self.qa_sessions[session_id] = {
+                "sessionId": session_id,
+                "courseId": course_id,
+                "scopeType": scope_type,
+                "lessonId": lesson_id if scope_type == "lesson" else None,
+                "title": question[:80],
+                "status": "active",
+                "messages": [],
+                "lastMessageAt": now,
+            }
+        session = self.qa_sessions.get(session_id)
+        if (
+            session is None
+            or session.get("courseId") != course_id
+            or session.get("scopeType") != scope_type
+            or session.get("lessonId") != (lesson_id if scope_type == "lesson" else None)
+        ):
+            raise ValueError("qa.scope_invalid")
+
+        user_message_id = self.next_id("qa_message")
+        assistant_message_id = self.next_id("qa_message")
+        session.setdefault("messages", []).extend(
+            [
+                {
+                    "sessionId": session_id,
+                    "messageId": user_message_id,
+                    "role": "user",
+                    "contentMd": question,
+                    "answerMd": None,
+                    "answerType": None,
+                    "citations": [],
+                },
+                {
+                    "sessionId": session_id,
+                    "messageId": assistant_message_id,
+                    "role": "assistant",
+                    "contentMd": answer_md,
+                    "answerMd": answer_md,
+                    "answerType": "placeholder",
+                    "citations": list(citations),
+                    "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+                },
+            ]
+        )
+        session["lastMessageAt"] = now
+        return {
+            "sessionId": session_id,
+            "messageId": assistant_message_id,
+            "courseId": course_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "answerMd": answer_md,
+            "answerType": "placeholder",
+            "citations": list(citations),
+            "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+        }
+
     def _qa_block_payload_from_memory(
         self,
         block: dict[str, Any],
@@ -1495,6 +1614,8 @@ class RuntimeStore:
         session = self.qa_sessions.get(session_id)
         if session is None:
             return None
+        if session.get("scopeType") in {"course", "lesson"}:
+            return list(session.get("messages") or [])
         context = session.get("context") or {}
         live_context = self.get_qa_context(int(context.get("courseId") or 0), int(context.get("handoutBlockId") or 0))
         if (

@@ -37,8 +37,14 @@ class InquiryQuestionOption(CamelModel):
 class Citation(CamelModel):
     resource_id: int
     ref_label: str
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    lesson_title: str | None = None
+    lesson_order_index: int | None = None
+    resource_name: str | None = None
     page_no: int | None = None
     slide_no: int | None = None
     anchor_key: str | None = None
     start_sec: int | None = None
     end_sec: int | None = None
+    confidence_score: float | None = None

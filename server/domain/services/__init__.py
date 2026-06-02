@@ -3,6 +3,7 @@ from server.domain.services.bilibili import BilibiliService
 from server.domain.services.course_workbench import CourseWorkbenchService
 from server.domain.services.courses import CourseService
 from server.domain.services.errors import ServiceError
+from server.domain.services.exports import ExportService
 from server.domain.services.handouts import HandoutService
 from server.domain.services.home import HomeService
 from server.domain.services.inquiry import InquiryService
@@ -19,6 +20,7 @@ __all__ = [
     "BilibiliService",
     "CourseWorkbenchService",
     "CourseService",
+    "ExportService",
     "HandoutService",
     "HomeService",
     "InquiryService",

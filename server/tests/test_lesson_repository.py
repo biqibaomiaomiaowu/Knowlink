@@ -385,6 +385,22 @@ def test_lesson_range_artifact_rejects_reversed_order(repo: Any) -> None:
         )
 
 
+def test_export_artifact_preserves_requested_export_type(repo: Any) -> None:
+    course_id = _create_course(repo)
+    lesson = repo.create_lesson(course_id=course_id, title="第 1 节")
+
+    artifact = repo.create_scoped_artifact(
+        artifact_type="export_run",
+        course_id=course_id,
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        status="placeholder",
+        exportType="lesson_summary",
+    )
+
+    assert artifact["exportType"] == "lesson_summary"
+
+
 @pytest.mark.parametrize(
     "artifact_type",
     [

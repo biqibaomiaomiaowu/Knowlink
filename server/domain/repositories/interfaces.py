@@ -115,6 +115,8 @@ class ScopedArtifactRepository(Protocol):
         lesson_id: int | None = None,
         start_lesson_id: int | None = None,
         end_lesson_id: int | None = None,
+        status: str = "placeholder",
+        **extra: Any,
     ) -> dict[str, Any]: ...
 
     def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]: ...
@@ -331,6 +333,26 @@ class QaRepository(Protocol):
     ) -> dict[str, Any]: ...
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None: ...
+
+    def list_scoped_qa_sessions(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def create_scoped_qa_exchange(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        question: str,
+        answer_md: str,
+        citations: Sequence[dict[str, Any]],
+        session_id: int | None = None,
+    ) -> dict[str, Any]: ...
 
 
 class QuizRepository(Protocol):

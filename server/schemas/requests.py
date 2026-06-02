@@ -228,8 +228,18 @@ class QaMessageRequest(CamelModel):
     question: str
 
 
+class ScopedQaMessageRequest(CamelModel):
+    question: str = Field(min_length=1)
+    session_id: int | None = None
+
+
 class QuizGenerateRequest(CamelModel):
     question_count_level: Literal["small", "medium", "large"] = "medium"
+
+
+class StageQuizGenerateRequest(QuizGenerateRequest):
+    start_lesson_id: int
+    end_lesson_id: int
 
 
 class QuizAnswerItem(CamelModel):
@@ -251,3 +261,19 @@ class ProgressData(CamelModel):
     last_slide_no: int | None = None
     last_anchor_key: str | None = None
     last_activity_at: datetime | None = None
+
+
+class LessonProgressData(CamelModel):
+    last_position_sec: int | None = Field(default=None, ge=0)
+    last_handout_block_id: int | None = Field(default=None, ge=0)
+    handout_read_percent: int | None = Field(default=None, ge=0, le=100)
+    quiz_status: Literal["not_generated", "ready", "completed", "failed", "stale"] | None = None
+    review_status: Literal["not_due", "due", "in_progress", "completed"] | None = None
+
+
+class ExportCreateRequest(CamelModel):
+    export_type: Literal["course_summary", "lesson_summary", "qa_transcript", "quiz_report", "review_plan"] = (
+        "course_summary"
+    )
+    scope_type: Literal["course", "lesson"] = "course"
+    lesson_id: int | None = None

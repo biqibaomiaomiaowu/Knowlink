@@ -284,6 +284,37 @@ class QaMessageData(CamelModel):
     generation_metadata: dict[str, object] | None = None
 
 
+class ScopedHandoutPlaceholderData(CamelModel):
+    scope_type: Literal["course", "lesson"]
+    lesson_id: int | None = None
+    artifact_kind: Literal["lesson_handout", "course_summary_handout"]
+    status: Literal["not_generated", "generating", "ready", "partial_success", "failed", "stale", "placeholder"]
+    can_generate: bool
+    required_sources: list[str]
+    message: str
+    available_actions: list[str]
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class QaSessionSummary(CamelModel):
+    session_id: int
+    course_id: int
+    scope_type: Literal["course", "lesson"]
+    lesson_id: int | None = None
+    title: str | None = None
+    last_message_at: datetime | None = None
+
+
+class QaSessionListData(CamelModel):
+    items: list[QaSessionSummary]
+
+
+class ScopedQaMessageData(QaMessageData):
+    course_id: int
+    scope_type: Literal["course", "lesson"]
+    lesson_id: int | None = None
+
+
 class QuizQuestion(CamelModel):
     question_id: int
     stem_md: str
@@ -304,6 +335,31 @@ class QuizStatusData(CamelModel):
     question_count: int
 
 
+class ScopedQuizData(CamelModel):
+    quiz_id: int
+    course_id: int
+    scope_type: Literal["course", "lesson", "lesson_range"]
+    lesson_id: int | None = None
+    start_lesson_id: int | None = None
+    end_lesson_id: int | None = None
+    quiz_mode: str = "objective"
+    status: str
+    question_count: int = 0
+    questions: list[QuizQuestion] = Field(default_factory=list)
+
+
+class SubjectiveGradingPlaceholderData(CamelModel):
+    answer_text: str | None = None
+    grading_status: Literal["placeholder", "not_submitted", "grading", "graded", "failed"] = "placeholder"
+    total_score: int | None = None
+    dimension_scores: list[dict[str, object]] = Field(default_factory=list)
+    deductions: list[dict[str, object]] = Field(default_factory=list)
+    feedback_md: str
+    citations: list[Citation] = Field(default_factory=list)
+    confidence_score: float | None = None
+    needs_human_review: bool = False
+
+
 class SubmitQuizResult(CamelModel):
     attempt_id: int
     score: int
@@ -320,6 +376,12 @@ class ReviewTask(CamelModel):
     priority_score: int
     reason_text: str
     recommended_minutes: int
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    knowledge_point_key: str | None = None
+    source_question_keys: list[str] = Field(default_factory=list)
+    recommended_handout_block: dict[str, object] | None = None
+    evidence_chain: list[dict[str, object]] = Field(default_factory=list)
     recommended_segment: dict[str, object] | None = None
     practice_entry: dict[str, object] | None = None
     review_order: int | None = None
@@ -335,6 +397,62 @@ class ReviewRunStatusData(CamelModel):
     course_id: int
     status: str
     generated_count: int
+
+
+class ScopedReviewTasksData(CamelModel):
+    scope_type: Literal["course", "lesson"]
+    lesson_id: int | None = None
+    status: str
+    items: list[ReviewTask]
+    weak_lessons: list[dict[str, object]] = Field(default_factory=list)
+    cross_lesson_weak_points: list[dict[str, object]] = Field(default_factory=list)
+
+
+class PlaceholderData(CamelModel):
+    status: Literal["not_generated", "generating", "ready", "placeholder"] = "placeholder"
+    scope_type: Literal["course", "lesson"]
+    lesson_id: int | None = None
+    message: str
+    available_actions: list[str] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class GraphNode(CamelModel):
+    node_id: str
+    label: str
+    node_type: str
+
+
+class GraphEdge(CamelModel):
+    source_node_id: str
+    target_node_id: str
+    relation_type: str
+
+
+class GraphPlaceholderData(PlaceholderData):
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+
+
+class ReportSummaryPlaceholderData(CamelModel):
+    summary_status: Literal["placeholder"] = "placeholder"
+    scope_type: Literal["course", "lesson"]
+    lesson_id: int | None = None
+    metrics: list[dict[str, object]] = Field(default_factory=list)
+    message: str
+
+
+class ExportPlaceholderData(CamelModel):
+    available_export_types: list[
+        Literal["course_summary", "lesson_summary", "qa_transcript", "quiz_report", "review_plan"]
+    ]
+    status: Literal["placeholder"] = "placeholder"
+    scope_type: Literal["course", "lesson"] = "course"
+    lesson_id: int | None = None
+    export_type: str | None = None
+    export_id: int | None = None
+    download_url: str | None = None
+    message: str
 
 
 class DashboardData(CamelModel):
