@@ -14,6 +14,7 @@ from server.api.deps import get_qa_service
 from server.app import app
 from server.domain.services import QaService
 from server.infra.db.base import Base
+from server.infra.repositories.memory_runtime import RuntimeStore
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
 from server.tests.test_api import AUTH_HEADERS, request
 from server.tests.test_handout_outline_runtime import (
@@ -34,7 +35,11 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
         )
 
         assert result["answerType"] == "direct_answer"
-        assert result["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
+        assert result["generationMetadata"] == {
+            "source": "fallback",
+            "reason": "model_unavailable",
+            "evidenceTier": "original_evidence",
+        }
         assert result["citations"] == [
             {"resourceId": pdf_segment["resourceId"], "refLabel": "PDF 第 1 页", "pageNo": 1}
         ]
@@ -68,7 +73,268 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
         engine.dispose()
 
 
-def test_sql_qa_insufficient_evidence_returns_empty_citations_and_writes_no_refs():
+def test_sql_qa_uses_course_wide_original_segments_without_block_origin_refs():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, block_id = _ready_block_without_origin_refs(repo, session)
+        service = QaService(courses=repo, qa=repo)
+
+        result = service.create_message(
+            payload=_Payload(course_id=course_id, handout_block_id=block_id, question="集合的定义是什么？")
+        )
+
+        assert result["answerType"] == "direct_answer"
+        assert result["citations"]
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+
+        messages = service.get_session_messages(session_id=result["sessionId"])
+        assistant_message = messages["items"][1]
+        assert assistant_message["generationMetadata"] == result["generationMetadata"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_qa_uses_course_scope_for_course_prior_without_direct_evidence():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, block_id = _ready_course_scope_only_block(repo, session)
+        service = QaService(courses=repo, qa=repo)
+
+        result = service.create_message(
+            payload=_Payload(course_id=course_id, handout_block_id=block_id, question="空集为什么也是集合？")
+        )
+
+        assert result["answerType"] == "direct_answer"
+        assert result["citations"] == []
+        assert result["generationMetadata"]["evidenceTier"] == "course_prior"
+
+        messages = service.get_session_messages(session_id=result["sessionId"])
+        assistant_message = messages["items"][1]
+        assert assistant_message["generationMetadata"]["evidenceTier"] == "course_prior"
+        assert assistant_message["citations"] == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_qa_uses_course_scope_for_out_of_scope_questions():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, block_id = _ready_course_scope_only_block(repo, session)
+        service = QaService(courses=repo, qa=repo)
+
+        result = service.create_message(
+            payload=_Payload(course_id=course_id, handout_block_id=block_id, question="今天杭州天气怎么样？")
+        )
+
+        assert result["answerType"] == "clarification"
+        assert result["citations"] == []
+        assert result["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+        messages = service.get_session_messages(session_id=result["sessionId"])
+        assistant_message = messages["items"][1]
+        assert assistant_message["answerType"] == "clarification"
+        assert assistant_message["generationMetadata"]["evidenceTier"] == "out_of_scope"
+        assert assistant_message["citations"] == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_memory_qa_uses_course_scope_for_out_of_scope_questions():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="set theory basics",
+        entry_type="manual_import",
+        goal_text="learn empty sets, subsets, and set operations",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    repo.create_parse_run(course_id)
+    repo.create_handout(course_id)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    service = QaService(courses=repo, qa=repo)
+
+    result = service.create_message(
+        payload=_Payload(course_id=course_id, handout_block_id=block["blockId"], question="今天杭州天气怎么样？")
+    )
+
+    assert result["answerType"] == "clarification"
+    assert result["citations"] == []
+    assert result["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+    messages = repo.get_qa_session_messages(result["sessionId"])
+    assistant_message = messages[1]
+    assert assistant_message["answerType"] == "clarification"
+    assert assistant_message["citations"] == []
+    assert assistant_message["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+
+def test_memory_qa_uses_source_segment_keys_without_block_citations_for_original_evidence():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="calculus basics",
+        entry_type="manual_import",
+        goal_text="learn derivative definitions and applications",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "mp4",
+            "objectKey": f"raw/1/{course_id}/derivative.mp4",
+            "originalName": "derivative.mp4",
+            "mimeType": "video/mp4",
+            "sizeBytes": 1024,
+            "checksum": "sha256:memory-derivative",
+        },
+    )
+    repo.create_parse_run(course_id)
+    repo.create_handout(course_id)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    block["title"] = "Derivative definition"
+    block["summary"] = "A derivative measures instantaneous rate of change."
+    block["contentMd"] = "A derivative measures instantaneous rate of change at a point."
+    block["knowledgePoints"] = [{"knowledgePointKey": "kp-derivative", "displayName": "derivative"}]
+    block["citations"] = []
+
+    result = QaService(courses=repo, qa=repo).create_message(
+        payload=_Payload(
+            course_id=course_id,
+            handout_block_id=block["blockId"],
+            question="What is a derivative?",
+        )
+    )
+
+    assert result["answerType"] == "direct_answer"
+    assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+    assert len(result["citations"]) == 1
+    assert result["citations"][0]["resourceId"] == resource["resourceId"]
+    assert result["citations"][0]["startSec"] == block["startSec"]
+    assert result["citations"][0]["endSec"] == block["endSec"]
+    assert result["citations"][0]["refLabel"]
+
+    messages = repo.get_qa_session_messages(result["sessionId"])
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[0]["citations"] == []
+    assert "refs" not in messages[0]
+    assert "refs" not in messages[1]
+    assert messages[1]["generationMetadata"]["evidenceTier"] == "original_evidence"
+    assert messages[1]["citations"] == result["citations"]
+    assert messages[1]["citations"] == [
+        {
+            "resourceId": resource["resourceId"],
+            "refLabel": result["citations"][0]["refLabel"],
+            "startSec": block["startSec"],
+            "endSec": block["endSec"],
+        }
+    ]
+
+
+def test_memory_qa_does_not_emit_video_source_segment_for_pdf_only_course():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="calculus basics",
+        entry_type="manual_import",
+        goal_text="learn derivative definitions and applications",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    pdf_resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/derivative.pdf",
+            "originalName": "derivative.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:memory-derivative-pdf",
+        },
+    )
+    repo.create_parse_run(course_id)
+    repo.create_handout(course_id)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    block["title"] = "Derivative definition"
+    block["summary"] = "A derivative measures instantaneous rate of change."
+    block["contentMd"] = "A derivative measures instantaneous rate of change at a point."
+    block["knowledgePoints"] = [{"knowledgePointKey": "kp-derivative", "displayName": "derivative"}]
+    block["citations"] = []
+
+    result = QaService(courses=repo, qa=repo).create_message(
+        payload=_Payload(
+            course_id=course_id,
+            handout_block_id=block["blockId"],
+            question="What is a derivative?",
+        )
+    )
+
+    assert result["generationMetadata"]["evidenceTier"] != "original_evidence"
+    assert result["citations"] == []
+    assert not any(
+        citation.get("resourceId") == pdf_resource["resourceId"]
+        and citation.get("startSec") == block["startSec"]
+        and citation.get("endSec") == block["endSec"]
+        for citation in result["citations"]
+    )
+
+    messages = repo.get_qa_session_messages(result["sessionId"])
+    assert messages[1]["generationMetadata"] == result["generationMetadata"]
+    assert messages[1]["citations"] == result["citations"]
+
+
+def test_sql_qa_uses_video_source_segment_keys_before_handout_context_without_citations():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_overlapping_caption_segments(repo)
+        course_segments = Base.metadata.tables["course_segments"]
+        first_segment_id = int(segment_keys[0].removeprefix("segment-"))
+        session.execute(
+            sa.update(course_segments)
+            .where(course_segments.c.id == first_segment_id)
+            .values(text_content="集合的定义是什么？集合是确定对象组成的整体。")
+        )
+        session.commit()
+
+        handout_service = _handout_service(repo)
+        handout_service.generate_handout(course_id=course_id, idempotency_key=None)
+        block = repo.get_latest_handout(course_id)["blocks"][0]
+        source_ref = _source_video_ref(session, block)
+        repo.save_handout_block_result(
+            block["blockId"],
+            {
+                "title": "集合的定义",
+                "summary": "集合定义说明。",
+                "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+                "sourceSegmentKeys": block["sourceSegmentKeys"],
+                "knowledgePoints": [{"knowledgePointKey": "kp-set", "displayName": "集合"}],
+                "citations": [],
+            },
+        )
+        service = QaService(courses=repo, qa=repo)
+
+        result = service.create_message(
+            payload=_Payload(course_id=course_id, handout_block_id=block["blockId"], question="集合的定义是什么？")
+        )
+
+        assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert "handoutContext" not in result["generationMetadata"]
+        assert result["citations"] == [
+            {
+                "resourceId": source_ref["resourceId"],
+                "refLabel": source_ref["refLabel"],
+                "startSec": source_ref["startSec"],
+                "endSec": source_ref["endSec"],
+            }
+        ]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_qa_out_of_scope_returns_empty_citations_and_writes_no_refs():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, block_id, _ = _ready_block_with_pdf_ref(repo)
@@ -80,8 +346,9 @@ def test_sql_qa_insufficient_evidence_returns_empty_citations_and_writes_no_refs
 
         qa_message_refs = Base.metadata.tables["qa_message_refs"]
         ref_count = session.scalar(sa.select(sa.func.count()).select_from(qa_message_refs))
-        assert result["answerType"] == "insufficient_evidence"
+        assert result["answerType"] == "clarification"
         assert result["citations"] == []
+        assert result["generationMetadata"]["evidenceTier"] == "out_of_scope"
         assert ref_count == 0
     finally:
         session.close()
@@ -202,12 +469,13 @@ def test_sql_qa_uses_active_adjacent_handout_block_vector_content():
 
         assert result["answerType"] == "direct_answer"
         assert "向量提示说明集合定义" in result["answerMd"]
+        adjacent_ref = _source_video_ref(session, adjacent_block)
         assert result["citations"] == [
             {
-                "resourceId": _source_video_ref(session, adjacent_block)["resourceId"],
-                "refLabel": _source_video_ref(session, adjacent_block)["refLabel"],
-                "startSec": _source_video_ref(session, adjacent_block)["startSec"],
-                "endSec": _source_video_ref(session, adjacent_block)["endSec"],
+                "resourceId": adjacent_ref["resourceId"],
+                "refLabel": adjacent_ref["refLabel"],
+                "startSec": adjacent_ref["startSec"],
+                "endSec": adjacent_ref["endSec"],
             }
         ]
     finally:
@@ -215,7 +483,7 @@ def test_sql_qa_uses_active_adjacent_handout_block_vector_content():
         engine.dispose()
 
 
-def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
+def test_sql_qa_uses_non_adjacent_ready_block_as_course_wide_handout_context():
     repo, session, engine = _build_sqlite_repository()
     try:
         course_id, _ = _create_course_with_three_blocks(repo)
@@ -225,12 +493,18 @@ def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
         blocks = repo.get_latest_handout(course_id)["blocks"]
         for block in blocks:
             source_ref = _source_video_ref(session, block)
+            is_far_block = block["blockId"] == blocks[2]["blockId"]
+            content_md = (
+                "## 远端课程级讲义提示\n\n远端课程级讲义提示说明 superkey 可以被课程级 QA 跨块命中。"
+                if is_far_block
+                else "## 普通内容"
+            )
             repo.save_handout_block_result(
                 block["blockId"],
                 {
                     "title": block["title"],
-                    "summary": block["summary"],
-                    "contentMd": "## 普通内容",
+                    "summary": "远端课程级讲义提示说明 superkey 可以被课程级 QA 跨块命中。" if is_far_block else block["summary"],
+                    "contentMd": content_md,
                     "sourceSegmentKeys": block["sourceSegmentKeys"],
                     "knowledgePoints": [],
                     "citations": [source_ref],
@@ -242,16 +516,19 @@ def test_sql_qa_ignores_non_adjacent_ready_block_even_when_relevant():
             handout_version_id=repo.get_course(course_id)["activeHandoutVersionId"],
             owner_type="handout_block",
             owner_id=blocks[2]["blockId"],
-            content_text="远端提示不应被第一个 block 的 QA 命中。",
+            content_text="远端课程级讲义提示说明 superkey 可以被课程级 QA 跨块命中。",
             metadata_json={"outlineKey": blocks[2]["outlineKey"]},
         )
 
         result = QaService(courses=repo, qa=repo).create_message(
-            payload=_Payload(course_id=course_id, handout_block_id=blocks[0]["blockId"], question="远端提示是什么？")
+            payload=_Payload(course_id=course_id, handout_block_id=blocks[0]["blockId"], question="远端课程级讲义提示是什么？")
         )
 
-        assert result["answerType"] == "insufficient_evidence"
+        assert result["answerType"] == "direct_answer"
+        assert "远端课程级讲义提示" in result["answerMd"]
         assert result["citations"] == []
+        assert result["generationMetadata"]["evidenceTier"] == "handout_context"
+        assert result["generationMetadata"]["handoutContext"]["handoutBlockId"] == blocks[2]["blockId"]
     finally:
         session.close()
         engine.dispose()
@@ -443,6 +720,94 @@ def _ready_block_with_pdf_ref(repo: SqlAlchemyRuntimeRepository) -> tuple[int, i
         },
     )
     return course_id, block["blockId"], pdf_segment
+
+
+def _ready_block_without_origin_refs(repo: SqlAlchemyRuntimeRepository, session) -> tuple[int, int]:
+    course_id, _ = _create_course_with_active_video_segments(repo)
+    handout_service = _handout_service(repo)
+    handout_service.generate_handout(course_id=course_id, idempotency_key=None)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    repo.save_handout_block_result(
+        block["blockId"],
+        {
+            "title": "集合的定义",
+            "summary": "集合定义说明。",
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [{"knowledgePointKey": "kp-set", "displayName": "集合"}],
+            "citations": [],
+        },
+    )
+
+    handout_blocks = Base.metadata.tables["handout_blocks"]
+    session.execute(
+        sa.update(handout_blocks)
+        .where(handout_blocks.c.id == block["blockId"])
+        .values(source_segment_keys_json=[])
+    )
+    session.commit()
+    return course_id, block["blockId"]
+
+
+def _ready_course_scope_only_block(repo: SqlAlchemyRuntimeRepository, session) -> tuple[int, int]:
+    course = repo.create_course(
+        title="集合论基础",
+        entry_type="manual_import",
+        goal_text="理解空集、子集和集合运算",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "mp4",
+            "objectKey": f"raw/1/{course_id}/sets.mp4",
+            "originalName": "集合论入门.mp4",
+            "mimeType": "video/mp4",
+            "sizeBytes": 1024,
+            "checksum": "sha256:sets-scope",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = parse_run["parseRunId"]
+    repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "video_caption",
+                "orderNo": 1,
+                "textContent": "本页只说明课程安排、学习节奏和作业提交方式。",
+                "startSec": 0,
+                "endSec": 60,
+            }
+        ],
+    )
+    repo.mark_parse_run_succeeded(parse_run_id)
+    handout_service = _handout_service(repo)
+    handout_service.generate_handout(course_id=course_id, idempotency_key=None)
+    block = repo.get_latest_handout(course_id)["blocks"][0]
+    repo.save_handout_block_result(
+        block["blockId"],
+        {
+            "title": "学习安排",
+            "summary": "介绍课程节奏和作业提交方式。",
+            "contentMd": "## 学习安排\n\n本节只介绍课程节奏、作业提交方式和复习计划。",
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [{"knowledgePointKey": "kp-schedule", "displayName": "学习安排"}],
+            "citations": [],
+        },
+    )
+
+    handout_blocks = Base.metadata.tables["handout_blocks"]
+    session.execute(
+        sa.update(handout_blocks)
+        .where(handout_blocks.c.id == block["blockId"])
+        .values(source_segment_keys_json=[])
+    )
+    session.commit()
+    return course_id, block["blockId"]
 
 
 def _build_sqlite_repository():

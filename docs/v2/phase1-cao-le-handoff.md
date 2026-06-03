@@ -164,3 +164,10 @@ KNOWLINK_ENABLE_VIVO_VISION=false KNOWLINK_ENABLE_VIVO_ASR=false KNOWLINK_ENABLE
 - 下载与 ffmpeg 合并链路需要严格响应取消，避免临时文件和半成品对象残留。
 - `bilibili_import_run` 与 `async_tasks` 状态需要保持一致，否则前端进度和后端恢复会分叉。
 - Android 端播放稳定性依赖编码选择，默认优先 H.264/AVC 和 AAC。
+
+## 12. 2026-05-28 平板端联调记录
+
+- 平板端联调基本通过；当前已验证的核心功能入口、网络访问、资源上传和阶段一主流程未发现功能性阻塞。
+- 平板 USB 联调需要同时映射 FastAPI 与 MinIO：`adb reverse tcp:8000 tcp:8000`、`adb reverse tcp:9000 tcp:9000`。只映射 `8000` 时，上传初始化可以成功，但文件 PUT 到 `127.0.0.1:9000` 的 MinIO 预签名 URL 会失败。
+- 讲义页平板端布局问题已修复：平板横屏可用宽度保持左 / 中 / 右三栏结构，手机和窄屏仍使用上下结构。回归测试已覆盖 tablet landscape 三栏和 narrow stacked 两种场景。
+- 讲义页平板端视频加载失败已定位为 Android 原生播放器拦截本地 HTTP 预签名地址；已在 Android manifest 允许本地 cleartext 播放地址，并用 manifest 回归测试覆盖。

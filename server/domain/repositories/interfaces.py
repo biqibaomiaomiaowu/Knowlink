@@ -4,6 +4,8 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Protocol, TypeVar
 
+from server.ai.qa_types import LexicalSearchHit, QaScope, VectorSearchHit
+
 
 T = TypeVar("T")
 
@@ -332,6 +334,45 @@ class HandoutRepository(Protocol):
 
 class QaRepository(Protocol):
     def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None: ...
+
+    def search_vector_segments(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]: ...
+
+    def search_lexical_segments(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]: ...
+
+    def search_vector_handout_blocks(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]: ...
+
+    def search_lexical_handout_blocks(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]: ...
+
+    def search_course_wide_original_segments(
+        self,
+        *,
+        question: str,
+        course_id: int | None,
+        parse_run_id: int | None,
+        handout_version_id: int | None = None,
+        handout_block_id: int | str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]: ...
 
     def save_qa_exchange(
         self,

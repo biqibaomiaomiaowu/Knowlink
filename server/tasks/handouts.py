@@ -6,12 +6,14 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from server.ai.embedding import get_configured_embedding_client
 from server.ai.handout_block import generate_handout_block
 from server.ai.vector_projection import build_vector_document_inputs
 from server.infra.db.base import utcnow
 from server.infra.db.models import AsyncTask, Course, CourseSegment, HandoutBlock, HandoutVersion, VectorDocument
 from server.infra.db.session import create_session
 from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.vector_backfill import build_search_text
 
 
 class HandoutTaskInputError(ValueError):
@@ -46,6 +48,7 @@ def run_handout_block_generate(
     *,
     session_factory: Callable[[], Session] = create_session,
     generate_block_func: Callable[..., dict[str, Any]] = generate_handout_block,
+    embedding_client_factory: Callable[[], Any] | None = get_configured_embedding_client,
 ) -> dict[str, Any]:
     task_id = _required_int(message, "taskId", "task_id")
     course_id = _required_int(message, "courseId", "course_id")
@@ -63,6 +66,7 @@ def run_handout_block_generate(
             handout_block_id=handout_block_id,
             source_parse_run_id=source_parse_run_id,
             generate_block_func=generate_block_func,
+            embedding_client_factory=embedding_client_factory,
         )
     finally:
         session.close()
@@ -138,6 +142,7 @@ def _run_handout_block_generate_with_session(
     handout_block_id: int,
     source_parse_run_id: int,
     generate_block_func: Callable[..., dict[str, Any]],
+    embedding_client_factory: Callable[[], Any] | None,
 ) -> dict[str, Any]:
     task = _require_model(session, AsyncTask, task_id, "async_task.not_found")
     course = _require_model(session, Course, course_id, "course.not_found")
@@ -189,7 +194,8 @@ def _run_handout_block_generate_with_session(
         saved = SqlAlchemyRuntimeRepository(session, user_id=course.user_id).save_handout_block_result(block.id, payload)
         if saved is None:
             raise HandoutTaskInputError("handout block result was rejected by repository")
-        _replace_handout_block_vector(session, saved, course=course, version=version)
+        embedding_client = embedding_client_factory() if embedding_client_factory is not None else None
+        _replace_handout_block_vector(session, saved, course=course, version=version, embedding_client=embedding_client)
     except Exception as exc:
         finished_at = utcnow()
         task.status = "failed"
@@ -383,6 +389,7 @@ def _replace_handout_block_vector(
     *,
     course: Course,
     version: HandoutVersion,
+    embedding_client: Any | None = None,
 ) -> None:
     stored_block = session.get(HandoutBlock, int(block["blockId"]))
     if stored_block is not None and stored_block.handout_version_id == version.id:
@@ -409,13 +416,38 @@ def _replace_handout_block_vector(
             "handoutBlockId": block["blockId"],
         }
     inputs = build_vector_document_inputs(handout_block=vector_block)
+    embeddings: list[list[float]] | None = None
+    embedding_error: str | None = None
+    if inputs and embedding_client is not None:
+        try:
+            embeddings = embedding_client.embed_texts([item.content_text for item in inputs])
+            if len(embeddings) != len(inputs):
+                embeddings = None
+                embedding_error = "Embedding provider returned a different vector count."
+            else:
+                for embedding in embeddings:
+                    if len(embedding) != VectorDocument.EMBEDDING_DIM:
+                        embeddings = None
+                        embedding_error = (
+                            f"Embedding provider returned vector dimension {len(embedding)}, "
+                            f"expected {VectorDocument.EMBEDDING_DIM}."
+                        )
+                        break
+        except Exception as exc:
+            embeddings = None
+            embedding_error = str(exc)
     session.execute(
         delete(VectorDocument).where(
+            VectorDocument.course_id == course.id,
+            VectorDocument.parse_run_id == version.source_parse_run_id,
+            VectorDocument.handout_version_id == version.id,
             VectorDocument.owner_type == "handout_block",
             VectorDocument.owner_id == int(block["blockId"]),
         )
     )
-    for item in inputs:
+    embedding_model = _embedding_model_name(embedding_client) if embedding_client is not None and embeddings is not None else None
+    for index, item in enumerate(inputs):
+        embedding_vector = list(embeddings[index]) if embeddings is not None else None
         session.add(
             VectorDocument(
                 course_id=int(item.course_id or course.id),
@@ -426,7 +458,15 @@ def _replace_handout_block_vector(
                 resource_id=item.resource_id,
                 content_text=item.content_text,
                 metadata_json=item.metadata_json,
-                embedding=None,
+                embedding=embedding_vector,
+                embedding_vector=embedding_vector,
+                embedding_model=embedding_model,
+                embedding_dim=VectorDocument.EMBEDDING_DIM if embedding_vector is not None else None,
+                embedding_status="ready"
+                if embedding_vector is not None
+                else ("failed" if embedding_client is not None else "pending"),
+                embedding_error=None if embedding_vector is not None or embedding_client is None else embedding_error,
+                search_text=build_search_text(item.content_text, item.metadata_json),
             )
         )
 
@@ -465,6 +505,14 @@ def _optional_int(payload: Mapping[str, Any], *keys: str) -> int | None:
         except (TypeError, ValueError):
             return None
     return None
+
+
+def _embedding_model_name(client: Any) -> str:
+    for attr in ("model", "model_name"):
+        value = getattr(client, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "unknown"
 
 
 def _require_model(session: Session, model: type[Any], model_id: int, code: str) -> Any:

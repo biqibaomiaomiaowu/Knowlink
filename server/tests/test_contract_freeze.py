@@ -57,8 +57,31 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
     assert "week2-cao-le-parse-inquiry-contract.md" in api_contract
     assert "schemas/ai/handout_outline.schema.json" in week2_contract
     assert "schemas/ai/handout_block.schema.json" in week2_contract
+    assert "schemas/ai/qa_response.schema.json" in week2_contract
     assert "schemas/ai/knowledge_point_extraction.schema.json" in week2_contract
     assert "schemas/parse/normalized_document.schema.json" in week2_contract
+
+    for token in (
+        "`generationMetadata.evidenceTier`",
+        "`original_evidence`",
+        "`handout_context`",
+        "`course_prior`",
+        "`out_of_scope`",
+        "`citations=[]`",
+        "服务端归一化后补充的响应元数据",
+        "不是模型可自由返回的字段",
+    ):
+        assert token in week2_contract
+
+    for token in (
+        "current-block-prioritized course-wide Hybrid RAG",
+        "current block 是 boost，不是 filter",
+        "active parse run",
+        "active handout version",
+        "handout_context citations=[]",
+        "source-fact intent 不进入 course_prior",
+    ):
+        assert token in week2_contract
 
     for token in (
         "`course_segments`",
@@ -608,13 +631,92 @@ def test_collaboration_docs_expose_change_flow_and_priority_matrices():
                     {"resourceId": 503, "refLabel": "DOCX 积分部分", "anchorKey": "section-integral"},
                     {"resourceId": 504, "refLabel": "视频 02:00-04:00", "startSec": 120, "endSec": 240},
                 ],
-                "generationMetadata": {"source": "model", "reason": "model_response"},
+                "generationMetadata": {
+                    "source": "model",
+                    "reason": "model_response",
+                    "evidenceTier": "original_evidence",
+                },
             },
         ),
     ],
 )
 def test_citation_schemas_accept_all_reference_types(schema_path: str, payload: dict):
     build_validator(schema_path).validate(payload)
+
+
+def test_qa_response_schema_accepts_generation_metadata_evidence_tier():
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    validator.validate(
+        {
+            "answerMd": "依据讲义内容回答，未找到可追溯原始资料引用。\n\n集合是确定对象组成的整体。",
+            "answerType": "direct_answer",
+            "citations": [],
+            "generationMetadata": {
+                "source": "fallback",
+                "reason": "handout_context_match",
+                "evidenceTier": "handout_context",
+                "handoutContext": {
+                    "handoutBlockId": 501,
+                    "outlineKey": "ch1-def",
+                    "title": "集合的定义",
+                },
+            },
+        }
+    )
+
+
+def test_qa_response_schema_rejects_missing_generation_metadata_evidence_tier():
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                "answerMd": "集合是确定对象组成的整体。",
+                "answerType": "direct_answer",
+                "citations": [{"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}],
+                "generationMetadata": {
+                    "source": "model",
+                    "reason": "model_response",
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize("evidence_tier", ["handout_context", "course_prior", "out_of_scope"])
+def test_qa_response_schema_rejects_non_original_tier_with_citations(evidence_tier: str):
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                "answerMd": "依据讲义内容回答。",
+                "answerType": "direct_answer",
+                "citations": [{"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}],
+                "generationMetadata": {
+                    "source": "fallback",
+                    "reason": "non_original_tier",
+                    "evidenceTier": evidence_tier,
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "generation_metadata",
+    [
+        {"source": "fallback", "reason": "bad_tier", "evidenceTier": "lecture_only"},
+        {"source": "fallback", "reason": "extra_field", "unexpectedField": True},
+    ],
+)
+def test_qa_response_schema_rejects_invalid_generation_metadata(generation_metadata: dict):
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                "answerMd": "回答内容",
+                "answerType": "direct_answer",
+                "citations": [],
+                "generationMetadata": generation_metadata,
+            }
+        )
 
 
 @pytest.mark.parametrize(

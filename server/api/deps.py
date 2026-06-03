@@ -5,6 +5,7 @@ from functools import lru_cache
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from server.ai.embedding import get_configured_embedding_client
 from server.ai.qa_policy import get_configured_qa_answer_client
 from server.config.settings import Settings, get_settings
 from server.domain.services import (
@@ -304,6 +305,7 @@ async def get_qa_service(
         qa=repo,
         lessons=lesson_repo,
         resources=repo,
+        embedding_client=get_configured_embedding_client(),
         qa_answer_client=get_configured_qa_answer_client(),
     )
 

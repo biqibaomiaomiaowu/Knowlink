@@ -81,7 +81,7 @@
     },
     "generationMetadata": {
       "type": "object",
-      "required": ["source", "reason"],
+      "required": ["source", "reason", "evidenceTier"],
       "properties": {
         "source": {
           "type": "string",
@@ -90,6 +90,36 @@
         "reason": {
           "type": "string",
           "minLength": 1
+        },
+        "evidenceTier": {
+          "type": "string",
+          "enum": ["original_evidence", "handout_context", "course_prior", "out_of_scope"]
+        },
+        "handoutContext": {
+          "type": "object",
+          "properties": {
+            "handoutBlockId": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "minLength": 1
+                }
+              ]
+            },
+            "outlineKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -153,5 +183,29 @@
       "$ref": "#/$defs/generationMetadata"
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "required": ["generationMetadata"],
+        "properties": {
+          "generationMetadata": {
+            "required": ["evidenceTier"],
+            "properties": {
+              "evidenceTier": {
+                "enum": ["handout_context", "course_prior", "out_of_scope"]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "citations": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

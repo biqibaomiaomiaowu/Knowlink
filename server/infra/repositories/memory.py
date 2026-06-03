@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, TypeVar
 
+from server.ai.qa_types import LexicalSearchHit, QaScope, VectorSearchHit
 from server.infra.repositories.memory_runtime import RuntimeStore
 
 
@@ -435,6 +436,57 @@ class MemoryScaffoldRepository:
 
     def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
         return self.store.get_qa_context(course_id, handout_block_id)
+
+    def search_vector_segments(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        return self.store.search_vector_segments(scope, embedding=embedding, limit=limit)
+
+    def search_lexical_segments(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        return self.store.search_lexical_segments(scope, query=query, limit=limit)
+
+    def search_vector_handout_blocks(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        return self.store.search_vector_handout_blocks(scope, embedding=embedding, limit=limit)
+
+    def search_lexical_handout_blocks(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        return self.store.search_lexical_handout_blocks(scope, query=query, limit=limit)
+
+    def search_course_wide_original_segments(
+        self,
+        *,
+        question: str,
+        course_id: int | None,
+        parse_run_id: int | None,
+        handout_version_id: int | None = None,
+        handout_block_id: int | str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        return self.store.search_course_wide_original_segments(
+            question=question,
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+            handout_version_id=handout_version_id,
+            handout_block_id=handout_block_id,
+            limit=limit,
+        )
 
     def save_qa_exchange(
         self,

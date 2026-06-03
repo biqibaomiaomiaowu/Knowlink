@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/course_create_request.dart';
@@ -103,18 +103,24 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
   }
 
   Future<void> pickFiles() async {
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: true,
-      type: FileType.custom,
-      allowedExtensions: const ['mp4', 'pdf', 'pptx', 'docx', 'srt'],
+    const resourceTypeGroup = XTypeGroup(
+      label: 'KnowLink resources',
+      extensions: ['mp4', 'pdf', 'pptx', 'docx', 'srt'],
     );
-    if (result == null) {
+    final files = await openFiles(
+      acceptedTypeGroups: [resourceTypeGroup],
+    );
+    if (files.isEmpty) {
       return;
     }
 
+    final items = <UploadQueueItemModel>[];
+    for (final file in files) {
+      items.add(await _queueItemFromXFile(file));
+    }
+
     addFilesForUpload(
-      result.files.map(_queueItemFromPlatformFile).toList(),
+      items,
     );
   }
 
@@ -262,19 +268,15 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
     );
   }
 
-  UploadQueueItemModel _queueItemFromPlatformFile(PlatformFile file) {
-    final bytes = file.bytes;
-    if (bytes == null) {
-      throw StateError('无法读取文件 ${file.name} 的内容');
-    }
-
+  Future<UploadQueueItemModel> _queueItemFromXFile(XFile file) async {
+    final bytes = await file.readAsBytes();
     final resourceType = _resourceTypeFromFilename(file.name);
     return UploadQueueItemModel(
       id: 'upload-${DateTime.now().microsecondsSinceEpoch}-${file.name}',
       name: file.name,
       resourceType: resourceType,
       mimeType: _mimeTypeFor(resourceType),
-      sizeBytes: file.size,
+      sizeBytes: bytes.length,
       checksum: 'sha256:${sha256.convert(bytes).toString()}',
       bytes: Uint8List.fromList(bytes),
       scopeType: resourceType == ResourceType.mp4 ? 'lesson' : 'course',

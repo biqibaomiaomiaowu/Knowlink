@@ -11,6 +11,25 @@ from typing import Any, Literal, Mapping, Protocol, Sequence
 from server.ai.core.errors import AIOutputParseError, fallback_reason_for_error
 from server.ai.core.types import ChatMessage, JsonChatRequest
 from server.ai.deepseek import get_configured_deepseek_chat_config
+from server.ai.qa_candidate_utils import (
+    locator_key,
+    locator_tuple,
+    qa_candidate_identity as _shared_qa_candidate_identity,
+    replace_candidate_rank,
+)
+from server.ai.qa_exact_retrieval import build_exact_evidence_candidates
+from server.ai.qa_types import (
+    EvidenceTier,
+    FusedSearchHit,
+    HandoutContextCandidate,
+    LexicalSearchHit,
+    QaCandidateSource,
+    QaEvidenceCandidate,
+    QaGenerationResult,
+    QaScope,
+    RetrievalTrace,
+    VectorSearchHit,
+)
 from server.ai.providers.deepseek_chat import (
     DeepSeekLangChainConfig,
     DeepSeekLangChainJsonClient,
@@ -22,15 +41,15 @@ from server.config.settings import load_root_dotenv
 from server.parsers.base import clean_text
 
 
-QaCandidateSource = Literal[
-    "current_block_ref",
-    "knowledge_point_evidence",
-    "adjacent_block",
-    "course_document_segment",
-]
 QaAnswerType = Literal["direct_answer", "clarification", "insufficient_evidence"]
+UnreferencedEvidenceTier = Literal["handout_context", "course_prior"]
 _DEFAULT_QA_MODEL = "Doubao-Seed-2.0-pro"
 _DEFAULT_QA_TIMEOUT_SEC = 60.0
+_OUT_OF_SCOPE_INTENT_TERM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("天气", "气象", "气温", "温度", "下雨", "降雨", "降水", "气压", "台风", "预报"),
+    ("新闻", "热搜", "娱乐", "明星", "媒体", "报道"),
+    ("股票", "股价", "基金", "彩票", "中奖", "证券", "投资"),
+)
 _QA_SYSTEM_PROMPT = """你是 KnowLink 的块级学习问答助手。只返回 JSON，不要返回 Markdown 代码块或解释。
 JSON 格式固定为：
 {"answerMd":"...","answerType":"direct_answer|clarification|insufficient_evidence","citations":[{"resourceId":1,"segmentKey":"...","pageNo":1,"refLabel":"..."}]}
@@ -41,27 +60,15 @@ JSON 格式固定为：
 4. 每个 citation 只能使用一种定位：pageNo、slideNo、anchorKey、或 startSec/endSec。
 5. answerMd 使用中文 Markdown，简洁回答用户问题。
 """
-
-
-@dataclass(frozen=True)
-class QaEvidenceCandidate:
-    candidate_key: str
-    source: QaCandidateSource
-    rank: int
-    content_text: str
-    resource_id: int
-    ref_label: str
-    locator: dict[str, Any]
-    segment_id: int | None = None
-    segment_key: str | None = None
-    course_id: int | None = None
-    parse_run_id: int | None = None
-    handout_version_id: int | None = None
-    handout_block_id: int | str | None = None
-    metadata_json: dict[str, Any] | None = None
-
-    def to_qa_citation(self) -> dict[str, Any]:
-        return {"resourceId": self.resource_id, "refLabel": self.ref_label, **self.locator}
+_UNREFERENCED_QA_SYSTEM_PROMPT = """你是 KnowLink 的课程学习问答助手。只返回 JSON，不要返回 Markdown 代码块或解释。
+JSON 格式固定为：
+{"answerMd":"...","answerType":"direct_answer|clarification","citations":[]}
+规则：
+1. citations 必须返回空数组，不得编造或返回任何引用。
+2. evidenceTier 为 handout_context 时，只能依据输入的讲义上下文回答；answerMd 必须说明“依据讲义内容回答，未找到可追溯原始资料引用”；上下文不足时返回 clarification。
+3. evidenceTier 为 course_prior 时，只能回答与当前课程范围相关的问题；answerMd 必须说明“课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释”；超出课程范围或无法判断时返回 clarification。
+4. answerMd 使用中文 Markdown，简洁回答用户问题。
+"""
 
 
 @dataclass(frozen=True)
@@ -73,6 +80,16 @@ class QaAnswerWithRefs:
 class QaAnswerClient(Protocol):
     def generate_answer(self, question: str, candidates: Sequence[QaEvidenceCandidate]) -> dict[str, Any]:
         """Return a raw QA response generated only from the provided candidates."""
+
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: UnreferencedEvidenceTier,
+        course_scope: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a raw QA response without citations for non-original evidence tiers."""
 
 
 def get_configured_qa_answer_client() -> QaAnswerClient | None:
@@ -152,6 +169,40 @@ class VivoQaAnswerClient:
             label="vivo qa",
         )
 
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: UnreferencedEvidenceTier,
+        course_scope: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._throttle()
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="vivo",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_UNREFERENCED_QA_SYSTEM_PROMPT),
+                    ChatMessage(
+                        role="user",
+                        content=_build_unreferenced_qa_prompt(
+                            question,
+                            context_text=context_text,
+                            evidence_tier=evidence_tier,
+                            course_scope=course_scope,
+                        ),
+                    ),
+                ],
+                temperature=0.1,
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 2048, "stream": False, "request_id": str(uuid.uuid4())},
+            ),
+            label="vivo unreferenced qa",
+        )
+
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_at
         if elapsed < self._min_request_interval_sec:
@@ -200,6 +251,38 @@ class DeepSeekQaAnswerClient:
             label="deepseek qa",
         )
 
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: UnreferencedEvidenceTier,
+        course_scope: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return _complete_model_json(
+            self._ai_service,
+            JsonChatRequest(
+                provider="deepseek",
+                model=self._model,
+                messages=[
+                    ChatMessage(role="system", content=_UNREFERENCED_QA_SYSTEM_PROMPT),
+                    ChatMessage(
+                        role="user",
+                        content=_build_unreferenced_qa_prompt(
+                            question,
+                            context_text=context_text,
+                            evidence_tier=evidence_tier,
+                            course_scope=course_scope,
+                        ),
+                    ),
+                ],
+                timeout_sec=self._timeout_sec,
+                response_format={"type": "json_object"},
+                metadata={"max_tokens": 4096, "reasoning_effort": self._reasoning_effort},
+            ),
+            label="deepseek unreferenced qa",
+        )
+
 
 def generate_block_qa_response(
     question: str,
@@ -211,6 +294,7 @@ def generate_block_qa_response(
     active_course_id: int | None = None,
     active_parse_run_id: int | None = None,
     active_handout_version_id: int | None = None,
+    course_scope: Mapping[str, Any] | None = None,
     client: QaAnswerClient | None = None,
 ) -> dict[str, Any]:
     candidates = build_block_scoped_qa_candidates(
@@ -224,7 +308,51 @@ def generate_block_qa_response(
         active_handout_version_id=active_handout_version_id,
     )
     answer_candidates = _relevant_candidates(question, candidates)
+    has_course_scope = _has_course_scope(course_scope)
     if not answer_candidates:
+        if has_course_scope and _question_has_out_of_scope_intent(question, course_scope):
+            return _out_of_scope_response()
+        handout_contexts = _relevant_handout_contexts(
+            question,
+            _handout_context_candidates(current_block=current_block, adjacent_blocks=adjacent_blocks),
+        )
+        if handout_contexts:
+            if client is not None:
+                try:
+                    return _normalize_unreferenced_qa_response(
+                        client.generate_unreferenced_answer(
+                            question,
+                            context_text=handout_contexts[0].content_text,
+                            evidence_tier="handout_context",
+                        ),
+                        evidence_tier="handout_context",
+                        reason="handout_context_match",
+                        handout_context=handout_contexts[0],
+                    )
+                except Exception as exc:
+                    return _fallback_handout_context_response(
+                        handout_contexts[0],
+                        reason=fallback_reason_for_error(exc),
+                    )
+            return _fallback_handout_context_response(handout_contexts[0], reason="handout_context_match")
+        if has_course_scope:
+            if _question_is_course_related(question, course_scope):
+                if client is not None:
+                    try:
+                        return _normalize_unreferenced_qa_response(
+                            client.generate_unreferenced_answer(
+                                question,
+                                context_text=_course_scope_text(course_scope),
+                                evidence_tier="course_prior",
+                                course_scope=course_scope,
+                            ),
+                            evidence_tier="course_prior",
+                            reason="course_related_prior",
+                        )
+                    except Exception as exc:
+                        return _fallback_course_prior_response(question, reason=fallback_reason_for_error(exc))
+                return _fallback_course_prior_response(question, reason="course_related_prior")
+            return _out_of_scope_response()
         return insufficient_evidence_response(source="fallback", reason="no_candidate_evidence")
 
     if client is not None:
@@ -268,15 +396,18 @@ def build_block_scoped_qa_candidates(
         return []
 
     normalized_segments = [_normalize_segment(segment, index) for index, segment in enumerate(segments, start=1)]
-    segment_by_key = {segment["segmentKey"]: segment for segment in normalized_segments if segment.get("segmentKey")}
-    segment_by_id = {
-        int(segment["segmentId"]): segment
-        for segment in normalized_segments
-        if _as_positive_int(segment.get("segmentId")) is not None
-    }
-
-    candidates: list[QaEvidenceCandidate] = []
+    candidates = build_exact_evidence_candidates(
+        current_block=current_block,
+        segments=segments,
+        knowledge_point_evidences=knowledge_point_evidences,
+        adjacent_blocks=adjacent_blocks,
+        active_course_id=course_id,
+        active_parse_run_id=parse_run_id,
+        active_handout_version_id=handout_version_id,
+    )
     seen: set[tuple[int, str, tuple[tuple[str, Any], ...]]] = set()
+    for candidate in candidates:
+        seen.add(qa_candidate_identity(candidate))
 
     def append(candidate: QaEvidenceCandidate | None) -> None:
         if candidate is None:
@@ -286,80 +417,6 @@ def build_block_scoped_qa_candidates(
             return
         seen.add(identity)
         candidates.append(candidate)
-
-    for citation in _mapping_list(current_block.get("citations")):
-        append(
-            _candidate_from_citation(
-                citation,
-                segment_by_key=segment_by_key,
-                segment_by_id=segment_by_id,
-                segments=normalized_segments,
-                source="current_block_ref",
-                rank=len(candidates) + 1,
-                fallback_content=_block_text(current_block),
-                fallback_handout_block_id=block_id,
-                course_id=course_id,
-                parse_run_id=parse_run_id,
-                handout_version_id=handout_version_id,
-            )
-        )
-
-    current_kp_keys = _current_block_knowledge_point_keys(current_block)
-    for evidence in knowledge_point_evidences:
-        if not isinstance(evidence, Mapping):
-            continue
-        if not current_kp_keys:
-            continue
-        if str(_field_value(evidence, "knowledgePointKey", "knowledge_point_key") or "") not in current_kp_keys:
-            continue
-        append(
-            _candidate_from_evidence(
-                evidence,
-                segment_by_key=segment_by_key,
-                segment_by_id=segment_by_id,
-                segments=normalized_segments,
-                rank=len(candidates) + 1,
-                course_id=course_id,
-                parse_run_id=parse_run_id,
-                handout_version_id=handout_version_id,
-                handout_block_id=block_id,
-            )
-        )
-
-    for adjacent_block in _sorted_adjacent_blocks(adjacent_blocks, current_block=current_block):
-        if handout_version_id is not None:
-            adjacent_version_id = _as_positive_int(_field_value(adjacent_block, "handoutVersionId", "handout_version_id"))
-            if adjacent_version_id != handout_version_id:
-                continue
-        if not _block_matches_active_scope(
-            adjacent_block,
-            active_course_id=course_id,
-            active_parse_run_id=parse_run_id,
-            active_handout_version_id=handout_version_id,
-        ):
-            continue
-        for citation in _mapping_list(adjacent_block.get("citations")):
-            append(
-                _candidate_from_citation(
-                    citation,
-                    segment_by_key=segment_by_key,
-                    segment_by_id=segment_by_id,
-                    segments=normalized_segments,
-                    source="adjacent_block",
-                    rank=len(candidates) + 1,
-                    fallback_content=_block_text(adjacent_block),
-                    fallback_handout_block_id=_field_value(
-                        adjacent_block,
-                        "handoutBlockId",
-                        "handout_block_id",
-                        "outlineKey",
-                        "outline_key",
-                    ),
-                    course_id=course_id,
-                    parse_run_id=parse_run_id,
-                    handout_version_id=handout_version_id,
-                )
-            )
 
     document_segments = [
         segment
@@ -477,13 +534,7 @@ def build_qa_message_refs(
 
 
 def qa_candidate_identity(candidate: QaEvidenceCandidate) -> tuple[int, str, tuple[tuple[str, Any], ...]]:
-    if candidate.segment_id is not None:
-        segment_identity = f"id:{candidate.segment_id}"
-    elif candidate.segment_key:
-        segment_identity = f"key:{candidate.segment_key}"
-    else:
-        segment_identity = f"source:{candidate.source}:{candidate.rank}"
-    return (candidate.resource_id, segment_identity, _locator_tuple(candidate.locator))
+    return _shared_qa_candidate_identity(candidate)
 
 
 def _normalize_qa_response_payload(payload: Mapping[str, Any], *, candidates: Sequence[QaEvidenceCandidate]) -> dict[str, Any]:
@@ -545,6 +596,53 @@ def _normalize_qa_response_payload(payload: Mapping[str, Any], *, candidates: Se
     }
 
 
+def _normalize_unreferenced_qa_response(
+    payload: Mapping[str, Any],
+    *,
+    evidence_tier: UnreferencedEvidenceTier,
+    reason: str,
+    handout_context: HandoutContextCandidate | None = None,
+) -> dict[str, Any]:
+    answer_type = str(payload.get("answerType") or payload.get("answer_type") or "direct_answer")
+    if answer_type not in {"direct_answer", "clarification"}:
+        answer_type = "direct_answer"
+    answer_md = clean_text(str(payload.get("answerMd") or payload.get("answer_md") or ""))
+    if not answer_md:
+        raise AIOutputParseError("unreferenced qa answerMd is required")
+    answer_md = _ensure_unreferenced_disclosure(answer_md, evidence_tier=evidence_tier)
+    return {
+        "answerMd": answer_md,
+        "answerType": answer_type,
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="model",
+            reason=reason,
+            evidence_tier=evidence_tier,
+            handout_context=_handout_context_metadata(handout_context) if handout_context is not None else None,
+        ),
+    }
+
+
+def _ensure_unreferenced_disclosure(answer_md: str, *, evidence_tier: UnreferencedEvidenceTier) -> str:
+    if evidence_tier == "handout_context":
+        if _has_handout_context_disclosure(answer_md):
+            return answer_md
+        return f"依据讲义内容回答，未找到可追溯原始资料引用。\n\n{answer_md}"
+    if _has_course_prior_disclosure(answer_md):
+        return answer_md
+    return f"课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释。\n\n{answer_md}"
+
+
+def _has_handout_context_disclosure(answer_md: str) -> bool:
+    return "讲义" in answer_md and ("未找到可追溯原始资料引用" in answer_md or "无原始资料引用" in answer_md)
+
+
+def _has_course_prior_disclosure(answer_md: str) -> bool:
+    return ("无直接证据" in answer_md or "未找到直接证据" in answer_md) and (
+        "基于当前课程主题" in answer_md or "补充解释" in answer_md
+    )
+
+
 def _fallback_qa_response(candidates: Sequence[QaEvidenceCandidate], *, reason: str) -> dict[str, Any]:
     if not candidates:
         return insufficient_evidence_response(source="fallback", reason="no_candidate_evidence")
@@ -558,70 +656,106 @@ def _fallback_qa_response(candidates: Sequence[QaEvidenceCandidate], *, reason: 
     }
 
 
-def _generation_metadata(*, source: str, reason: str) -> dict[str, str]:
-    return {"source": source, "reason": reason}
+def _fallback_handout_context_response(context: HandoutContextCandidate, *, reason: str) -> dict[str, Any]:
+    answer_text = _truncate(context.content_text, 220)
+    return {
+        "answerMd": f"依据讲义内容回答，未找到可追溯原始资料引用。\n\n{answer_text}",
+        "answerType": "direct_answer",
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="fallback",
+            reason=reason,
+            evidence_tier="handout_context",
+            handout_context=_handout_context_metadata(context),
+        ),
+    }
 
 
-def _candidate_from_evidence(
-    evidence: Mapping[str, Any],
+def _course_scope_text(course_scope: Mapping[str, Any] | None) -> str:
+    if not isinstance(course_scope, Mapping):
+        return ""
+    values: list[str] = []
+    for key in ("title", "summary", "goalText", "goal_text"):
+        value = course_scope.get(key)
+        if isinstance(value, str) and value:
+            values.append(value)
+    for key in ("resourceTitles", "handoutTitles", "knowledgePointNames"):
+        value = course_scope.get(key)
+        if isinstance(value, list):
+            values.extend(str(item) for item in value if str(item).strip())
+    return clean_text("\n".join(values))
+
+
+def _has_course_scope(course_scope: Mapping[str, Any] | None) -> bool:
+    return bool(_course_scope_text(course_scope))
+
+
+def _question_is_course_related(question: str, course_scope: Mapping[str, Any] | None) -> bool:
+    scope_text = _course_scope_text(course_scope)
+    if not scope_text:
+        return False
+    if _question_has_out_of_scope_intent(question, course_scope):
+        return False
+    return _relevance_score(question, scope_text) > 0
+
+
+def _question_has_out_of_scope_intent(question: str, course_scope: Mapping[str, Any] | None = None) -> bool:
+    normalized = clean_text(question).lower()
+    if not normalized:
+        return False
+    scope_text = _course_scope_text(course_scope).lower()
+    for term_group in _OUT_OF_SCOPE_INTENT_TERM_GROUPS:
+        if any(term in normalized for term in term_group) and not any(term in scope_text for term in term_group):
+            return True
+    return False
+
+
+def _fallback_course_prior_response(question: str, *, reason: str) -> dict[str, Any]:
+    answer = clean_text(question)
+    return {
+        "answerMd": (
+            "课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释。\n\n"
+            f"{answer} 可以结合当前课程中的相关概念来理解；请优先回到讲义和原始资料中的定义、例子和符号约定进行核对。"
+        ),
+        "answerType": "direct_answer",
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="fallback",
+            reason=reason,
+            evidence_tier="course_prior",
+        ),
+    }
+
+
+def _out_of_scope_response() -> dict[str, Any]:
+    return {
+        "answerMd": "这个问题超出了当前课程范围。请提问与当前课程内容、讲义或学习目标相关的问题。",
+        "answerType": "clarification",
+        "citations": [],
+        "generationMetadata": _generation_metadata(
+            source="fallback",
+            reason="out_of_scope",
+            evidence_tier="out_of_scope",
+        ),
+    }
+
+
+def _generation_metadata(
     *,
-    segment_by_key: Mapping[str, Mapping[str, Any]],
-    segment_by_id: Mapping[int, Mapping[str, Any]],
-    segments: Sequence[Mapping[str, Any]],
-    rank: int,
-    course_id: int | None,
-    parse_run_id: int | None,
-    handout_version_id: int | None,
-    handout_block_id: int | str | None,
-) -> QaEvidenceCandidate | None:
-    segment = _segment_from_ref(evidence, segment_by_key=segment_by_key, segment_by_id=segment_by_id, segments=segments)
-    if segment is None or not _matches_course_parse(segment, course_id=course_id, parse_run_id=parse_run_id):
-        return None
-    return _candidate_from_segment(
-        segment,
-        source="knowledge_point_evidence",
-        rank=rank,
-        handout_block_id=handout_block_id,
-        handout_version_id=handout_version_id,
-        content_override=None,
-        ref_label=None,
-        locator_override=None,
-    )
+    source: str,
+    reason: str,
+    evidence_tier: str = "original_evidence",
+    handout_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"source": source, "reason": reason, "evidenceTier": evidence_tier}
+    if handout_context:
+        metadata["handoutContext"] = {
+            key: value
+            for key, value in handout_context.items()
+            if key in {"handoutBlockId", "outlineKey", "title"} and value not in (None, "")
+        }
+    return metadata
 
-
-def _candidate_from_citation(
-    citation: Mapping[str, Any],
-    *,
-    segment_by_key: Mapping[str, Mapping[str, Any]],
-    segment_by_id: Mapping[int, Mapping[str, Any]],
-    segments: Sequence[Mapping[str, Any]],
-    source: QaCandidateSource,
-    rank: int,
-    fallback_content: str,
-    fallback_handout_block_id: int | str | None,
-    course_id: int | None,
-    parse_run_id: int | None,
-    handout_version_id: int | None,
-) -> QaEvidenceCandidate | None:
-    segment = _segment_from_ref(citation, segment_by_key=segment_by_key, segment_by_id=segment_by_id, segments=segments)
-    if segment is None:
-        return None
-    if not _matches_course_parse(segment, course_id=course_id, parse_run_id=parse_run_id):
-        return None
-
-    locator = _locator_from_citation_segment(citation, segment)
-    if not locator:
-        return None
-    return _candidate_from_segment(
-        segment,
-        source=source,
-        rank=rank,
-        handout_block_id=fallback_handout_block_id,
-        handout_version_id=handout_version_id,
-        content_override=fallback_content if source == "adjacent_block" else None,
-        ref_label=clean_text(str(_field_value(citation, "refLabel", "ref_label") or "")) or None,
-        locator_override=locator,
-    )
 
 
 def _candidate_from_segment(
@@ -667,67 +801,6 @@ def _candidate_from_segment(
             if value not in (None, "")
         },
     )
-
-
-def _locator_from_citation_segment(citation: Mapping[str, Any], segment: Mapping[str, Any]) -> dict[str, Any]:
-    segment_locator = _locator(segment)
-    if not segment_locator:
-        return {}
-
-    citation_locator = _locator(citation)
-    if not citation_locator:
-        return segment_locator
-
-    if "startSec" in segment_locator and "endSec" in segment_locator:
-        if "startSec" not in citation_locator or "endSec" not in citation_locator:
-            return segment_locator
-        start_sec = _as_int(citation_locator.get("startSec"))
-        end_sec = _as_int(citation_locator.get("endSec"))
-        segment_start = _as_int(segment_locator.get("startSec"))
-        segment_end = _as_int(segment_locator.get("endSec"))
-        if (
-            start_sec is None
-            or end_sec is None
-            or segment_start is None
-            or segment_end is None
-            or start_sec < segment_start
-            or end_sec > segment_end
-            or end_sec <= start_sec
-        ):
-            return {}
-        return {"startSec": start_sec, "endSec": end_sec}
-
-    return segment_locator
-
-
-def _segment_from_ref(
-    ref: Mapping[str, Any],
-    *,
-    segment_by_key: Mapping[str, Mapping[str, Any]],
-    segment_by_id: Mapping[int, Mapping[str, Any]],
-    segments: Sequence[Mapping[str, Any]],
-) -> Mapping[str, Any] | None:
-    key = _field_value(ref, "segmentKey", "segment_key")
-    segment_from_key = segment_by_key.get(_stable_key(key)) if isinstance(key, str) and key.strip() else None
-    segment_id = _as_positive_int(_field_value(ref, "segmentId", "segment_id"))
-    segment_from_id = segment_by_id.get(segment_id) if segment_id is not None else None
-    if key or segment_id is not None:
-        if segment_from_key is not None and segment_from_id is not None:
-            if segment_from_key.get("segmentKey") != segment_from_id.get("segmentKey"):
-                return None
-            return segment_from_key
-        return segment_from_key or segment_from_id
-
-    resource_id = _as_positive_int(_field_value(ref, "resourceId", "resource_id"))
-    locator = _locator(ref)
-    if resource_id is None or not locator:
-        return None
-    for segment in segments:
-        if _as_positive_int(segment.get("resourceId")) != resource_id:
-            continue
-        if _locator(segment) == locator:
-            return segment
-    return None
 
 
 def _candidate_by_identity(
@@ -875,15 +948,6 @@ def _ref_type(locator: Mapping[str, Any]) -> str:
     return "segment"
 
 
-def _current_block_knowledge_point_keys(block: Mapping[str, Any]) -> set[str]:
-    keys: set[str] = set()
-    for item in _mapping_list(block.get("knowledgePoints") or block.get("knowledge_points")):
-        key = _field_value(item, "knowledgePointKey", "knowledge_point_key")
-        if isinstance(key, str) and key:
-            keys.add(key)
-    return keys
-
-
 def _sorted_adjacent_blocks(
     adjacent_blocks: Sequence[Mapping[str, Any]],
     *,
@@ -897,6 +961,56 @@ def _sorted_adjacent_blocks(
             _as_int(_field_value(block, "sortNo", "sort_no")) or 0,
         ),
     )
+
+
+def _handout_context_candidates(
+    *,
+    current_block: Mapping[str, Any],
+    adjacent_blocks: Sequence[Mapping[str, Any]],
+) -> list[HandoutContextCandidate]:
+    blocks = [current_block, *_sorted_adjacent_blocks(adjacent_blocks, current_block=current_block)]
+    candidates: list[HandoutContextCandidate] = []
+    for block in blocks:
+        text = _block_text(block)
+        if not text:
+            continue
+        candidates.append(
+            HandoutContextCandidate(
+                rank=len(candidates) + 1,
+                content_text=text,
+                handout_block_id=_field_value(block, "handoutBlockId", "handout_block_id", "blockId", "block_id"),
+                outline_key=_field_value(block, "outlineKey", "outline_key"),
+                title=_handout_context_title(block),
+                source="current_handout_block" if block is current_block else "adjacent_handout_block",
+            )
+        )
+    return candidates
+
+
+def _relevant_handout_contexts(
+    question: str,
+    contexts: Sequence[HandoutContextCandidate],
+) -> list[HandoutContextCandidate]:
+    relevant = [context for context in contexts if _relevance_score(question, context.content_text) > 0]
+    return [
+        HandoutContextCandidate(
+            rank=index,
+            content_text=context.content_text,
+            handout_block_id=context.handout_block_id,
+            outline_key=context.outline_key,
+            title=context.title,
+            source=context.source,
+        )
+        for index, context in enumerate(relevant, start=1)
+    ]
+
+
+def _handout_context_metadata(context: HandoutContextCandidate) -> dict[str, Any]:
+    return {
+        "handoutBlockId": context.handout_block_id,
+        "outlineKey": context.outline_key,
+        "title": context.title,
+    }
 
 
 def _rank_document_segments(segments: Sequence[Mapping[str, Any]], question: str) -> list[Mapping[str, Any]]:
@@ -959,6 +1073,22 @@ def _block_text(block: Mapping[str, Any]) -> str:
     )
 
 
+def _handout_context_title(block: Mapping[str, Any]) -> str:
+    title = clean_text(str(_field_value(block, "title") or ""))
+    heading = _first_markdown_heading(_field_value(block, "contentMd", "content_md"))
+    if heading and (not title or title in heading):
+        return heading
+    return title or heading or "讲义块"
+
+
+def _first_markdown_heading(markdown: Any) -> str:
+    for line in str(markdown or "").splitlines():
+        match = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if match:
+            return clean_text(match.group(1))
+    return ""
+
+
 def _locator(payload: Mapping[str, Any]) -> dict[str, Any]:
     locators: dict[str, Any] = {}
     for key in ("pageNo", "slideNo"):
@@ -986,11 +1116,11 @@ def _locator_group_count(locator: Mapping[str, Any]) -> int:
 
 
 def _locator_tuple(locator: Mapping[str, Any]) -> tuple[tuple[str, Any], ...]:
-    return tuple((key, locator[key]) for key in ("pageNo", "slideNo", "anchorKey", "startSec", "endSec") if key in locator)
+    return locator_tuple(locator)
 
 
 def _locator_key(locator: Mapping[str, Any]) -> str:
-    return "-".join(f"{key}-{value}" for key, value in _locator_tuple(locator))
+    return locator_key(locator)
 
 
 def _segment_label(segment: Mapping[str, Any], *, locator: Mapping[str, Any]) -> str:
@@ -1010,6 +1140,14 @@ def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [clean_text(str(item)) for item in value if clean_text(str(item))]
 
 
 def _keywords(text: str) -> set[str]:
@@ -1039,22 +1177,7 @@ def _relevance_score(question: str, text: str) -> int:
 
 
 def _replace_rank(candidate: QaEvidenceCandidate, rank: int) -> QaEvidenceCandidate:
-    return QaEvidenceCandidate(
-        candidate_key=candidate.candidate_key,
-        source=candidate.source,
-        rank=rank,
-        content_text=candidate.content_text,
-        resource_id=candidate.resource_id,
-        ref_label=candidate.ref_label,
-        locator=candidate.locator,
-        segment_id=candidate.segment_id,
-        segment_key=candidate.segment_key,
-        course_id=candidate.course_id,
-        parse_run_id=candidate.parse_run_id,
-        handout_version_id=candidate.handout_version_id,
-        handout_block_id=candidate.handout_block_id,
-        metadata_json=candidate.metadata_json,
-    )
+    return replace_candidate_rank(candidate, rank)
 
 
 def _field_value(payload: Mapping[str, Any], *keys: str) -> Any:
@@ -1118,6 +1241,31 @@ def _build_qa_prompt(question: str, candidates: Sequence[QaEvidenceCandidate], *
             f"用户问题：{clean_text(question)}",
             "请只基于 evidenceCandidates 回答，并只引用 evidenceCandidates 内的候选。",
             f"evidenceCandidates：{json.dumps(evidence, ensure_ascii=False, sort_keys=True)}",
+        ]
+    )
+
+
+def _build_unreferenced_qa_prompt(
+    question: str,
+    *,
+    context_text: str,
+    evidence_tier: UnreferencedEvidenceTier,
+    course_scope: Mapping[str, Any] | None = None,
+    max_context_chars: int = 1600,
+) -> str:
+    payload: dict[str, Any] = {
+        "question": clean_text(question),
+        "evidenceTier": evidence_tier,
+        "contextText": _truncate(context_text, max_context_chars),
+        "requiredCitations": [],
+    }
+    scope_text = _course_scope_text(course_scope)
+    if scope_text:
+        payload["courseScope"] = _truncate(scope_text, max_context_chars)
+    return "\n".join(
+        [
+            "请基于以下 JSON 输入回答，并保持 citations 为空数组。",
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
         ]
     )
 
