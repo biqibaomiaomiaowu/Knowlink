@@ -83,7 +83,7 @@ class _CourseExportsPageState extends ConsumerState<CourseExportsPage> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      '可用类型预留：课程总结、节课总结、QA 记录、测验报告、复习计划。',
+                      '可用类型预留：课程总结、课时总结、QA 记录、测验报告、复习计划。',
                     ),
                   ],
                 ),

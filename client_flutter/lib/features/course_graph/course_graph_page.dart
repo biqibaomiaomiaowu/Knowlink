@@ -20,7 +20,7 @@ class CourseGraphPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = switch (kind) {
       CourseGraphPageKind.settings => '课程设置',
-      CourseGraphPageKind.graph => lessonId == null ? '课程图谱' : '节课图谱',
+      CourseGraphPageKind.graph => lessonId == null ? '课程图谱' : '课时图谱',
     };
     final message = switch (kind) {
       CourseGraphPageKind.settings => '课程设置入口已预留，当前版本先保持只读状态。',

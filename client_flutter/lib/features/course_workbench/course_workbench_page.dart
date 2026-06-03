@@ -99,7 +99,7 @@ class _ProgressCard extends StatelessWidget {
                 icon: Icons.timeline_outlined,
                 label: '学习进度',
                 value: '进度 ${model.progressPct}%',
-                detail: '${course.lessonCount} 节课',
+                detail: '${course.lessonCount} 课时',
               ),
               MetricBox(
                 icon: Icons.psychology_alt_outlined,
@@ -111,7 +111,7 @@ class _ProgressCard extends StatelessWidget {
               ),
               MetricBox(
                 icon: Icons.play_circle_outline,
-                label: '当前节课',
+                label: '当前课时',
                 value: course.currentLessonTitle ?? '未选择',
                 detail: model.currentLesson?.nextAction?.reason,
               ),
@@ -170,7 +170,7 @@ class _QuickEntryGrid extends StatelessWidget {
         key: 'course_qa',
         title: '全课程 QA',
         status: 'placeholder',
-        message: '基于全部节课提问',
+        message: '基于全部课时提问',
       ),
       const PlaceholderEntryModel(
         key: 'course_graph',
@@ -244,10 +244,10 @@ class _LessonList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionLabel('节课列表'),
+          const _SectionLabel('课时列表'),
           const SizedBox(height: 12),
           if (lessons.isEmpty)
-            const Text('暂无节课。')
+            const Text('暂无课时。')
           else
             ...lessons.map(
               (lesson) => ListTile(

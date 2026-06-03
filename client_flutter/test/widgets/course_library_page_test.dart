@@ -23,9 +23,9 @@ void main() {
     expect(find.text('当前课程'), findsOneWidget);
     expect(find.textContaining('学习状态：learning_ready'), findsOneWidget);
     expect(find.textContaining('最近活动：2026-06-01'), findsOneWidget);
-    expect(find.textContaining('节课 6'), findsOneWidget);
+    expect(find.textContaining('课时 6'), findsOneWidget);
     expect(find.textContaining('课程资料 3'), findsOneWidget);
-    expect(find.textContaining('当前节课：关系模型'), findsOneWidget);
+    expect(find.textContaining('当前课时：关系模型'), findsOneWidget);
     expect(find.textContaining('掌握度 72%'), findsOneWidget);
     expect(find.textContaining('待复习 4'), findsOneWidget);
     expect(find.textContaining('handout / running'), findsOneWidget);

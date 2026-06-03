@@ -618,7 +618,7 @@ class LessonService:
         primary_video: dict[str, Any] | None,
     ) -> dict[str, Any]:
         action_type = "continue_video" if primary_video is not None else "open_lesson"
-        label = "继续本节视频" if primary_video is not None else "打开本节课"
+        label = "继续本课时视频" if primary_video is not None else "打开本课时"
         return {
             "type": action_type,
             "label": label,

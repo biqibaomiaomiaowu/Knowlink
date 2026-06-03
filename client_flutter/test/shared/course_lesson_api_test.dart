@@ -131,7 +131,7 @@ void main() {
     final lessons = await api.fetchLessons('101');
     final created = await api.createLesson(
       courseId: '101',
-      request: {'title': '新增节课'},
+      request: {'title': '新增课时'},
       idempotencyKey: 'create-l-2',
     );
     final updated = await api.updateLesson(
@@ -154,7 +154,7 @@ void main() {
     final merged = await api.mergeLessons(
       courseId: '101',
       lessonIds: ['l-1', 'l-2'],
-      targetTitle: '合并节课',
+      targetTitle: '合并课时',
     );
     final split = await api.splitLesson(
       courseId: '101',
@@ -271,7 +271,7 @@ Map<String, dynamic> _workbenchData() {
         'key': 'course_qa',
         'title': '全课程 QA',
         'status': 'ready',
-        'message': '基于全部节课提问',
+        'message': '基于全部课时提问',
       },
     ],
     'nextActions': [

@@ -176,7 +176,7 @@ class _ChatPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final scopeLabel = lessonId == null
         ? '当前范围：全课程 $courseId'
-        : '当前范围：课程 $courseId / 节课 $lessonId';
+        : '当前范围：课程 $courseId / 课时 $lessonId';
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -222,7 +222,7 @@ class _ChatPanel extends StatelessWidget {
             minLines: 3,
             maxLines: 5,
             decoration: InputDecoration(
-              hintText: lessonId == null ? '向整门课程提问' : '只向当前节课提问',
+              hintText: lessonId == null ? '向整门课程提问' : '只向当前课时提问',
               border: const OutlineInputBorder(),
               suffixIcon: const IconButton(
                 tooltip: '发送',

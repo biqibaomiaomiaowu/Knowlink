@@ -117,10 +117,10 @@ class _CourseTile extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _InlineMetric('最近活动：${_formatDate(item.lastActivityAt)}'),
-                  _InlineMetric('节课 ${item.lessonCount}'),
+                  _InlineMetric('课时 ${item.lessonCount}'),
                   _InlineMetric('课程资料 ${item.courseResourceCount}'),
                   _InlineMetric(
-                    '当前节课：${item.currentLessonTitle ?? '未选择'}',
+                    '当前课时：${item.currentLessonTitle ?? '未选择'}',
                   ),
                   _InlineMetric(mastery),
                   _InlineMetric('待复习 ${item.pendingReviewCount}'),

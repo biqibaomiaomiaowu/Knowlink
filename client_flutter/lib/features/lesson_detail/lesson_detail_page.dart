@@ -28,13 +28,13 @@ class LessonDetailPage extends ConsumerWidget {
     );
     final detail = ref.watch(lessonDetailProvider(request));
     return AppScaffold(
-      title: '节课详情',
+      title: '课时详情',
       activeTab: KnowLinkTab.handout,
       courseId: courseId,
       body: detail.when(
-        loading: () => const AppLoadingView(label: '正在加载节课详情'),
+        loading: () => const AppLoadingView(label: '正在加载课时详情'),
         error: (error, _) => AppErrorView(
-          message: '节课详情加载失败：$error',
+          message: '课时详情加载失败：$error',
           onRetry: () => ref.invalidate(lessonDetailProvider(request)),
         ),
         data: (model) => _LessonDetailBody(model: model),
@@ -294,10 +294,10 @@ class _ResourceSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionLabel('节课资料'),
+          const _SectionLabel('课时资料'),
           const SizedBox(height: 12),
           if (resources.isEmpty)
-            const Text('暂无节课资料。')
+            const Text('暂无课时资料。')
           else
             ...resources.map(
               (resource) => ListTile(

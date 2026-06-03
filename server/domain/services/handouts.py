@@ -52,7 +52,7 @@ class HandoutService:
             "status": "placeholder",
             "canGenerate": True,
             "requiredSources": ["lessons", "course_resources", "lesson_handouts"],
-            "message": "课程总结讲义将在后续生成任务中汇总课程资料、节课讲义和测验复习结果。",
+            "message": "课程总结讲义将在后续生成任务中汇总课程资料、课时讲义和测验复习结果。",
             "availableActions": ["generate"],
             "citations": [],
         }
@@ -82,7 +82,7 @@ class HandoutService:
             "status": "placeholder",
             "canGenerate": can_generate,
             "requiredSources": required_sources,
-            "message": "节课讲义将在后续生成任务中基于本节主视频、本节资料和必要课程级资料生成。",
+            "message": "课时讲义将在后续生成任务中基于本课时主视频、本课时资料和必要课程级资料生成。",
             "availableActions": ["generate"] if can_generate else ["upload_primary_video", "upload_lesson_resource"],
             "citations": [],
         }

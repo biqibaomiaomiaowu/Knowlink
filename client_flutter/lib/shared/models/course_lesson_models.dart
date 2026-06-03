@@ -172,7 +172,7 @@ Map<String, dynamic> _workbenchNextActionJson(
     action.putIfAbsent('label', () {
       final title =
           action['title'] as String? ?? action['lessonTitle'] as String?;
-      return title == null || title.isEmpty ? '继续学习当前节课' : '继续学习$title';
+      return title == null || title.isEmpty ? '继续学习当前课时' : '继续学习$title';
     });
   }
   return action;
@@ -217,7 +217,7 @@ class LessonSummaryModel {
     return LessonSummaryModel(
       lessonId: _stringId(json['lessonId']),
       courseId: _stringId(json['courseId']),
-      title: json['title'] as String? ?? '未命名节课',
+      title: json['title'] as String? ?? '未命名课时',
       orderIndex: _intValue(json['orderIndex']),
       lessonStatus: json['lessonStatus'] as String? ?? 'draft',
       primaryVideoResourceId: _nullableString(json['primaryVideoResourceId']),

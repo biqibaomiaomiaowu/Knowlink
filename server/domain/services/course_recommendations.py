@@ -131,7 +131,7 @@ class CourseRecommendationService:
             "scopeType": "lesson",
             "courseId": course["courseId"],
             "lessonId": lesson["lessonId"],
-            "title": f"复习薄弱节课：{lesson['title']}",
+            "title": f"复习薄弱课时：{lesson['title']}",
             "masteryScore": float(mastery_score),
             "reason": self._reason(course=course, lessons=[lesson], weak_lesson=lesson),
             "reasonPlaceholders": self._reason_placeholders(),

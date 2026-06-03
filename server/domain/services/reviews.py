@@ -61,7 +61,7 @@ class ReviewService:
                 "lessonId": lesson["lessonId"],
                 "title": lesson.get("title"),
                 "masteryScore": lesson.get("masteryScore"),
-                "reasonText": "该节课存在待复习知识点占位。",
+                "reasonText": "该课时存在待复习知识点占位。",
             }
             for lesson in lessons
         ]
@@ -74,7 +74,7 @@ class ReviewService:
             "crossLessonWeakPoints": [
                 {
                     "knowledgePointKey": "kp-cross-lesson-placeholder",
-                    "title": "跨节课薄弱点占位",
+                    "title": "跨课时薄弱点占位",
                     "lessonIds": [lesson["lessonId"] for lesson in lessons],
                     "evidenceChain": [
                         {"type": "course_review", "scopeType": "course", "courseId": course_id},
@@ -249,7 +249,7 @@ class ReviewService:
             "scopeType": "lesson",
             "lessonId": lesson_id,
             "priorityScore": 80,
-            "reasonText": "该节课存在待复习知识点占位。",
+            "reasonText": "该课时存在待复习知识点占位。",
             "recommendedMinutes": 15,
             "knowledgePointKey": f"lesson-{lesson_id}-placeholder",
             "sourceQuestionKeys": [],

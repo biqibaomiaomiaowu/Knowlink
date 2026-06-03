@@ -607,7 +607,7 @@ class _UploadSection extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             const Text(
-              '文档上传需选择整门课程或指定节课；视频上传需选择自动创建节课或绑定已有节课。',
+              '文档上传需选择整门课程或指定课时；视频上传需选择自动创建课时或绑定已有课时。',
               style: TextStyle(
                 color: AppTheme.muted,
                 fontWeight: FontWeight.w700,
@@ -1419,7 +1419,7 @@ class _UploadQueueTile extends StatelessWidget {
               if (!item.hasRequiredScope) ...[
                 const SizedBox(height: 8),
                 const Text(
-                  '请补全节课归属后再上传。',
+                  '请补全课时归属后再上传。',
                   style: TextStyle(
                     color: Color(0xFFDC2626),
                     fontWeight: FontWeight.w700,
@@ -1470,7 +1470,7 @@ class _DocumentScopeControls extends StatelessWidget {
             ),
             items: const [
               DropdownMenuItem(value: 'course', child: Text('整门课程')),
-              DropdownMenuItem(value: 'lesson', child: Text('指定节课')),
+              DropdownMenuItem(value: 'lesson', child: Text('指定课时')),
             ],
             onChanged: item.isUploading
                 ? null
@@ -1537,12 +1537,12 @@ class _VideoPlacementControls extends StatelessWidget {
           child: DropdownButtonFormField<String>(
             initialValue: item.lessonPlacement ?? 'auto_create',
             decoration: const InputDecoration(
-              labelText: '视频节课放置',
+              labelText: '视频课时放置',
               border: OutlineInputBorder(),
             ),
             items: const [
-              DropdownMenuItem(value: 'auto_create', child: Text('自动创建节课')),
-              DropdownMenuItem(value: 'bind_existing', child: Text('绑定已有节课')),
+              DropdownMenuItem(value: 'auto_create', child: Text('自动创建课时')),
+              DropdownMenuItem(value: 'bind_existing', child: Text('绑定已有课时')),
             ],
             onChanged: item.isUploading
                 ? null
@@ -1580,7 +1580,7 @@ class _VideoPlacementControls extends StatelessWidget {
             enabled: !item.isUploading &&
                 (item.lessonPlacement ?? 'auto_create') == 'auto_create',
             decoration: const InputDecoration(
-              labelText: '新节课标题',
+              labelText: '新课时标题',
               border: OutlineInputBorder(),
             ),
             onChanged: (value) => onUpdateScope(

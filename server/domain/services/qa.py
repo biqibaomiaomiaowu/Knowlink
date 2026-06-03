@@ -61,7 +61,7 @@ class QaService:
             lesson_id=lesson_id,
             session_id=payload.session_id,
             question=payload.question,
-            answer_md=f"这是《{lesson.get('title') or '当前节课'}》的节课级 QA 占位回答。",
+            answer_md=f"这是《{lesson.get('title') or '当前课时'}》的课时级 QA 占位回答。",
             citations=citations,
         )
 
@@ -195,7 +195,7 @@ class QaService:
         lesson_id = lesson.get("lessonId") if lesson is not None else None
         lesson_title = lesson.get("title") if lesson is not None else None
         lesson_order = lesson.get("orderIndex") if lesson is not None else None
-        prefix = f"第 {lesson_order} 节课：{lesson_title} / " if lesson_title and lesson_order else ""
+        prefix = f"第 {lesson_order} 课时：{lesson_title} / " if lesson_title and lesson_order else ""
         return {
             "scopeType": resource.get("scopeType"),
             "lessonId": lesson_id,

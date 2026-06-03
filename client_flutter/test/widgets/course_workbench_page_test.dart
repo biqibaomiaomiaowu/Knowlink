@@ -24,6 +24,9 @@ void main() {
 
     expect(find.text('数据库系统'), findsOneWidget);
     expect(find.textContaining('进度 33%'), findsOneWidget);
+    expect(find.textContaining('6 课时'), findsOneWidget);
+    expect(find.text('当前课时'), findsOneWidget);
+    expect(find.text('课时列表'), findsOneWidget);
     expect(find.text('第 2 课'), findsOneWidget);
     expect(find.text('关系模型'), findsOneWidget);
     expect(find.text('数据库教材.pdf'), findsOneWidget);
@@ -94,7 +97,7 @@ class _CourseWorkbenchFakeApiClient extends ApiClient {
           'key': 'course_qa',
           'title': '全课程 QA',
           'status': 'ready',
-          'message': '基于全部节课提问',
+          'message': '基于全部课时提问',
         },
         {
           'key': 'course_graph',

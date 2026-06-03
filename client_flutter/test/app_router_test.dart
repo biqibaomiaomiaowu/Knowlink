@@ -400,7 +400,7 @@ class _RouterFakeApiClient extends ApiClient {
       'lessonCount': 2,
       'courseResourceCount': 0,
       'currentLessonId': 'l-2',
-      'currentLessonTitle': '路由节课',
+      'currentLessonTitle': '路由课时',
       'overallMasteryScore': 0.5,
       'pendingReviewCount': 0,
       'pipelineStage': 'handout',
@@ -414,7 +414,7 @@ class _RouterFakeApiClient extends ApiClient {
     return {
       'lessonId': lessonId,
       'courseId': courseId,
-      'title': '路由节课',
+      'title': '路由课时',
       'orderIndex': 1,
       'lessonStatus': 'learning_ready',
       'primaryVideoResourceId': null,
