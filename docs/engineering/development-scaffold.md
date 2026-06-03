@@ -7,7 +7,7 @@
 - 后端依赖方向固定为 `router -> service -> repository`。
 - 当前真实联调优先使用 `server/infra/repositories/sqlalchemy.py` 的 SQLAlchemy 运行时仓储；`server/infra/repositories/memory.py` 保留为 demo、scaffold 和轻量测试适配器，router 不应直接引用任一具体仓储实现。
 - DTO 固定在 `server/schemas/common.py`、`server/schemas/requests.py`、`server/schemas/responses.py`。
-- 客户端路由固定为 `/`、`/import`、`/recommend`、`/courses/:courseId/progress`、`/courses/:courseId/inquiry`、`/courses/:courseId/handout`、`/courses/:courseId/qa/:sessionId`、`/quizzes/:quizId`、`/courses/:courseId/review`。
+- 客户端 V1 主链路路由保留 `/`、`/import`、`/recommend`、`/courses/:courseId/progress`、`/courses/:courseId/inquiry`、`/courses/:courseId/handout`、`/courses/:courseId/qa/:sessionId`、`/quizzes/:quizId`、`/courses/:courseId/review`；V2 Phase 2 当前主入口新增 `/courses`、`/courses/:courseId`、`/courses/:courseId/lessons/:lessonId`、课程 / 节课 QA、graph、report / export placeholder 入口。
 - 当前仓库按 Flutter APP 交付组织，不承接快应用工程。
 
 ## 2. 各条线入口
@@ -38,12 +38,13 @@
 | 推荐、创建课程、上传、解析、问询、讲义、QA、测验、复习接口 | 第一版主链路已覆盖 | `server/tests/test_api.py`、`server/tests/test_scaffold_consistency.py` 与 runtime wiring 测试覆盖主链路 smoke、幂等和展示字段 |
 | AI / parse contract 与引用约束 | 已落地 | `schemas/ai/*.schema.json`、`schemas/parse/normalized_document.schema.json`，并由 `server/tests/test_contract_freeze.py` 覆盖 |
 | B 站导入接口 | 第一版为 `501` stub；第二版已接入扫码登录、服务端凭据、预览、任务创建、状态、取消、重试和 runner 导入路径，真实公网样例验收仍以 `docs/v2/phase-plan.md` 为准 | `server/api/routers/bilibili.py`、`server/domain/services/bilibili.py`、`server/tasks/bilibili_import.py`，并由 `test_api.py`、`test_bilibili_service.py`、`test_bilibili_import_runner.py`、`test_bilibili_sql_runtime.py` 校验 |
-| Flutter 路由、页面、provider | 第一版主链路已承接；第二版 B站导入区块已接入扫码、预览、创建、轮询、取消、重试和导入后资源刷新 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位；B站导入由 `CourseImportPage` 与 `bilibiliImportProvider` 承接 |
+| V2 Lesson domain、资源 scope 与分层学习产物 | 阶段二已接入 lesson CRUD / merge / split、课程 / 节课资源 scope、分层讲义 / QA / quiz / review / progress、课程 / 节课 report / export placeholder | `server/domain/services/lessons.py`、`resources.py`、`home.py`、`exports.py`、`course_recommendations.py`，并由 `test_lessons_api.py`、`test_resource_scope_import.py`、`test_scoped_learning_artifacts.py`、`test_home_lesson_continuation.py` 校验 |
+| Flutter 路由、页面、provider | 第一版主链路已承接；第二版 B站导入区块已接入扫码、预览、创建、轮询、取消、重试和导入后资源刷新；阶段二课程库、课程工作台和节课详情已成为 V2 当前入口 | `client_flutter/lib/app/`、`client_flutter/lib/features/`、`client_flutter/lib/shared/providers/` 已就位；B站导入由 `CourseImportPage` 与 `bilibiliImportProvider` 承接，V2 workbench/detail 由 `CourseLibraryPage`、`CourseWorkbenchPage`、`LessonDetailPage` 承接 |
 | Flutter 自动化测试 | 已覆盖启动 smoke、course flow provider 和 Week 4 页面 / provider 语义 | `client_flutter/test/` 下 smoke、provider、quiz、review、home 等测试 |
 | SQLAlchemy model 与 Alembic 迁移 | 第一版业务表已覆盖 | 课程、资源、解析、讲义、QA、测验、掌握度、复习和学习进度相关 model / migration 已进入运行时 |
 | `async_tasks` 与 worker | 第一版异步运行时已接通 | parse、handout、quiz、review 等任务通过 task payload、Dramatiq worker 和 dispatcher 接线 |
 | PostgreSQL / Redis / MinIO / Worker 真实运行时 | 第一版已接通 | 本地运行时已覆盖 SQLAlchemy 持久化仓储、MinIO 上传 / 读取、Redis / Dramatiq worker 与聚合 read model；scheduler 当前默认禁用，需 `KNOWLINK_SCHEDULER_ENABLED=true` 显式启用 |
-| V2 AI 重能力 contract 入口 | 仅轻量类型入口已落地，正式 API / read model / 输出 schema 待冻结 | `server/ai/v2/graph.py`、`streaming.py`、`grading.py` 与 `server/tests/test_ai_v2_contracts.py` 只校验 dataclass / Protocol 边界，不代表图谱、SSE 或主观题判卷运行时已完成 |
+| V2 图谱 / 流式 / 主观题判卷 / report / export | 图谱、report、export 已有 placeholder API / 页面空状态；流式与主观题判卷仍为 contract / 占位，不代表正式生成能力 | `server/api/routers/exports.py`、`server/ai/v2/graph.py`、`streaming.py`、`grading.py` 与 `server/tests/test_ai_v2_contracts.py` / `test_home_lesson_continuation.py`；正式图谱、SSE、主观题判卷、真实报告和真实导出需另行冻结 |
 
 FastAPI 当前默认允许本地 Flutter Web origin；MinIO 本地默认使用全局 `MINIO_API_CORS_ALLOW_ORIGIN=*`，生产环境可通过 `KNOWLINK_CORS_ALLOW_ORIGINS` 和 `KNOWLINK_MINIO_CORS_ALLOW_ORIGIN` 显式收紧。
 

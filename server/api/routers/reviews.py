@@ -16,6 +16,53 @@ async def get_review_tasks(
     return api_ok(request, service.list_review_tasks(course_id=courseId))
 
 
+@router.get("/courses/{courseId}/lessons/{lessonId}/review")
+async def get_lesson_review(
+    courseId: int,
+    lessonId: int,
+    request: Request,
+    service: ReviewService = Depends(get_review_service),
+):
+    return api_ok(request, service.get_lesson_review(course_id=courseId, lesson_id=lessonId))
+
+
+@router.post("/courses/{courseId}/lessons/{lessonId}/review/regenerate")
+async def regenerate_lesson_review(
+    courseId: int,
+    lessonId: int,
+    request: Request,
+    service: ReviewService = Depends(get_review_service),
+):
+    return api_ok(request, service.regenerate_lesson_review(course_id=courseId, lesson_id=lessonId))
+
+
+@router.get("/courses/{courseId}/review")
+async def get_course_review(
+    courseId: int,
+    request: Request,
+    service: ReviewService = Depends(get_review_service),
+):
+    return api_ok(request, service.get_course_review(course_id=courseId))
+
+
+@router.post("/courses/{courseId}/review/regenerate")
+async def regenerate_course_review(
+    courseId: int,
+    request: Request,
+    service: ReviewService = Depends(get_review_service),
+):
+    return api_ok(request, service.regenerate_course_review(course_id=courseId))
+
+
+@router.get("/courses/{courseId}/exam-review")
+async def get_exam_review(
+    courseId: int,
+    request: Request,
+    service: ReviewService = Depends(get_review_service),
+):
+    return api_ok(request, service.get_exam_review(course_id=courseId))
+
+
 @router.post("/courses/{courseId}/review-tasks/regenerate")
 async def regenerate_review_tasks(
     courseId: int,

@@ -77,6 +77,15 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
         assert step_code in week2_contract
 
 
+def test_v2_course_lesson_workbench_contract_is_linked_from_api_contract():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    docs_nav = load_text(DOCS_NAV_DOC)
+
+    assert "v2-course-lesson-workbench-contract.md" in api_contract
+    assert "v2-course-lesson-workbench-contract.md" in docs_nav
+    assert "phase2-course-lesson-workbench-handoff.md" in docs_nav
+
+
 def test_backend_optimization_contract_freezes_idempotency_and_upload_fast_return():
     api_contract = load_text("docs/contracts/api-contract.md")
     error_codes = load_text("docs/contracts/error-codes.md")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Protocol, TypeVar
 
@@ -37,7 +37,19 @@ class CourseRepository(Protocol):
 
     def list_recent_courses(self) -> list[dict[str, Any]]: ...
 
+    def list_courses(self, filters: Mapping[str, Any] | None = None) -> list[dict[str, Any]]: ...
+
     def get_course(self, course_id: int) -> dict[str, Any] | None: ...
+
+    def update_course(self, course_id: int, changes: Mapping[str, Any]) -> dict[str, Any] | None: ...
+
+    def archive_course(self, course_id: int) -> dict[str, Any] | None: ...
+
+    def restore_course(self, course_id: int) -> dict[str, Any] | None: ...
+
+    def get_course_delete_impact(self, course_id: int) -> dict[str, Any] | None: ...
+
+    def delete_course(self, course_id: int) -> dict[str, Any] | None: ...
 
     def set_current_course(self, course_id: int) -> dict[str, Any] | None: ...
 
@@ -54,6 +66,77 @@ class ResourceRepository(Protocol):
     def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]: ...
 
     def delete_resource(self, course_id: int, resource_id: int) -> bool: ...
+
+    def update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        usage_role: str | None = None,
+    ) -> dict[str, Any] | None: ...
+
+
+class LessonRepository(Protocol):
+    def create_lesson(
+        self,
+        *,
+        course_id: int,
+        title: str,
+        source_type: str = "manual",
+        source_ref_json: dict[str, Any] | None = None,
+        primary_video_resource_id: int | None = None,
+        primary_video_start_sec: int | None = None,
+        primary_video_end_sec: int | None = None,
+        meta_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def list_lessons(self, course_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]: ...
+
+    def get_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None: ...
+
+    def reorder_lessons(self, *, course_id: int, lesson_ids: Sequence[int]) -> list[dict[str, Any]]: ...
+
+    def soft_delete_lesson(self, *, course_id: int, lesson_id: int) -> dict[str, Any]: ...
+
+    def update_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        changes: Mapping[str, Any],
+    ) -> dict[str, Any] | None: ...
+
+
+class ScopedArtifactRepository(Protocol):
+    def create_scoped_artifact(
+        self,
+        *,
+        artifact_type: str,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        status: str = "placeholder",
+        **extra: Any,
+    ) -> dict[str, Any]: ...
+
+    def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]: ...
+
+    def mark_lesson_artifacts_stale(
+        self,
+        *,
+        course_id: int,
+        lesson_ids: Sequence[int],
+    ) -> list[dict[str, Any]]: ...
 
 
 class ParseRunRepository(Protocol):
@@ -167,6 +250,26 @@ class BilibiliImportRepository(Protocol):
         **changes: Any,
     ) -> dict[str, Any] | None: ...
 
+    def upsert_bilibili_import_item(
+        self,
+        *,
+        import_run_id: int,
+        course_id: int,
+        source_url: str,
+        item_key: str | None = None,
+        title: str | None = None,
+        part_no: int | None = None,
+        status: str = "pending",
+        progress_pct: int = 0,
+        lesson_id: int | None = None,
+        resource_id: int | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    def list_bilibili_import_items(self, import_run_id: int) -> list[dict[str, Any]]: ...
+
 
 class TaskDispatcher(Protocol):
     def enqueue_parse_pipeline(self, *, task_id: int, payload: dict[str, Any]) -> None: ...
@@ -241,6 +344,26 @@ class QaRepository(Protocol):
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None: ...
 
+    def list_scoped_qa_sessions(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def create_scoped_qa_exchange(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        question: str,
+        answer_md: str,
+        citations: Sequence[dict[str, Any]],
+        session_id: int | None = None,
+    ) -> dict[str, Any]: ...
+
 
 class QuizRepository(Protocol):
     def create_quiz(
@@ -285,3 +408,15 @@ class ProgressRepository(Protocol):
     def get_progress(self, course_id: int) -> dict[str, Any]: ...
 
     def update_progress(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class LessonProgressRepository(Protocol):
+    def upsert_user_lesson_progress(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]: ...
+
+    def get_user_lesson_progress(self, *, course_id: int, lesson_id: int) -> dict[str, Any] | None: ...

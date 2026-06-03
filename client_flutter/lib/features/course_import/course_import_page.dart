@@ -115,6 +115,28 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
             state: state,
             onPickFiles: notifier.pickFiles,
             onRemoveFile: notifier.removeQueuedFile,
+            onUpdateFileScope: ({
+              required itemId,
+              scopeType,
+              lessonId,
+              clearLessonId = false,
+              usageRole,
+              lessonPlacement,
+              clearLessonPlacement = false,
+              lessonTitle,
+              clearLessonTitle = false,
+            }) =>
+                notifier.updateQueuedFileScope(
+              itemId: itemId,
+              scopeType: scopeType,
+              lessonId: lessonId,
+              clearLessonId: clearLessonId,
+              usageRole: usageRole,
+              lessonPlacement: lessonPlacement,
+              clearLessonPlacement: clearLessonPlacement,
+              lessonTitle: lessonTitle,
+              clearLessonTitle: clearLessonTitle,
+            ),
             onUpload: effectiveCourseId == null
                 ? null
                 : () => notifier.uploadPendingFiles(effectiveCourseId),
@@ -501,6 +523,7 @@ class _UploadSection extends StatelessWidget {
     required this.state,
     required this.onPickFiles,
     required this.onRemoveFile,
+    required this.onUpdateFileScope,
     required this.onUpload,
     required this.onDeleteResource,
     required this.onRefresh,
@@ -510,6 +533,17 @@ class _UploadSection extends StatelessWidget {
   final CourseImportState state;
   final VoidCallback onPickFiles;
   final ValueChanged<String> onRemoveFile;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateFileScope;
   final VoidCallback? onUpload;
   final ValueChanged<int>? onDeleteResource;
   final VoidCallback? onRefresh;
@@ -518,7 +552,7 @@ class _UploadSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final resources = state.resources.valueOrNull ?? const [];
     final hasUploadableFiles = state.uploadQueue.any(
-      (item) => item.isPending || item.hasFailed,
+      (item) => (item.isPending || item.hasFailed) && item.hasRequiredScope,
     );
     final visibleItems = [
       ...state.uploadQueue.map(_UploadDisplayItem.fromQueue),
@@ -572,6 +606,15 @@ class _UploadSection extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            const Text(
+              '文档上传需选择整门课程或指定节课；视频上传需选择自动创建节课或绑定已有节课。',
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -597,6 +640,7 @@ class _UploadSection extends StatelessWidget {
               ...state.uploadQueue.map(
                 (item) => _UploadQueueTile(
                   item: item,
+                  onUpdateScope: onUpdateFileScope,
                   onRemove:
                       item.isUploading ? null : () => onRemoveFile(item.id),
                 ),
@@ -1301,10 +1345,22 @@ class _UploadedResourceList extends StatelessWidget {
 class _UploadQueueTile extends StatelessWidget {
   const _UploadQueueTile({
     required this.item,
+    required this.onUpdateScope,
     required this.onRemove,
   });
 
   final UploadQueueItemModel item;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateScope;
   final VoidCallback? onRemove;
 
   @override
@@ -1316,26 +1372,225 @@ class _UploadQueueTile extends StatelessWidget {
       _ => '待上传',
     };
 
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        item.hasFailed
-            ? Icons.error_outline
-            : item.isReady
-                ? Icons.check_circle_outline
-                : Icons.insert_drive_file_outlined,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: AppTheme.line),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  item.hasFailed
+                      ? Icons.error_outline
+                      : item.isReady
+                          ? Icons.check_circle_outline
+                          : Icons.insert_drive_file_outlined,
+                ),
+                title: Text(item.name),
+                subtitle: Text(
+                  '${item.resourceType.name.toUpperCase()} · '
+                  '${item.sizeBytes} bytes · $statusLabel'
+                  '${item.errorMessage == null ? '' : '\n${item.errorMessage}'}',
+                ),
+                trailing: IconButton(
+                  tooltip: '移出队列',
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (item.isVideo)
+                _VideoPlacementControls(
+                  item: item,
+                  onUpdateScope: onUpdateScope,
+                )
+              else
+                _DocumentScopeControls(
+                  item: item,
+                  onUpdateScope: onUpdateScope,
+                ),
+              if (!item.hasRequiredScope) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  '请补全节课归属后再上传。',
+                  style: TextStyle(
+                    color: Color(0xFFDC2626),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      title: Text(item.name),
-      subtitle: Text(
-        '${item.resourceType.name.toUpperCase()} · '
-        '${item.sizeBytes} bytes · $statusLabel'
-        '${item.errorMessage == null ? '' : '\n${item.errorMessage}'}',
-      ),
-      trailing: IconButton(
-        tooltip: '移出队列',
-        onPressed: onRemove,
-        icon: const Icon(Icons.close),
-      ),
+    );
+  }
+}
+
+class _DocumentScopeControls extends StatelessWidget {
+  const _DocumentScopeControls({
+    required this.item,
+    required this.onUpdateScope,
+  });
+
+  final UploadQueueItemModel item;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateScope;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(
+          width: 190,
+          child: DropdownButtonFormField<String>(
+            initialValue: item.scopeType,
+            decoration: const InputDecoration(
+              labelText: '资料范围',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'course', child: Text('整门课程')),
+              DropdownMenuItem(value: 'lesson', child: Text('指定节课')),
+            ],
+            onChanged: item.isUploading
+                ? null
+                : (value) => onUpdateScope(
+                      itemId: item.id,
+                      scopeType: value,
+                      usageRole: value == 'lesson'
+                          ? 'lesson_material'
+                          : 'course_material',
+                      clearLessonId: value != 'lesson',
+                    ),
+          ),
+        ),
+        SizedBox(
+          width: 220,
+          child: TextFormField(
+            initialValue: item.lessonId,
+            enabled: !item.isUploading && item.scopeType == 'lesson',
+            decoration: const InputDecoration(
+              labelText: 'lessonId',
+              hintText: '如 l-2',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => onUpdateScope(
+              itemId: item.id,
+              lessonId: value.trim().isEmpty ? null : value.trim(),
+              clearLessonId: value.trim().isEmpty,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VideoPlacementControls extends StatelessWidget {
+  const _VideoPlacementControls({
+    required this.item,
+    required this.onUpdateScope,
+  });
+
+  final UploadQueueItemModel item;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateScope;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(
+          width: 210,
+          child: DropdownButtonFormField<String>(
+            initialValue: item.lessonPlacement ?? 'auto_create',
+            decoration: const InputDecoration(
+              labelText: '视频节课放置',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'auto_create', child: Text('自动创建节课')),
+              DropdownMenuItem(value: 'bind_existing', child: Text('绑定已有节课')),
+            ],
+            onChanged: item.isUploading
+                ? null
+                : (value) => onUpdateScope(
+                      itemId: item.id,
+                      scopeType: 'lesson',
+                      usageRole: 'primary_video',
+                      lessonPlacement: value,
+                      clearLessonId: value != 'bind_existing',
+                    ),
+          ),
+        ),
+        SizedBox(
+          width: 220,
+          child: TextFormField(
+            initialValue: item.lessonId,
+            enabled:
+                !item.isUploading && item.lessonPlacement == 'bind_existing',
+            decoration: const InputDecoration(
+              labelText: '绑定 lessonId',
+              hintText: '如 l-2',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => onUpdateScope(
+              itemId: item.id,
+              lessonId: value.trim().isEmpty ? null : value.trim(),
+              clearLessonId: value.trim().isEmpty,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 240,
+          child: TextFormField(
+            initialValue: item.lessonTitle,
+            enabled: !item.isUploading &&
+                (item.lessonPlacement ?? 'auto_create') == 'auto_create',
+            decoration: const InputDecoration(
+              labelText: '新节课标题',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => onUpdateScope(
+              itemId: item.id,
+              lessonTitle: value.trim().isEmpty ? null : value.trim(),
+              clearLessonTitle: value.trim().isEmpty,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

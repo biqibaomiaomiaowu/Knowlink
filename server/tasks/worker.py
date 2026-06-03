@@ -64,6 +64,7 @@ def bilibili_import(message: dict[str, Any]) -> None:
             message,
             bilibili=repo,
             resources=repo,
+            lessons=repo,
             async_tasks=repo,
             storage=build_object_storage(get_settings()),
         )

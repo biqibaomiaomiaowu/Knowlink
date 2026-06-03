@@ -4,7 +4,9 @@ from server.domain.repositories import (
     AsyncTaskRepository,
     CourseRepository,
     IdempotencyRepository,
+    LessonRepository,
     QuizRepository,
+    ScopedArtifactRepository,
     TaskDispatcher,
 )
 from server.domain.services.async_tasks import (
@@ -27,12 +29,16 @@ class QuizService:
         courses: CourseRepository,
         quizzes: QuizRepository,
         idempotency: IdempotencyRepository,
+        lessons: LessonRepository | None = None,
+        scoped_artifacts: ScopedArtifactRepository | None = None,
         task_dispatcher: TaskDispatcher | None = None,
         async_tasks: AsyncTaskRepository | None = None,
     ) -> None:
         self.courses = courses
         self.quizzes = quizzes
         self.idempotency = idempotency
+        self.lessons = lessons
+        self.scoped_artifacts = scoped_artifacts
         self.task_dispatcher = task_dispatcher
         self.async_tasks = resolve_async_tasks(async_tasks, quizzes)
 
@@ -137,6 +143,79 @@ class QuizService:
                 status_code=404,
             )
         return quiz
+
+    def generate_lesson_quiz(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        question_count_level: str = "medium",
+    ) -> dict[str, object]:
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        return self._create_scoped_quiz(
+            course_id=course_id,
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            question_count_level=question_count_level,
+        )
+
+    def get_current_lesson_quiz(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        if self.scoped_artifacts is None:
+            raise self._artifact_scope_error()
+        artifacts = [
+            artifact
+            for artifact in self.scoped_artifacts.list_lesson_artifacts(course_id=course_id, lesson_id=lesson_id)
+            if artifact.get("artifactType") == "quiz"
+        ]
+        if not artifacts:
+            raise ServiceError(
+                message="Lesson quiz was not found.",
+                error_code="quiz.not_found",
+                status_code=404,
+            )
+        latest = artifacts[-1]
+        quiz = self.quizzes.get_quiz(int(latest["artifactId"]))
+        return self._scoped_quiz_response(quiz or latest)
+
+    def generate_stage_quiz(self, *, course_id: int, payload) -> dict[str, object]:
+        self._ensure_course(course_id)
+        self._ensure_lesson(course_id=course_id, lesson_id=payload.start_lesson_id)
+        self._ensure_lesson(course_id=course_id, lesson_id=payload.end_lesson_id)
+        return self._create_scoped_quiz(
+            course_id=course_id,
+            scope_type="lesson_range",
+            start_lesson_id=payload.start_lesson_id,
+            end_lesson_id=payload.end_lesson_id,
+            question_count_level=payload.question_count_level,
+        )
+
+    def generate_comprehensive_quiz(
+        self,
+        *,
+        course_id: int,
+        question_count_level: str = "medium",
+    ) -> dict[str, object]:
+        self._ensure_course(course_id)
+        return self._create_scoped_quiz(
+            course_id=course_id,
+            scope_type="course",
+            question_count_level=question_count_level,
+        )
+
+    def subjective_grading_placeholder(self, *, course_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        return {
+            "answerText": None,
+            "gradingStatus": "placeholder",
+            "totalScore": None,
+            "dimensionScores": [],
+            "deductions": [],
+            "feedbackMd": "主观题 AI 判卷本轮仅提供合同占位，不运行正式 judge。",
+            "citations": [],
+            "confidenceScore": None,
+            "needsHumanReview": False,
+        }
 
     def get_quiz_status(self, *, quiz_id: int) -> dict[str, object]:
         quiz = self.get_quiz(quiz_id=quiz_id)
@@ -260,6 +339,86 @@ class QuizService:
                 status_code=404,
             )
         return course
+
+    def _ensure_lesson(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        if self.lessons is None:
+            raise ServiceError(
+                message="Lesson was not found.",
+                error_code="lesson.not_found",
+                status_code=404,
+            )
+        lesson = self.lessons.get_lesson(course_id=course_id, lesson_id=lesson_id)
+        if lesson is None:
+            raise ServiceError(
+                message="Lesson was not found.",
+                error_code="lesson.not_found",
+                status_code=404,
+            )
+        return lesson
+
+    def _create_scoped_quiz(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        question_count_level: str,
+    ) -> dict[str, object]:
+        if self.scoped_artifacts is None:
+            raise self._artifact_scope_error()
+        try:
+            artifact = self.scoped_artifacts.create_scoped_artifact(
+                artifact_type="quiz",
+                course_id=course_id,
+                scope_type=scope_type,
+                lesson_id=lesson_id,
+                start_lesson_id=start_lesson_id,
+                end_lesson_id=end_lesson_id,
+                status="placeholder",
+                quizMode="objective",
+                questionCountLevel=question_count_level,
+            )
+        except ValueError as exc:
+            raise self._service_error_from_value_error(exc) from exc
+        quiz = self.quizzes.get_quiz(int(artifact["artifactId"]))
+        return self._scoped_quiz_response(quiz or artifact)
+
+    def _scoped_quiz_response(self, quiz: dict[str, object]) -> dict[str, object]:
+        quiz_id = quiz.get("quizId", quiz.get("artifactId"))
+        return {
+            "quizId": quiz_id,
+            "courseId": quiz.get("courseId"),
+            "scopeType": quiz.get("scopeType", "course"),
+            "lessonId": quiz.get("lessonId"),
+            "startLessonId": quiz.get("startLessonId"),
+            "endLessonId": quiz.get("endLessonId"),
+            "quizMode": quiz.get("quizMode", "objective"),
+            "status": quiz.get("status", "placeholder"),
+            "questionCount": quiz.get("questionCount", 0),
+            "questions": list(quiz.get("questions") or []),
+        }
+
+    def _artifact_scope_error(self) -> ServiceError:
+        return ServiceError(
+            message="Scoped quiz artifacts are unavailable.",
+            error_code="artifact.scope_invalid",
+            status_code=400,
+        )
+
+    def _service_error_from_value_error(self, exc: ValueError) -> ServiceError:
+        error_code = str(exc) or "artifact.scope_invalid"
+        return ServiceError(
+            message=error_code.replace(".", " "),
+            error_code=error_code,
+            status_code={
+                "artifact.scope_invalid": 400,
+                "lesson.not_found": 404,
+                "course.not_found": 404,
+            }.get(error_code, 400),
+        )
 
 
 def _int_value(value: object) -> int | None:

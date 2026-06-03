@@ -39,9 +39,14 @@ async def upload_complete(
 async def list_resources(
     courseId: int,
     request: Request,
+    scopeType: str | None = None,
+    lessonId: int | None = None,
     service: ResourceService = Depends(get_resource_service),
 ):
-    return api_ok(request, service.list_resources(course_id=courseId))
+    return api_ok(
+        request,
+        service.list_resources(course_id=courseId, scope_type=scopeType, lesson_id=lessonId),
+    )
 
 
 @playback_router.get("/{resourceId}/playback")

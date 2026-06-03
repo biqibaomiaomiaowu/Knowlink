@@ -209,7 +209,19 @@
   "sourceUrl": "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
   "selectionMode": "selected_parts",
   "selectedPartIds": ["cid-1001"],
-  "qualityPreference": "android_safe"
+  "qualityPreference": "android_safe",
+  "lessonMode": "auto_per_video",
+  "targetLessonId": null,
+  "partLessonTitles": {
+    "cid-1001": "P1 行列式"
+  },
+  "partLessonMap": {
+    "cid-1001": {
+      "lessonId": 1001,
+      "sourcePartId": "cid-1001"
+    }
+  },
+  "createLessonIfMissing": true
 }
 ```
 
@@ -219,6 +231,11 @@
 - `sourceUrl` 必填，用于幂等回放、快照校验和审计，不替代 `previewId`。
 - `selectionMode` 可取 `current_part`、`all_parts`、`selected_parts`。
 - `selectedPartIds` 仅在 `selected_parts` 时必填。
+- `lessonMode` 可取 `auto_per_video`、`bind_existing`、`course_material`；默认 `auto_per_video`。
+- `targetLessonId` 仅在 `lessonMode=bind_existing` 时必填，且必须属于当前课程。
+- `partLessonTitles` 可按 `sourcePartId` 覆盖自动创建 lesson 的标题。
+- `partLessonMap` 是请求期可选初始映射，只允许客户端提交 `lessonId` 与 `sourcePartId`；`resourceId` 由导入 runner 写入，客户端提交 `resourceId` 必须被拒绝。
+- `createLessonIfMissing=false` 时，缺少目标 lesson 的 part 返回 `resource.lesson_mismatch`。
 - `courseId` 以 path 为准，请求体不重复传同义字段。
 
 响应 `data`：
@@ -239,6 +256,7 @@
 
 - `previewId` 过期、不存在或不属于当前用户/课程返回 `404 bilibili.preview_not_found`。
 - 选择项不合法返回 `422 bilibili.selection_invalid`。
+- `lessonMode=bind_existing` 的 `targetLessonId` 或 `partLessonMap[*].lessonId` 不属于当前课程时返回 `400 resource.lesson_mismatch`。
 - 任务创建或派发失败返回 `503 async_task.enqueue_failed`，响应仍应包含可追踪的任务或失败原因。
 
 #### Idempotency-Key
@@ -268,6 +286,26 @@ B站导入创建接口必须支持 `Idempotency-Key`，幂等范围固定为 `us
       "stage": "download",
       "taskId": 7001,
       "resourceIds": [],
+      "lessonMode": "auto_per_video",
+      "targetLessonId": null,
+      "partLessonMap": {
+        "cid-1001": {
+          "lessonId": 1001,
+          "sourcePartId": "cid-1001"
+        }
+      },
+      "items": [
+        {
+          "itemKey": "cid-1001",
+          "lessonId": 1001,
+          "resourceId": null,
+          "status": "binding_ready",
+          "progressPct": 10,
+          "metadataJson": {
+            "sourcePartId": "cid-1001"
+          }
+        }
+      ],
       "preview": {
         "title": "线性代数复习",
         "parts": [
@@ -304,6 +342,26 @@ B站导入创建接口必须支持 `Idempotency-Key`，幂等范围固定为 `us
   "stage": "ffmpeg",
   "taskId": 7001,
   "resourceIds": [],
+  "lessonMode": "auto_per_video",
+  "targetLessonId": null,
+  "partLessonMap": {
+    "cid-1001": {
+      "lessonId": 1001,
+      "sourcePartId": "cid-1001"
+    }
+  },
+  "items": [
+    {
+      "itemKey": "cid-1001",
+      "lessonId": 1001,
+      "resourceId": null,
+      "status": "binding_ready",
+      "progressPct": 10,
+      "metadataJson": {
+        "sourcePartId": "cid-1001"
+      }
+    }
+  ],
   "preview": {
     "title": "线性代数复习",
     "parts": [

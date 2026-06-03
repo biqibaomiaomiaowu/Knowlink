@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.infra.db.base import Base, ID_TYPE, JSON_TYPE, TimestampMixin
@@ -11,7 +11,25 @@ from server.infra.db.base import Base, ID_TYPE, JSON_TYPE, TimestampMixin
 class MasteryRecord(Base, TimestampMixin):
     __tablename__ = "mastery_records"
     __table_args__ = (
-        UniqueConstraint("user_id", "course_id", "knowledge_point_key", name="uq_mastery_records_user_course_key"),
+        Index(
+            "uq_mastery_records_user_course_key_course",
+            "user_id",
+            "course_id",
+            "knowledge_point_key",
+            unique=True,
+            sqlite_where=text("lesson_id IS NULL"),
+            postgresql_where=text("lesson_id IS NULL"),
+        ),
+        Index(
+            "uq_mastery_records_user_course_lesson_key",
+            "user_id",
+            "course_id",
+            "lesson_id",
+            "knowledge_point_key",
+            unique=True,
+            sqlite_where=text("lesson_id IS NOT NULL"),
+            postgresql_where=text("lesson_id IS NOT NULL"),
+        ),
         Index("ix_mastery_records_course_priority", "course_id", "review_priority"),
         Index("ix_mastery_records_user_course", "user_id", "course_id"),
     )
@@ -19,6 +37,7 @@ class MasteryRecord(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
     last_quiz_attempt_id: Mapped[int | None] = mapped_column(ForeignKey("quiz_attempts.id"), nullable=True)
 
     knowledge_point_key: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -44,10 +63,13 @@ class ReviewTaskRun(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(30), default="course", nullable=False)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
     source_quiz_attempt_id: Mapped[int | None] = mapped_column(ForeignKey("quiz_attempts.id"), nullable=True)
 
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     generated_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    evidence_chain_json: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True)
     payload_json: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -66,6 +88,8 @@ class ReviewTask(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     review_task_run_id: Mapped[int] = mapped_column(ForeignKey("review_task_runs.id"), nullable=False)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(30), default="course", nullable=False)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
 
     task_key: Mapped[str] = mapped_column(String(120), nullable=False)
     task_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -78,6 +102,7 @@ class ReviewTask(Base, TimestampMixin):
     source_segment_keys_json: Mapped[list] = mapped_column(JSON_TYPE, nullable=False)
     recommended_action_json: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
     recommended_segment_json: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
+    evidence_chain_json: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True)
     practice_entry_json: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
     review_order: Mapped[int] = mapped_column(Integer, nullable=False)
     intensity: Mapped[str] = mapped_column(String(20), nullable=False)

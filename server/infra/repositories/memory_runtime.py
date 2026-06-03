@@ -24,6 +24,17 @@ def _scoped_idempotency_record_expired(expires_at: object) -> bool:
     return expires_at <= utcnow()
 
 
+_SCOPED_ARTIFACT_ALLOWED_SCOPES = {
+    "handout_version": {"course", "lesson"},
+    "qa_session": {"course", "lesson"},
+    "quiz": {"course", "lesson", "lesson_range"},
+    "review_task_run": {"course", "lesson"},
+    "mastery_record": {"course", "lesson"},
+    "graph_snapshot": {"course", "lesson"},
+    "export_run": {"course", "lesson"},
+}
+
+
 @dataclass
 class RuntimeStore:
     lock: Lock = field(default_factory=Lock)
@@ -43,13 +54,17 @@ class RuntimeStore:
             "review_run": 8300,
             "review_task": 8400,
             "bilibili_import_run": 9100,
+            "bilibili_import_item": 9150,
             "bilibili_qr_session": 9200,
             "bilibili_preview": 9300,
+            "lesson": 1000,
+            "scoped_artifact": 10000,
         }
     )
     idempotency: dict[tuple[str, str], Any] = field(default_factory=dict)
     idempotency_records: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     courses: dict[int, dict[str, Any]] = field(default_factory=dict)
+    lessons: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     resources: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     parse_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
     inquiry_answers: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
@@ -61,10 +76,13 @@ class RuntimeStore:
     review_tasks: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     async_tasks: dict[int, dict[str, Any]] = field(default_factory=dict)
     progress: dict[int, dict[str, Any]] = field(default_factory=dict)
+    user_lesson_progress: dict[tuple[int, int], dict[str, Any]] = field(default_factory=dict)
+    scoped_artifacts: dict[int, dict[str, Any]] = field(default_factory=dict)
     bilibili_qr_sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     bilibili_auth_session: dict[str, Any] | None = None
     bilibili_preview_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
     bilibili_import_runs: dict[int, dict[str, Any]] = field(default_factory=dict)
+    bilibili_import_items: dict[tuple[int, str], dict[str, Any]] = field(default_factory=dict)
     current_course_id: int | None = None
 
     def next_id(self, key: str) -> int:
@@ -150,9 +168,13 @@ class RuntimeStore:
             "goalText": goal_text,
             "examAt": exam_at,
             "preferredStyle": preferred_style,
+            "isCurrent": False,
             "lifecycleStatus": "draft",
             "pipelineStage": "idle",
             "pipelineStatus": "idle",
+            "archivedAt": None,
+            "deletedAt": None,
+            "createdAt": utcnow(),
             "updatedAt": utcnow(),
         }
         self.courses[course_id] = course
@@ -161,22 +183,190 @@ class RuntimeStore:
         return course
 
     def list_recent_courses(self) -> list[dict[str, Any]]:
+        return self.list_courses({"archived": "exclude", "sort": "recent_activity_desc"})
+
+    def list_courses(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        normalized_filters = filters or {}
+        archived_mode = normalized_filters.get("archived") or "exclude"
+        query = str(normalized_filters.get("q") or "").strip().lower()
+        learning_status = normalized_filters.get("learningStatus") or normalized_filters.get("learning_status")
+        source = normalized_filters.get("source")
+        sort = normalized_filters.get("sort") or "recent_activity_desc"
+        courses = [
+            self._course_with_library_counts(course)
+            for course in self.courses.values()
+            if course.get("deletedAt") is None
+        ]
+        if archived_mode == "only":
+            courses = [course for course in courses if course.get("archivedAt") is not None]
+        elif archived_mode != "include":
+            courses = [course for course in courses if course.get("archivedAt") is None]
+        if query:
+            courses = [
+                course
+                for course in courses
+                if query in str(course.get("title") or "").lower()
+                or query in str(course.get("goalText") or "").lower()
+            ]
+        if learning_status:
+            courses = [course for course in courses if course.get("lifecycleStatus") == learning_status]
+        if source:
+            courses = [course for course in courses if course.get("entryType") == source]
+        return self._sort_courses(courses, sort)
+
+    def _sort_courses(self, courses: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
+        if sort == "created_at_desc":
+            return sorted(courses, key=lambda course: (course.get("createdAt") or utcnow(), course["courseId"]), reverse=True)
+        if sort == "exam_at_asc":
+            return sorted(
+                courses,
+                key=lambda course: (
+                    course.get("examAt") is None,
+                    course.get("examAt") or utcnow(),
+                    course["courseId"],
+                ),
+            )
+        if sort == "title_asc":
+            return sorted(courses, key=lambda course: (str(course.get("title") or ""), course["courseId"]))
         return sorted(
-            self.courses.values(),
-            key=lambda course: course["updatedAt"],
+            courses,
+            key=lambda course: (course.get("lastActivityAt") or course.get("updatedAt") or utcnow(), course["courseId"]),
             reverse=True,
         )
 
     def get_course(self, course_id: int) -> dict[str, Any] | None:
-        return self.courses.get(course_id)
+        course = self.courses.get(course_id)
+        if course is None or course.get("deletedAt") is not None:
+            return None
+        return self._course_with_library_counts(course)
+
+    def update_course(self, course_id: int, changes: dict[str, Any]) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        field_map = {
+            "title": "title",
+            "goal_text": "goalText",
+            "goalText": "goalText",
+            "exam_at": "examAt",
+            "examAt": "examAt",
+            "preferred_style": "preferredStyle",
+            "preferredStyle": "preferredStyle",
+        }
+        for key, value in changes.items():
+            target = field_map.get(key)
+            if target is not None:
+                self.courses[course_id][target] = value
+        self.courses[course_id]["updatedAt"] = utcnow()
+        return self.get_course(course_id)
+
+    def archive_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        self.courses[course_id]["archivedAt"] = self.courses[course_id].get("archivedAt") or utcnow()
+        self.courses[course_id]["updatedAt"] = utcnow()
+        return self.get_course(course_id)
+
+    def restore_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        self.courses[course_id]["archivedAt"] = None
+        self.courses[course_id]["updatedAt"] = utcnow()
+        return self.get_course(course_id)
+
+    def get_course_delete_impact(self, course_id: int) -> dict[str, Any] | None:
+        if self.get_course(course_id) is None:
+            return None
+        blockers = self._course_delete_blockers(course_id)
+        blocker_count = sum(blockers.values())
+        return {
+            "courseId": course_id,
+            "canDelete": blocker_count == 0,
+            "blockerCount": blocker_count,
+            "blockers": blockers,
+        }
+
+    def delete_course(self, course_id: int) -> dict[str, Any] | None:
+        course = self.get_course(course_id)
+        if course is None:
+            return None
+        impact = self.get_course_delete_impact(course_id)
+        if impact is not None and not impact["canDelete"]:
+            raise ValueError("course.delete_blocked")
+        now = utcnow()
+        self.courses[course_id]["deletedAt"] = now
+        self.courses[course_id]["archivedAt"] = None
+        self.courses[course_id]["lifecycleStatus"] = "deleted"
+        self.courses[course_id]["updatedAt"] = now
+        if self.current_course_id == course_id:
+            self.current_course_id = None
+        return {"courseId": course_id, "deleted": True, "deletedAt": now}
+
+    def _course_delete_blockers(self, course_id: int) -> dict[str, int]:
+        return {
+            "lessons": len(self.list_lessons(course_id)),
+            "resources": len(self.resources.get(course_id, [])),
+            "asyncTasks": len([task for task in self.async_tasks.values() if task.get("courseId") == course_id]),
+            "handouts": 1 if course_id in self.handout_by_course else 0,
+            "qaSessions": len([session for session in self.qa_sessions.values() if session.get("courseId") == course_id]),
+            "quizzes": len([quiz for quiz in self.quizzes.values() if quiz.get("courseId") == course_id]),
+            "reviewTasks": len(self.review_tasks.get(course_id, [])),
+        }
+
+    def _course_with_library_counts(self, course: dict[str, Any]) -> dict[str, Any]:
+        course_id = int(course["courseId"])
+        lessons = self.list_lessons(course_id)
+        resources = self.resources.get(course_id, [])
+        current_lesson = self._current_library_lesson(course_id, lessons)
+        progress_items = [
+            progress
+            for (progress_course_id, _lesson_id), progress in self.user_lesson_progress.items()
+            if progress_course_id == course_id
+        ]
+        pending_review_count = sum(1 for progress in progress_items if progress.get("reviewStatus") == "due")
+        activity_times = [
+            value
+            for value in [course.get("updatedAt"), *(progress.get("lastActivityAt") for progress in progress_items)]
+            if value is not None
+        ]
+        item = dict(course)
+        item["isCurrent"] = course_id == self.current_course_id or bool(course.get("isCurrent", False))
+        item["lessonCount"] = len(lessons)
+        item["courseResourceCount"] = len([resource for resource in resources if resource.get("scopeType") == "course"])
+        item["currentLessonId"] = current_lesson.get("lessonId") if current_lesson else None
+        item["currentLessonTitle"] = current_lesson.get("title") if current_lesson else None
+        item["overallMasteryScore"] = self._overall_mastery_score(lessons)
+        item["pendingReviewCount"] = pending_review_count
+        item["lastActivityAt"] = max(activity_times) if activity_times else course.get("updatedAt")
+        return item
+
+    def _current_library_lesson(
+        self,
+        course_id: int,
+        lessons: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        for lesson in lessons:
+            progress = self.get_user_lesson_progress(course_id=course_id, lesson_id=lesson["lessonId"])
+            if lesson.get("lessonStatus") != "completed" and (progress or {}).get("quizStatus") != "completed":
+                return lesson
+        return lessons[0] if lessons else None
+
+    def _overall_mastery_score(self, lessons: list[dict[str, Any]]) -> float | None:
+        scores = [float(lesson["masteryScore"]) for lesson in lessons if lesson.get("masteryScore") is not None]
+        return round(sum(scores) / len(scores), 2) if scores else None
 
     def set_current_course(self, course_id: int) -> dict[str, Any] | None:
         course = self.get_course(course_id)
         if course is None:
             return None
-        course["updatedAt"] = utcnow()
+        for item in self.courses.values():
+            item["isCurrent"] = False
+        self.courses[course_id]["isCurrent"] = True
+        self.courses[course_id]["updatedAt"] = utcnow()
         self.current_course_id = course_id
-        return course
+        return self.get_course(course_id)
 
     def get_current_course(self) -> dict[str, Any] | None:
         if self.current_course_id is not None:
@@ -185,6 +375,401 @@ class RuntimeStore:
                 return course
         recent = self.list_recent_courses()
         return recent[0] if recent else None
+
+    def create_lesson(
+        self,
+        *,
+        course_id: int,
+        title: str,
+        source_type: str = "manual",
+        source_ref_json: dict[str, Any] | None = None,
+        primary_video_resource_id: int | None = None,
+        primary_video_start_sec: int | None = None,
+        primary_video_end_sec: int | None = None,
+        meta_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        lessons = self.lessons.setdefault(course_id, [])
+        order_index = len([lesson for lesson in lessons if lesson["lessonStatus"] != "deleted"]) + 1
+        now = utcnow()
+        lesson = {
+            "lessonId": self.next_id("lesson"),
+            "courseId": course_id,
+            "title": title,
+            "orderIndex": order_index,
+            "lessonStatus": "draft",
+            "primaryVideoResourceId": primary_video_resource_id,
+            "primaryVideoStartSec": primary_video_start_sec,
+            "primaryVideoEndSec": primary_video_end_sec,
+            "sourceType": source_type,
+            "sourceRefJson": source_ref_json,
+            "handoutStatus": "not_generated",
+            "quizStatus": "not_generated",
+            "reviewStatus": "not_due",
+            "masteryScore": None,
+            "lastPositionSec": None,
+            "lastActivityAt": None,
+            "nextAction": None,
+            "metaJson": meta_json,
+            "deletedAt": None,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        lessons.append(lesson)
+        course = self.courses.get(course_id)
+        if course is not None:
+            course["updatedAt"] = now
+        return lesson
+
+    def list_lessons(self, course_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        lessons = self.lessons.get(course_id, [])
+        if not include_deleted:
+            lessons = [lesson for lesson in lessons if lesson["lessonStatus"] != "deleted"]
+        return sorted(lessons, key=lambda lesson: (lesson["orderIndex"], lesson["lessonId"]))
+
+    def get_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        for lesson in self.lessons.get(course_id, []):
+            if lesson["lessonId"] != lesson_id:
+                continue
+            if lesson["lessonStatus"] == "deleted" and not include_deleted:
+                return None
+            return lesson
+        return None
+
+    def update_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        changes: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        lesson = self.get_lesson(course_id=course_id, lesson_id=lesson_id)
+        if lesson is None:
+            return None
+        field_map = {
+            "title": "title",
+            "lessonStatus": "lessonStatus",
+            "lesson_status": "lessonStatus",
+            "primaryVideoResourceId": "primaryVideoResourceId",
+            "primary_video_resource_id": "primaryVideoResourceId",
+            "primaryVideoStartSec": "primaryVideoStartSec",
+            "primary_video_start_sec": "primaryVideoStartSec",
+            "primaryVideoEndSec": "primaryVideoEndSec",
+            "primary_video_end_sec": "primaryVideoEndSec",
+            "sourceType": "sourceType",
+            "source_type": "sourceType",
+            "sourceRefJson": "sourceRefJson",
+            "source_ref_json": "sourceRefJson",
+            "handoutStatus": "handoutStatus",
+            "handout_status": "handoutStatus",
+            "quizStatus": "quizStatus",
+            "quiz_status": "quizStatus",
+            "reviewStatus": "reviewStatus",
+            "review_status": "reviewStatus",
+            "masteryScore": "masteryScore",
+            "mastery_score": "masteryScore",
+            "lastPositionSec": "lastPositionSec",
+            "last_position_sec": "lastPositionSec",
+            "lastActivityAt": "lastActivityAt",
+            "last_activity_at": "lastActivityAt",
+            "nextAction": "nextAction",
+            "next_action": "nextAction",
+            "metaJson": "metaJson",
+            "meta_json": "metaJson",
+        }
+        for key, value in changes.items():
+            target = field_map.get(key)
+            if target is not None:
+                lesson[target] = value
+        now = utcnow()
+        lesson["updatedAt"] = now
+        course = self.courses.get(course_id)
+        if course is not None:
+            course["updatedAt"] = now
+        return lesson
+
+    def reorder_lessons(self, *, course_id: int, lesson_ids: list[int]) -> list[dict[str, Any]]:
+        active_lessons = self.list_lessons(course_id)
+        active_ids = {lesson["lessonId"] for lesson in active_lessons}
+        requested_ids = set(lesson_ids)
+        if len(lesson_ids) != len(requested_ids) or requested_ids != active_ids:
+            raise ValueError("lesson.order_conflict")
+
+        lesson_by_id = {lesson["lessonId"]: lesson for lesson in active_lessons}
+        now = utcnow()
+        for order_index, lesson_id in enumerate(lesson_ids, start=1):
+            lesson = lesson_by_id[lesson_id]
+            lesson["orderIndex"] = order_index
+            lesson["updatedAt"] = now
+        course = self.courses.get(course_id)
+        if course is not None:
+            course["updatedAt"] = now
+        return [lesson_by_id[lesson_id] for lesson_id in lesson_ids]
+
+    def soft_delete_lesson(self, *, course_id: int, lesson_id: int) -> dict[str, Any] | None:
+        lesson = self.get_lesson(course_id=course_id, lesson_id=lesson_id, include_deleted=True)
+        if lesson is None:
+            raise ValueError("lesson.not_found")
+        now = utcnow()
+        lesson["lessonStatus"] = "deleted"
+        lesson["deletedAt"] = now
+        lesson["updatedAt"] = now
+        self._compress_lesson_order(course_id)
+        course = self.courses.get(course_id)
+        if course is not None:
+            course["updatedAt"] = now
+        return lesson
+
+    def _compress_lesson_order(self, course_id: int) -> None:
+        for order_index, lesson in enumerate(self.list_lessons(course_id), start=1):
+            lesson["orderIndex"] = order_index
+            lesson["updatedAt"] = utcnow()
+
+    def upsert_user_lesson_progress(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+            raise ValueError("lesson.not_found")
+        self._validate_lesson_progress_payload(course_id=course_id, payload=payload)
+        now = utcnow()
+        progress = self.user_lesson_progress.get(
+            (course_id, lesson_id),
+            {
+                "courseId": course_id,
+                "lessonId": lesson_id,
+                "lastPositionSec": None,
+                "lastHandoutBlockId": None,
+                "handoutReadPercent": 0,
+                "quizStatus": "not_generated",
+                "reviewStatus": "not_due",
+                "metaJson": None,
+                "createdAt": now,
+            },
+        )
+        field_map = {
+            "lastPositionSec": "lastPositionSec",
+            "last_position_sec": "lastPositionSec",
+            "lastHandoutBlockId": "lastHandoutBlockId",
+            "last_handout_block_id": "lastHandoutBlockId",
+            "handoutReadPercent": "handoutReadPercent",
+            "handout_read_percent": "handoutReadPercent",
+            "quizStatus": "quizStatus",
+            "quiz_status": "quizStatus",
+            "reviewStatus": "reviewStatus",
+            "review_status": "reviewStatus",
+            "metaJson": "metaJson",
+            "meta_json": "metaJson",
+        }
+        for key, value in payload.items():
+            target = field_map.get(key)
+            if target is not None:
+                progress[target] = value
+        progress["lastActivityAt"] = now
+        progress["updatedAt"] = now
+        self.user_lesson_progress[(course_id, lesson_id)] = progress
+        return progress
+
+    def _validate_lesson_progress_payload(self, *, course_id: int, payload: dict[str, Any]) -> None:
+        block_id = payload.get("lastHandoutBlockId", payload.get("last_handout_block_id"))
+        if block_id is None:
+            return
+        try:
+            normalized_block_id = int(block_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("artifact.scope_invalid") from exc
+        if normalized_block_id <= 0 or not self._handout_block_belongs_to_course(course_id, normalized_block_id):
+            raise ValueError("artifact.scope_invalid")
+
+    def _handout_block_belongs_to_course(self, course_id: int, handout_block_id: int) -> bool:
+        handout_version_id = self.handout_by_course.get(course_id)
+        if handout_version_id is None:
+            return False
+        handout = self.handouts.get(handout_version_id)
+        if handout is None:
+            return False
+        return any(block.get("blockId") == handout_block_id for block in handout.get("blocks", []))
+
+    def get_user_lesson_progress(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+    ) -> dict[str, Any] | None:
+        return self.user_lesson_progress.get((course_id, lesson_id))
+
+    def create_scoped_artifact(
+        self,
+        *,
+        artifact_type: str,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        status: str = "placeholder",
+        **extra: Any,
+    ) -> dict[str, Any]:
+        self._validate_artifact_type_scope(artifact_type=artifact_type, scope_type=scope_type)
+        self._validate_artifact_scope(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+        )
+        if artifact_type == "mastery_record":
+            knowledge_point_key = str(
+                extra.get("knowledgePointKey")
+                or extra.get("knowledge_point_key")
+                or f"kp-{lesson_id or 'course'}"
+            )
+            mastery_lesson_id = lesson_id if scope_type == "lesson" else None
+            if self._scoped_mastery_record_exists(
+                course_id=course_id,
+                lesson_id=mastery_lesson_id,
+                knowledge_point_key=knowledge_point_key,
+            ):
+                raise ValueError("artifact.scope_invalid")
+        else:
+            knowledge_point_key = None
+        now = utcnow()
+        artifact_id = self.next_id("quiz") if artifact_type == "quiz" else self.next_id("scoped_artifact")
+        artifact = {
+            "artifactId": artifact_id,
+            "artifactType": artifact_type,
+            "courseId": course_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "startLessonId": start_lesson_id if scope_type == "lesson_range" else None,
+            "endLessonId": end_lesson_id if scope_type == "lesson_range" else None,
+            "status": status,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        if knowledge_point_key is not None:
+            artifact["knowledgePointKey"] = knowledge_point_key
+        artifact.update(extra)
+        self.scoped_artifacts[artifact_id] = artifact
+        if artifact_type == "quiz":
+            self.quizzes[artifact_id] = {
+                "quizId": artifact_id,
+                "courseId": course_id,
+                "scopeType": scope_type,
+                "lessonId": artifact.get("lessonId"),
+                "startLessonId": artifact.get("startLessonId"),
+                "endLessonId": artifact.get("endLessonId"),
+                "quizMode": artifact.get("quizMode") or artifact.get("quiz_mode") or "objective",
+                "status": status,
+                "questionCount": 0,
+                "questions": [],
+            }
+        return artifact
+
+    def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "artifactId": artifact["artifactId"],
+                "artifactType": artifact["artifactType"],
+                "courseId": artifact["courseId"],
+                "scopeType": artifact["scopeType"],
+                "lessonId": artifact.get("lessonId"),
+                "startLessonId": artifact.get("startLessonId"),
+                "endLessonId": artifact.get("endLessonId"),
+                "status": artifact["status"],
+            }
+            for artifact in sorted(self.scoped_artifacts.values(), key=lambda item: item["artifactId"])
+            if artifact.get("courseId") == course_id
+            and artifact.get("scopeType") == "lesson"
+            and artifact.get("lessonId") == lesson_id
+        ]
+
+    def mark_lesson_artifacts_stale(self, *, course_id: int, lesson_ids: list[int]) -> list[dict[str, Any]]:
+        lesson_id_set = set(lesson_ids)
+        stale_artifacts: list[dict[str, Any]] = []
+        now = utcnow()
+        for artifact in sorted(self.scoped_artifacts.values(), key=lambda item: item["artifactId"]):
+            if (
+                artifact.get("courseId") == course_id
+                and artifact.get("scopeType") == "lesson"
+                and artifact.get("lessonId") in lesson_id_set
+            ):
+                artifact["status"] = "stale"
+                artifact["updatedAt"] = now
+                stale_artifacts.append(
+                    {
+                        "artifactId": artifact["artifactId"],
+                        "artifactType": artifact["artifactType"],
+                        "courseId": artifact["courseId"],
+                        "scopeType": artifact["scopeType"],
+                        "lessonId": artifact.get("lessonId"),
+                        "startLessonId": artifact.get("startLessonId"),
+                        "endLessonId": artifact.get("endLessonId"),
+                        "status": artifact["status"],
+                    }
+                )
+        return stale_artifacts
+
+    def _validate_artifact_type_scope(self, *, artifact_type: str, scope_type: str) -> None:
+        allowed_scopes = _SCOPED_ARTIFACT_ALLOWED_SCOPES.get(artifact_type)
+        if allowed_scopes is None or scope_type not in allowed_scopes:
+            raise ValueError("artifact.scope_invalid")
+
+    def _scoped_mastery_record_exists(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int | None,
+        knowledge_point_key: str,
+    ) -> bool:
+        return any(
+            artifact.get("artifactType") == "mastery_record"
+            and artifact.get("courseId") == course_id
+            and artifact.get("lessonId") == lesson_id
+            and artifact.get("knowledgePointKey") == knowledge_point_key
+            for artifact in self.scoped_artifacts.values()
+        )
+
+    def _validate_artifact_scope(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        start_lesson_id: int | None,
+        end_lesson_id: int | None,
+    ) -> None:
+        if scope_type == "course":
+            return
+        if scope_type == "lesson":
+            if lesson_id is None or self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("artifact.scope_invalid")
+            return
+        if scope_type == "lesson_range":
+            start_lesson = (
+                self.get_lesson(course_id=course_id, lesson_id=start_lesson_id)
+                if start_lesson_id is not None
+                else None
+            )
+            end_lesson = (
+                self.get_lesson(course_id=course_id, lesson_id=end_lesson_id)
+                if end_lesson_id is not None
+                else None
+            )
+            if start_lesson is None or end_lesson is None:
+                raise ValueError("artifact.scope_invalid")
+            if start_lesson["orderIndex"] > end_lesson["orderIndex"]:
+                raise ValueError("artifact.scope_invalid")
+            return
+        raise ValueError("artifact.scope_invalid")
 
     def create_bilibili_qr_session(
         self,
@@ -336,19 +921,21 @@ class RuntimeStore:
             "failureReason": None,
             "startedAt": now,
             "finishedAt": None,
+            "items": [],
             "createdAt": now,
             "updatedAt": now,
         }
         self.bilibili_import_runs[import_run_id] = run
-        return run
+        return self._bilibili_import_run_with_items(run)
 
     def get_bilibili_import_run(self, import_run_id: int) -> dict[str, Any] | None:
-        return self.bilibili_import_runs.get(import_run_id)
+        run = self.bilibili_import_runs.get(import_run_id)
+        return self._bilibili_import_run_with_items(run) if run is not None else None
 
     def list_bilibili_import_runs(self, course_id: int) -> list[dict[str, Any]]:
         return sorted(
             [
-                run
+                self._bilibili_import_run_with_items(run)
                 for run in self.bilibili_import_runs.values()
                 if run["courseId"] == course_id
             ],
@@ -397,15 +984,110 @@ class RuntimeStore:
         ):
             run["finishedAt"] = utcnow()
         run["updatedAt"] = utcnow()
+        return self._bilibili_import_run_with_items(run)
+
+    def upsert_bilibili_import_item(
+        self,
+        *,
+        import_run_id: int,
+        course_id: int,
+        source_url: str,
+        item_key: str | None = None,
+        title: str | None = None,
+        part_no: int | None = None,
+        status: str = "pending",
+        progress_pct: int = 0,
+        lesson_id: int | None = None,
+        resource_id: int | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        if import_run_id not in self.bilibili_import_runs:
+            raise ValueError("bilibili.import_run_not_found")
+        normalized_key = str(item_key or f"item-{self.next_id('bilibili_import_item')}")
+        slot = (import_run_id, normalized_key)
+        now = utcnow()
+        existing = self.bilibili_import_items.get(slot)
+        item = {
+            "importItemId": (existing or {}).get("importItemId") or self.next_id("bilibili_import_item"),
+            "importRunId": import_run_id,
+            "courseId": course_id,
+            "resourceId": resource_id,
+            "lessonId": lesson_id,
+            "sourceUrl": source_url,
+            "itemKey": normalized_key,
+            "title": title,
+            "partNo": part_no,
+            "status": status,
+            "progressPct": progress_pct,
+            "metadataJson": dict(metadata_json or {}),
+            "errorCode": error_code,
+            "failureReason": failure_reason,
+            "finishedAt": (existing or {}).get("finishedAt"),
+            "createdAt": (existing or {}).get("createdAt", now),
+            "updatedAt": now,
+        }
+        if status in {"imported", "failed", "canceled"} and item["finishedAt"] is None:
+            item["finishedAt"] = now
+        self.bilibili_import_items[slot] = item
+        run = self.bilibili_import_runs[import_run_id]
+        run["items"] = self.list_bilibili_import_items(import_run_id)
+        run["updatedAt"] = now
+        return item
+
+    def list_bilibili_import_items(self, import_run_id: int) -> list[dict[str, Any]]:
+        return sorted(
+            [
+                item
+                for (run_id, _item_key), item in self.bilibili_import_items.items()
+                if run_id == import_run_id
+            ],
+            key=lambda item: (
+                item.get("partNo") is None,
+                item.get("partNo") or 0,
+                item["importItemId"],
+            ),
+        )
+
+    def _bilibili_import_run_with_items(self, run: dict[str, Any]) -> dict[str, Any]:
+        run["items"] = self.list_bilibili_import_items(int(run["importRunId"]))
         return run
 
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        if "scopeType" in payload:
+            scope_type = payload["scopeType"]
+        elif "scope_type" in payload:
+            scope_type = payload["scope_type"]
+        else:
+            scope_type = "course"
+        if scope_type not in {"course", "lesson"}:
+            raise ValueError("resource.scope_required")
+        lesson_id = payload.get("lessonId", payload.get("lesson_id"))
+        if scope_type == "lesson":
+            if lesson_id is None or self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("resource.lesson_mismatch")
+        else:
+            lesson_id = None
+
+        usage_role = (
+            payload.get("usageRole")
+            or payload.get("usage_role")
+            or ("course_material" if scope_type == "course" else "lesson_material")
+        )
+        sort_order = payload.get("sortOrder", payload.get("sort_order"))
+        if sort_order is None:
+            sort_order = len(self.resources.get(course_id, []))
         resource_id = self.next_id("resource")
         resource = {
             "resourceId": resource_id,
             "courseId": course_id,
             "resourceType": payload["resourceType"],
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "usageRole": usage_role,
             "sourceType": payload.get("sourceType", "upload"),
+            "sourcePartId": payload.get("sourcePartId", payload.get("source_part_id")),
             "originUrl": payload.get("originUrl"),
             "originalName": payload["originalName"],
             "objectKey": payload["objectKey"],
@@ -417,6 +1099,12 @@ class RuntimeStore:
             "validationStatus": "passed",
             "processingStatus": "pending",
             "parsePolicyJson": payload.get("parsePolicyJson"),
+            "visibleToCourseQa": payload.get(
+                "visibleToCourseQa",
+                payload.get("visible_to_course_qa", True),
+            ),
+            "durationSec": payload.get("durationSec", payload.get("duration_sec")),
+            "sortOrder": int(sort_order),
         }
         self.resources.setdefault(course_id, []).append(resource)
         return resource
@@ -429,6 +1117,33 @@ class RuntimeStore:
             for resource in resources:
                 if resource["resourceId"] == resource_id:
                     return resource
+        return None
+
+    def update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        usage_role: str | None = None,
+    ) -> dict[str, Any] | None:
+        if scope_type not in {"course", "lesson"}:
+            raise ValueError("resource.scope_required")
+        if scope_type == "lesson":
+            if lesson_id is None or self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("resource.lesson_mismatch")
+        else:
+            lesson_id = None
+
+        for resource in self.resources.get(course_id, []):
+            if resource["resourceId"] != resource_id:
+                continue
+            resource["scopeType"] = scope_type
+            resource["lessonId"] = lesson_id
+            if usage_role is not None:
+                resource["usageRole"] = usage_role
+            return resource
         return None
 
     def create_parse_run(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -731,6 +1446,112 @@ class RuntimeStore:
         }
         return payload
 
+    def list_scoped_qa_sessions(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        sessions = []
+        for session in self.qa_sessions.values():
+            if session.get("courseId") != course_id or session.get("scopeType") != scope_type:
+                continue
+            if scope_type == "lesson" and session.get("lessonId") != lesson_id:
+                continue
+            if scope_type == "course" and session.get("lessonId") is not None:
+                continue
+            sessions.append(
+                {
+                    "sessionId": session["sessionId"],
+                    "courseId": session["courseId"],
+                    "scopeType": session["scopeType"],
+                    "lessonId": session.get("lessonId"),
+                    "title": session.get("title"),
+                    "lastMessageAt": session.get("lastMessageAt"),
+                }
+            )
+        return sorted(sessions, key=lambda item: item["sessionId"])
+
+    def create_scoped_qa_exchange(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        question: str,
+        answer_md: str,
+        citations: list[dict[str, Any]],
+        session_id: int | None = None,
+    ) -> dict[str, Any]:
+        if self.get_course(course_id) is None:
+            raise ValueError("course.not_found")
+        if scope_type == "lesson":
+            if lesson_id is None or self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("qa.scope_invalid")
+        elif scope_type != "course" or lesson_id is not None:
+            raise ValueError("qa.scope_invalid")
+
+        now = utcnow()
+        if session_id is None:
+            session_id = self.next_id("qa_session")
+            self.qa_sessions[session_id] = {
+                "sessionId": session_id,
+                "courseId": course_id,
+                "scopeType": scope_type,
+                "lessonId": lesson_id if scope_type == "lesson" else None,
+                "title": question[:80],
+                "status": "active",
+                "messages": [],
+                "lastMessageAt": now,
+            }
+        session = self.qa_sessions.get(session_id)
+        if (
+            session is None
+            or session.get("courseId") != course_id
+            or session.get("scopeType") != scope_type
+            or session.get("lessonId") != (lesson_id if scope_type == "lesson" else None)
+        ):
+            raise ValueError("qa.scope_invalid")
+
+        user_message_id = self.next_id("qa_message")
+        assistant_message_id = self.next_id("qa_message")
+        session.setdefault("messages", []).extend(
+            [
+                {
+                    "sessionId": session_id,
+                    "messageId": user_message_id,
+                    "role": "user",
+                    "contentMd": question,
+                    "answerMd": None,
+                    "answerType": None,
+                    "citations": [],
+                },
+                {
+                    "sessionId": session_id,
+                    "messageId": assistant_message_id,
+                    "role": "assistant",
+                    "contentMd": answer_md,
+                    "answerMd": answer_md,
+                    "answerType": "placeholder",
+                    "citations": list(citations),
+                    "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+                },
+            ]
+        )
+        session["lastMessageAt"] = now
+        return {
+            "sessionId": session_id,
+            "messageId": assistant_message_id,
+            "courseId": course_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "answerMd": answer_md,
+            "answerType": "placeholder",
+            "citations": list(citations),
+            "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+        }
+
     def _qa_block_payload_from_memory(
         self,
         block: dict[str, Any],
@@ -820,6 +1641,8 @@ class RuntimeStore:
         session = self.qa_sessions.get(session_id)
         if session is None:
             return None
+        if session.get("scopeType") in {"course", "lesson"}:
+            return list(session.get("messages") or [])
         context = session.get("context") or {}
         live_context = self.get_qa_context(int(context.get("courseId") or 0), int(context.get("handoutBlockId") or 0))
         if (

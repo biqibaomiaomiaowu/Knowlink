@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from server.infra.db.base import Base
 from server.infra.db.models import (
     BilibiliAuthSession,
+    BilibiliImportItem,
     BilibiliImportRun,
     BilibiliPreviewSnapshot,
     BilibiliQrSession,
@@ -42,6 +43,19 @@ def test_memory_bilibili_import_lifecycle() -> None:
         source_type="single_video",
         preview={"title": "单视频预览"},
         selection={"partIds": [1]},
+    )
+    import_item = repo.upsert_bilibili_import_item(
+        import_run_id=import_run["importRunId"],
+        course_id=course["courseId"],
+        source_url=import_run["sourceUrl"],
+        item_key="p1",
+        title="单视频 P1",
+        part_no=1,
+        status="binding_ready",
+        progress_pct=10,
+        lesson_id=None,
+        resource_id=None,
+        metadata_json={"sourcePartId": "p1"},
     )
     preview_snapshot = repo.save_bilibili_preview_snapshot(
         preview_id="bili_preview_memory",
@@ -82,6 +96,9 @@ def test_memory_bilibili_import_lifecycle() -> None:
     assert updated["tempDir"] == "runtime/bilibili/9101"
     assert updated["preview"] == {"title": "单视频预览"}
     assert updated["selection"] == {"partIds": [1]}
+    assert import_item["itemKey"] == "p1"
+    assert repo.list_bilibili_import_items(import_run["importRunId"]) == [import_item]
+    assert repo.get_bilibili_import_run(import_run["importRunId"])["items"] == [import_item]
     assert repo.get_bilibili_preview_snapshot("bili_preview_memory") == preview_snapshot
     assert repo.get_bilibili_import_run(import_run["importRunId"]) == updated
     assert runs == [updated]
@@ -112,6 +129,19 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
         source_type="single_video",
         preview={"title": "SQL 单视频预览"},
         selection={"partIds": [1]},
+    )
+    import_item = repo.upsert_bilibili_import_item(
+        import_run_id=import_run["importRunId"],
+        course_id=course["courseId"],
+        source_url=import_run["sourceUrl"],
+        item_key="p1",
+        title="SQL 单视频 P1",
+        part_no=1,
+        status="binding_ready",
+        progress_pct=10,
+        lesson_id=None,
+        resource_id=None,
+        metadata_json={"sourcePartId": "p1"},
     )
     preview_snapshot = repo.save_bilibili_preview_snapshot(
         preview_id="bili_preview_sql",
@@ -156,6 +186,9 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
     assert updated["recoverable"] is True
     assert updated["tempDir"] == "runtime/bilibili/9101"
     assert updated["finishedAt"] is not None
+    assert import_item["itemKey"] == "p1"
+    assert repo.list_bilibili_import_items(import_run["importRunId"]) == [import_item]
+    assert repo.get_bilibili_import_run(import_run["importRunId"])["items"] == [import_item]
     assert repo.get_bilibili_preview_snapshot("bili_preview_sql") == preview_snapshot
     assert repo.get_bilibili_import_run(import_run["importRunId"]) == updated
     assert repo.list_bilibili_import_runs(course["courseId"]) == [updated]
@@ -163,9 +196,12 @@ def test_sql_bilibili_import_lifecycle_round_trips() -> None:
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliAuthSession)) == 1
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliPreviewSnapshot)) == 1
     assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliImportRun)) == 1
+    assert session.scalar(sa.select(sa.func.count()).select_from(BilibiliImportItem)) == 1
     columns = BilibiliImportRun.__table__.columns
     assert not columns["recoverable"].nullable
     assert columns["temp_dir"].nullable
+    item_columns = BilibiliImportItem.__table__.columns
+    assert item_columns["lesson_id"].nullable
 
 
 def test_sql_bilibili_preview_snapshots_are_scoped_by_user() -> None:

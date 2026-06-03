@@ -473,6 +473,7 @@ async def main():
         headers=AUTH_HEADERS | {"idempotency-key": "sql-api-upload"},
         json_body={
             "resourceType": "pdf",
+            "scopeType": "course",
             "objectKey": f"raw/1/{course_id}/sql-runtime.pdf",
             "originalName": "sql-runtime.pdf",
             "mimeType": "application/pdf",

@@ -4,6 +4,7 @@ from server.domain.repositories import (
     AsyncTaskRepository,
     CourseRepository,
     IdempotencyRepository,
+    LessonRepository,
     ReviewRepository,
     TaskDispatcher,
 )
@@ -25,18 +26,81 @@ class ReviewService:
         courses: CourseRepository,
         reviews: ReviewRepository,
         idempotency: IdempotencyRepository,
+        lessons: LessonRepository | None = None,
         task_dispatcher: TaskDispatcher | None = None,
         async_tasks: AsyncTaskRepository | None = None,
     ) -> None:
         self.courses = courses
         self.reviews = reviews
         self.idempotency = idempotency
+        self.lessons = lessons
         self.task_dispatcher = task_dispatcher
         self.async_tasks = resolve_async_tasks(async_tasks, reviews)
 
     def list_review_tasks(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
         return {"items": self.reviews.list_review_tasks(course_id)}
+
+    def get_lesson_review(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        lesson = self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        return {
+            "scopeType": "lesson",
+            "lessonId": lesson_id,
+            "status": "placeholder",
+            "items": [self._lesson_review_task(lesson=lesson)],
+        }
+
+    def regenerate_lesson_review(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        return self.get_lesson_review(course_id=course_id, lesson_id=lesson_id)
+
+    def get_course_review(self, *, course_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        lessons = self._course_lessons(course_id)
+        weak_lessons = [
+            {
+                "lessonId": lesson["lessonId"],
+                "title": lesson.get("title"),
+                "masteryScore": lesson.get("masteryScore"),
+                "reasonText": "该节课存在待复习知识点占位。",
+            }
+            for lesson in lessons
+        ]
+        return {
+            "scopeType": "course",
+            "lessonId": None,
+            "status": "placeholder",
+            "items": [],
+            "weakLessons": weak_lessons,
+            "crossLessonWeakPoints": [
+                {
+                    "knowledgePointKey": "kp-cross-lesson-placeholder",
+                    "title": "跨节课薄弱点占位",
+                    "lessonIds": [lesson["lessonId"] for lesson in lessons],
+                    "evidenceChain": [
+                        {"type": "course_review", "scopeType": "course", "courseId": course_id},
+                    ],
+                }
+            ]
+            if lessons
+            else [],
+        }
+
+    def regenerate_course_review(self, *, course_id: int) -> dict[str, object]:
+        return self.get_course_review(course_id=course_id)
+
+    def get_exam_review(self, *, course_id: int) -> dict[str, object]:
+        course = self._ensure_course(course_id)
+        exam_at = course.get("examAt")
+        return {
+            "scopeType": "course",
+            "lessonId": None,
+            "status": "placeholder" if exam_at is not None else "not_generated",
+            "examAt": exam_at,
+            "items": [],
+            "message": "考前复习本轮仅提供占位入口。" if exam_at is not None else "课程尚未设置考试时间。",
+            "availableActions": ["open_course_review"] if exam_at is not None else ["set_exam_at"],
+            "citations": [],
+        }
 
     def regenerate_review_tasks(
         self,
@@ -154,6 +218,62 @@ class ReviewService:
                 status_code=404,
             )
         return course
+
+    def _ensure_lesson(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        if self.lessons is None:
+            raise ServiceError(
+                message="Lesson was not found.",
+                error_code="lesson.not_found",
+                status_code=404,
+            )
+        lesson = self.lessons.get_lesson(course_id=course_id, lesson_id=lesson_id)
+        if lesson is None:
+            raise ServiceError(
+                message="Lesson was not found.",
+                error_code="lesson.not_found",
+                status_code=404,
+            )
+        return lesson
+
+    def _course_lessons(self, course_id: int) -> list[dict[str, object]]:
+        if self.lessons is None:
+            return []
+        return list(self.lessons.list_lessons(course_id))
+
+    def _lesson_review_task(self, *, lesson: dict[str, object]) -> dict[str, object]:
+        lesson_id = int(lesson["lessonId"])
+        return {
+            "reviewTaskId": lesson_id * 10 + 1,
+            "taskType": "revisit_lesson",
+            "scopeType": "lesson",
+            "lessonId": lesson_id,
+            "priorityScore": 80,
+            "reasonText": "该节课存在待复习知识点占位。",
+            "recommendedMinutes": 15,
+            "knowledgePointKey": f"lesson-{lesson_id}-placeholder",
+            "sourceQuestionKeys": [],
+            "recommendedHandoutBlock": None,
+            "recommendedSegment": {
+                "lessonId": lesson_id,
+                "label": "回看本节关键片段",
+            },
+            "practiceEntry": {
+                "type": "lesson_quiz",
+                "lessonId": lesson_id,
+                "label": "生成本节练习",
+            },
+            "reviewOrder": 1,
+            "intensity": "medium",
+            "evidenceChain": [
+                {
+                    "type": "lesson_review",
+                    "scopeType": "lesson",
+                    "lessonId": lesson_id,
+                    "title": lesson.get("title"),
+                }
+            ],
+        }
 
 
 def _int_value(value: object) -> int | None:

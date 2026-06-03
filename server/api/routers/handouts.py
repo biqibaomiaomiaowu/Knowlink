@@ -20,6 +20,44 @@ async def generate_handout(
     return api_ok(request, data)
 
 
+@router.get("/courses/{courseId}/handouts/course-summary")
+async def get_course_summary_handout(
+    courseId: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(request, service.get_course_summary_placeholder(course_id=courseId))
+
+
+@router.post("/courses/{courseId}/handouts/course-summary/generate")
+async def generate_course_summary_handout(
+    courseId: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(request, service.generate_course_summary_placeholder(course_id=courseId))
+
+
+@router.get("/courses/{courseId}/lessons/{lessonId}/handout")
+async def get_lesson_handout(
+    courseId: int,
+    lessonId: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(request, service.get_lesson_handout_placeholder(course_id=courseId, lesson_id=lessonId))
+
+
+@router.post("/courses/{courseId}/lessons/{lessonId}/handout/generate")
+async def generate_lesson_handout(
+    courseId: int,
+    lessonId: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(request, service.generate_lesson_handout_placeholder(course_id=courseId, lesson_id=lessonId))
+
+
 @router.get("/handout-versions/{handoutVersionId}/status")
 async def get_handout_status(
     handoutVersionId: int,

@@ -100,12 +100,15 @@ class BilibiliImportItem(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_bilibili_import_items_run_status", "import_run_id", "status"),
         Index("ix_bilibili_import_items_course_resource", "course_id", "resource_id"),
+        Index("ix_bilibili_import_items_course_lesson", "course_id", "lesson_id"),
+        Index("ix_bilibili_import_items_run_item_key", "import_run_id", "item_key", unique=True),
     )
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     import_run_id: Mapped[int] = mapped_column(ForeignKey("bilibili_import_runs.id"), nullable=False)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
     resource_id: Mapped[int | None] = mapped_column(ForeignKey("course_resources.id"), nullable=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
     source_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     item_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)

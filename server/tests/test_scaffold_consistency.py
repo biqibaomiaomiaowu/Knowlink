@@ -212,6 +212,7 @@ def test_dashboard_and_pipeline_status_cover_competition_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "dashboard-upload-1"},
             json_body={
                 "resourceType": "pdf",
+                "scopeType": "course",
                 "objectKey": f"raw/1/{course_id}/high-math.pdf",
                 "originalName": "high-math.pdf",
                 "mimeType": "application/pdf",
@@ -269,6 +270,7 @@ def test_upload_contract_accepts_pptx_and_docx():
                 headers=AUTH_HEADERS,
                 json_body={
                     "resourceType": resource_type,
+                    "scopeType": "course",
                     "filename": f"demo.{resource_type}",
                     "mimeType": "application/octet-stream",
                     "sizeBytes": 1024,
@@ -286,6 +288,7 @@ def test_upload_contract_accepts_pptx_and_docx():
                 headers=AUTH_HEADERS | {"idempotency-key": f"upload-{resource_type}-1"},
                 json_body={
                     "resourceType": resource_type,
+                    "scopeType": "course",
                     "objectKey": upload_init["data"]["objectKey"],
                     "originalName": f"demo.{resource_type}",
                     "mimeType": "application/octet-stream",
@@ -336,6 +339,7 @@ def test_handout_qa_and_jump_target_keep_single_locator_per_citation():
             headers=AUTH_HEADERS | {"idempotency-key": "mixed-citation-upload"},
             json_body={
                 "resourceType": "pdf",
+                "scopeType": "course",
                 "objectKey": f"raw/1/{course_id}/demo.pdf",
                 "originalName": "demo.pdf",
                 "mimeType": "application/pdf",
@@ -454,6 +458,7 @@ def test_inquiry_and_quiz_generate_cover_planning_display_fields():
             headers=AUTH_HEADERS | {"idempotency-key": "planning-display-upload"},
             json_body={
                 "resourceType": "pdf",
+                "scopeType": "course",
                 "objectKey": f"raw/1/{course_id}/planning-display.pdf",
                 "originalName": "planning-display.pdf",
                 "mimeType": "application/pdf",
@@ -564,6 +569,9 @@ def test_scaffold_structure_and_docs_are_aligned():
     architecture = (ROOT / "docs/v1/architecture.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/contracts/api-contract.md").read_text(encoding="utf-8")
     scaffold = (ROOT / "docs/engineering/development-scaffold.md").read_text(encoding="utf-8")
+    docs_readme = (ROOT / "docs/README.md").read_text(encoding="utf-8")
+    phase2_handoff = (ROOT / "docs/v2/phase2-course-lesson-workbench-handoff.md").read_text(encoding="utf-8")
+    router_test = (ROOT / "client_flutter/test/app_router_test.dart").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     pubspec = (ROOT / "client_flutter/pubspec.yaml").read_text(encoding="utf-8")
     architecture_scaffold = architecture.split("### 7.1 后端", 1)[1].split("---", 1)[0]
@@ -586,6 +594,24 @@ def test_scaffold_structure_and_docs_are_aligned():
     assert "第一版业务表已覆盖" in scaffold
     assert "第一版已接通" in scaffold
     assert "内存态 demo 适配器仍保留" in scaffold
+    assert "Lesson domain" in scaffold
+    assert "课程 / 节课资源 scope" in scaffold
+    assert "课程工作台和节课详情已成为 V2 当前入口" in scaffold
+    assert "graph / streaming / subjective grading / report / export" in docs_readme
+    assert "contracts/v2-course-lesson-workbench-contract.md" in docs_readme
+    assert "v2/phase2-course-lesson-workbench-handoff.md" in docs_readme
+    assert "/courses/:courseId/lessons/:lessonId" in docs_readme
+    assert "Demo Routes And Manual Acceptance Checklist" in phase2_handoff
+    assert "Manual acceptance checklist" in phase2_handoff
+    assert "Confirm home continues into lesson" in phase2_handoff
+    assert "Verify no resource QA entry exists" in phase2_handoff
+    assert "/courses/:courseId/lessons/:lessonId/qa" in phase2_handoff
+    assert "Task 9 focused backend suite" in phase2_handoff
+    assert "Task 9 Flutter suite" in phase2_handoff
+    assert "/courses/101" in router_test
+    assert "/courses/101/lessons/l-2" in router_test
+    assert "/courses/101/review?kind=subjective_grading" in router_test
+    assert "/courses/101/exports" in router_test
     assert "server/schemas/api.py" not in architecture_scaffold
     assert "app_factory.py" in architecture_scaffold
     assert "router.py" in architecture_scaffold
