@@ -229,6 +229,7 @@ class PipelineService:
         )
         steps = self._aggregate_steps(tasks=tasks, resources=resources, has_parse_run=parse_run is not None)
         pipeline_status = self._aggregate_pipeline_status(steps, parse_run=parse_run, tasks=tasks)
+        steps = self._normalize_steps_for_pipeline_status(steps, pipeline_status)
         progress_pct = self._aggregate_progress(steps, pipeline_status)
         active_parse_run_id = self._active_parse_run_id(course, parse_run, pipeline_status)
 
@@ -602,6 +603,28 @@ class PipelineService:
         if any(status in {"failed", "partial_success"} for status in step_statuses.values()):
             return self._failed_or_partial(steps)
         return "succeeded"
+
+    def _normalize_steps_for_pipeline_status(
+        self,
+        steps: list[dict[str, object]],
+        pipeline_status: str,
+    ) -> list[dict[str, object]]:
+        if pipeline_status != "partial_success":
+            return steps
+        normalized_steps: list[dict[str, object]] = []
+        for step in steps:
+            if step.get("code") == "vectorize" and step.get("status") == "failed":
+                normalized_steps.append(
+                    {
+                        **step,
+                        "status": "partial_success",
+                        "progressPct": DEFAULT_PROGRESS_BY_STATUS["partial_success"],
+                        "message": MESSAGE_BY_STATUS["partial_success"],
+                    }
+                )
+            else:
+                normalized_steps.append(step)
+        return normalized_steps
 
     def _failed_or_partial(self, steps: list[dict[str, object]]) -> str:
         statuses = {str(step["code"]): str(step["status"]) for step in steps}
