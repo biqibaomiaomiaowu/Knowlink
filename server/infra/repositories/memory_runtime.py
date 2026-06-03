@@ -1119,6 +1119,33 @@ class RuntimeStore:
                     return resource
         return None
 
+    def update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        usage_role: str | None = None,
+    ) -> dict[str, Any] | None:
+        if scope_type not in {"course", "lesson"}:
+            raise ValueError("resource.scope_required")
+        if scope_type == "lesson":
+            if lesson_id is None or self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("resource.lesson_mismatch")
+        else:
+            lesson_id = None
+
+        for resource in self.resources.get(course_id, []):
+            if resource["resourceId"] != resource_id:
+                continue
+            resource["scopeType"] = scope_type
+            resource["lessonId"] = lesson_id
+            if usage_role is not None:
+                resource["usageRole"] = usage_role
+            return resource
+        return None
+
     def create_parse_run(self, course_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
         parse_run_id = self.next_id("parse_run")
         task_id = self.next_id("task")

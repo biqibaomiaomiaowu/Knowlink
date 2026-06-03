@@ -67,6 +67,16 @@ class ResourceRepository(Protocol):
 
     def delete_resource(self, course_id: int, resource_id: int) -> bool: ...
 
+    def update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        usage_role: str | None = None,
+    ) -> dict[str, Any] | None: ...
+
 
 class LessonRepository(Protocol):
     def create_lesson(

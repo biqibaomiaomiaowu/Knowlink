@@ -144,8 +144,10 @@ POST   /api/v1/courses/{courseId}/lessons/{lessonId}/split
 `SetPrimaryVideoRequest`:
 
 - `resourceId`
-- `startSec`
-- `endSec`
+- `startSec`（可选）
+- `endSec`（可选）
+
+`SetPrimaryVideoRequest.startSec` / `endSec` 用于设置可选视频片段；两者同时存在时 `end` 必须大于 `start` 且不得超过视频时长。只提交 `resourceId` 时表示绑定完整视频或未知区间。
 
 `MergeLessonsRequest`:
 
@@ -157,6 +159,18 @@ POST   /api/v1/courses/{courseId}/lessons/{lessonId}/split
 - `splitAtSec`
 - `firstTitle`
 - `secondTitle`
+
+Merge side effects:
+
+- 第一个 `lessonId` 是 target lesson；其余 lesson 软删除。
+- 非 target lesson 的 lesson-scoped resources 必须迁移到 target lesson，不创建重复 resource row。
+- 受影响 lesson-scoped artifacts 标记 stale。
+
+Split side effects:
+
+- 拆分后的两段 lesson 共享同一个 `primaryVideoResourceId`，通过 `primaryVideoStartSec` / `primaryVideoEndSec` 区分片段。
+- 如果原主视频 resource 是 lesson scope，拆分时必须提升为 course scope，使两段 lesson 可以引用同一 resource。
+- 不创建重复视频 resource row；原 lesson-scoped artifacts 标记 stale。
 
 `LessonSummary`:
 

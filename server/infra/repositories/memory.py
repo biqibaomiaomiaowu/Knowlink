@@ -204,6 +204,23 @@ class MemoryScaffoldRepository:
     def get_resource(self, resource_id: int) -> dict[str, Any] | None:
         return self.store.get_resource(resource_id)
 
+    def update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        usage_role: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self.store.update_resource_scope(
+            course_id=course_id,
+            resource_id=resource_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            usage_role=usage_role,
+        )
+
     def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]:
         return {}
 

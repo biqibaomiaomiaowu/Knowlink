@@ -54,6 +54,7 @@ class LessonService:
             resource=primary_video,
             start_sec=payload.primary_video_start_sec,
             end_sec=payload.primary_video_end_sec,
+            require_complete_range=primary_video is not None,
         )
         lesson = self.lessons.create_lesson(
             course_id=course_id,
@@ -150,7 +151,12 @@ class LessonService:
             lesson_id=lesson_id,
             resource_id=payload.resource_id,
         )
-        self._ensure_primary_video_range(resource=resource, start_sec=payload.start_sec, end_sec=payload.end_sec)
+        self._ensure_primary_video_range(
+            resource=resource,
+            start_sec=payload.start_sec,
+            end_sec=payload.end_sec,
+            require_complete_range=False,
+        )
         lesson = self._update_lesson(
             course_id=course_id,
             lesson_id=lesson_id,
@@ -170,6 +176,11 @@ class LessonService:
             course_id=course_id,
             lesson_id=int(target["lessonId"]),
             changes={"title": title},
+        )
+        self._move_lesson_resources(
+            course_id=course_id,
+            source_lesson_ids=[int(lesson["lessonId"]) for lesson in stale_lessons],
+            target_lesson_id=int(target_lesson["lessonId"]),
         )
         stale_artifact_ids = self._mark_lesson_artifacts_stale(
             course_id=course_id,
@@ -203,6 +214,14 @@ class LessonService:
                 error_code="lesson.order_conflict",
                 status_code=409,
             )
+        if (original_video or {}).get("scopeType") == "lesson":
+            self._update_resource_scope(
+                course_id=course_id,
+                resource_id=int(original_video["resourceId"]),
+                scope_type="course",
+                lesson_id=None,
+                usage_role=original_video.get("usageRole") or "primary_video",
+            )
 
         first_title = payload.first_title or lesson["title"]
         second_title = payload.second_title or f"{lesson['title']} 2"
@@ -219,23 +238,10 @@ class LessonService:
             title=second_title,
             source_type=lesson.get("sourceType") or "manual",
             source_ref_json=lesson.get("sourceRefJson"),
-            primary_video_resource_id=lesson.get("primaryVideoResourceId")
-            if (original_video or {}).get("scopeType") != "lesson"
-            else None,
+            primary_video_resource_id=lesson.get("primaryVideoResourceId"),
             primary_video_start_sec=split_at,
             primary_video_end_sec=end_sec,
         )
-        if (original_video or {}).get("scopeType") == "lesson":
-            copied_video = self._copy_primary_video_resource(
-                course_id=course_id,
-                source=original_video,
-                lesson_id=int(second_lesson["lessonId"]),
-            )
-            second_lesson = self._update_lesson(
-                course_id=course_id,
-                lesson_id=int(second_lesson["lessonId"]),
-                changes={"primary_video_resource_id": copied_video["resourceId"]},
-            )
         self._place_split_lesson_after(
             course_id=course_id,
             first_lesson_id=int(first_lesson["lessonId"]),
@@ -336,10 +342,17 @@ class LessonService:
         resource: dict[str, Any] | None,
         start_sec: int | None,
         end_sec: int | None,
+        require_complete_range: bool,
     ) -> None:
         if resource is None and (start_sec is not None or end_sec is not None):
             raise ServiceError(
                 message="Primary video range requires a primary video resource.",
+                error_code="common.validation_error",
+                status_code=400,
+            )
+        if require_complete_range and resource is not None and (start_sec is None or end_sec is None):
+            raise ServiceError(
+                message="Primary video range requires start and end seconds.",
                 error_code="common.validation_error",
                 status_code=400,
             )
@@ -364,32 +377,53 @@ class LessonService:
                 status_code=400,
             )
 
-    def _copy_primary_video_resource(
+    def _move_lesson_resources(
         self,
         *,
         course_id: int,
-        source: dict[str, Any],
-        lesson_id: int,
+        source_lesson_ids: Sequence[int],
+        target_lesson_id: int,
+    ) -> None:
+        source_ids = {int(lesson_id) for lesson_id in source_lesson_ids}
+        if not source_ids:
+            return
+        for resource in self.resources.list_resources(course_id):
+            if resource.get("scopeType") != "lesson" or resource.get("lessonId") not in source_ids:
+                continue
+            self._update_resource_scope(
+                course_id=course_id,
+                resource_id=int(resource["resourceId"]),
+                scope_type="lesson",
+                lesson_id=target_lesson_id,
+                usage_role=resource.get("usageRole"),
+            )
+
+    def _update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        usage_role: str | None,
     ) -> dict[str, Any]:
-        payload = {
-            "resourceType": source["resourceType"],
-            "scopeType": "lesson",
-            "lessonId": lesson_id,
-            "usageRole": "primary_video",
-            "sourceType": source.get("sourceType", "upload"),
-            "sourcePartId": source.get("sourcePartId"),
-            "originUrl": source.get("originUrl"),
-            "objectKey": source["objectKey"],
-            "previewKey": source.get("previewKey"),
-            "originalName": source["originalName"],
-            "mimeType": source.get("mimeType"),
-            "sizeBytes": source.get("sizeBytes"),
-            "checksum": source.get("checksum"),
-            "parsePolicyJson": source.get("parsePolicyJson"),
-            "visibleToCourseQa": source.get("visibleToCourseQa", True),
-            "durationSec": source.get("durationSec"),
-        }
-        return self.resources.create_resource(course_id, payload)
+        try:
+            updated = self.resources.update_resource_scope(
+                course_id=course_id,
+                resource_id=resource_id,
+                scope_type=scope_type,
+                lesson_id=lesson_id,
+                usage_role=usage_role,
+            )
+        except ValueError as exc:
+            raise self._service_error_from_value_error(exc) from exc
+        if updated is None:
+            raise ServiceError(
+                message="Resource was not found.",
+                error_code="resource.not_found",
+                status_code=404,
+            )
+        return updated
 
     def _lesson_summary(
         self,
@@ -600,6 +634,7 @@ class LessonService:
             "resource.not_found": 404,
             "resource.not_video": 409,
             "resource.lesson_mismatch": 400,
+            "resource.scope_required": 400,
             "artifact.scope_invalid": 400,
         }.get(error_code, 400)
         return ServiceError(

@@ -198,6 +198,52 @@ def test_update_lesson_and_mark_lesson_artifacts_stale(repo: Any) -> None:
     assert artifacts[0]["status"] == "stale"
 
 
+def test_update_resource_scope_moves_lesson_resources(repo: Any) -> None:
+    course_id = _create_course(repo)
+    first = repo.create_lesson(course_id=course_id, title="第 1 节")
+    second = repo.create_lesson(course_id=course_id, title="第 2 节")
+    resource = repo.create_resource(
+        course_id,
+        _resource_payload(
+            original_name="second-note.pdf",
+            scope_type="lesson",
+            lesson_id=second["lessonId"],
+            usage_role="lesson_material",
+        ),
+    )
+
+    moved = dict(
+        repo.update_resource_scope(
+            course_id=course_id,
+            resource_id=resource["resourceId"],
+            scope_type="lesson",
+            lesson_id=first["lessonId"],
+            usage_role="lesson_material",
+        )
+    )
+    promoted = repo.update_resource_scope(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        scope_type="course",
+        lesson_id=None,
+        usage_role="primary_video",
+    )
+
+    assert moved["scopeType"] == "lesson"
+    assert moved["lessonId"] == first["lessonId"]
+    assert promoted["scopeType"] == "course"
+    assert promoted["lessonId"] is None
+    assert promoted["usageRole"] == "primary_video"
+    assert repo.get_resource(resource["resourceId"])["scopeType"] == "course"
+    with pytest.raises(ValueError, match="resource.lesson_mismatch"):
+        repo.update_resource_scope(
+            course_id=course_id,
+            resource_id=resource["resourceId"],
+            scope_type="lesson",
+            lesson_id=999999,
+        )
+
+
 def test_mark_lesson_artifacts_stale_returns_type_disambiguated_rows(repo: Any) -> None:
     course_id = _create_course(repo)
     lesson = repo.create_lesson(course_id=course_id, title="第 1 节")

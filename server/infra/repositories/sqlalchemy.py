@@ -897,6 +897,40 @@ class SqlAlchemyRuntimeRepository:
             return None
         return _resource_dict(resource)
 
+    def update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        usage_role: str | None = None,
+    ) -> dict[str, Any] | None:
+        if scope_type not in {"course", "lesson"}:
+            raise ValueError("resource.scope_required")
+        if scope_type == "lesson":
+            if lesson_id is None or self._get_lesson_model(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("resource.lesson_mismatch")
+        else:
+            lesson_id = None
+        resource = self.session.scalar(
+            select(CourseResource)
+            .join(Course, Course.id == CourseResource.course_id)
+            .where(
+                CourseResource.id == resource_id,
+                CourseResource.course_id == course_id,
+                Course.user_id == self.user_id,
+            )
+        )
+        if resource is None:
+            return None
+        resource.scope_type = scope_type
+        resource.lesson_id = lesson_id
+        if usage_role is not None:
+            resource.usage_role = usage_role
+        self._commit_or_flush()
+        return _resource_dict(resource)
+
     def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]:
         resource_exists = self.session.scalar(
             select(CourseResource.id).where(

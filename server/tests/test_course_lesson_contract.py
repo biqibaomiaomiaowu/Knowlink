@@ -61,6 +61,18 @@ def test_v2_course_lesson_contract_freezes_required_sections() -> None:
     ):
         assert path in contract
 
+    for token in (
+        "Merge side effects:",
+        "非 target lesson 的 lesson-scoped resources 必须迁移到 target lesson",
+        "Split side effects:",
+        "共享同一个 `primaryVideoResourceId`",
+        "提升为 course scope",
+        "不创建重复视频 resource row",
+        "`SetPrimaryVideoRequest.startSec` / `endSec` 用于设置可选视频片段",
+        "只提交 `resourceId` 时表示绑定完整视频或未知区间",
+    ):
+        assert token in contract
+
 
 def test_v2_course_lesson_contract_freezes_scope_and_no_resource_qa() -> None:
     contract = text(CONTRACT_PATH)

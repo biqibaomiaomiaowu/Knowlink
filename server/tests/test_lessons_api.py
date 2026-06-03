@@ -199,6 +199,20 @@ def test_create_lesson_rejects_video_range_without_video() -> None:
     assert body["errorCode"] == "common.validation_error"
 
 
+def test_create_lesson_rejects_primary_video_without_full_range() -> None:
+    course = _create_course()
+    video = _mp4_resource(course["courseId"], name="course-video")
+
+    status, body = _api(
+        "POST",
+        f"/api/v1/courses/{course['courseId']}/lessons",
+        json_body={"title": "新节课", "primaryVideoResourceId": video["resourceId"]},
+    )
+
+    assert status == 400
+    assert body["errorCode"] == "common.validation_error"
+
+
 def test_rename_lesson_updates_summary() -> None:
     course = _create_course()
     lesson = runtime_store.create_lesson(course_id=course["courseId"], title="旧标题")
@@ -300,6 +314,7 @@ def test_set_primary_video_accepts_only_mp4_resource_in_same_course() -> None:
     other = _create_course("外部课程")
     lesson = runtime_store.create_lesson(course_id=course["courseId"], title="主节课")
     mp4 = _mp4_resource(course["courseId"], name="main", lesson_id=lesson["lessonId"])
+    range_optional_mp4 = _mp4_resource(course["courseId"], name="range-optional", lesson_id=lesson["lessonId"])
     pdf = _pdf_resource(course["courseId"], name="notes", lesson_id=lesson["lessonId"])
     foreign = _mp4_resource(other["courseId"], name="foreign")
 
@@ -307,6 +322,11 @@ def test_set_primary_video_accepts_only_mp4_resource_in_same_course() -> None:
         "POST",
         f"/api/v1/courses/{course['courseId']}/lessons/{lesson['lessonId']}/primary-video",
         json_body={"resourceId": mp4["resourceId"], "startSec": 10, "endSec": 120},
+    )
+    range_optional_status, range_optional_body = _api(
+        "POST",
+        f"/api/v1/courses/{course['courseId']}/lessons/{lesson['lessonId']}/primary-video",
+        json_body={"resourceId": range_optional_mp4["resourceId"]},
     )
     pdf_status, pdf_body = _api(
         "POST",
@@ -324,6 +344,11 @@ def test_set_primary_video_accepts_only_mp4_resource_in_same_course() -> None:
     assert updated["primaryVideoResourceId"] == mp4["resourceId"]
     assert updated["primaryVideoStartSec"] == 10
     assert updated["primaryVideoEndSec"] == 120
+    assert range_optional_status == 200
+    range_optional_lesson = range_optional_body["data"]["lesson"]
+    assert range_optional_lesson["primaryVideoResourceId"] == range_optional_mp4["resourceId"]
+    assert range_optional_lesson.get("primaryVideoStartSec") is None
+    assert range_optional_lesson.get("primaryVideoEndSec") is None
     assert pdf_status == 409
     assert pdf_body["errorCode"] == "resource.not_video"
     assert foreign_status == 404
@@ -408,6 +433,7 @@ def test_merge_adjacent_lessons_keeps_target_and_marks_artifacts_stale() -> None
     first = runtime_store.create_lesson(course_id=course["courseId"], title="第 1 节")
     second = runtime_store.create_lesson(course_id=course["courseId"], title="第 2 节")
     third = runtime_store.create_lesson(course_id=course["courseId"], title="第 3 节")
+    second_note = _pdf_resource(course["courseId"], name="second-note", lesson_id=second["lessonId"])
     first_artifact = runtime_store.create_scoped_artifact(
         artifact_type="handout_version",
         course_id=course["courseId"],
@@ -442,6 +468,9 @@ def test_merge_adjacent_lessons_keeps_target_and_marks_artifacts_stale() -> None
         (first["lessonId"], 1),
         (third["lessonId"], 2),
     ]
+    moved_note = runtime_store.get_resource(second_note["resourceId"])
+    assert moved_note["scopeType"] == "lesson"
+    assert moved_note["lessonId"] == first["lessonId"]
     assert runtime_store.scoped_artifacts[first_artifact["artifactId"]]["status"] == "stale"
     assert runtime_store.scoped_artifacts[second_artifact["artifactId"]]["status"] == "stale"
     assert set(body["data"]["staleArtifactIds"]) == {
@@ -477,6 +506,7 @@ def test_split_lesson_by_video_timestamp_creates_new_lesson_with_same_video_rang
     course = _create_course()
     lesson = runtime_store.create_lesson(course_id=course["courseId"], title="完整节课")
     video = _mp4_resource(course["courseId"], name="split-video", lesson_id=lesson["lessonId"])
+    resource_count = len(runtime_store.list_resources(course["courseId"]))
     runtime_store.update_lesson(
         course_id=course["courseId"],
         lesson_id=lesson["lessonId"],
@@ -505,12 +535,13 @@ def test_split_lesson_by_video_timestamp_creates_new_lesson_with_same_video_rang
     assert first["primaryVideoStartSec"] == 0
     assert first["primaryVideoEndSec"] == 240
     assert second["title"] == "后半节"
-    assert second["primaryVideoResourceId"] != video["resourceId"]
+    assert second["primaryVideoResourceId"] == video["resourceId"]
     assert second["primaryVideoStartSec"] == 240
     assert second["primaryVideoEndSec"] == 600
-    copied_video = runtime_store.get_resource(second["primaryVideoResourceId"])
-    assert copied_video["lessonId"] == second["lessonId"]
-    assert copied_video["objectKey"] == video["objectKey"]
+    shared_video = runtime_store.get_resource(video["resourceId"])
+    assert shared_video["scopeType"] == "course"
+    assert shared_video["lessonId"] is None
+    assert len(runtime_store.list_resources(course["courseId"])) == resource_count
     assert [(item["lessonId"], item["orderIndex"]) for item in _lesson_items(course["courseId"])] == [
         (first["lessonId"], 1),
         (second["lessonId"], 2),

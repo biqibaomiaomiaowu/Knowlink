@@ -105,6 +105,8 @@ Manual acceptance checklist:
 - Task 8 scoped artifact 回归验证命令：`.venv/bin/python -m pytest -q server/tests/test_scoped_learning_artifacts.py` 通过。
 - Task 9 focused backend suite：`.venv/bin/python -m pytest -q server/tests/test_course_lesson_contract.py server/tests/test_lesson_repository.py server/tests/test_lessons_api.py server/tests/test_course_workbench_api.py server/tests/test_resource_scope_import.py server/tests/test_scoped_learning_artifacts.py server/tests/test_home_lesson_continuation.py server/tests/test_api.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py` 通过。
 - Task 9 Flutter suite：`flutter test` 通过；`flutter analyze` 通过。当前 WSL Flutter shell wrapper 有 CRLF 问题，实际验证在 D 盘临时副本通过 Windows Flutter SDK 执行。
+- Final review remediation：merge 会将非 target lesson 的 lesson-scoped resources 迁移到 target lesson；split 后两段 lesson 共享同一个 `primaryVideoResourceId`，必要时把原 lesson-scoped video 提升为 course scope；`CreateLessonRequest` 主视频必须带完整 start/end range。
+- Final verification：后端 845 个 pytest 用按文件顺序分段全覆盖命令通过；本机单进程全量 pytest 在 pytest / C extension 长进程里出现非确定性 SIGSEGV，失败用例单跑和文件级均通过。Windows Flutter SDK 临时副本 `flutter test` 通过、`flutter analyze` 通过。
 - 后端 pytest 命令和结果：`server/tests/test_lesson_repository.py server/tests/test_contract_freeze.py server/tests/test_scaffold_consistency.py server/tests/test_resource_deletion_semantics.py server/tests/test_sql_runtime_contract.py` 通过。
 - Task 3 后端 pytest 命令和结果：`.venv/bin/python -m pytest -q server/tests/test_course_workbench_api.py server/tests/test_api.py` 通过。
 - Task 3 repository / migration 回归：`.venv/bin/python -m pytest -q server/tests/test_lesson_repository.py server/tests/test_lesson_migration.py server/tests/test_scaffold_consistency.py server/tests/test_sql_runtime_contract.py` 通过。
