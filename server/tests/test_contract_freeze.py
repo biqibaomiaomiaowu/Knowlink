@@ -490,11 +490,18 @@ def test_docker_runtime_does_not_depend_on_python_bytecode_cache():
     assert "find /usr/local" in dockerfile
     assert "-name '*.pyc' -delete" in dockerfile
     assert "-name '__pycache__'" in dockerfile
+    first_pip_install = dockerfile.index("pip install")
+    assert dockerfile.index("-name '*.pyc' -delete") < first_pip_install
+    assert dockerfile.index("-name '__pycache__'") < first_pip_install
+    assert "pip install --no-cache-dir --no-compile --upgrade pip" in dockerfile
+    assert "pip install --no-cache-dir --no-compile .[dev]" in dockerfile
     assert "__pycache__/" in dockerignore
     assert "*.py[cod]" in dockerignore
     assert ".venv/" in dockerignore
     assert "PYTHONDONTWRITEBYTECODE=1" in api_contract
     assert "清理镜像内 `.pyc` / `__pycache__`" in api_contract
+    assert "首次 `pip install` 前" in api_contract
+    assert "`pip install` 必须使用 `--no-compile`" in api_contract
     assert "Python 字节码缓存" in scaffold_doc
 
 

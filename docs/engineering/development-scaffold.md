@@ -43,7 +43,7 @@
 | Flutter 自动化测试 | 已覆盖启动 smoke、course flow provider 和 Week 4 页面 / provider 语义 | `client_flutter/test/` 下 smoke、provider、quiz、review、home 等测试 |
 | SQLAlchemy model 与 Alembic 迁移 | 第一版业务表已覆盖 | 课程、资源、解析、讲义、QA、测验、掌握度、复习和学习进度相关 model / migration 已进入运行时 |
 | `async_tasks` 与 worker | 第一版异步运行时已接通 | parse、handout、quiz、review 等任务通过 task payload、Dramatiq worker 和 dispatcher 接线 |
-| PostgreSQL / Redis / MinIO / Worker 真实运行时 | 第一版已接通 | 本地运行时已覆盖 SQLAlchemy 持久化仓储、MinIO 上传 / 读取、Redis / Dramatiq worker 与聚合 read model；Docker 镜像禁用 Python 字节码缓存并清理镜像内 `.pyc` / `__pycache__`；scheduler 当前默认禁用，需 `KNOWLINK_SCHEDULER_ENABLED=true` 显式启用 |
+| PostgreSQL / Redis / MinIO / Worker 真实运行时 | 第一版已接通 | 本地运行时已覆盖 SQLAlchemy 持久化仓储、MinIO 上传 / 读取、Redis / Dramatiq worker 与聚合 read model；Docker 镜像禁用 Python 字节码缓存，首次 `pip install` 前和依赖安装后均清理镜像内 `.pyc` / `__pycache__`，并使用 `pip install --no-compile`；scheduler 当前默认禁用，需 `KNOWLINK_SCHEDULER_ENABLED=true` 显式启用 |
 | V2 图谱 / 流式 / 主观题判卷 / report / export | 图谱、report、export 已有 placeholder API / 页面空状态；流式与主观题判卷仍为 contract / 占位，不代表正式生成能力 | `server/api/routers/exports.py`、`server/ai/v2/graph.py`、`streaming.py`、`grading.py` 与 `server/tests/test_ai_v2_contracts.py` / `test_home_lesson_continuation.py`；正式图谱、SSE、主观题判卷、真实报告和真实导出需另行冻结 |
 
 FastAPI 当前默认允许本地 Flutter Web origin；MinIO 本地默认使用全局 `MINIO_API_CORS_ALLOW_ORIGIN=*`，生产环境可通过 `KNOWLINK_CORS_ALLOW_ORIGINS` 和 `KNOWLINK_MINIO_CORS_ALLOW_ORIGIN` 显式收紧。
