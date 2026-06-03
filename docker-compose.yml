@@ -1,8 +1,12 @@
+x-knowlink-backend-image: &knowlink-backend-image
+  image: knowlink-backend:dev
+  build:
+    context: .
+    dockerfile: server/Dockerfile
+
 services:
   db-migrate:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    <<: *knowlink-backend-image
     command: alembic upgrade head
     env_file:
       - .env
@@ -14,9 +18,7 @@ services:
         condition: service_healthy
 
   minio-init:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    <<: *knowlink-backend-image
     command: python scripts/init_minio_bucket.py
     env_file:
       - .env
@@ -32,9 +34,7 @@ services:
         condition: service_started
 
   api:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    <<: *knowlink-backend-image
     command: uvicorn server.app:app --host 0.0.0.0 --port 8000
     env_file:
       - .env
@@ -59,9 +59,7 @@ services:
         condition: service_started
 
   worker:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    <<: *knowlink-backend-image
     command: dramatiq --processes 1 --threads 4 server.tasks.broker:broker server.tasks.worker
     env_file:
       - .env
