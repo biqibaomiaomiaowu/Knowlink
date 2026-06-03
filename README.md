@@ -65,7 +65,7 @@ docker compose up -d --no-build api worker
 docker compose start postgres redis minio api worker
 ```
 
-Compose 中 `api`、`worker`、`db-migrate` 和 `minio-init` 共用 `knowlink-backend:dev` 镜像；Dockerfile 将 apt / Python 第三方依赖层与源码层分开，只有依赖或 Dockerfile 变化时才需要重新构建。运行时以 `/workspace` 为工作目录加载源码。默认构建使用中科大 Debian 与 PyPI 镜像源，可通过 build args 覆盖。
+Compose 中 `api`、`worker`、`db-migrate` 和 `minio-init` 共用 `knowlink-backend:dev` 镜像；Dockerfile 将 apt / Python 第三方依赖层与源码层分开，只有依赖或 Dockerfile 变化时才需要重新构建。运行时以 `/workspace` 为工作目录，并通过 `PYTHONPATH=/workspace` 加载源码。默认构建使用中科大 Debian 与 PyPI 镜像源，可通过 build args 覆盖。
 
 如果 worker 或 db-migrate 在导入第三方包时报 `bad marshal data`，先重建镜像层，避免继续复用损坏的 Python 字节码缓存：
 

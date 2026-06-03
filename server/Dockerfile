@@ -5,7 +5,8 @@ ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 ARG PIP_INDEX_URL=https://mirrors.ustc.edu.cn/pypi/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace
 
 WORKDIR /workspace
 
