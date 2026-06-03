@@ -3,6 +3,9 @@ FROM python:3.12-slim
 ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /workspace
 
 COPY pyproject.toml README.md /workspace/
@@ -17,6 +20,8 @@ RUN sed -i \
     apt-get install -y --no-install-recommends -o Acquire::Retries=5 ffmpeg && \
     rm -rf /var/lib/apt/lists/* && \
     pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .[dev]
+    pip install --no-cache-dir .[dev] && \
+    find /usr/local -name '*.pyc' -delete && \
+    find /usr/local -type d -name '__pycache__' -prune -exec rm -rf '{}' +
 
 EXPOSE 8000

@@ -53,6 +53,13 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 docker compose up --build
 ```
 
+如果 worker 或 db-migrate 在导入第三方包时报 `bad marshal data`，先重建镜像层，避免继续复用损坏的 Python 字节码缓存：
+
+```powershell
+docker compose build --no-cache api worker db-migrate minio-init
+docker compose up
+```
+
 默认本地端口：
 
 - FastAPI：`http://127.0.0.1:8000`

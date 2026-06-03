@@ -480,6 +480,24 @@ def test_phase5_runtime_defaults_and_resource_delete_contract_are_documented():
     assert "Dramatiq worker 和 scheduler" not in readme
 
 
+def test_docker_runtime_does_not_depend_on_python_bytecode_cache():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    dockerfile = load_text("server/Dockerfile")
+    dockerignore = load_text(".dockerignore")
+    scaffold_doc = load_text(SCAFFOLD_DOC)
+
+    assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
+    assert "find /usr/local" in dockerfile
+    assert "-name '*.pyc' -delete" in dockerfile
+    assert "-name '__pycache__'" in dockerfile
+    assert "__pycache__/" in dockerignore
+    assert "*.py[cod]" in dockerignore
+    assert ".venv/" in dockerignore
+    assert "PYTHONDONTWRITEBYTECODE=1" in api_contract
+    assert "清理镜像内 `.pyc` / `__pycache__`" in api_contract
+    assert "Python 字节码缓存" in scaffold_doc
+
+
 def test_phase5_async_enqueue_and_retry_errors_are_documented():
     api_contract = load_text("docs/contracts/api-contract.md")
     error_codes = load_text("docs/contracts/error-codes.md")
