@@ -686,6 +686,19 @@ def test_compose_worker_uses_dramatiq_cli_and_queue_env():
     assert "KNOWLINK_PARSE_PIPELINE_ACTOR: server.tasks.worker:parse_pipeline" in compose
 
 
+def test_server_docker_image_installs_ffmpeg_for_bilibili_import_worker():
+    dockerfile = (ROOT / "server" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ARG DEBIAN_MIRROR=" in dockerfile
+    assert "ARG DEBIAN_SECURITY_MIRROR=" in dockerfile
+    assert "mirrors.ustc.edu.cn/debian" in dockerfile
+    assert "sed -i" in dockerfile
+    assert "apt-get update" in dockerfile
+    assert "Acquire::Retries=5" in dockerfile
+    assert "ffmpeg" in dockerfile
+    assert "rm -rf /var/lib/apt/lists/*" in dockerfile
+
+
 def test_default_compose_does_not_start_placeholder_scheduler():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 

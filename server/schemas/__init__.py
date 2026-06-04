@@ -14,6 +14,9 @@ from server.schemas.requests import (
     UploadInitRequest,
 )
 from server.schemas.responses import (
+    ContinueLearningData,
+    CourseRecommendationAction,
+    CourseRecommendationListData,
     CourseSummary,
     DashboardData,
     HandoutBlock,
@@ -31,6 +34,9 @@ __all__ = [
     "AsyncEntity",
     "Citation",
     "ConfirmRecommendationRequest",
+    "ContinueLearningData",
+    "CourseRecommendationAction",
+    "CourseRecommendationListData",
     "CourseSummary",
     "CreateCourseRequest",
     "DashboardData",

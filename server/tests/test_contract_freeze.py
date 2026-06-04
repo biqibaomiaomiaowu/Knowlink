@@ -57,8 +57,31 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
     assert "week2-cao-le-parse-inquiry-contract.md" in api_contract
     assert "schemas/ai/handout_outline.schema.json" in week2_contract
     assert "schemas/ai/handout_block.schema.json" in week2_contract
+    assert "schemas/ai/qa_response.schema.json" in week2_contract
     assert "schemas/ai/knowledge_point_extraction.schema.json" in week2_contract
     assert "schemas/parse/normalized_document.schema.json" in week2_contract
+
+    for token in (
+        "`generationMetadata.evidenceTier`",
+        "`original_evidence`",
+        "`handout_context`",
+        "`course_prior`",
+        "`out_of_scope`",
+        "`citations=[]`",
+        "服务端归一化后补充的响应元数据",
+        "不是模型可自由返回的字段",
+    ):
+        assert token in week2_contract
+
+    for token in (
+        "current-block-prioritized course-wide Hybrid RAG",
+        "current block 是 boost，不是 filter",
+        "active parse run",
+        "active handout version",
+        "handout_context citations=[]",
+        "source-fact intent 不进入 course_prior",
+    ):
+        assert token in week2_contract
 
     for token in (
         "`course_segments`",
@@ -75,6 +98,15 @@ def test_week2_parse_inquiry_contract_is_linked_from_api_contract():
     for step_code in ("resource_validate", "caption_extract", "document_parse", "knowledge_extract", "vectorize"):
         assert step_code in api_contract
         assert step_code in week2_contract
+
+
+def test_v2_course_lesson_workbench_contract_is_linked_from_api_contract():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    docs_nav = load_text(DOCS_NAV_DOC)
+
+    assert "v2-course-lesson-workbench-contract.md" in api_contract
+    assert "v2-course-lesson-workbench-contract.md" in docs_nav
+    assert "phase2-course-lesson-workbench-handoff.md" in docs_nav
 
 
 def test_backend_optimization_contract_freezes_idempotency_and_upload_fast_return():
@@ -348,7 +380,7 @@ def test_bilibili_reserved_contract_sections_keep_request_body_and_delete_shape(
         "### `POST /api/v1/courses/{courseId}/resources/imports/bilibili`", 1
     )[1].split("### `GET /api/v1/courses/{courseId}/resources/imports/bilibili`", 1)[0]
     delete_session_section = api_contract.split("### `DELETE /api/v1/bilibili/auth/session`", 1)[1].split(
-        "当前未实现阶段统一返回：", 1
+        "V1 历史 stub 阶段统一返回：", 1
     )[0]
 
     assert '"videoUrl"' in import_section
@@ -448,6 +480,31 @@ def test_phase5_runtime_defaults_and_resource_delete_contract_are_documented():
     assert "Dramatiq worker 和 scheduler" not in readme
 
 
+def test_docker_runtime_does_not_depend_on_python_bytecode_cache():
+    api_contract = load_text("docs/contracts/api-contract.md")
+    dockerfile = load_text("server/Dockerfile")
+    dockerignore = load_text(".dockerignore")
+    scaffold_doc = load_text(SCAFFOLD_DOC)
+
+    assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
+    assert "find /usr/local" in dockerfile
+    assert "-name '*.pyc' -delete" in dockerfile
+    assert "-name '__pycache__'" in dockerfile
+    first_pip_install = dockerfile.index("pip install")
+    assert dockerfile.index("-name '*.pyc' -delete") < first_pip_install
+    assert dockerfile.index("-name '__pycache__'") < first_pip_install
+    assert "pip install --no-cache-dir --no-compile --upgrade pip" in dockerfile
+    assert "pip install --no-cache-dir --no-compile .[dev]" in dockerfile
+    assert "__pycache__/" in dockerignore
+    assert "*.py[cod]" in dockerignore
+    assert ".venv/" in dockerignore
+    assert "PYTHONDONTWRITEBYTECODE=1" in api_contract
+    assert "清理镜像内 `.pyc` / `__pycache__`" in api_contract
+    assert "首次 `pip install` 前" in api_contract
+    assert "`pip install` 必须使用 `--no-compile`" in api_contract
+    assert "Python 字节码缓存" in scaffold_doc
+
+
 def test_phase5_async_enqueue_and_retry_errors_are_documented():
     api_contract = load_text("docs/contracts/api-contract.md")
     error_codes = load_text("docs/contracts/error-codes.md")
@@ -466,6 +523,8 @@ def test_phase5_async_enqueue_and_retry_errors_are_documented():
     assert "`503 async_task.enqueue_failed`" in api_contract
     assert "`POST /api/v1/async-tasks/{taskId}/retry`" in api_contract
     assert "只有 `failed`、`queued` 状态可通过该接口重新入队" in api_contract
+    assert "响应必须返回 `entity.type` / `entity.id`" in api_contract
+    assert "B站导入重试固定返回 `entity.type=bilibili_import_run`" in api_contract
     assert "`retrying` 等可重试任务" not in api_contract
     assert "任务状态重置为 `queued` 时发现记录已变化或不可写" in api_contract
     assert "任务状态更新为 retry 时" not in api_contract
@@ -597,13 +656,92 @@ def test_collaboration_docs_expose_change_flow_and_priority_matrices():
                     {"resourceId": 503, "refLabel": "DOCX 积分部分", "anchorKey": "section-integral"},
                     {"resourceId": 504, "refLabel": "视频 02:00-04:00", "startSec": 120, "endSec": 240},
                 ],
-                "generationMetadata": {"source": "model", "reason": "model_response"},
+                "generationMetadata": {
+                    "source": "model",
+                    "reason": "model_response",
+                    "evidenceTier": "original_evidence",
+                },
             },
         ),
     ],
 )
 def test_citation_schemas_accept_all_reference_types(schema_path: str, payload: dict):
     build_validator(schema_path).validate(payload)
+
+
+def test_qa_response_schema_accepts_generation_metadata_evidence_tier():
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    validator.validate(
+        {
+            "answerMd": "依据讲义内容回答，未找到可追溯原始资料引用。\n\n集合是确定对象组成的整体。",
+            "answerType": "direct_answer",
+            "citations": [],
+            "generationMetadata": {
+                "source": "fallback",
+                "reason": "handout_context_match",
+                "evidenceTier": "handout_context",
+                "handoutContext": {
+                    "handoutBlockId": 501,
+                    "outlineKey": "ch1-def",
+                    "title": "集合的定义",
+                },
+            },
+        }
+    )
+
+
+def test_qa_response_schema_rejects_missing_generation_metadata_evidence_tier():
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                "answerMd": "集合是确定对象组成的整体。",
+                "answerType": "direct_answer",
+                "citations": [{"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}],
+                "generationMetadata": {
+                    "source": "model",
+                    "reason": "model_response",
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize("evidence_tier", ["handout_context", "course_prior", "out_of_scope"])
+def test_qa_response_schema_rejects_non_original_tier_with_citations(evidence_tier: str):
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                "answerMd": "依据讲义内容回答。",
+                "answerType": "direct_answer",
+                "citations": [{"resourceId": 501, "refLabel": "PDF 第 2 页", "pageNo": 2}],
+                "generationMetadata": {
+                    "source": "fallback",
+                    "reason": "non_original_tier",
+                    "evidenceTier": evidence_tier,
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "generation_metadata",
+    [
+        {"source": "fallback", "reason": "bad_tier", "evidenceTier": "lecture_only"},
+        {"source": "fallback", "reason": "extra_field", "unexpectedField": True},
+    ],
+)
+def test_qa_response_schema_rejects_invalid_generation_metadata(generation_metadata: dict):
+    validator = build_validator("schemas/ai/qa_response.schema.json")
+    with pytest.raises(ValidationError):
+        validator.validate(
+            {
+                "answerMd": "回答内容",
+                "answerType": "direct_answer",
+                "citations": [],
+                "generationMetadata": generation_metadata,
+            }
+        )
 
 
 @pytest.mark.parametrize(

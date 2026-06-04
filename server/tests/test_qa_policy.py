@@ -34,6 +34,29 @@ class FakeAIService:
         return AIModelResult(text=json.dumps(self.payload, ensure_ascii=False), parsed_json=self.payload)
 
 
+class FakeUnreferencedAnswerClient:
+    def __init__(self, payload: dict | None = None, error: BaseException | None = None):
+        self.payload = payload if payload is not None else {}
+        self.error = error
+        self.unreferenced_requests = []
+
+    def generate_answer(self, question, candidates):
+        raise AssertionError("citation-backed QA path should not be used")
+
+    def generate_unreferenced_answer(self, question, *, context_text, evidence_tier, course_scope=None):
+        self.unreferenced_requests.append(
+            {
+                "question": question,
+                "contextText": context_text,
+                "evidenceTier": evidence_tier,
+                "courseScope": course_scope,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return self.payload
+
+
 def test_block_scoped_qa_prioritizes_current_block_refs_before_other_evidence():
     candidates = build_block_scoped_qa_candidates(
         "集合的定义是什么？",
@@ -66,7 +89,11 @@ def test_block_scoped_qa_prioritizes_current_block_refs_before_other_evidence():
 
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "direct_answer"
-    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_unavailable"}
+    assert response["generationMetadata"] == {
+        "source": "fallback",
+        "reason": "model_unavailable",
+        "evidenceTier": "original_evidence",
+    }
     assert response["citations"] == [{"resourceId": 1, "refLabel": "视频 00s-20s", "startSec": 0, "endSec": 20}]
 
 
@@ -102,6 +129,488 @@ def test_block_scoped_qa_refuses_when_no_candidate_evidence_exists():
 
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "insufficient_evidence"
+    assert response["citations"] == []
+
+
+def test_qa_uses_handout_context_when_original_evidence_is_missing():
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "handout_context"
+    assert response["generationMetadata"]["handoutContext"]["title"] == "集合的定义"
+    assert "依据讲义内容回答" in response["answerMd"]
+    assert "集合是确定对象组成的整体" in response["answerMd"]
+
+
+def test_qa_uses_title_summary_handout_context_when_content_is_empty():
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+            "summary": "集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    assert response["answerType"] == "direct_answer"
+    assert response["generationMetadata"]["evidenceTier"] == "handout_context"
+    assert "集合是确定对象组成的整体" in response["answerMd"]
+
+
+def test_qa_uses_unreferenced_model_for_handout_context_and_drops_citations():
+    client = FakeUnreferencedAnswerClient(
+        {
+            "answerMd": "讲义说明集合是确定对象组成的整体。",
+            "answerType": "direct_answer",
+            "citations": [{"resourceId": 999, "pageNo": 1, "refLabel": "伪引用"}],
+        }
+    )
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerMd"].startswith("依据讲义内容回答，未找到可追溯原始资料引用。\n\n")
+    assert "讲义说明集合是确定对象组成的整体。" in response["answerMd"]
+    assert "依据讲义内容回答" in response["answerMd"]
+    assert "未找到可追溯原始资料引用" in response["answerMd"]
+    assert response["citations"] == []
+    assert response["generationMetadata"]["source"] == "model"
+    assert response["generationMetadata"]["evidenceTier"] == "handout_context"
+    assert response["generationMetadata"]["handoutContext"]["title"] == "集合的定义"
+    assert client.unreferenced_requests[0]["evidenceTier"] == "handout_context"
+    assert "集合是确定对象组成的整体" in client.unreferenced_requests[0]["contextText"]
+
+
+def test_qa_unreferenced_model_keeps_existing_handout_context_disclosure_once():
+    answer_md = "依据讲义内容回答，未找到可追溯原始资料引用。\n\n讲义说明集合是确定对象组成的整体。"
+    client = FakeUnreferencedAnswerClient(
+        {
+            "answerMd": answer_md,
+            "answerType": "direct_answer",
+            "citations": [],
+        }
+    )
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerMd"] == answer_md.replace("\n\n", "\n")
+    assert response["answerMd"].count("依据讲义内容回答") == 1
+
+
+def test_qa_answers_course_related_question_without_direct_evidence():
+    response = generate_block_qa_response(
+        "空集为什么也是集合？",
+        current_block={
+            **_current_block(),
+            "title": "",
+            "summary": "",
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "handoutTitles": ["集合的定义"],
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "course_prior"
+    assert "基于当前课程主题的补充解释" in response["answerMd"]
+    assert "空集" in response["answerMd"]
+
+
+def test_qa_uses_unreferenced_model_for_course_prior_and_drops_citations():
+    course_scope = {
+        "title": "集合论入门",
+        "goalText": "理解集合、空集、元素和子集。",
+        "handoutTitles": ["集合的定义"],
+        "knowledgePointNames": ["集合", "空集"],
+    }
+    client = FakeUnreferencedAnswerClient(
+        {
+            "answer_md": "空集没有元素，但仍然满足集合的定义。",
+            "answer_type": "direct_answer",
+            "citations": [{"resourceId": 999, "pageNo": 1, "refLabel": "伪引用"}],
+        }
+    )
+
+    response = generate_block_qa_response(
+        "空集为什么也是集合？",
+        current_block={
+            **_current_block(),
+            "title": "",
+            "summary": "",
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope=course_scope,
+        client=client,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerMd"].startswith("课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释。\n\n")
+    assert "空集没有元素，但仍然满足集合的定义。" in response["answerMd"]
+    assert "基于当前课程主题的补充解释" in response["answerMd"]
+    assert response["citations"] == []
+    assert response["generationMetadata"]["source"] == "model"
+    assert response["generationMetadata"]["evidenceTier"] == "course_prior"
+    assert client.unreferenced_requests[0]["evidenceTier"] == "course_prior"
+    assert client.unreferenced_requests[0]["courseScope"] == course_scope
+
+
+def test_qa_unreferenced_model_keeps_existing_course_prior_disclosure_once():
+    course_scope = {
+        "title": "集合论入门",
+        "goalText": "理解集合、空集、元素和子集。",
+        "handoutTitles": ["集合的定义"],
+        "knowledgePointNames": ["集合", "空集"],
+    }
+    answer_md = "课程资料和讲义中未找到直接证据，以下是基于当前课程主题的补充解释。\n\n空集没有元素，但仍然满足集合的定义。"
+    client = FakeUnreferencedAnswerClient(
+        {
+            "answerMd": answer_md,
+            "answerType": "direct_answer",
+            "citations": [],
+        }
+    )
+
+    response = generate_block_qa_response(
+        "空集为什么也是集合？",
+        current_block={
+            **_current_block(),
+            "title": "",
+            "summary": "",
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope=course_scope,
+        client=client,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerMd"] == answer_md.replace("\n\n", "\n")
+    assert response["answerMd"].count("基于当前课程主题的补充解释") == 1
+
+
+def test_qa_unreferenced_model_error_falls_back_to_handout_context():
+    client = FakeUnreferencedAnswerClient(error=AIOutputParseError("empty answer"))
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        client=client,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["citations"] == []
+    assert response["generationMetadata"] == {
+        "source": "fallback",
+        "reason": "model_output_invalid",
+        "evidenceTier": "handout_context",
+        "handoutContext": {"handoutBlockId": 4001, "outlineKey": "outline-1", "title": "集合的定义"},
+    }
+
+
+def test_qa_rejects_out_of_scope_question_without_direct_evidence():
+    response = generate_block_qa_response(
+        "今天杭州天气怎么样？",
+        current_block={**_current_block(), "citations": [], "sourceSegmentKeys": [], "knowledgePoints": [], "contentMd": ""},
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "handoutTitles": ["集合的定义"],
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "clarification"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+
+def test_qa_does_not_reject_domain_term_when_it_is_in_course_scope():
+    response = generate_block_qa_response(
+        "天气预报为什么会变化？",
+        current_block={**_current_block(), "citations": [], "sourceSegmentKeys": [], "knowledgePoints": [], "contentMd": ""},
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "气象学入门",
+            "goalText": "理解气象观测、气压、降水和预报。",
+            "knowledgePointNames": ["气象", "气压", "降水"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "course_prior"
+
+
+def test_qa_rejects_mixed_course_keyword_out_of_scope_question():
+    response = generate_block_qa_response(
+        "集合今天杭州天气怎么样？",
+        current_block={
+            **_current_block(),
+            "title": "",
+            "summary": "",
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    assert response["answerType"] == "clarification"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+
+def test_qa_rejects_out_of_scope_before_handout_context_when_no_original_evidence():
+    response = generate_block_qa_response(
+        "集合今天杭州天气怎么样？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "## 集合的定义\n\n集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "clarification"
+    assert response["citations"] == []
+    assert response["generationMetadata"]["evidenceTier"] == "out_of_scope"
+
+
+def test_qa_keeps_original_evidence_before_out_of_scope_terms():
+    response = generate_block_qa_response(
+        "集合今天杭州天气怎么样？",
+        current_block=_current_block(),
+        segments=_segments(),
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["generationMetadata"]["evidenceTier"] == "original_evidence"
+    assert response["citations"] == [{"resourceId": 1, "refLabel": "\u89c6\u9891 00s-20s", "startSec": 0, "endSec": 20}]
+
+
+def test_qa_keeps_original_evidence_before_stock_and_news_terms():
+    for question in [
+        "\u96c6\u5408\u80a1\u7968\u8d70\u52bf\u600e\u4e48\u770b\uff1f",
+        "\u96c6\u5408\u65b0\u95fb\u70ed\u641c\u662f\u4ec0\u4e48\uff1f",
+    ]:
+        response = generate_block_qa_response(
+            question,
+            current_block=_current_block(),
+            segments=_segments(),
+            knowledge_point_evidences=[],
+            adjacent_blocks=[],
+            active_course_id=101,
+            active_parse_run_id=9001,
+            active_handout_version_id=7001,
+            course_scope={
+                "title": "set theory basics",
+                "goalText": "learn empty sets, subsets, and set operations",
+                "knowledgePointNames": ["set", "empty set"],
+            },
+        )
+
+        QA_RESPONSE_VALIDATOR.validate(response)
+        assert response["answerType"] == "direct_answer"
+        assert response["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert response["citations"] == [{"resourceId": 1, "refLabel": "\u89c6\u9891 00s-20s", "startSec": 0, "endSec": 20}]
+
+
+def test_qa_keeps_legacy_insufficient_evidence_for_out_of_scope_without_course_scope():
+    response = generate_block_qa_response(
+        "今天杭州天气怎么样？",
+        current_block={**_current_block(), "citations": [], "sourceSegmentKeys": [], "knowledgePoints": [], "contentMd": ""},
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "insufficient_evidence"
+    assert response["citations"] == []
+
+
+def test_qa_does_not_reject_course_question_with_generic_time_word():
+    response = generate_block_qa_response(
+        "今天集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "sourceSegmentKeys": [],
+            "knowledgePoints": [],
+            "contentMd": "",
+            "title": "集合的定义",
+            "summary": "集合是确定对象组成的整体。",
+        },
+        segments=[],
+        knowledge_point_evidences=[],
+        adjacent_blocks=[],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+        course_scope={
+            "title": "集合论入门",
+            "goalText": "理解集合、空集、元素和子集。",
+            "knowledgePointNames": ["集合", "空集"],
+        },
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["generationMetadata"]["evidenceTier"] == "handout_context"
     assert response["citations"] == []
 
 
@@ -156,6 +665,46 @@ def test_block_citation_locator_is_normalized_from_reverse_lookup_segment():
     )
 
     assert candidates[0].to_qa_citation() == {"resourceId": 2, "refLabel": "bad-page", "pageNo": 1}
+
+
+def test_video_only_block_uses_source_segment_keys_when_citations_are_missing():
+    candidates = build_block_scoped_qa_candidates(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "knowledgePoints": [],
+            "sourceSegmentKeys": ["mp4-c1"],
+        },
+        segments=[_segments()[0]],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    assert [(candidate.source, candidate.segment_key) for candidate in candidates] == [
+        ("current_block_source_segment", "mp4-c1")
+    ]
+
+    response = generate_block_qa_response(
+        "集合的定义是什么？",
+        current_block={
+            **_current_block(),
+            "citations": [],
+            "knowledgePoints": [],
+            "sourceSegmentKeys": ["mp4-c1"],
+        },
+        segments=[_segments()[0]],
+        active_course_id=101,
+        active_parse_run_id=9001,
+        active_handout_version_id=7001,
+    )
+
+    QA_RESPONSE_VALIDATOR.validate(response)
+    assert response["answerType"] == "direct_answer"
+    assert response["citations"] == [
+        {"resourceId": 1, "refLabel": "视频 00s-20s", "startSec": 0, "endSec": 20}
+    ]
 
 
 def test_block_video_citation_allows_subrange_but_rejects_cross_segment_time():
@@ -229,7 +778,11 @@ def test_schema_valid_client_citation_is_mapped_back_to_candidate():
 
     QA_RESPONSE_VALIDATOR.validate(response)
     assert response["answerType"] == "direct_answer"
-    assert response["generationMetadata"] == {"source": "model", "reason": "model_response"}
+    assert response["generationMetadata"] == {
+        "source": "model",
+        "reason": "model_response",
+        "evidenceTier": "original_evidence",
+    }
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
 
 
@@ -310,6 +863,36 @@ def test_deepseek_qa_answer_client_uses_ai_service_request():
     assert response["answerType"] == "direct_answer"
 
 
+def test_deepseek_qa_answer_client_unreferenced_request_uses_scope_prompt():
+    ai_service = FakeAIService({"answerMd": "空集没有元素。", "answerType": "direct_answer", "citations": []})
+    client = DeepSeekQaAnswerClient(
+        api_key="fake-deepseek-key",
+        base_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        reasoning_effort="high",
+        timeout_sec=13,
+        ai_service=ai_service,
+    )
+
+    payload = client.generate_unreferenced_answer(
+        "空集为什么也是集合？",
+        context_text="集合论入门\n空集",
+        evidence_tier="course_prior",
+        course_scope={"title": "集合论入门", "knowledgePointNames": ["空集"]},
+    )
+
+    request = ai_service.requests[0]
+    assert request.provider == "deepseek"
+    assert request.model == "deepseek-v4-flash"
+    assert request.timeout_sec == 13
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata == {"max_tokens": 4096, "reasoning_effort": "high"}
+    assert [message.role for message in request.messages] == ["system", "user"]
+    assert "evidenceTier" in request.messages[1].content
+    assert "course_prior" in request.messages[1].content
+    assert payload["answerMd"] == "空集没有元素。"
+
+
 def test_vivo_qa_answer_client_uses_ai_service_request_and_normalizes_json():
     model_payload = {
         "answerMd": "集合是确定对象组成的整体。",
@@ -355,6 +938,37 @@ def test_vivo_qa_answer_client_uses_ai_service_request_and_normalizes_json():
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
 
 
+def test_vivo_qa_answer_client_unreferenced_request_uses_scope_prompt():
+    ai_service = FakeAIService({"answerMd": "讲义说明集合定义。", "answerType": "direct_answer", "citations": []})
+    client = VivoQaAnswerClient(
+        app_key="fake-key",
+        base_url="https://example.invalid/v1",
+        model="Doubao-Seed-2.0-pro",
+        timeout_sec=7,
+        ai_service=ai_service,
+    )
+
+    payload = client.generate_unreferenced_answer(
+        "集合的定义是什么？",
+        context_text="集合是确定对象组成的整体。",
+        evidence_tier="handout_context",
+    )
+
+    request = ai_service.requests[0]
+    assert request.provider == "vivo"
+    assert request.model == "Doubao-Seed-2.0-pro"
+    assert request.temperature == 0.1
+    assert request.timeout_sec == 7
+    assert request.response_format == {"type": "json_object"}
+    assert request.metadata["max_tokens"] == 2048
+    assert request.metadata["stream"] is False
+    assert request.metadata["request_id"]
+    assert [message.role for message in request.messages] == ["system", "user"]
+    assert "evidenceTier" in request.messages[1].content
+    assert "handout_context" in request.messages[1].content
+    assert payload["answerMd"] == "讲义说明集合定义。"
+
+
 def test_vivo_qa_bad_json_falls_back_to_candidate():
     client = VivoQaAnswerClient(
         app_key="fake-key",
@@ -375,7 +989,11 @@ def test_vivo_qa_bad_json_falls_back_to_candidate():
     )
 
     assert response["answerType"] == "direct_answer"
-    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_output_invalid"}
+    assert response["generationMetadata"] == {
+        "source": "fallback",
+        "reason": "model_output_invalid",
+        "evidenceTier": "original_evidence",
+    }
     assert response["citations"] == [{"resourceId": 2, "refLabel": "PDF 第 1 页", "pageNo": 1}]
 
 
@@ -426,7 +1044,11 @@ def test_qa_maps_ai_provider_error_to_fallback_reason():
         client=client,
     )
 
-    assert response["generationMetadata"] == {"source": "fallback", "reason": "model_provider_error"}
+    assert response["generationMetadata"] == {
+        "source": "fallback",
+        "reason": "model_provider_error",
+        "evidenceTier": "original_evidence",
+    }
 
 
 def test_qa_message_refs_include_only_answer_citations_not_all_candidates():

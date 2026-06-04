@@ -23,12 +23,24 @@ class _FakeParserResult:
 
 
 class _FakeEmbeddingClient:
+    model = "fake-embedding"
+
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
 
     def embed_texts(self, sentences):
         self.calls.append(list(sentences))
-        return [[float(index), float(len(sentence))] for index, sentence in enumerate(sentences, start=1)]
+        return [
+            [float(index), float(len(sentence)), *([0.0] * (VectorDocument.EMBEDDING_DIM - 2))]
+            for index, sentence in enumerate(sentences, start=1)
+        ]
+
+
+class _WrongDimEmbeddingClient:
+    model = "wrong-dim"
+
+    def embed_texts(self, sentences):
+        return [[1.0, 2.0] for _sentence in sentences]
 
 
 class _FakeObjectStorage:
@@ -92,10 +104,60 @@ def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Pa
     vectors = session.scalars(sa.select(VectorDocument)).all()
     assert len(vectors) == 1
     assert vectors[0].owner_type == "segment"
-    assert vectors[0].embedding == [1.0, 13.0]
+    assert vectors[0].embedding == vectors[0].embedding_vector
+    assert len(vectors[0].embedding_vector) == VectorDocument.EMBEDDING_DIM
+    assert vectors[0].embedding_vector[:2] == [1.0, 13.0]
+    assert vectors[0].embedding_model == "fake-embedding"
+    assert vectors[0].embedding_dim == VectorDocument.EMBEDDING_DIM
+    assert vectors[0].embedding_status == "ready"
+    assert vectors[0].embedding_error is None
+    assert "pdf_page_text" in vectors[0].search_text
+    assert "pdf" in vectors[0].search_text
     assert session.get(ParseRun, message["parseRunId"]).status == "succeeded"
     assert session.get(AsyncTask, message["taskId"]).status == "succeeded"
     assert _step_statuses(session, message["parseRunId"])["vectorize"] == "succeeded"
+
+
+def test_parse_pipeline_marks_vectorization_failed_on_embedding_dimension_mismatch(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "lecture.pdf", resource_type="pdf")
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": "pdf",
+                "segments": [
+                    {
+                        "segmentKey": "pdf-p1",
+                        "segmentType": "pdf_page_text",
+                        "textContent": "embedding dimension mismatch",
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=lambda: _WrongDimEmbeddingClient(),
+        base_dir=tmp_path,
+    )
+
+    assert result["status"] == "partial_success"
+    assert result["vectorDocumentCount"] == 0
+    assert {"code": "embedding.dimension_mismatch"} in result["issues"]
+    assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 0
+    vectorize_task = session.scalar(
+        sa.select(AsyncTask).where(AsyncTask.parse_run_id == message["parseRunId"], AsyncTask.step_code == "vectorize")
+    )
+    assert vectorize_task.status == "failed"
+    assert vectorize_task.error_code == "embedding.dimension_mismatch"
 
 
 def test_parse_pipeline_persists_mp4_visual_segment_fields(tmp_path: Path):

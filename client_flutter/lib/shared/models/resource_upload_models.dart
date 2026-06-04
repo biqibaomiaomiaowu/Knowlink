@@ -7,6 +7,12 @@ class ResourceUploadInitRequestModel {
     required this.mimeType,
     required this.sizeBytes,
     required this.checksum,
+    this.scopeType,
+    this.lessonId,
+    this.usageRole,
+    this.lessonPlacement,
+    this.lessonTitle,
+    this.visibleToCourseQa,
   });
 
   final ResourceType resourceType;
@@ -14,6 +20,12 @@ class ResourceUploadInitRequestModel {
   final String mimeType;
   final int sizeBytes;
   final String checksum;
+  final String? scopeType;
+  final String? lessonId;
+  final String? usageRole;
+  final String? lessonPlacement;
+  final String? lessonTitle;
+  final bool? visibleToCourseQa;
 
   Map<String, dynamic> toJson() {
     return {
@@ -22,6 +34,12 @@ class ResourceUploadInitRequestModel {
       'mimeType': mimeType,
       'sizeBytes': sizeBytes,
       'checksum': checksum,
+      if (scopeType != null) 'scopeType': scopeType,
+      if (lessonId != null) 'lessonId': lessonId,
+      if (usageRole != null) 'usageRole': usageRole,
+      if (lessonPlacement != null) 'lessonPlacement': lessonPlacement,
+      if (lessonTitle != null) 'lessonTitle': lessonTitle,
+      if (visibleToCourseQa != null) 'visibleToCourseQa': visibleToCourseQa,
     };
   }
 }
@@ -58,6 +76,12 @@ class ResourceUploadCompleteRequestModel {
     required this.mimeType,
     required this.sizeBytes,
     required this.checksum,
+    this.scopeType,
+    this.lessonId,
+    this.usageRole,
+    this.lessonPlacement,
+    this.lessonTitle,
+    this.visibleToCourseQa,
   });
 
   final ResourceType resourceType;
@@ -66,6 +90,12 @@ class ResourceUploadCompleteRequestModel {
   final String mimeType;
   final int sizeBytes;
   final String checksum;
+  final String? scopeType;
+  final String? lessonId;
+  final String? usageRole;
+  final String? lessonPlacement;
+  final String? lessonTitle;
+  final bool? visibleToCourseQa;
 
   Map<String, dynamic> toJson() {
     return {
@@ -75,6 +105,12 @@ class ResourceUploadCompleteRequestModel {
       'mimeType': mimeType,
       'sizeBytes': sizeBytes,
       'checksum': checksum,
+      if (scopeType != null) 'scopeType': scopeType,
+      if (lessonId != null) 'lessonId': lessonId,
+      if (usageRole != null) 'usageRole': usageRole,
+      if (lessonPlacement != null) 'lessonPlacement': lessonPlacement,
+      if (lessonTitle != null) 'lessonTitle': lessonTitle,
+      if (visibleToCourseQa != null) 'visibleToCourseQa': visibleToCourseQa,
     };
   }
 }
@@ -88,6 +124,11 @@ class CourseResourceModel {
     required this.ingestStatus,
     required this.validationStatus,
     required this.processingStatus,
+    this.scopeType = 'course',
+    this.lessonId,
+    this.usageRole = 'course_material',
+    this.visibleToCourseQa = true,
+    this.durationSec,
   });
 
   final int resourceId;
@@ -97,6 +138,11 @@ class CourseResourceModel {
   final String ingestStatus;
   final String validationStatus;
   final String processingStatus;
+  final String scopeType;
+  final String? lessonId;
+  final String usageRole;
+  final bool visibleToCourseQa;
+  final int? durationSec;
 
   factory CourseResourceModel.fromJson(Map<String, dynamic> json) {
     return CourseResourceModel(
@@ -107,6 +153,11 @@ class CourseResourceModel {
       ingestStatus: json['ingestStatus'] as String,
       validationStatus: json['validationStatus'] as String,
       processingStatus: json['processingStatus'] as String,
+      scopeType: json['scopeType'] as String? ?? 'course',
+      lessonId: json['lessonId']?.toString(),
+      usageRole: json['usageRole'] as String? ?? 'course_material',
+      visibleToCourseQa: json['visibleToCourseQa'] as bool? ?? true,
+      durationSec: json['durationSec'] as int?,
     );
   }
 }

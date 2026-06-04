@@ -167,6 +167,7 @@ def _complete_payload(
         mime_type="application/pdf",
         size_bytes=size_bytes,
         checksum=checksum,
+        scope_type="course",
     )
 
 
@@ -389,6 +390,7 @@ def test_upload_init_uses_storage_presigned_url_and_course_scoped_key():
             mime_type="application/pdf",
             size_bytes=1024,
             checksum="sha256:abc123",
+            scope_type="course",
         ),
     )
 
@@ -398,6 +400,7 @@ def test_upload_init_uses_storage_presigned_url_and_course_scoped_key():
     assert result["objectKey"] == f"raw/1/{course_id}/temp/pdf/chapter_1.pdf"
     expected_headers = {
         "x-amz-meta-course-id": str(course_id),
+        "x-amz-meta-scope-type": "course",
         "x-amz-meta-checksum": "sha256:abc123",
         "x-amz-meta-sha256": "abc123",
     }
@@ -427,6 +430,7 @@ def test_upload_complete_only_stats_object_and_creates_resource():
             mime_type="application/pdf",
             size_bytes=1024,
             checksum="sha256:fast-return",
+            scope_type="course",
         ),
         idempotency_key="fast-return-upload",
     )
@@ -544,6 +548,7 @@ def test_upload_init_fails_when_storage_is_not_configured():
                 mime_type="application/pdf",
                 size_bytes=1024,
                 checksum="sha256:abc123",
+                scope_type="course",
             ),
         )
 

@@ -34,16 +34,17 @@
 
 ## 3. 前端快速说明
 
-- 登录页调用 `POST /api/v1/bilibili/auth/qr/sessions` 获取 `qrCodeUrl`，轮询 `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`。
-- 导入前调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview` 展示 `parts`。
+- 登录页调用 `POST /api/v1/bilibili/auth/qr/sessions` 获取 `qrCodeUrl`，前端必须把它作为二维码内容本地编码渲染，不得作为图片/iframe/跳转 URL 直接请求；随后轮询 `GET /api/v1/bilibili/auth/qr/sessions/{sessionId}`。
+- 导入前调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview` 展示 `parts`；公共可访问视频不要求先扫码登录。
 - 创建任务调用 `POST /api/v1/courses/{courseId}/resources/imports/bilibili`，随后轮询 `GET /api/v1/bilibili-import-runs/{importRunId}/status`。
 - 取消按钮调用 `POST /api/v1/bilibili-import-runs/{importRunId}/cancel`，响应为 async-task 形态。
 - 前端只展示 `status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`，不得读取或保存 B站 cookie。
 
 ## 3.1 给朱春雯
 
-- 页面只需要展示 `qrCodeUrl`、`loginStatus`、`preview.parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`。
+- 页面只需要展示 `qrCodeUrl`、`loginStatus`、`preview.parts`、`status`、`progressPct`、`stage`、`failureReason`、`nextAction` 和 `resourceIds`；`qrCodeUrl` 是二维码内容，不是图片地址。
 - 前端不读取、不缓存、不打印 cookie；登录态只通过 `GET /api/v1/bilibili/auth/session` 展示。
+- `GET /api/v1/bilibili/auth/session` 未登录返回 `loginStatus=inactive`，过期返回 `loginStatus=expired`，不作为预览和导入按钮的硬前置。
 - 扫码、资源预览、导入进度、失败提示和取消入口按 contract 字段渲染即可。
 - Android 真机录屏、页面截图、扫码页和进度页交互由朱春雯补充验收证据。
 - 推荐页可读取 `reasonMaterials` 和 `nextAction.type=confirm_course`；课程详情调用 `GET /api/v1/courses/{courseId}`，当前课程调用 `GET /api/v1/courses/current`，切换课程调用 `POST /api/v1/courses/{courseId}/switch-current`。
@@ -163,3 +164,10 @@ KNOWLINK_ENABLE_VIVO_VISION=false KNOWLINK_ENABLE_VIVO_ASR=false KNOWLINK_ENABLE
 - 下载与 ffmpeg 合并链路需要严格响应取消，避免临时文件和半成品对象残留。
 - `bilibili_import_run` 与 `async_tasks` 状态需要保持一致，否则前端进度和后端恢复会分叉。
 - Android 端播放稳定性依赖编码选择，默认优先 H.264/AVC 和 AAC。
+
+## 12. 2026-05-28 平板端联调记录
+
+- 平板端联调基本通过；当前已验证的核心功能入口、网络访问、资源上传和阶段一主流程未发现功能性阻塞。
+- 平板 USB 联调需要同时映射 FastAPI 与 MinIO：`adb reverse tcp:8000 tcp:8000`、`adb reverse tcp:9000 tcp:9000`。只映射 `8000` 时，上传初始化可以成功，但文件 PUT 到 `127.0.0.1:9000` 的 MinIO 预签名 URL 会失败。
+- 讲义页平板端布局问题已修复：平板横屏可用宽度保持左 / 中 / 右三栏结构，手机和窄屏仍使用上下结构。回归测试已覆盖 tablet landscape 三栏和 narrow stacked 两种场景。
+- 讲义页平板端视频加载失败已定位为 Android 原生播放器拦截本地 HTTP 预签名地址；已在 Android manifest 允许本地 cleartext 播放地址，并用 manifest 回归测试覆盖。

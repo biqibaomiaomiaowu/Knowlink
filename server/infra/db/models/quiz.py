@@ -16,7 +16,12 @@ class Quiz(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
-    handout_version_id: Mapped[int] = mapped_column(ForeignKey("handout_versions.id"), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(30), default="course", nullable=False)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
+    start_lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
+    end_lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
+    quiz_mode: Mapped[str] = mapped_column(String(80), default="objective", nullable=False)
+    handout_version_id: Mapped[int | None] = mapped_column(ForeignKey("handout_versions.id"), nullable=True)
     source_parse_run_id: Mapped[int | None] = mapped_column(ForeignKey("parse_runs.id"), nullable=True)
 
     quiz_type: Mapped[str] = mapped_column(String(50), nullable=False)

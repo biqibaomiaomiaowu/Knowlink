@@ -333,6 +333,12 @@ EXPECTED_RUNTIME_TABLE_COLUMNS = {
         "content_text",
         "metadata_json",
         "embedding",
+        "embedding_vector",
+        "embedding_model",
+        "embedding_dim",
+        "embedding_status",
+        "embedding_error",
+        "search_text",
     },
 }
 

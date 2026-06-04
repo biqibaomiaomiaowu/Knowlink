@@ -26,9 +26,11 @@ class BilibiliService:
         async_tasks: Any,
         task_dispatcher: Any,
         bili_client: Any,
+        lessons: Any | None = None,
     ) -> None:
         self.courses = courses
         self.bilibili = bilibili
+        self.lessons = lessons or getattr(bilibili, "store", bilibili)
         self.async_tasks = async_tasks
         self.task_dispatcher = task_dispatcher
         self.bili_client = bili_client
@@ -40,9 +42,9 @@ class BilibiliService:
         source_url: str,
     ) -> dict[str, object]:
         self._ensure_course(course_id)
-        auth = self._require_auth_session()
+        cookies = self._optional_auth_cookies()
         preview = self._normalize_preview(
-            self.bili_client.preview(source_url, self._cookies_from_auth(auth))
+            self.bili_client.preview(source_url, cookies)
         )
         preview_id = str(preview["previewId"])
         _call_with_supported_kwargs(
@@ -65,10 +67,23 @@ class BilibiliService:
         selection_mode: str | None,
         selected_part_ids: list[str],
         quality_preference: str | None,
-        idempotency_key: str | None,
+        lesson_mode: str | None = "auto_per_video",
+        target_lesson_id: int | None = None,
+        part_lesson_titles: dict[str, str] | None = None,
+        part_lesson_map: dict[str, dict[str, Any]] | None = None,
+        create_lesson_if_missing: bool = True,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         self._ensure_course(course_id)
-        self._require_auth_session()
+        normalized_lesson_mode = lesson_mode or "auto_per_video"
+        normalized_part_lesson_titles = dict(part_lesson_titles or {})
+        normalized_part_lesson_map = self._normalize_part_lesson_map(part_lesson_map or {})
+        self._validate_lesson_placement(
+            course_id=course_id,
+            lesson_mode=normalized_lesson_mode,
+            target_lesson_id=target_lesson_id,
+        )
+        self._validate_part_lesson_map(course_id=course_id, part_lesson_map=normalized_part_lesson_map)
         action = (
             f"bilibili.import_create:user:{self._user_id()}:"
             f"/api/v1/courses/{course_id}/resources/imports/bilibili"
@@ -79,6 +94,11 @@ class BilibiliService:
             selection_mode=selection_mode,
             selected_part_ids=selected_part_ids,
             quality_preference=quality_preference,
+            lesson_mode=normalized_lesson_mode,
+            target_lesson_id=target_lesson_id,
+            part_lesson_titles=normalized_part_lesson_titles,
+            part_lesson_map=normalized_part_lesson_map,
+            create_lesson_if_missing=create_lesson_if_missing,
         )
         existing = self._get_idempotency_result(action=action, key=idempotency_key)
         if existing is not None:
@@ -91,6 +111,11 @@ class BilibiliService:
                 selection_mode=selection_mode,
                 selected_part_ids=selected_part_ids,
                 quality_preference=quality_preference,
+                lesson_mode=normalized_lesson_mode,
+                target_lesson_id=target_lesson_id,
+                part_lesson_titles=normalized_part_lesson_titles,
+                part_lesson_map=normalized_part_lesson_map,
+                create_lesson_if_missing=create_lesson_if_missing,
             ):
                 raise ServiceError(
                     message="Idempotency key was reused with a different Bilibili import request body.",
@@ -123,6 +148,11 @@ class BilibiliService:
                 selection_mode=str(normalized_selection_mode),
                 selected_part_ids=selected_part_ids,
                 quality_preference=str(normalized_quality_preference),
+                lesson_mode=normalized_lesson_mode,
+                target_lesson_id=target_lesson_id,
+                part_lesson_titles=normalized_part_lesson_titles,
+                part_lesson_map=normalized_part_lesson_map,
+                create_lesson_if_missing=create_lesson_if_missing,
                 request_fingerprint=request_fingerprint,
             ),
         )
@@ -200,11 +230,25 @@ class BilibiliService:
         return self._qr_response(existing)
 
     def get_auth_session(self) -> dict[str, object]:
-        auth = self._require_auth_session()
+        auth = self.bilibili.get_bilibili_auth_session()
+        if not isinstance(auth, dict):
+            return {
+                "loginStatus": "inactive",
+                "userNickname": None,
+                "expiresAt": None,
+            }
+        expires_at = auth.get("expiresAt") or auth.get("expires_at")
+        user_nickname = auth.get("userNickname") or auth.get("user_nickname")
+        if not self._auth_is_active(auth) or self._is_expired(expires_at):
+            return {
+                "loginStatus": "expired",
+                "userNickname": user_nickname,
+                "expiresAt": expires_at,
+            }
         return {
             "loginStatus": "active",
-            "userNickname": auth.get("userNickname") or auth.get("user_nickname"),
-            "expiresAt": auth.get("expiresAt") or auth.get("expires_at"),
+            "userNickname": user_nickname,
+            "expiresAt": expires_at,
         }
 
     def delete_auth_session(self) -> dict[str, object]:
@@ -220,12 +264,22 @@ class BilibiliService:
         selection_mode: str,
         selected_part_ids: list[str],
         quality_preference: str,
+        lesson_mode: str,
+        target_lesson_id: int | None,
+        part_lesson_titles: dict[str, str],
+        part_lesson_map: dict[str, dict[str, Any]],
+        create_lesson_if_missing: bool,
         request_fingerprint: str,
     ) -> dict[str, object]:
         selection = {
             "selectionMode": selection_mode,
             "selectedPartIds": list(selected_part_ids),
             "qualityPreference": quality_preference,
+            "lessonMode": lesson_mode,
+            "targetLessonId": target_lesson_id,
+            "partLessonTitles": dict(part_lesson_titles),
+            "createLessonIfMissing": create_lesson_if_missing,
+            "partLessonMap": {str(key): dict(value) for key, value in part_lesson_map.items()},
             "previewId": preview["previewId"],
             "requestFingerprint": request_fingerprint,
         }
@@ -243,6 +297,9 @@ class BilibiliService:
             "importRunId": import_run_id,
             "sourceUrl": source_url,
             "qualityPreference": quality_preference,
+            "lessonMode": lesson_mode,
+            "targetLessonId": target_lesson_id,
+            "partLessonMap": {str(key): dict(value) for key, value in part_lesson_map.items()},
         }
         task = _call_with_supported_kwargs(
             self.async_tasks.create_async_task,
@@ -308,21 +365,14 @@ class BilibiliService:
             )
         return course
 
-    def _require_auth_session(self) -> dict[str, Any]:
+    def _optional_auth_cookies(self) -> dict[str, Any]:
         auth = self.bilibili.get_bilibili_auth_session()
-        if auth is None:
-            raise ServiceError(
-                message="Bilibili auth session is required.",
-                error_code="bilibili.auth_required",
-                status_code=401,
-            )
-        if not self._auth_is_active(auth) or self._is_expired(auth.get("expiresAt") or auth.get("expires_at")):
-            raise ServiceError(
-                message="Bilibili auth session is expired.",
-                error_code="bilibili.auth_expired",
-                status_code=401,
-            )
-        return auth
+        if not isinstance(auth, dict):
+            return {}
+        expires_at = auth.get("expiresAt") or auth.get("expires_at")
+        if not self._auth_is_active(auth) or self._is_expired(expires_at):
+            return {}
+        return self._cookies_from_auth(auth)
 
     def _get_preview_entry(
         self,
@@ -372,6 +422,11 @@ class BilibiliService:
         selection_mode: str | None,
         selected_part_ids: list[str],
         quality_preference: str | None,
+        lesson_mode: str | None,
+        target_lesson_id: int | None,
+        part_lesson_titles: dict[str, str],
+        part_lesson_map: dict[str, dict[str, Any]],
+        create_lesson_if_missing: bool,
     ) -> bool:
         if not isinstance(result, dict):
             return False
@@ -391,6 +446,7 @@ class BilibiliService:
             return run.get("courseId") == course_id and selection["requestFingerprint"] == request_fingerprint
         requested_selection_mode = selection_mode or str(selection.get("selectionMode") or "current_part")
         requested_quality_preference = quality_preference or str(selection.get("qualityPreference") or "android_safe")
+        requested_lesson_mode = lesson_mode or str(selection.get("lessonMode") or "auto_per_video")
         return (
             run.get("courseId") == course_id
             and run.get("sourceUrl") == source_url
@@ -398,6 +454,11 @@ class BilibiliService:
             and selection.get("selectionMode") == requested_selection_mode
             and list(selection.get("selectedPartIds") or []) == list(selected_part_ids)
             and selection.get("qualityPreference") == requested_quality_preference
+            and selection.get("lessonMode") == requested_lesson_mode
+            and selection.get("targetLessonId") == target_lesson_id
+            and dict(selection.get("partLessonTitles") or {}) == dict(part_lesson_titles)
+            and dict(selection.get("partLessonMap") or {}) == dict(part_lesson_map)
+            and bool(selection.get("createLessonIfMissing", True)) == bool(create_lesson_if_missing)
         )
 
     @staticmethod
@@ -408,6 +469,11 @@ class BilibiliService:
         selection_mode: str | None,
         selected_part_ids: list[str],
         quality_preference: str | None,
+        lesson_mode: str | None,
+        target_lesson_id: int | None,
+        part_lesson_titles: dict[str, str],
+        part_lesson_map: dict[str, dict[str, Any]],
+        create_lesson_if_missing: bool,
     ) -> str:
         payload = {
             "previewId": preview_id,
@@ -415,9 +481,89 @@ class BilibiliService:
             "selectionMode": selection_mode,
             "selectedPartIds": list(selected_part_ids),
             "qualityPreference": quality_preference,
+            "lessonMode": lesson_mode,
+            "targetLessonId": target_lesson_id,
+            "partLessonTitles": dict(part_lesson_titles),
+            "partLessonMap": {str(key): dict(value) for key, value in part_lesson_map.items()},
+            "createLessonIfMissing": create_lesson_if_missing,
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _validate_lesson_placement(
+        self,
+        *,
+        course_id: int,
+        lesson_mode: str,
+        target_lesson_id: int | None,
+    ) -> None:
+        if lesson_mode != "bind_existing":
+            return
+        get_lesson = getattr(self.lessons, "get_lesson", None)
+        lesson = (
+            get_lesson(course_id=course_id, lesson_id=int(target_lesson_id))
+            if callable(get_lesson) and target_lesson_id is not None
+            else None
+        )
+        if lesson is None:
+            raise ServiceError(
+                message="Bilibili import target lesson does not belong to this course.",
+                error_code="resource.lesson_mismatch",
+                status_code=400,
+            )
+
+    @staticmethod
+    def _normalize_part_lesson_map(part_lesson_map: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        normalized: dict[str, dict[str, Any]] = {}
+        allowed_fields = {"lessonId", "sourcePartId"}
+        for raw_part_id, raw_mapping in part_lesson_map.items():
+            part_id = str(raw_part_id).strip()
+            if not part_id or not isinstance(raw_mapping, dict):
+                continue
+            fields = {str(field).strip() for field in raw_mapping if str(field).strip()}
+            unexpected = fields - allowed_fields
+            if unexpected:
+                raise ServiceError(
+                    message="Bilibili import part lesson mapping contains unsupported fields.",
+                    error_code="bilibili.selection_invalid",
+                    status_code=422,
+                )
+            mapping = {
+                field: raw_mapping[field]
+                for field in allowed_fields
+                if field in raw_mapping and raw_mapping[field] not in (None, "", [])
+            }
+            if mapping:
+                normalized[part_id] = mapping
+        return normalized
+
+    def _validate_part_lesson_map(
+        self,
+        *,
+        course_id: int,
+        part_lesson_map: dict[str, dict[str, Any]],
+    ) -> None:
+        get_lesson = getattr(self.lessons, "get_lesson", None)
+        if not callable(get_lesson):
+            return
+        for mapping in part_lesson_map.values():
+            lesson_id = mapping.get("lessonId")
+            if lesson_id is None:
+                continue
+            try:
+                normalized_lesson_id = int(lesson_id)
+            except (TypeError, ValueError):
+                raise ServiceError(
+                    message="Bilibili import part lesson mapping is invalid.",
+                    error_code="resource.lesson_mismatch",
+                    status_code=400,
+                ) from None
+            if get_lesson(course_id=course_id, lesson_id=normalized_lesson_id) is None:
+                raise ServiceError(
+                    message="Bilibili import part lesson mapping points to another course.",
+                    error_code="resource.lesson_mismatch",
+                    status_code=400,
+                )
 
     @staticmethod
     def _raise_preview_not_found() -> None:
@@ -467,6 +613,10 @@ class BilibiliService:
             "stage": run["stage"],
             "taskId": run.get("taskId"),
             "resourceIds": run.get("resourceIds") or [],
+            "lessonMode": selection.get("lessonMode") if isinstance(selection := run.get("selection"), dict) else None,
+            "targetLessonId": selection.get("targetLessonId") if isinstance(selection, dict) else None,
+            "partLessonMap": selection.get("partLessonMap") if isinstance(selection, dict) else {},
+            "items": list(run.get("items") or []),
             "preview": run.get("preview"),
             "nextAction": _next_action(str(run["status"])),
             "errorCode": run.get("errorCode"),

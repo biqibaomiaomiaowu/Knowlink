@@ -151,6 +151,7 @@ def upload_ready_resource(
             headers=AUTH_HEADERS | {"idempotency-key": idempotency_key},
             json_body={
                 "resourceType": resource_type,
+                "scopeType": "course",
                 "objectKey": f"raw/1/{course_id}/{suffix}.{resource_type}",
                 "originalName": f"{suffix}.{resource_type}",
                 "mimeType": mime_type,
@@ -521,6 +522,7 @@ def test_upload_complete_is_idempotent():
     headers = AUTH_HEADERS | {"idempotency-key": "upload-complete-1"}
     payload = {
         "resourceType": "pdf",
+        "scopeType": "course",
         "objectKey": f"raw/1/{course_id}/upload-complete.pdf",
         "originalName": "upload-complete.pdf",
         "mimeType": "application/pdf",
@@ -545,6 +547,7 @@ def test_upload_complete_rejects_same_idempotency_key_with_different_body():
     headers = AUTH_HEADERS | {"idempotency-key": "upload-complete-body-mismatch"}
     first_payload = {
         "resourceType": "pdf",
+        "scopeType": "course",
         "objectKey": f"raw/1/{course_id}/upload-mismatch-a.pdf",
         "originalName": "upload-mismatch-a.pdf",
         "mimeType": "application/pdf",
@@ -728,7 +731,7 @@ def test_inquiry_answers_reject_raw_non_int_numbers_with_service_error(raw_value
     )
 
     assert status == 422
-    assert body["errorCode"] == "inquiry.answers_invalid"
+    assert body["errorCode"] == "common.validation_error"
 
 
 @pytest.mark.parametrize(
@@ -767,7 +770,7 @@ def test_inquiry_answers_reject_raw_non_string_single_select_values(raw_value, s
     )
 
     assert status == 422
-    assert body["errorCode"] == "inquiry.answers_invalid"
+    assert body["errorCode"] == "common.validation_error"
 
 
 def test_handout_generate_is_idempotent():
@@ -1021,6 +1024,21 @@ def test_bilibili_preview_and_import_routes_return_v2_contract():
                 headers=AUTH_HEADERS | {"idempotency-key": "api-bili-cancel-1"},
             )
         )
+        invalid_mapping_status, invalid_mapping_body = asyncio.run(
+            request(
+                "POST",
+                f"/api/v1/courses/{course['courseId']}/resources/imports/bilibili",
+                headers=AUTH_HEADERS | {"idempotency-key": "api-bili-invalid-part-map"},
+                json_body={
+                    "previewId": preview["previewId"],
+                    "sourceUrl": preview["sourceUrl"],
+                    "selectionMode": "selected_parts",
+                    "selectedPartIds": ["p1"],
+                    "qualityPreference": "android_safe",
+                    "partLessonMap": {"p1": {"resourceId": 501, "sourcePartId": "p1"}},
+                },
+            )
+        )
     finally:
         app.dependency_overrides.pop(get_bilibili_service, None)
 
@@ -1036,6 +1054,8 @@ def test_bilibili_preview_and_import_routes_return_v2_contract():
         "nextAction": "none",
         "entity": create_body["data"]["entity"],
     }
+    assert invalid_mapping_status == 422
+    assert invalid_mapping_body["errorCode"] == "bilibili.selection_invalid"
     assert dispatcher.enqueued[0]["payload"]["courseId"] == course["courseId"]
 
 

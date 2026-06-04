@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_error_view.dart';
@@ -114,6 +115,28 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
             state: state,
             onPickFiles: notifier.pickFiles,
             onRemoveFile: notifier.removeQueuedFile,
+            onUpdateFileScope: ({
+              required itemId,
+              scopeType,
+              lessonId,
+              clearLessonId = false,
+              usageRole,
+              lessonPlacement,
+              clearLessonPlacement = false,
+              lessonTitle,
+              clearLessonTitle = false,
+            }) =>
+                notifier.updateQueuedFileScope(
+              itemId: itemId,
+              scopeType: scopeType,
+              lessonId: lessonId,
+              clearLessonId: clearLessonId,
+              usageRole: usageRole,
+              lessonPlacement: lessonPlacement,
+              clearLessonPlacement: clearLessonPlacement,
+              lessonTitle: lessonTitle,
+              clearLessonTitle: clearLessonTitle,
+            ),
             onUpload: effectiveCourseId == null
                 ? null
                 : () => notifier.uploadPendingFiles(effectiveCourseId),
@@ -141,10 +164,50 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
               partId,
               selected: selected,
             ),
+            onSelectAllParts: bilibiliNotifier.selectAllParts,
+            onClearSelectedParts: bilibiliNotifier.clearSelectedParts,
             onCreateImport: effectiveCourseId == null
                 ? null
                 : () => _runBilibiliAction(() async {
                       await bilibiliNotifier.createImport(effectiveCourseId);
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
+                      final run = ref
+                          .read(bilibiliImportProvider)
+                          .currentRun
+                          .valueOrNull;
+                      if (run != null && !run.isTerminal) {
+                        await bilibiliNotifier.pollCurrentRunUntilTerminal(
+                          run.importRunId,
+                        );
+                      }
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
+                      await _refreshResourcesIfBilibiliImported(
+                        effectiveCourseId,
+                      );
+                    }),
+            onRetry: effectiveCourseId == null
+                ? null
+                : () => _runBilibiliAction(() async {
+                      await bilibiliNotifier.retryCurrentRun();
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
+                      final run = ref
+                          .read(bilibiliImportProvider)
+                          .currentRun
+                          .valueOrNull;
+                      if (run != null && !run.isTerminal) {
+                        await bilibiliNotifier.pollCurrentRunUntilTerminal(
+                          run.importRunId,
+                        );
+                      }
+                      if (!_isActiveCourse(effectiveCourseId)) {
+                        return;
+                      }
                       await _refreshResourcesIfBilibiliImported(
                         effectiveCourseId,
                       );
@@ -246,6 +309,9 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
       return;
     }
     _lastResourceCourseId = courseId;
+    ref
+        .read(bilibiliImportProvider.notifier)
+        .activateCourse(courseId, clearState: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -269,13 +335,27 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
   }
 
   Future<void> _refreshResourcesIfBilibiliImported(String? courseId) async {
-    if (courseId == null) {
+    if (courseId == null || !_isActiveCourse(courseId)) {
       return;
     }
     final currentRun = ref.read(bilibiliImportProvider).currentRun.valueOrNull;
     if (currentRun?.isImported == true) {
       await ref.read(courseImportProvider.notifier).fetchResources(courseId);
     }
+  }
+
+  bool _isActiveCourse(String? courseId) {
+    if (!mounted || courseId == null) {
+      return false;
+    }
+    final activeCourseId = widget.courseId ??
+        ref
+            .read(courseImportProvider)
+            .createdCourse
+            .valueOrNull
+            ?.courseId
+            .toString();
+    return activeCourseId == courseId;
   }
 }
 
@@ -443,6 +523,7 @@ class _UploadSection extends StatelessWidget {
     required this.state,
     required this.onPickFiles,
     required this.onRemoveFile,
+    required this.onUpdateFileScope,
     required this.onUpload,
     required this.onDeleteResource,
     required this.onRefresh,
@@ -452,6 +533,17 @@ class _UploadSection extends StatelessWidget {
   final CourseImportState state;
   final VoidCallback onPickFiles;
   final ValueChanged<String> onRemoveFile;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateFileScope;
   final VoidCallback? onUpload;
   final ValueChanged<int>? onDeleteResource;
   final VoidCallback? onRefresh;
@@ -460,7 +552,7 @@ class _UploadSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final resources = state.resources.valueOrNull ?? const [];
     final hasUploadableFiles = state.uploadQueue.any(
-      (item) => item.isPending || item.hasFailed,
+      (item) => (item.isPending || item.hasFailed) && item.hasRequiredScope,
     );
     final visibleItems = [
       ...state.uploadQueue.map(_UploadDisplayItem.fromQueue),
@@ -514,6 +606,15 @@ class _UploadSection extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            const Text(
+              '文档上传需选择整门课程或指定课时；视频上传需选择自动创建课时或绑定已有课时。',
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -539,6 +640,7 @@ class _UploadSection extends StatelessWidget {
               ...state.uploadQueue.map(
                 (item) => _UploadQueueTile(
                   item: item,
+                  onUpdateScope: onUpdateFileScope,
                   onRemove:
                       item.isUploading ? null : () => onRemoveFile(item.id),
                 ),
@@ -636,7 +738,10 @@ class _BilibiliImportSection extends StatelessWidget {
     required this.onUrlChanged,
     required this.onPreview,
     required this.onTogglePart,
+    required this.onSelectAllParts,
+    required this.onClearSelectedParts,
     required this.onCreateImport,
+    required this.onRetry,
     required this.onCancel,
     required this.onRefreshStatus,
     required this.onRefreshAuth,
@@ -650,7 +755,10 @@ class _BilibiliImportSection extends StatelessWidget {
   final ValueChanged<String> onUrlChanged;
   final VoidCallback? onPreview;
   final void Function(String partId, bool selected) onTogglePart;
+  final VoidCallback onSelectAllParts;
+  final VoidCallback onClearSelectedParts;
   final VoidCallback? onCreateImport;
+  final VoidCallback? onRetry;
   final VoidCallback onCancel;
   final VoidCallback onRefreshStatus;
   final VoidCallback onRefreshAuth;
@@ -711,7 +819,7 @@ class _BilibiliImportSection extends StatelessWidget {
             Text(
               courseId == null
                   ? '请先创建课程或从推荐页进入已有课程。'
-                  : '粘贴 B站视频或合集链接后预览可导入分 P。',
+                  : '粘贴 B站单视频、多 P、合集或番剧链接后预览可导入条目。',
               style: const TextStyle(
                 color: AppTheme.muted,
                 fontWeight: FontWeight.w600,
@@ -769,6 +877,8 @@ class _BilibiliImportSection extends StatelessWidget {
                 preview: state.preview.valueOrNull!,
                 selectedPartIds: state.selectedPartIds,
                 onTogglePart: onTogglePart,
+                onSelectAllParts: onSelectAllParts,
+                onClearSelectedParts: onClearSelectedParts,
               ),
             ],
             const SizedBox(height: 16),
@@ -776,6 +886,7 @@ class _BilibiliImportSection extends StatelessWidget {
               currentTask: state.currentTask,
               currentRun: state.currentRun,
               onRefreshStatus: onRefreshStatus,
+              onRetry: onRetry,
             ),
           ],
         ),
@@ -804,20 +915,25 @@ class _BilibiliAuthStatus extends StatelessWidget {
     if (authSession.isLoading) {
       return const AppLoadingView(label: '正在读取B站登录状态');
     }
-    if (authSession.hasError) {
-      return AppErrorView(
-        message: 'B站登录状态暂不可用：${authSession.error}',
-        onRetry: onRefreshAuth,
-      );
-    }
-
+    final authError = authSession.hasError ? authSession.error : null;
     final session = authSession.valueOrNull;
     final isActive = session?.isActive == true;
-    final label = isActive ? '已登录：${session?.userNickname ?? 'B站账号'}' : '未登录B站';
+    final label = authError != null
+        ? 'B站登录状态暂不可用'
+        : isActive
+            ? '已登录：${session?.userNickname ?? 'B站账号'}'
+            : '未登录B站';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (authError != null) ...[
+          AppErrorView(
+            message: 'B站登录状态暂不可用：$authError',
+            onRetry: onRefreshAuth,
+          ),
+          const SizedBox(height: 10),
+        ],
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -826,9 +942,11 @@ class _BilibiliAuthStatus extends StatelessWidget {
             StatusPill(
               label: label,
               color: isActive ? const Color(0xFF16A34A) : AppTheme.muted,
-              icon: isActive
-                  ? Icons.check_circle_outline
-                  : Icons.account_circle_outlined,
+              icon: authError != null
+                  ? Icons.error_outline
+                  : isActive
+                      ? Icons.check_circle_outline
+                      : Icons.account_circle_outlined,
             ),
             OutlinedButton.icon(
               onPressed: onCreateQrSession,
@@ -891,22 +1009,20 @@ class _BilibiliQrSessionView extends StatelessWidget {
             ),
           )
         else ...[
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              qrCodeUrl,
-              width: 132,
-              height: 132,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return Text(
-                  '二维码链接：$qrCodeUrl',
-                  style: const TextStyle(
-                    color: AppTheme.brandBlue,
-                    fontWeight: FontWeight.w700,
-                  ),
-                );
-              },
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.line),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: QrImageView(
+                data: qrCodeUrl,
+                version: QrVersions.auto,
+                size: 132,
+                backgroundColor: Colors.white,
+              ),
             ),
           ),
         ],
@@ -926,14 +1042,25 @@ class _BilibiliPreviewCard extends StatelessWidget {
     required this.preview,
     required this.selectedPartIds,
     required this.onTogglePart,
+    required this.onSelectAllParts,
+    required this.onClearSelectedParts,
   });
 
   final BilibiliPreviewModel preview;
   final Set<String> selectedPartIds;
   final void Function(String partId, bool selected) onTogglePart;
+  final VoidCallback onSelectAllParts;
+  final VoidCallback onClearSelectedParts;
 
   @override
   Widget build(BuildContext context) {
+    final allPartIds = preview.parts.map((part) => part.partId).toSet();
+    final selectedCount =
+        allPartIds.where((partId) => selectedPartIds.contains(partId)).length;
+    final hasParts = allPartIds.isNotEmpty;
+    final isAllSelected = hasParts && selectedCount == allPartIds.length;
+    final isNoneSelected = selectedCount == 0;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -950,11 +1077,34 @@ class _BilibiliPreviewCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '${preview.totalParts} 个分 P · ${preview.sourceType}',
+              '${preview.sourceTypeLabel} · ${preview.totalParts} 个条目 · '
+              '默认${preview.defaultSelectionModeLabel}',
               style: const TextStyle(
                 color: AppTheme.muted,
                 fontWeight: FontWeight.w600,
               ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                StatusPill(
+                  label: '已选 $selectedCount/${preview.totalParts}',
+                  icon: Icons.check_circle_outline,
+                ),
+                OutlinedButton.icon(
+                  onPressed: isAllSelected ? null : onSelectAllParts,
+                  icon: const Icon(Icons.select_all),
+                  label: const Text('全选'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: isNoneSelected ? null : onClearSelectedParts,
+                  icon: const Icon(Icons.deselect),
+                  label: const Text('取消全选'),
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             ...preview.parts.map(
@@ -982,11 +1132,13 @@ class _BilibiliRunStatusCard extends StatelessWidget {
     required this.currentTask,
     required this.currentRun,
     required this.onRefreshStatus,
+    required this.onRetry,
   });
 
   final AsyncValue<BilibiliImportTaskModel?> currentTask;
   final AsyncValue<BilibiliImportRunModel?> currentRun;
   final VoidCallback onRefreshStatus;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -1031,14 +1183,8 @@ class _BilibiliRunStatusCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (task != null) StatusPill(label: task.status),
-                if (run != null) StatusPill(label: run.status),
-                if (run?.recoverable == true)
-                  const StatusPill(
-                    label: '可重试',
-                    color: Color(0xFFF97316),
-                    icon: Icons.refresh,
-                  ),
+                if (task != null) StatusPill(label: _taskStatusLabel(task)),
+                if (run != null) StatusPill(label: run.statusLabel),
               ],
             ),
             if (run?.previewTitle != null) ...[
@@ -1051,10 +1197,22 @@ class _BilibiliRunStatusCard extends StatelessWidget {
             if (run != null) ...[
               const SizedBox(height: 8),
               Text(
-                '${run.stage} · ${run.progressPct}%',
+                '${run.stageLabel} · ${run.progressPct}%',
                 style: const TextStyle(
                   color: AppTheme.muted,
                   fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ProgressRail(value: run.progressPct / 100),
+            ],
+            if (run?.resourceIdsLabel != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                run!.resourceIdsLabel!,
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -1068,10 +1226,44 @@ class _BilibiliRunStatusCard extends StatelessWidget {
                 ),
               ),
             ],
+            if (run?.canRetry == true) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重试导入'),
+                ),
+              ),
+            ],
+            if (run?.isImported == true) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: () =>
+                      context.go('/courses/${run!.courseId}/progress'),
+                  icon: const Icon(Icons.manage_search),
+                  label: const Text('进入解析'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  String _taskStatusLabel(BilibiliImportTaskModel task) {
+    return switch (task.status) {
+      'queued' => '已入队',
+      'running' => '处理中',
+      'succeeded' => '已完成',
+      'failed' => '失败',
+      'canceled' => '已取消',
+      _ => task.status,
+    };
   }
 }
 
@@ -1153,10 +1345,22 @@ class _UploadedResourceList extends StatelessWidget {
 class _UploadQueueTile extends StatelessWidget {
   const _UploadQueueTile({
     required this.item,
+    required this.onUpdateScope,
     required this.onRemove,
   });
 
   final UploadQueueItemModel item;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateScope;
   final VoidCallback? onRemove;
 
   @override
@@ -1168,26 +1372,225 @@ class _UploadQueueTile extends StatelessWidget {
       _ => '待上传',
     };
 
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        item.hasFailed
-            ? Icons.error_outline
-            : item.isReady
-                ? Icons.check_circle_outline
-                : Icons.insert_drive_file_outlined,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: AppTheme.line),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  item.hasFailed
+                      ? Icons.error_outline
+                      : item.isReady
+                          ? Icons.check_circle_outline
+                          : Icons.insert_drive_file_outlined,
+                ),
+                title: Text(item.name),
+                subtitle: Text(
+                  '${item.resourceType.name.toUpperCase()} · '
+                  '${item.sizeBytes} bytes · $statusLabel'
+                  '${item.errorMessage == null ? '' : '\n${item.errorMessage}'}',
+                ),
+                trailing: IconButton(
+                  tooltip: '移出队列',
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (item.isVideo)
+                _VideoPlacementControls(
+                  item: item,
+                  onUpdateScope: onUpdateScope,
+                )
+              else
+                _DocumentScopeControls(
+                  item: item,
+                  onUpdateScope: onUpdateScope,
+                ),
+              if (!item.hasRequiredScope) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  '请补全课时归属后再上传。',
+                  style: TextStyle(
+                    color: Color(0xFFDC2626),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      title: Text(item.name),
-      subtitle: Text(
-        '${item.resourceType.name.toUpperCase()} · '
-        '${item.sizeBytes} bytes · $statusLabel'
-        '${item.errorMessage == null ? '' : '\n${item.errorMessage}'}',
-      ),
-      trailing: IconButton(
-        tooltip: '移出队列',
-        onPressed: onRemove,
-        icon: const Icon(Icons.close),
-      ),
+    );
+  }
+}
+
+class _DocumentScopeControls extends StatelessWidget {
+  const _DocumentScopeControls({
+    required this.item,
+    required this.onUpdateScope,
+  });
+
+  final UploadQueueItemModel item;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateScope;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(
+          width: 190,
+          child: DropdownButtonFormField<String>(
+            initialValue: item.scopeType,
+            decoration: const InputDecoration(
+              labelText: '资料范围',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'course', child: Text('整门课程')),
+              DropdownMenuItem(value: 'lesson', child: Text('指定课时')),
+            ],
+            onChanged: item.isUploading
+                ? null
+                : (value) => onUpdateScope(
+                      itemId: item.id,
+                      scopeType: value,
+                      usageRole: value == 'lesson'
+                          ? 'lesson_material'
+                          : 'course_material',
+                      clearLessonId: value != 'lesson',
+                    ),
+          ),
+        ),
+        SizedBox(
+          width: 220,
+          child: TextFormField(
+            initialValue: item.lessonId,
+            enabled: !item.isUploading && item.scopeType == 'lesson',
+            decoration: const InputDecoration(
+              labelText: 'lessonId',
+              hintText: '如 l-2',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => onUpdateScope(
+              itemId: item.id,
+              lessonId: value.trim().isEmpty ? null : value.trim(),
+              clearLessonId: value.trim().isEmpty,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VideoPlacementControls extends StatelessWidget {
+  const _VideoPlacementControls({
+    required this.item,
+    required this.onUpdateScope,
+  });
+
+  final UploadQueueItemModel item;
+  final void Function({
+    required String itemId,
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement,
+    String? lessonTitle,
+    bool clearLessonTitle,
+  }) onUpdateScope;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(
+          width: 210,
+          child: DropdownButtonFormField<String>(
+            initialValue: item.lessonPlacement ?? 'auto_create',
+            decoration: const InputDecoration(
+              labelText: '视频课时放置',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'auto_create', child: Text('自动创建课时')),
+              DropdownMenuItem(value: 'bind_existing', child: Text('绑定已有课时')),
+            ],
+            onChanged: item.isUploading
+                ? null
+                : (value) => onUpdateScope(
+                      itemId: item.id,
+                      scopeType: 'lesson',
+                      usageRole: 'primary_video',
+                      lessonPlacement: value,
+                      clearLessonId: value != 'bind_existing',
+                    ),
+          ),
+        ),
+        SizedBox(
+          width: 220,
+          child: TextFormField(
+            initialValue: item.lessonId,
+            enabled:
+                !item.isUploading && item.lessonPlacement == 'bind_existing',
+            decoration: const InputDecoration(
+              labelText: '绑定 lessonId',
+              hintText: '如 l-2',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => onUpdateScope(
+              itemId: item.id,
+              lessonId: value.trim().isEmpty ? null : value.trim(),
+              clearLessonId: value.trim().isEmpty,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 240,
+          child: TextFormField(
+            initialValue: item.lessonTitle,
+            enabled: !item.isUploading &&
+                (item.lessonPlacement ?? 'auto_create') == 'auto_create',
+            decoration: const InputDecoration(
+              labelText: '新课时标题',
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (value) => onUpdateScope(
+              itemId: item.id,
+              lessonTitle: value.trim().isEmpty ? null : value.trim(),
+              clearLessonTitle: value.trim().isEmpty,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

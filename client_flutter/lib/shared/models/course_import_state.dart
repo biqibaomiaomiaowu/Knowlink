@@ -58,6 +58,12 @@ class UploadQueueItemModel {
     required this.sizeBytes,
     required this.checksum,
     required this.bytes,
+    this.scopeType = 'course',
+    this.lessonId,
+    this.usageRole = 'course_material',
+    this.lessonPlacement,
+    this.lessonTitle,
+    this.visibleToCourseQa = true,
     this.status = 'pending',
     this.errorMessage,
     this.resource,
@@ -70,16 +76,42 @@ class UploadQueueItemModel {
   final int sizeBytes;
   final String checksum;
   final Uint8List bytes;
+  final String scopeType;
+  final String? lessonId;
+  final String usageRole;
+  final String? lessonPlacement;
+  final String? lessonTitle;
+  final bool visibleToCourseQa;
   final String status;
   final String? errorMessage;
   final CourseResourceModel? resource;
 
+  bool get isVideo => resourceType == ResourceType.mp4;
   bool get isPending => status == 'pending';
   bool get isUploading => status == 'uploading';
   bool get isReady => status == 'ready';
   bool get hasFailed => status == 'failed';
+  bool get hasRequiredScope {
+    if (isVideo) {
+      return lessonPlacement == 'auto_create' ||
+          (lessonPlacement == 'bind_existing' &&
+              lessonId != null &&
+              lessonId!.isNotEmpty);
+    }
+    return scopeType == 'course' ||
+        (scopeType == 'lesson' && lessonId != null && lessonId!.isNotEmpty);
+  }
 
   UploadQueueItemModel copyWith({
+    String? scopeType,
+    String? lessonId,
+    bool clearLessonId = false,
+    String? usageRole,
+    String? lessonPlacement,
+    bool clearLessonPlacement = false,
+    String? lessonTitle,
+    bool clearLessonTitle = false,
+    bool? visibleToCourseQa,
     String? status,
     String? errorMessage,
     bool clearErrorMessage = false,
@@ -93,6 +125,13 @@ class UploadQueueItemModel {
       sizeBytes: sizeBytes,
       checksum: checksum,
       bytes: bytes,
+      scopeType: scopeType ?? this.scopeType,
+      lessonId: clearLessonId ? null : lessonId ?? this.lessonId,
+      usageRole: usageRole ?? this.usageRole,
+      lessonPlacement:
+          clearLessonPlacement ? null : lessonPlacement ?? this.lessonPlacement,
+      lessonTitle: clearLessonTitle ? null : lessonTitle ?? this.lessonTitle,
+      visibleToCourseQa: visibleToCourseQa ?? this.visibleToCourseQa,
       status: status ?? this.status,
       errorMessage:
           clearErrorMessage ? null : errorMessage ?? this.errorMessage,

@@ -31,6 +31,57 @@ class BilibiliQrSessionModel {
       }.contains(status);
 }
 
+String _sourceTypeLabel(String sourceType) {
+  return switch (sourceType) {
+    'single_video' => '单视频',
+    'multi_p' => '多 P 视频',
+    'collection' => '合集',
+    'bangumi' => '番剧',
+    _ => sourceType,
+  };
+}
+
+String _selectionModeLabel(String selectionMode) {
+  return switch (selectionMode) {
+    'current_part' => '当前条目',
+    'all_parts' => '全部条目',
+    'selected_parts' => '指定条目',
+    _ => selectionMode,
+  };
+}
+
+String _runStatusLabel(String status) {
+  return switch (status) {
+    'pending' => '等待处理',
+    'fetching_metadata' => '读取元数据',
+    'waiting_download' => '等待下载',
+    'downloading' => '下载中',
+    'merging' => '合并中',
+    'uploading' => '上传中',
+    'imported' => '已导入',
+    'failed' => '导入失败',
+    'recoverable' => '可重试',
+    'canceled' => '已取消',
+    _ => status,
+  };
+}
+
+String _stageLabel(String stage) {
+  return switch (stage) {
+    'queued' => '已入队',
+    'metadata' => '获取元数据',
+    'download' => '下载音视频',
+    'ffmpeg' => '合并音视频',
+    'object_storage' => '上传对象存储',
+    'resource_import' => '创建课程资源',
+    'done' => '已完成',
+    'error' => '失败',
+    'canceling' => '取消中',
+    'canceled' => '已取消',
+    _ => stage,
+  };
+}
+
 class BilibiliAuthSessionModel {
   const BilibiliAuthSessionModel({
     required this.loginStatus,
@@ -145,6 +196,11 @@ class BilibiliPreviewModel {
     }
     return [parts.first.partId];
   }
+
+  String get sourceTypeLabel => _sourceTypeLabel(sourceType);
+
+  String get defaultSelectionModeLabel =>
+      _selectionModeLabel(defaultSelectionMode);
 }
 
 class BilibiliImportCreateRequestModel {
@@ -339,6 +395,17 @@ class BilibiliImportRunModel {
   bool get isImported => status == 'imported';
 
   bool get isFailed => status == 'failed' || status == 'recoverable';
+
+  String get sourceTypeLabel => _sourceTypeLabel(sourceType);
+
+  String get statusLabel => _runStatusLabel(status);
+
+  String get stageLabel => _stageLabel(stage);
+
+  bool get canRetry => recoverable && nextAction == 'retry' && taskId != null;
+
+  String? get resourceIdsLabel =>
+      resourceIds.isEmpty ? null : '资源：${resourceIds.join('、')}';
 }
 
 class BilibiliImportRunListModel {

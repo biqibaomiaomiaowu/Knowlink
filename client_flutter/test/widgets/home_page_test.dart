@@ -33,6 +33,11 @@ void main() {
           path: '/courses/:courseId/handout',
           builder: (context, state) => const Text('handout-route'),
         ),
+        GoRoute(
+          path: '/courses/:courseId',
+          builder: (context, state) =>
+              Text('course-detail-${state.pathParameters['courseId']}'),
+        ),
       ],
     );
 
@@ -45,18 +50,57 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('KnowLink 固定联调课'), findsOneWidget);
+    expect(find.text('课程 202'), findsOneWidget);
     expect(find.textContaining('讲义块 4001'), findsOneWidget);
     expect(find.text('极限定义'), findsOneWidget);
     expect(find.text('95 分钟'), findsOneWidget);
     expect(find.text('该块是考试高频点'), findsWidgets);
 
-    await tester.tap(find.text('继续学习'));
+    await tester.tap(find.widgetWithText(OutlinedButton, '继续学习').first);
     await tester.pumpAndSettle();
 
     expect(find.text('handout-route'), findsOneWidget);
     expect(container.read(courseFlowProvider).courseId, '101');
     expect(container.read(activeBlockProvider), 4001);
     expect(container.read(playerStateProvider).positionSec, 180);
+  });
+
+  testWidgets('recent learning opens course detail from the course list',
+      (tester) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _HomePageFakeApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const HomePage(),
+        ),
+        GoRoute(
+          path: '/courses/:courseId',
+          builder: (context, state) =>
+              Text('course-detail-${state.pathParameters['courseId']}'),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '课程详情').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('course-detail-101'), findsOneWidget);
   });
 
   testWidgets('home resume clears stale state when progress has no target',
@@ -97,7 +141,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('继续学习'));
+    await tester.tap(find.widgetWithText(OutlinedButton, '继续学习').first);
     await tester.pumpAndSettle();
 
     expect(find.text('handout-route'), findsOneWidget);
@@ -125,7 +169,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('设为当前课程'));
+    await tester.tap(find.widgetWithText(OutlinedButton, '设为当前课程').first);
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.switchedCourseIds, ['101']);
@@ -155,19 +199,21 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('设为当前课程'));
+    await tester.tap(find.widgetWithText(OutlinedButton, '设为当前课程').first);
     await tester.pump();
 
-    final switchingButton = tester.widget<OutlinedButton>(find.widgetWithText(
-      OutlinedButton,
-      '正在切换',
-    ));
+    final switchingButton = tester.widget<OutlinedButton>(find
+        .widgetWithText(
+          OutlinedButton,
+          '正在切换',
+        )
+        .first);
     expect(switchingButton.onPressed, isNull);
 
     switchCompleter.complete(_course(101));
     await tester.pumpAndSettle();
 
-    expect(find.text('设为当前课程'), findsOneWidget);
+    expect(find.text('设为当前课程'), findsWidgets);
     expect(container.read(courseFlowProvider).courseId, '101');
   });
 
@@ -191,7 +237,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('设为当前课程'));
+    await tester.tap(find.widgetWithText(OutlinedButton, '设为当前课程').first);
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.switchedCourseIds, ['101']);
@@ -272,6 +318,16 @@ class _HomePageFakeApiClient extends ApiClient {
           'pipelineStatus': 'succeeded',
           'updatedAt': '2026-05-11T10:00:00+00:00',
         },
+        {
+          'courseId': 202,
+          'title': '课程 202',
+          'entryType': 'recommendation',
+          'catalogId': 'math-final-01',
+          'lifecycleStatus': 'learning_ready',
+          'pipelineStage': 'handout',
+          'pipelineStatus': 'succeeded',
+          'updatedAt': '2026-05-10T10:00:00+00:00',
+        },
       ],
       'topReviewTasks': [
         {
@@ -303,11 +359,12 @@ class _HomePageFakeApiClient extends ApiClient {
 
   @override
   Future<CourseProgressModel> fetchCourseProgress(String courseId) async {
+    final parsedCourseId = int.parse(courseId);
     return CourseProgressModel.fromJson({
-      'courseId': 101,
+      'courseId': parsedCourseId,
       'handoutVersionId': 3001,
-      'lastHandoutBlockId': progressBlockId,
-      'lastPositionSec': progressPositionSec,
+      'lastHandoutBlockId': parsedCourseId == 101 ? progressBlockId : null,
+      'lastPositionSec': parsedCourseId == 101 ? progressPositionSec : null,
       'lastActivityAt': '2026-05-11T10:00:00+00:00',
     });
   }

@@ -1,0 +1,56 @@
+# Local environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+.envrc
+local_assets/
+
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+*.egg-info/
+build/
+dist/
+*.db
+*.sqlite
+*.sqlite3
+
+# Flutter / Dart build outputs
+.dart_tool/
+client_flutter/.dart_tool/
+client_flutter/.packages
+client_flutter/.flutter-plugins
+client_flutter/.flutter-plugins-dependencies
+client_flutter/build/
+coverage/
+
+# Editors, OS, and local agent state
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+.codex/
+.agents/
+.superpowers/
+docs/superpowers/
+AGENTS.md
+
+# Logs and temp files
+*.log
+*.tmp
+*.pid
+*.out
+*.swp
+.tmp-py312/

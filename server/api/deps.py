@@ -5,14 +5,19 @@ from functools import lru_cache
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from server.ai.embedding import get_configured_embedding_client
 from server.ai.qa_policy import get_configured_qa_answer_client
 from server.config.settings import Settings, get_settings
 from server.domain.services import (
     BilibiliService,
+    CourseRecommendationService,
+    CourseWorkbenchService,
     CourseService,
+    ExportService,
     HandoutService,
     HomeService,
     InquiryService,
+    LessonService,
     PipelineService,
     ProgressService,
     QaService,
@@ -155,7 +160,45 @@ async def get_catalog_service() -> RecommendationService:
 async def get_course_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> CourseService:
-    return CourseService(courses=repo, idempotency=repo)
+    course_repo = getattr(repo, "store", repo)
+    return CourseService(courses=course_repo, idempotency=course_repo)
+
+
+async def get_course_workbench_service(
+    repo=Depends(get_week2_runtime_repository),
+) -> CourseWorkbenchService:
+    course_repo = getattr(repo, "store", repo)
+    return CourseWorkbenchService(
+        courses=course_repo,
+        lessons=course_repo,
+        resources=course_repo,
+        lesson_progress=course_repo,
+    )
+
+
+async def get_course_recommendation_service(
+    repo=Depends(get_week2_runtime_repository),
+) -> CourseRecommendationService:
+    course_repo = getattr(repo, "store", repo)
+    return CourseRecommendationService(
+        courses=repo,
+        lessons=course_repo,
+        resources=repo,
+        lesson_progress=course_repo,
+    )
+
+
+async def get_lesson_service(
+    repo=Depends(get_week2_runtime_repository),
+) -> LessonService:
+    course_repo = getattr(repo, "store", repo)
+    return LessonService(
+        courses=course_repo,
+        lessons=course_repo,
+        resources=course_repo,
+        lesson_progress=course_repo,
+        scoped_artifacts=course_repo,
+    )
 
 
 async def get_bilibili_service(
@@ -163,9 +206,11 @@ async def get_bilibili_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> BilibiliService:
+    lesson_repo = getattr(repo, "store", repo)
     return BilibiliService(
         courses=repo,
         bilibili=repo,
+        lessons=lesson_repo,
         async_tasks=async_tasks,
         task_dispatcher=task_dispatcher,
         bili_client=_get_bili_client(),
@@ -175,7 +220,22 @@ async def get_bilibili_service(
 async def get_home_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> HomeService:
-    return HomeService(courses=repo, reviews=repo, dashboard=repo)
+    course_repo = getattr(repo, "store", repo)
+    recommendations = CourseRecommendationService(
+        courses=repo,
+        lessons=course_repo,
+        resources=repo,
+        lesson_progress=course_repo,
+    )
+    return HomeService(
+        courses=repo,
+        reviews=repo,
+        dashboard=repo,
+        lessons=course_repo,
+        resources=repo,
+        lesson_progress=course_repo,
+        recommendations=recommendations,
+    )
 
 
 async def get_recommendation_flow_service(
@@ -188,10 +248,12 @@ async def get_recommendation_flow_service(
 async def get_resource_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> ResourceService:
+    lesson_repo = getattr(repo, "store", repo)
     return ResourceService(
         courses=repo,
         resources=repo,
         idempotency=repo,
+        lessons=lesson_repo,
         storage=_get_object_storage(),
     )
 
@@ -222,10 +284,13 @@ async def get_handout_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> HandoutService:
+    lesson_repo = getattr(repo, "store", repo)
     return HandoutService(
         courses=repo,
         handouts=repo,
         idempotency=repo,
+        lessons=lesson_repo,
+        resources=repo,
         task_dispatcher=task_dispatcher,
         async_tasks=async_tasks,
     )
@@ -234,7 +299,15 @@ async def get_handout_service(
 async def get_qa_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> QaService:
-    return QaService(courses=repo, qa=repo, qa_answer_client=get_configured_qa_answer_client())
+    lesson_repo = getattr(repo, "store", repo)
+    return QaService(
+        courses=repo,
+        qa=repo,
+        lessons=lesson_repo,
+        resources=repo,
+        embedding_client=get_configured_embedding_client(),
+        qa_answer_client=get_configured_qa_answer_client(),
+    )
 
 
 async def get_quiz_service(
@@ -242,10 +315,13 @@ async def get_quiz_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> QuizService:
+    lesson_repo = getattr(repo, "store", repo)
     return QuizService(
         courses=repo,
         quizzes=repo,
         idempotency=repo,
+        lessons=lesson_repo,
+        scoped_artifacts=lesson_repo,
         task_dispatcher=task_dispatcher,
         async_tasks=async_tasks,
     )
@@ -256,10 +332,12 @@ async def get_review_service(
     async_tasks=Depends(get_async_task_repository),
     task_dispatcher=Depends(get_task_dispatcher),
 ) -> ReviewService:
+    lesson_repo = getattr(repo, "store", repo)
     return ReviewService(
         courses=repo,
         reviews=repo,
         idempotency=repo,
+        lessons=lesson_repo,
         task_dispatcher=task_dispatcher,
         async_tasks=async_tasks,
     )
@@ -268,7 +346,15 @@ async def get_review_service(
 async def get_progress_service(
     repo=Depends(get_week2_runtime_repository),
 ) -> ProgressService:
-    return ProgressService(courses=repo, progress=repo)
+    lesson_repo = getattr(repo, "store", repo)
+    return ProgressService(courses=repo, progress=repo, lessons=lesson_repo, lesson_progress=lesson_repo)
+
+
+async def get_export_service(
+    repo=Depends(get_week2_runtime_repository),
+) -> ExportService:
+    lesson_repo = getattr(repo, "store", repo)
+    return ExportService(courses=repo, lessons=lesson_repo, scoped_artifacts=lesson_repo)
 
 
 def _build_object_storage(settings: Settings) -> ObjectStorage | None:

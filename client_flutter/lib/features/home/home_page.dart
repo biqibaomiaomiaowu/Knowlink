@@ -79,8 +79,18 @@ class _HomePageState extends ConsumerState<HomePage> {
             blockId: blockId,
           );
     ref.read(playerStateProvider.notifier).state = PlayerState(
-      positionSec: progress?.lastPositionSec ?? 0,
+      positionSec: progress?.lastPositionSec ?? course.lastPositionSec ?? 0,
     );
+    final lessonId = progress?.currentLessonId ?? course.currentLessonId;
+    if (lessonId != null && lessonId.isNotEmpty) {
+      ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+        courseId: course.courseId.toString(),
+        lessonId: lessonId,
+        positionSec: progress?.lastPositionSec ?? course.lastPositionSec ?? 0,
+      );
+      context.go('/courses/${course.courseId}/lessons/$lessonId');
+      return;
+    }
     context.go('/courses/${course.courseId}/handout');
   }
 
@@ -397,27 +407,29 @@ class _RecentLearningCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final course = recentCourses.isEmpty ? null : recentCourses.first;
-    final progress = course == null
-        ? null
-        : progressByCourseId[course.courseId]?.valueOrNull;
+    final visibleCourses = recentCourses.take(3).toList();
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const _SectionHeader(title: '最近学习'),
           const SizedBox(height: 18),
-          if (course == null)
+          if (visibleCourses.isEmpty)
             const _EmptyText('暂无最近学习课程。')
           else
-            _RecentLearningDetails(
-              course: course,
-              progress: progress,
-              progressState: progressByCourseId[course.courseId],
-              isSwitching: isSwitchingCourse,
-              onResume: () => onResumeCourse(course),
-              onSwitch: () => onSwitchCourse(course),
-            ),
+            for (var index = 0; index < visibleCourses.length; index++) ...[
+              _RecentLearningDetails(
+                course: visibleCourses[index],
+                progress: progressByCourseId[visibleCourses[index].courseId]
+                    ?.valueOrNull,
+                progressState:
+                    progressByCourseId[visibleCourses[index].courseId],
+                isSwitching: isSwitchingCourse,
+                onResume: () => onResumeCourse(visibleCourses[index]),
+                onSwitch: () => onSwitchCourse(visibleCourses[index]),
+              ),
+              if (index < visibleCourses.length - 1) const Divider(height: 28),
+            ],
         ],
       ),
     );
@@ -443,7 +455,7 @@ class _RecentLearningDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final resumeText = _resumeText(progress);
+    final resumeText = _resumeText(progress, course);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -507,6 +519,11 @@ class _RecentLearningDetails extends StatelessWidget {
               onPressed: isSwitching ? null : onSwitch,
               icon: const Icon(Icons.check_circle_outline),
               label: Text(isSwitching ? '正在切换' : '设为当前课程'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => context.go('/courses/${course.courseId}'),
+              icon: const Icon(Icons.info_outline),
+              label: const Text('课程详情'),
             ),
           ],
         ),
@@ -777,11 +794,18 @@ class _EmptyText extends StatelessWidget {
   }
 }
 
-String _resumeText(CourseProgressModel? progress) {
+String _resumeText(CourseProgressModel? progress, CourseSummaryModel course) {
+  final lessonTitle = progress?.currentLessonTitle ?? course.currentLessonTitle;
   if (progress == null || !progress.hasResumeTarget) {
+    if (lessonTitle != null && lessonTitle.isNotEmpty) {
+      return '上次学习：$lessonTitle';
+    }
     return '还没有最近学习位置，点击继续学习会进入讲义页。';
   }
   final parts = <String>[];
+  if (lessonTitle != null && lessonTitle.isNotEmpty) {
+    parts.add(lessonTitle);
+  }
   if (progress.lastHandoutBlockId != null) {
     parts.add('讲义块 ${progress.lastHandoutBlockId}');
   }

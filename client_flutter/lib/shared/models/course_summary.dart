@@ -8,6 +8,9 @@ class CourseSummaryModel {
     required this.pipelineStatus,
     required this.updatedAt,
     this.catalogId,
+    this.currentLessonId,
+    this.currentLessonTitle,
+    this.lastPositionSec,
   });
 
   final int courseId;
@@ -18,6 +21,9 @@ class CourseSummaryModel {
   final String pipelineStage;
   final String pipelineStatus;
   final DateTime updatedAt;
+  final String? currentLessonId;
+  final String? currentLessonTitle;
+  final int? lastPositionSec;
 
   factory CourseSummaryModel.fromJson(Map<String, dynamic> json) {
     return CourseSummaryModel(
@@ -29,6 +35,9 @@ class CourseSummaryModel {
       pipelineStage: json['pipelineStage'] as String,
       pipelineStatus: json['pipelineStatus'] as String,
       updatedAt: DateTime.parse(json['updatedAt'] as String),
+      currentLessonId: json['currentLessonId']?.toString(),
+      currentLessonTitle: json['currentLessonTitle'] as String?,
+      lastPositionSec: json['lastPositionSec'] as int?,
     );
   }
 
@@ -42,6 +51,9 @@ class CourseSummaryModel {
       'pipelineStage': pipelineStage,
       'pipelineStatus': pipelineStatus,
       'updatedAt': updatedAt.toIso8601String(),
+      'currentLessonId': currentLessonId,
+      'currentLessonTitle': currentLessonTitle,
+      'lastPositionSec': lastPositionSec,
     };
   }
 }

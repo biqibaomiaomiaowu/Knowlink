@@ -154,9 +154,14 @@ def test_v2_bilibili_contract_freezes_auth_dtos():
     for status in ("pending_scan", "scanned", "confirmed", "expired", "failed"):
         assert f"`{status}`" in contract
 
+    assert "不是 PNG/JPG 图片地址" in qr_section
+    assert "不得把该 URL 作为 `Image.network`" in qr_section
     assert "loginStatus" not in qr_section
     assert "authenticated" not in session_section
     assert "displayName" not in session_section
+    assert "loginStatus=inactive" in session_section
+    assert "loginStatus=expired" in session_section
+    assert "未登录返回 `401 bilibili.auth_required`" not in session_section
 
     for field in ("loginStatus", "userNickname", "expiresAt"):
         assert f'"{field}"' in session_section
@@ -167,6 +172,9 @@ def test_v2_bilibili_contract_freezes_preview_dto_shape():
     preview_section = contract.split(
         "### `POST /api/v1/courses/{courseId}/resources/imports/bilibili/preview`", 1
     )[1].split("### `POST /api/v1/courses/{courseId}/resources/imports/bilibili`", 1)[0]
+
+    assert "允许匿名 preview" in preview_section
+    assert "服务端没有 B站登录态或登录态过期时使用空 cookie" in preview_section
 
     for field in (
         "previewId",
@@ -215,6 +223,7 @@ def test_v2_bilibili_contract_marks_collection_and_bangumi_runtime_path_and_real
         '"sourceType": "collection"',
         '"sourceType": "bangumi"',
         "B站导入复用通用 `POST /api/v1/async-tasks/{taskId}/retry` 重试入口",
+        "B站导入 retry 响应必须保留 `entity.type=bilibili_import_run`",
         "`waiting_download` 是下载槽位队列预留状态",
     ):
         assert token in contract

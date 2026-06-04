@@ -32,6 +32,18 @@ class HandoutResumeTarget {
   final int blockId;
 }
 
+class LessonResumeTarget {
+  const LessonResumeTarget({
+    required this.courseId,
+    required this.lessonId,
+    this.positionSec = 0,
+  });
+
+  final String courseId;
+  final String lessonId;
+  final int positionSec;
+}
+
 class CourseFlowController extends Notifier<CourseFlowState> {
   @override
   CourseFlowState build() => const CourseFlowState();
@@ -147,6 +159,7 @@ class CourseFlowController extends Notifier<CourseFlowState> {
 
   void _resetCourseInteractionState() {
     ref.read(activeBlockProvider.notifier).state = null;
+    ref.read(activeLessonProvider.notifier).state = null;
     ref.read(playerStateProvider.notifier).state = const PlayerState();
   }
 }
@@ -169,3 +182,5 @@ final playerStateProvider = StateProvider<PlayerState>(
 final handoutResumeTargetProvider = StateProvider<HandoutResumeTarget?>(
   (ref) => null,
 );
+
+final activeLessonProvider = StateProvider<LessonResumeTarget?>((ref) => null);

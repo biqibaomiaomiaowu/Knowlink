@@ -32,6 +32,7 @@
 - 已开始但尚未完成的同一 scope + `Idempotency-Key` 请求必须返回 `409 common.idempotency_replay`，不得创建第二份业务实体。
 - 带路径参数的课程接口一律以 path 中的 `courseId` 为准；请求体不再重复传同义 `courseId`，`POST /api/v1/qa/messages` 是唯一例外。
 - Docker / runtime 默认任务队列为 `KNOWLINK_TASK_QUEUE=dramatiq`；`noop` dispatcher 只允许通过显式设置 `KNOWLINK_TASK_QUEUE=noop` 用于本地测试或开发，不得作为运行时默认。未知 `KNOWLINK_TASK_QUEUE` 值必须启动失败。
+- Docker 镜像必须设置 `PYTHONDONTWRITEBYTECODE=1`，并在首次 `pip install` 前清理镜像内 `.pyc` / `__pycache__`，依赖安装后再清理一次；`pip install` 必须使用 `--no-compile`，避免 API、worker、db-migrate 等进程在复用或并发导入第三方包时读取损坏的 Python 字节码缓存；本地构建上下文也必须通过 `.dockerignore` 排除 `.venv`、`__pycache__` 和 `*.py[cod]`。
 - Dramatiq actor 默认使用 `KNOWLINK_DRAMATIQ_QUEUE`；可通过 `KNOWLINK_DRAMATIQ_PARSE_QUEUE`、`KNOWLINK_DRAMATIQ_CONTENT_QUEUE`、`KNOWLINK_DRAMATIQ_QUIZ_QUEUE`、`KNOWLINK_DRAMATIQ_REVIEW_QUEUE` 分别覆盖 parse / content / quiz / review actor 队列。`KNOWLINK_DRAMATIQ_IMPORT_QUEUE`、`KNOWLINK_DRAMATIQ_MAINTENANCE_QUEUE` 为 V2 后续 import / maintenance actor 预留队列变量。未设置覆盖变量时必须回落到默认队列。
 - `KNOWLINK_ENV=production` / `prod` / `staging` 时，demo 鉴权 token、MinIO 默认凭据、`KNOWLINK_TASK_QUEUE=noop`、非 `sql` 的 `KNOWLINK_RUNTIME_REPOSITORY_BACKEND`，以及 `demo` / `fake` / `memory` / `local` / `disabled` 等非持久化或禁用型 `KNOWLINK_STORAGE_BACKEND` 必须启动前 fail-fast；本地 `development` / test 仍可使用 `.env.example` 的 demo 默认值。
 - scheduler 当前没有真实生产定时任务，默认 `KNOWLINK_SCHEDULER_ENABLED=false`，且默认 compose 不启动 scheduler 服务；如需手动运行，必须显式启用该环境变量。
@@ -52,7 +53,8 @@
 - `docs/v2/phase-plan.md` 是第二版的规划和责任口径，不直接等同于已实现 API。
 - V2 新增或重做 B站真实导入、知识图谱、实时流式输出、主观题自动判卷时，必须先补充对应 API / DTO / schema / 错误码 contract，再实施代码。
 - V2 B站真实导入 contract 已单独冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)；该文档覆盖本文 B站 V1 `501` stub 的历史口径。
-- V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示当前第一版实现状态。
+- V2 Phase 2 课程库、节课、工作台、分层资料和分层学习产物 contract 已单独冻结在 [v2-course-lesson-workbench-contract.md](./v2-course-lesson-workbench-contract.md)；课程列表、course workbench、lesson detail、resource scope、course QA、lesson QA、quiz / review / graph / export placeholder 和 home continue-learning 以该文档为准。
+- V2 B站导入不再受本文 B站 `501` stub 约束；V1 stub 仅表示第一版历史实现状态。
 - V2 状态拼写统一使用 `canceled`，不使用 `cancelled`。外部资料或旧 spec 中出现 `cancelled` 时，进入 API contract 前统一归一化为 `canceled`。
 - V2 B站导入细分状态到 `async_tasks.status` 的完整冻结映射以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准；本文仅保留过渡摘要：
 
@@ -240,7 +242,7 @@
 说明：
 
 - `resourceType` 可取 `mp4`、`pdf`、`pptx`、`docx`、`srt`。
-- `pptx` 与 `docx` 在 MVP 已经占位到 contract 和代码骨架，真实解析保真可渐进增强。
+- `pptx` 与 `docx` 已进入 contract、上传链路和 parser 实现；复杂版面、公式、图片 caption 等保真能力仍可按资料质量继续增强。
 
 ## 5. 课程与首页
 
@@ -366,7 +368,9 @@
   "filename": "chapter-1.pdf",
   "mimeType": "application/pdf",
   "sizeBytes": 32768,
-  "checksum": "sha256:demo"
+  "checksum": "sha256:demo",
+  "scopeType": "course",
+  "usageRole": "course_material"
 }
 ```
 
@@ -377,11 +381,20 @@
   "uploadUrl": "http://127.0.0.1:9000/knowlink/raw/1/101/temp/chapter-1.pdf?...",
   "objectKey": "raw/1/101/temp/chapter-1.pdf",
   "headers": {
-    "x-amz-meta-course-id": "101"
+    "x-amz-meta-course-id": "101",
+    "x-amz-meta-scope-type": "course"
   },
   "expiresAt": "2026-04-18T15:15:00+00:00"
 }
 ```
+
+V2 课程/节课工作台要求上传资料必须显式归属：
+
+- PDF / PPTX / DOCX / SRT 必须传 `scopeType=course|lesson`；缺失返回 `400 resource.scope_required`。
+- `scopeType=lesson` 时必须传当前课程内的 `lessonId`，否则返回 `400 resource.lesson_mismatch`。
+- MP4 可使用 `lessonPlacement=auto_create|bind_existing|course_material`；`auto_create` 会在 `upload-complete` 创建 lesson 并设为主视频。
+- `headers` 必须包含 `x-amz-meta-scope-type`；当请求已确定 `lessonId` 时，还必须包含 `x-amz-meta-lesson-id`。
+- 完整字段和用法见 [v2-course-lesson-workbench-contract.md](./v2-course-lesson-workbench-contract.md#4-resource-scope-and-import-placement)。
 
 本地 Docker 联调时，`uploadUrl` 必须使用浏览器可访问的 `KNOWLINK_MINIO_PUBLIC_ENDPOINT`
 签名，例如 `http://127.0.0.1:9000/...`；不能返回容器内 hostname `minio:9000`。
@@ -402,7 +415,10 @@
   "originalName": "chapter-1.pdf",
   "mimeType": "application/pdf",
   "sizeBytes": 32768,
-  "checksum": "sha256:demo"
+  "checksum": "sha256:demo",
+  "scopeType": "course",
+  "usageRole": "course_material",
+  "visibleToCourseQa": true
 }
 ```
 
@@ -411,9 +427,17 @@
 ```json
 {
   "resourceId": 501,
+  "courseId": 101,
+  "scopeType": "course",
+  "lessonId": null,
+  "usageRole": "course_material",
+  "sourceType": "upload",
+  "sourcePartId": null,
   "ingestStatus": "ready",
   "validationStatus": "passed",
-  "processingStatus": "pending"
+  "processingStatus": "pending",
+  "visibleToCourseQa": true,
+  "durationSec": null
 }
 ```
 
@@ -426,12 +450,20 @@
   "items": [
     {
       "resourceId": 501,
+      "courseId": 101,
       "resourceType": "pdf",
+      "scopeType": "course",
+      "lessonId": null,
+      "usageRole": "course_material",
+      "sourceType": "upload",
+      "sourcePartId": null,
       "originalName": "chapter-1.pdf",
       "objectKey": "raw/1/101/temp/chapter-1.pdf",
       "ingestStatus": "ready",
       "validationStatus": "passed",
-      "processingStatus": "pending"
+      "processingStatus": "pending",
+      "visibleToCourseQa": true,
+      "durationSec": null
     }
   ]
 }
@@ -482,7 +514,7 @@
 
 ### B 站导入预留接口（V1/MVP）
 
-以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract，但当前 V1 服务统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 将按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 接通真实扫码登录、下载、合并、MinIO 上传和课程资源导入；V2 B站真实导入 contract 已冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)，本文下方示例只作为 V1 历史 stub 形状保留，不作为 V2 字段来源。
+以下接口参考 `bilidown` 的“单视频 + 登录态 + 任务状态”分层方式冻结 V1/MVP contract。V1 历史 stub 阶段统一返回 `501 Not Implemented`，不创建真实任务、不触发 MinIO 写入，也不接通扫码登录。V2 已按 [docs/v2/phase-plan.md](../v2/phase-plan.md) 进入真实扫码登录、下载、合并、MinIO 上传和课程资源导入实现；V2 B站真实导入 contract 已冻结在 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md)，本文下方示例只作为 V1 历史 stub 形状保留，不作为 V2 字段来源。
 
 stub 阶段约束：
 
@@ -538,7 +570,7 @@ V1 历史 stub 阶段不会查询真实 B站登录态；V2 auth session DTO 以 
 
 ### `DELETE /api/v1/bilibili/auth/session`
 
-V1 历史 stub 目标响应形状如下；当前未实现阶段仍统一返回 `501`，V2 auth session 删除 DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
+V1 历史 stub 目标响应形状如下；stub 阶段统一返回 `501`，V2 auth session 删除 DTO 以 [v2-bilibili-import-contract.md](./v2-bilibili-import-contract.md) 为准。
 
 ```json
 {
@@ -546,7 +578,7 @@ V1 历史 stub 目标响应形状如下；当前未实现阶段仍统一返回 `
 }
 ```
 
-V1 当前未实现阶段统一返回：
+V1 历史 stub 阶段统一返回：
 
 ```json
 {
@@ -675,15 +707,19 @@ V1 当前未实现阶段统一返回：
 {
   "taskId": 7001,
   "status": "queued",
-  "nextAction": "poll"
+  "nextAction": "poll",
+  "entity": {
+    "type": "bilibili_import_run",
+    "id": 9101
+  }
 }
 ```
 
 说明：
 
-- 这是后端和演示排障用辅助接口，不作为页面主流程依赖。
 - 只有 `failed`、`queued` 状态可通过该接口重新入队；`succeeded`、`canceled`、`retrying` 或未知状态不得重试。
 - 当前支持重新入队的任务类型包括 `parse_pipeline`、`handout_generate`、`handout_block_generate`、`quiz_generate`、`review_refresh` 和 `bilibili_import`。
+- 若任务记录包含 `targetType` / `targetId`，响应必须返回 `entity.type` / `entity.id`，用于前端继续轮询目标实体；B站导入重试固定返回 `entity.type=bilibili_import_run`。
 - 重新入队前会把任务状态重置为 `queued`、清空旧错误并将 `progressPct` 置 0；如果 enqueue 失败，任务会被标记为 `failed` 且写入 `async_task.enqueue_failed`，客户端可继续展示重试入口。
 
 错误：
@@ -819,6 +855,10 @@ V1 当前未实现阶段统一返回：
 }
 ```
 
+失败语义：
+
+- 必填 key 缺失、key 未知、枚举值非法、`number` 类型不是 JSON integer，或 `time_budget_minutes` 超出 30 到 600 时，返回 `422 common.validation_error`。
+
 ### `POST /api/v1/courses/{courseId}/handouts/generate`
 
 响应 `data`：
@@ -920,7 +960,7 @@ V1 当前未实现阶段统一返回：
 
 说明：
 
-- 这是视频优先讲义页的首屏读取接口；本轮为破坏性两级 outline API 改动，Flutter 需后续单独适配。
+- 这是视频优先讲义页的首屏读取接口；当前 Flutter 讲义页已按两级 outline read model 消费 `items[*].children[]`。
 - `items[]` 是大标题，只负责语义分组和展开；大标题没有 `blockId`，不可直接生成讲义块，也不作为点击、跳转、高亮或 QA 的目标。
 - `items[*].children[]` 是小标题，也是唯一 leaf item；只有 child 绑定 `blockId`、`generationStatus`、`sourceSegmentKeys` 和 `topicTags`。
 - `items[*].children[*].sourceSegmentKeys` 是 API read model 必返字段，用于后续 block 生成和引用校验；前端可忽略展示。

@@ -18,8 +18,11 @@ class QaSession(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ID_TYPE, nullable=False)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
-    handout_version_id: Mapped[int] = mapped_column(ForeignKey("handout_versions.id"), nullable=False)
-    handout_block_id: Mapped[int] = mapped_column(ForeignKey("handout_blocks.id"), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(30), default="course", nullable=False)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("course_lessons.id"), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    handout_version_id: Mapped[int | None] = mapped_column(ForeignKey("handout_versions.id"), nullable=True)
+    handout_block_id: Mapped[int | None] = mapped_column(ForeignKey("handout_blocks.id"), nullable=True)
 
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     context_snapshot_json: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False)

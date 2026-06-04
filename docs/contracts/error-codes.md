@@ -20,17 +20,27 @@
 ## Course And Resource
 
 - `course.not_found`: 课程不存在
+- `course.delete_blocked`: 删除课程前发现资源、节课、学习产物、进度或引用 blocker，不能安全删除
 - `resource.not_found`: 资源不存在
 - `resource.has_dependents`: 资源已被后端解析产物、引用或学习进度依赖，当前不能安全删除
 - `resource.invalid_payload`: 上传完成回调字段不完整
 - `resource.not_video`: 资源不是可播放视频
 - `resource.playback_unavailable`: 播放地址生成失败
+- `resource.scope_required`: 上传或导入资料未声明 `scopeType`
+- `resource.lesson_mismatch`: 资料声明的 lesson 不存在或不属于当前课程
+
+## Lesson
+
+- `lesson.not_found`: 节课不存在或不属于当前课程
+- `lesson.scope_required`: 请求需要明确 lesson scope 或 lesson id
+- `lesson.order_conflict`: 节课排序请求缺失、重复、跨课程或违反同课程唯一顺序
+- `lesson.has_dependents`: 节课存在无法安全级联的资源、产物、进度或引用
 
 ## Bilibili
 
-- `bilibili.not_implemented`: V1 B 站导入与扫码登录接口已预留，但当前服务尚未接通
-- `bilibili.auth_required`: V2 B站导入需要扫码登录后才能继续
-- `bilibili.auth_expired`: V2 B站登录态过期或服务端凭据失效
+- `bilibili.not_implemented`: V1 历史 stub 阶段用于表示 B站导入与扫码登录接口已预留但未接通；V2 真实导入不使用该错误码表达能力未实现
+- `bilibili.auth_required`: B站实际要求账号态才能访问当前内容；公共可访问内容不得用该错误作为 preview/import 硬前置
+- `bilibili.auth_expired`: B站登录态过期、服务端凭据失效，或 B站请求因 cookie 失效失败；公共可访问内容应优先匿名请求
 - `bilibili.unsupported_url`: V2 B站链接不属于单视频、多 P、合集或番剧支持范围
 - `bilibili.access_denied`: B站内容不可访问，包含付费、会员、DRM、地区限制或账号无权限
 - `bilibili.metadata_failed`: B站元数据、分 P、合集或番剧条目获取失败
@@ -91,5 +101,10 @@
 ## QA / Quiz / Review
 
 - `qa.block_not_found`: 讲义块不存在
+- `qa.scope_invalid`: QA session 或消息请求 scope 与 course / lesson 不匹配
 - `quiz.not_found`: 测验不存在
 - `review.run_not_found`: 复习任务重算记录不存在
+
+## Artifact Scope
+
+- `artifact.scope_invalid`: 讲义、测验、复习、图谱、报告或导出请求 scope 非法

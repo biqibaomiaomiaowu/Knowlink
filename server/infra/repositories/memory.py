@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, TypeVar
 
+from server.ai.qa_types import LexicalSearchHit, QaScope, VectorSearchHit
 from server.infra.repositories.memory_runtime import RuntimeStore
 
 
@@ -159,6 +160,42 @@ class MemoryScaffoldRepository:
     def update_bilibili_import_run(self, import_run_id: int, **changes: Any) -> dict[str, Any] | None:
         return self.store.update_bilibili_import_run(import_run_id, **changes)
 
+    def upsert_bilibili_import_item(
+        self,
+        *,
+        import_run_id: int,
+        course_id: int,
+        source_url: str,
+        item_key: str | None = None,
+        title: str | None = None,
+        part_no: int | None = None,
+        status: str = "pending",
+        progress_pct: int = 0,
+        lesson_id: int | None = None,
+        resource_id: int | None = None,
+        metadata_json: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        return self.store.upsert_bilibili_import_item(
+            import_run_id=import_run_id,
+            course_id=course_id,
+            source_url=source_url,
+            item_key=item_key,
+            title=title,
+            part_no=part_no,
+            status=status,
+            progress_pct=progress_pct,
+            lesson_id=lesson_id,
+            resource_id=resource_id,
+            metadata_json=metadata_json,
+            error_code=error_code,
+            failure_reason=failure_reason,
+        )
+
+    def list_bilibili_import_items(self, import_run_id: int) -> list[dict[str, Any]]:
+        return self.store.list_bilibili_import_items(import_run_id)
+
     def create_resource(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.store.create_resource(course_id, payload)
 
@@ -167,6 +204,23 @@ class MemoryScaffoldRepository:
 
     def get_resource(self, resource_id: int) -> dict[str, Any] | None:
         return self.store.get_resource(resource_id)
+
+    def update_resource_scope(
+        self,
+        *,
+        course_id: int,
+        resource_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        usage_role: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self.store.update_resource_scope(
+            course_id=course_id,
+            resource_id=resource_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            usage_role=usage_role,
+        )
 
     def get_resource_delete_blockers(self, course_id: int, resource_id: int) -> dict[str, int]:
         return {}
@@ -383,6 +437,57 @@ class MemoryScaffoldRepository:
     def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
         return self.store.get_qa_context(course_id, handout_block_id)
 
+    def search_vector_segments(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        return self.store.search_vector_segments(scope, embedding=embedding, limit=limit)
+
+    def search_lexical_segments(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        return self.store.search_lexical_segments(scope, query=query, limit=limit)
+
+    def search_vector_handout_blocks(
+        self,
+        scope: QaScope,
+        embedding: Sequence[float],
+        limit: int,
+    ) -> list[VectorSearchHit]:
+        return self.store.search_vector_handout_blocks(scope, embedding=embedding, limit=limit)
+
+    def search_lexical_handout_blocks(
+        self,
+        scope: QaScope,
+        query: str,
+        limit: int,
+    ) -> list[LexicalSearchHit]:
+        return self.store.search_lexical_handout_blocks(scope, query=query, limit=limit)
+
+    def search_course_wide_original_segments(
+        self,
+        *,
+        question: str,
+        course_id: int | None,
+        parse_run_id: int | None,
+        handout_version_id: int | None = None,
+        handout_block_id: int | str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        return self.store.search_course_wide_original_segments(
+            question=question,
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+            handout_version_id=handout_version_id,
+            handout_block_id=handout_block_id,
+            limit=limit,
+        )
+
     def save_qa_exchange(
         self,
         context: dict[str, Any],
@@ -395,6 +500,36 @@ class MemoryScaffoldRepository:
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
         return self.store.get_qa_session_messages(session_id)
+
+    def list_scoped_qa_sessions(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.store.list_scoped_qa_sessions(course_id=course_id, scope_type=scope_type, lesson_id=lesson_id)
+
+    def create_scoped_qa_exchange(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        question: str,
+        answer_md: str,
+        citations: Sequence[dict[str, Any]],
+        session_id: int | None = None,
+    ) -> dict[str, Any]:
+        return self.store.create_scoped_qa_exchange(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            question=question,
+            answer_md=answer_md,
+            citations=list(citations),
+            session_id=session_id,
+        )
 
     def create_quiz(
         self,
@@ -490,6 +625,47 @@ class MemoryScaffoldRepository:
 
     def update_progress(self, course_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self.store.update_progress(course_id, payload)
+
+    def upsert_user_lesson_progress(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.store.upsert_user_lesson_progress(course_id=course_id, lesson_id=lesson_id, payload=payload)
+
+    def get_user_lesson_progress(self, *, course_id: int, lesson_id: int) -> dict[str, Any] | None:
+        return self.store.get_user_lesson_progress(course_id=course_id, lesson_id=lesson_id)
+
+    def create_scoped_artifact(
+        self,
+        *,
+        artifact_type: str,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        status: str = "placeholder",
+        **extra: Any,
+    ) -> dict[str, Any]:
+        return self.store.create_scoped_artifact(
+            artifact_type=artifact_type,
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+            status=status,
+            **extra,
+        )
+
+    def list_lesson_artifacts(self, *, course_id: int, lesson_id: int) -> list[dict[str, Any]]:
+        return self.store.list_lesson_artifacts(course_id=course_id, lesson_id=lesson_id)
+
+    def mark_lesson_artifacts_stale(self, *, course_id: int, lesson_ids: Sequence[int]) -> list[dict[str, Any]]:
+        return self.store.mark_lesson_artifacts_stale(course_id=course_id, lesson_ids=list(lesson_ids))
 
 
 def _sync_memory_handout_statuses(handout: dict[str, Any]) -> None:

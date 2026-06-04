@@ -1,6 +1,13 @@
-# knowlink_client
+# KnowLink Flutter 客户端
 
-KnowLink MVP Flutter 客户端。
+KnowLink Flutter APP 客户端。当前仓库按 Flutter APP 交付组织，不承接快应用工程。
+
+## 当前状态
+
+- V1 主链路页面、路由、provider 和 API read model 已接入：推荐、创建 / 切换课程、上传、解析进度、问询、讲义、QA、测验、复习与首页聚合。
+- 本地文件上传选择器使用 Flutter 官方 `file_selector`，Android 真机调试不依赖 `file_picker` 的 Android Gradle 插件链路。
+- V2 阶段一的 B站导入区块已接入自主导入页：登录态、扫码二维码会话、资源预览、分 P 选择、创建导入、状态轮询、取消、重试和导入后资源列表刷新。
+- V2 阶段二的知识图谱、流式输出和主观题判卷页面尚未作为当前客户端可验收能力落地；对应后端 contract / read model 冻结后再接入。
 
 ## 本地开发
 
@@ -17,17 +24,19 @@ flutter test
 
 ## Week 1 验证
 
-推荐验证顺序：
+推荐验证顺序；其中 B站导入相关用例覆盖当前 V2 阶段一前端状态：
 
 ```powershell
 flutter pub get
 flutter analyze
 flutter test test/core/network/api_client_test.dart
 flutter test test/widgets/course_recommend_page_test.dart
+flutter test test/widgets/bilibili_import_page_test.dart
+flutter test test/shared/bilibili_import_provider_test.dart
 flutter test
 ```
 
-Windows PowerShell 手动推荐页 smoke：
+Windows PowerShell 手动 smoke：
 
 ```powershell
 # terminal 1
@@ -42,24 +51,49 @@ flutter run -d web-server `
   --dart-define=KNOWLINK_DEMO_TOKEN=knowlink-demo-token
 
 # terminal 3
-$profile = "$env:TEMP\knowlink_chrome_cors_off"
-Remove-Item -Recurse -Force $profile -ErrorAction SilentlyContinue
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
-  --disable-web-security `
-  --disable-site-isolation-trials `
-  --user-data-dir="$profile" `
-  http://localhost:52853
+Start-Process "http://localhost:52853"
 ```
 
-然后打开 `http://localhost:52853`，进入智能课程推荐页，获取推荐，确认入课，并验证页面能展示已创建课程结果，且仍可跳转到自主导入页。
+然后打开 `http://localhost:52853`，进入智能课程推荐页，获取推荐，确认入课，并验证页面能展示已创建课程结果，且可跳转到自主导入页。已有课程下的自主导入页会展示 B站导入区块；公共可访问视频可直接预览，账号态内容按二维码登录状态处理。
 
-独立 Chrome 命令仅用于 FastAPI scaffold 尚未配置 CORS 时的本地 Flutter Web 验收，可在 Week 1 smoke 测试中避免修改后端代码。
+Android 真机 USB 联调：
+
+```powershell
+adb devices
+adb reverse tcp:8000 tcp:8000
+adb reverse tcp:9000 tcp:9000
+adb reverse --list
+
+adb shell curl -sS http://127.0.0.1:8000/health
+adb shell curl -sS http://127.0.0.1:9000/minio/health/live
+
+flutter run -d <device-id> `
+  --dart-define=KNOWLINK_API_BASE_URL=http://127.0.0.1:8000 `
+  --dart-define=KNOWLINK_DEMO_TOKEN=knowlink-demo-token
+```
+
+本地 Docker 默认会把上传和播放用的 MinIO 预签名 URL 签到 `KNOWLINK_MINIO_PUBLIC_ENDPOINT=127.0.0.1:9000`。真机通过 USB 访问本机服务时，必须同时映射 `8000` 和 `9000`；只映射 `8000` 会导致课程创建、上传初始化等 API 成功，但文件 PUT 到对象存储时出现 `Connection refused, address = 127.0.0.1, port = 9000`。
+
+讲义页播放器使用 Android 原生 `video_player` / ExoPlayer 访问 MinIO 预签名地址，`android/app/src/main/AndroidManifest.xml` 必须允许本地 HTTP cleartext。否则 API 请求可以成功，但视频会因 `Cleartext HTTP traffic to 127.0.0.1 not permitted` 加载失败。
+
+若平板不通过 USB reverse，而是走同一 Wi-Fi 下的宿主机局域网 IP，需要让后端签出设备可达的 MinIO host，并用同一个 host 构建 App：
+
+```powershell
+# .env
+KNOWLINK_MINIO_PUBLIC_ENDPOINT=<host-lan-ip>:9000
+
+docker compose up -d --force-recreate api worker
+
+flutter run -d <device-id> `
+  --dart-define=KNOWLINK_API_BASE_URL=http://<host-lan-ip>:8000 `
+  --dart-define=KNOWLINK_DEMO_TOKEN=knowlink-demo-token
+```
 
 ## 故障排查
 
 - Flutter 会在 `<flutter-sdk>\\bin\\cache` 下写入 SDK cache 锁文件。如果当前进程没有该 SDK 路径的写权限，命令可能会在输出前卡住。
 - 在受限 shell 或沙箱中，如果 Flutter SDK 位于不可写的工作区之外，容易出现上述问题。请在普通宿主机 shell 中运行 Flutter，或把 SDK 移到可写位置。
-- 如果后端日志出现 `OPTIONS ... 405 Method Not Allowed`，说明页面是在普通浏览器会话中打开的。请使用上面的独立 Chrome 命令重新打开。
+- FastAPI 默认允许 `http://localhost:*` 和 `http://127.0.0.1:*` 的 Flutter Web origin。若仍出现跨域预检失败，先检查后端是否运行在当前 `.env` 下，以及 `KNOWLINK_CORS_ALLOW_ORIGINS` 是否被收紧到不包含当前 Web 端口。
 - 如果 Git 对 Flutter SDK checkout 报 `dubious ownership`，先信任该 SDK 仓库：
 
 ```powershell

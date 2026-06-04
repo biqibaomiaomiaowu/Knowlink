@@ -10,6 +10,8 @@ class CourseProgressModel {
     this.lastSlideNo,
     this.lastAnchorKey,
     this.lastActivityAt,
+    this.currentLessonId,
+    this.currentLessonTitle,
   });
 
   final int courseId;
@@ -22,6 +24,8 @@ class CourseProgressModel {
   final int? lastSlideNo;
   final String? lastAnchorKey;
   final DateTime? lastActivityAt;
+  final String? currentLessonId;
+  final String? currentLessonTitle;
 
   bool get hasResumeTarget {
     return lastHandoutBlockId != null ||
@@ -43,6 +47,8 @@ class CourseProgressModel {
       lastSlideNo: json['lastSlideNo'] as int?,
       lastAnchorKey: json['lastAnchorKey'] as String?,
       lastActivityAt: _parseDateTime(json['lastActivityAt'] as String?),
+      currentLessonId: json['currentLessonId']?.toString(),
+      currentLessonTitle: json['currentLessonTitle'] as String?,
     );
   }
 }
