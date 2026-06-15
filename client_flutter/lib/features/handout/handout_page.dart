@@ -234,9 +234,8 @@ class _HandoutWorkspace extends StatelessWidget {
             constraints.maxWidth < _compactThreeColumnBreakpoint;
         final outlineWidth =
             useCompactColumns ? _compactOutlineWidth : _wideOutlineWidth;
-        final rightPanelWidth = useCompactColumns
-            ? _compactRightPanelWidth
-            : _wideRightPanelWidth;
+        final rightPanelWidth =
+            useCompactColumns ? _compactRightPanelWidth : _wideRightPanelWidth;
         final columnGap =
             useCompactColumns ? _compactColumnGap : _wideColumnGap;
 
@@ -685,73 +684,78 @@ class _BlockTile extends StatelessWidget {
 
     return Padding(
       padding: EdgeInsets.zero,
-      child: Material(
-        color: background,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          onTap: onTap,
+      child: HoverLift(
+        scale: 1.006,
+        offset: -2,
+        child: Material(
+          color: background,
           borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  margin: const EdgeInsets.only(top: 4),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isSelected ? AppTheme.brandBlue : Colors.white,
-                    border: Border.all(
-                      color: isSelected || isHighlighted
-                          ? AppTheme.brandBlue
-                          : AppTheme.subtle,
-                      width: isSelected ? 2 : 1.4,
+          child: InkWell(
+            onTap: onTap,
+            mouseCursor: SystemMouseCursors.click,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected ? AppTheme.brandBlue : Colors.white,
+                      border: Border.all(
+                        color: isSelected || isHighlighted
+                            ? AppTheme.brandBlue
+                            : AppTheme.subtle,
+                        width: isSelected ? 2 : 1.4,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        child.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: color,
-                          fontWeight:
-                              isSelected ? FontWeight.w900 : FontWeight.w700,
-                          fontSize: 13,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          child.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: color,
+                            fontWeight:
+                                isSelected ? FontWeight.w900 : FontWeight.w700,
+                            fontSize: 13,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          _OutlineMetaChip(
-                            label: _statusLabel(status),
-                            color: statusColor,
-                          ),
-                          _OutlineMetaChip(
-                            label:
-                                '${_formatSec(child.startSec)}-${_formatSec(child.endSec)}',
-                            color: AppTheme.muted,
-                          ),
-                          if (child.topicTags.isNotEmpty)
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
                             _OutlineMetaChip(
-                              label: child.topicTags.take(2).join(' / '),
-                              color: AppTheme.subtle,
+                              label: _statusLabel(status),
+                              color: statusColor,
                             ),
-                        ],
-                      ),
-                    ],
+                            _OutlineMetaChip(
+                              label:
+                                  '${_formatSec(child.startSec)}-${_formatSec(child.endSec)}',
+                              color: AppTheme.muted,
+                            ),
+                            if (child.topicTags.isNotEmpty)
+                              _OutlineMetaChip(
+                                label: child.topicTags.take(2).join(' / '),
+                                color: AppTheme.subtle,
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

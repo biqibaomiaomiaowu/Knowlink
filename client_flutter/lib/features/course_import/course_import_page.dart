@@ -681,49 +681,55 @@ class _UploadDropZone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: enabled && !isUploading ? onPickFiles : null,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 142),
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FBFF),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: enabled ? AppTheme.brandBlue : AppTheme.line,
-            style: BorderStyle.solid,
+    final interactive = enabled && !isUploading;
+    return HoverLift(
+      enabled: interactive,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        mouseCursor:
+            interactive ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onTap: interactive ? onPickFiles : null,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 142),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FBFF),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: enabled ? AppTheme.brandBlue : AppTheme.line,
+              style: BorderStyle.solid,
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.cloud_upload_outlined,
-              color: AppTheme.brandBlue,
-              size: 38,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              enabled ? '点击选择上传文件' : '创建课程后可上传文件',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.cloud_upload_outlined,
                 color: AppTheme.brandBlue,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
+                size: 38,
               ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              '单个文件最大 200MB，视频文件按后端限制处理',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.muted,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+              const SizedBox(height: 10),
+              Text(
+                enabled ? '点击选择上传文件' : '创建课程后可上传文件',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppTheme.brandBlue,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              const Text(
+                '单个文件最大 200MB，视频文件按后端限制处理',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.muted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

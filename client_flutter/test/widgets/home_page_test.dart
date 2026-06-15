@@ -1,398 +1,78 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:knowlink_client/core/network/api_client.dart';
+import 'package:knowlink_client/features/course_library/course_library_page.dart';
+import 'package:knowlink_client/features/course_workbench/course_workbench_page.dart';
 import 'package:knowlink_client/features/home/home_page.dart';
-import 'package:knowlink_client/shared/models/course_progress_models.dart';
-import 'package:knowlink_client/shared/models/course_summary.dart';
-import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
-import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
-import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
 void main() {
-  testWidgets('home page renders dashboard data and resumes latest learning',
-      (tester) async {
-    _useTestSurface(tester);
-    final fakeApiClient = _HomePageFakeApiClient();
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    addTearDown(container.dispose);
-    final router = GoRouter(
-      routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, state) => const HomePage(),
-        ),
-        GoRoute(
-          path: '/courses/:courseId/handout',
-          builder: (context, state) => const Text('handout-route'),
-        ),
-        GoRoute(
-          path: '/courses/:courseId',
-          builder: (context, state) =>
-              Text('course-detail-${state.pathParameters['courseId']}'),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp.router(routerConfig: router),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('KnowLink 固定联调课'), findsOneWidget);
-    expect(find.text('课程 202'), findsOneWidget);
-    expect(find.textContaining('讲义块 4001'), findsOneWidget);
-    expect(find.text('极限定义'), findsOneWidget);
-    expect(find.text('95 分钟'), findsOneWidget);
-    expect(find.text('该块是考试高频点'), findsWidgets);
-
-    await tester.tap(find.widgetWithText(OutlinedButton, '继续学习').first);
-    await tester.pumpAndSettle();
-
-    expect(find.text('handout-route'), findsOneWidget);
-    expect(container.read(courseFlowProvider).courseId, '101');
-    expect(container.read(activeBlockProvider), 4001);
-    expect(container.read(playerStateProvider).positionSec, 180);
-  });
-
-  testWidgets('recent learning opens course detail from the course list',
-      (tester) async {
-    _useTestSurface(tester);
-    final fakeApiClient = _HomePageFakeApiClient();
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    addTearDown(container.dispose);
-    final router = GoRouter(
-      routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, state) => const HomePage(),
-        ),
-        GoRoute(
-          path: '/courses/:courseId',
-          builder: (context, state) =>
-              Text('course-detail-${state.pathParameters['courseId']}'),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp.router(routerConfig: router),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(OutlinedButton, '课程详情').first);
-    await tester.pumpAndSettle();
-
-    expect(find.text('course-detail-101'), findsOneWidget);
-  });
-
-  testWidgets('home resume clears stale state when progress has no target',
-      (tester) async {
-    _useTestSurface(tester);
-    final fakeApiClient = _HomePageFakeApiClient(
-      progressBlockId: null,
-      progressPositionSec: null,
-    );
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    addTearDown(container.dispose);
-    container.read(courseFlowProvider.notifier).startCourse('101');
-    container.read(activeBlockProvider.notifier).state = 4999;
-    container.read(playerStateProvider.notifier).state =
-        const PlayerState(positionSec: 999);
-    final router = GoRouter(
-      routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, state) => const HomePage(),
-        ),
-        GoRoute(
-          path: '/courses/:courseId/handout',
-          builder: (context, state) => const Text('handout-route'),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp.router(routerConfig: router),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(OutlinedButton, '继续学习').first);
-    await tester.pumpAndSettle();
-
-    expect(find.text('handout-route'), findsOneWidget);
-    expect(container.read(courseFlowProvider).courseId, '101');
-    expect(container.read(activeBlockProvider), isNull);
-    expect(container.read(handoutResumeTargetProvider), isNull);
-    expect(container.read(playerStateProvider).positionSec, 0);
-  });
-
-  testWidgets('recent learning can switch current course', (tester) async {
-    _useTestSurface(tester);
-    final fakeApiClient = _HomePageFakeApiClient(switchCourseId: 202);
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    addTearDown(container.dispose);
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: const MaterialApp(home: HomePage()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(OutlinedButton, '设为当前课程').first);
-    await tester.pumpAndSettle();
-
-    expect(fakeApiClient.switchedCourseIds, ['101']);
-    expect(container.read(courseFlowProvider).courseId, '202');
-    expect(find.text('当前课程已切换'), findsOneWidget);
-  });
-
-  testWidgets('recent learning disables switch button while switching',
-      (tester) async {
-    _useTestSurface(tester);
-    final switchCompleter = Completer<CourseSummaryModel>();
-    final fakeApiClient = _HomePageFakeApiClient(
-      switchCompleter: switchCompleter,
-    );
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    addTearDown(container.dispose);
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: const MaterialApp(home: HomePage()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(OutlinedButton, '设为当前课程').first);
-    await tester.pump();
-
-    final switchingButton = tester.widget<OutlinedButton>(find
-        .widgetWithText(
-          OutlinedButton,
-          '正在切换',
-        )
-        .first);
-    expect(switchingButton.onPressed, isNull);
-
-    switchCompleter.complete(_course(101));
-    await tester.pumpAndSettle();
-
-    expect(find.text('设为当前课程'), findsWidgets);
-    expect(container.read(courseFlowProvider).courseId, '101');
-  });
-
-  testWidgets('recent learning switch failure shows snack bar', (tester) async {
-    _useTestSurface(tester);
-    final fakeApiClient = _HomePageFakeApiClient(
-      switchError: StateError('backend unavailable'),
-    );
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    addTearDown(container.dispose);
-
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: const MaterialApp(home: HomePage()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(OutlinedButton, '设为当前课程').first);
-    await tester.pumpAndSettle();
-
-    expect(fakeApiClient.switchedCourseIds, ['101']);
-    expect(find.textContaining('切换当前课程失败'), findsOneWidget);
-    expect(container.read(courseFlowProvider).courseId, isNull);
-  });
-
-  testWidgets('home page renders empty dashboard states on mobile', (
+  testWidgets('home page renders the redesigned study overview', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(390, 900);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final fakeApiClient = _HomePageFakeApiClient(empty: true);
+    _useTestSurface(tester);
+
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('学习总览'), findsWidgets);
+    expect(find.text('KNOWLINK / STUDY CENTER'), findsOneWidget);
+    expect(find.text('今日学习计划'), findsOneWidget);
+    expect(find.text('进入当前课时'), findsOneWidget);
+    expect(find.text('推荐复习'), findsOneWidget);
+    expect(find.text('最近课程'), findsOneWidget);
+
+    expect(find.text('进入测试'), findsNothing);
+    expect(find.text('下一步学习'), findsNothing);
+    expect(find.text('课程数'), findsNothing);
+    expect(find.text('今日计划'), findsNothing);
+    expect(find.text('薄弱点'), findsNothing);
+  });
+
+  testWidgets('home can jump to library and create a course', (tester) async {
+    _useTestSurface(tester);
+    final router = GoRouter(
+      routes: [
+        GoRoute(path: '/', builder: (_, __) => const HomePage()),
+        GoRoute(
+            path: '/courses', builder: (_, __) => const CourseLibraryPage()),
+        GoRoute(
+          path: '/courses/:courseId',
+          builder: (_, state) => CourseWorkbenchPage(
+            courseId: state.pathParameters['courseId']!,
+          ),
+        ),
+      ],
+    );
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [
-          apiClientProvider.overrideWithValue(fakeApiClient),
-        ],
-        child: const MaterialApp(home: HomePage()),
+        child: MaterialApp.router(routerConfig: router),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('暂无最近学习课程。'), findsOneWidget);
-    expect(find.text('暂无今日推荐知识点。'), findsOneWidget);
-    expect(find.text('完成测验后会在这里展示 Top3 复习任务。'), findsOneWidget);
+    await tester.tap(find.text('查看课程库'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CourseLibraryPage), findsOneWidget);
+
+    router.go('/');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新建课程').last);
+    await tester.pumpAndSettle();
+    expect(find.text('新建课程'), findsWidgets);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
   });
 }
 
 void _useTestSurface(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1200, 900);
+  tester.view.physicalSize = const Size(1280, 1400);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-}
-
-class _HomePageFakeApiClient extends ApiClient {
-  _HomePageFakeApiClient({
-    this.empty = false,
-    this.progressBlockId = 4001,
-    this.progressPositionSec = 180,
-    this.switchCourseId,
-    this.switchCompleter,
-    this.switchError,
-  });
-
-  final bool empty;
-  final int? progressBlockId;
-  final int? progressPositionSec;
-  final int? switchCourseId;
-  final Completer<CourseSummaryModel>? switchCompleter;
-  final Object? switchError;
-  final switchedCourseIds = <String>[];
-
-  @override
-  Future<HomeDashboardModel> fetchHomeDashboard() async {
-    if (empty) {
-      return HomeDashboardModel.fromJson({
-        'recentCourses': [],
-        'topReviewTasks': [],
-        'recommendationEntryEnabled': true,
-        'dailyRecommendedKnowledgePoints': [],
-        'learningStats': {},
-      });
-    }
-    return HomeDashboardModel.fromJson({
-      'recentCourses': [
-        {
-          'courseId': 101,
-          'title': 'KnowLink 固定联调课',
-          'entryType': 'manual_import',
-          'catalogId': null,
-          'lifecycleStatus': 'learning_ready',
-          'pipelineStage': 'handout',
-          'pipelineStatus': 'succeeded',
-          'updatedAt': '2026-05-11T10:00:00+00:00',
-        },
-        {
-          'courseId': 202,
-          'title': '课程 202',
-          'entryType': 'recommendation',
-          'catalogId': 'math-final-01',
-          'lifecycleStatus': 'learning_ready',
-          'pipelineStage': 'handout',
-          'pipelineStatus': 'succeeded',
-          'updatedAt': '2026-05-10T10:00:00+00:00',
-        },
-      ],
-      'topReviewTasks': [
-        {
-          'reviewTaskId': 8401,
-          'taskType': 'revisit_block',
-          'priorityScore': 95,
-          'reasonText': '该块是考试高频点',
-          'recommendedMinutes': 20,
-          'reviewOrder': 1,
-          'intensity': 'high',
-        },
-      ],
-      'recommendationEntryEnabled': true,
-      'dailyRecommendedKnowledgePoints': [
-        {
-          'knowledgePoint': '极限定义',
-          'reason': '高频考点且建议今天优先回看',
-          'targetCourseId': 101,
-        },
-      ],
-      'learningStats': {
-        'streakDays': 3,
-        'completedCourses': 1,
-        'reviewTasksCompleted': 2,
-        'totalLearningMinutes': 95,
-      },
-    });
-  }
-
-  @override
-  Future<CourseProgressModel> fetchCourseProgress(String courseId) async {
-    final parsedCourseId = int.parse(courseId);
-    return CourseProgressModel.fromJson({
-      'courseId': parsedCourseId,
-      'handoutVersionId': 3001,
-      'lastHandoutBlockId': parsedCourseId == 101 ? progressBlockId : null,
-      'lastPositionSec': parsedCourseId == 101 ? progressPositionSec : null,
-      'lastActivityAt': '2026-05-11T10:00:00+00:00',
-    });
-  }
-
-  @override
-  Future<CourseSummaryModel> switchCurrentCourse(String courseId) async {
-    switchedCourseIds.add(courseId);
-    final error = switchError;
-    if (error != null) {
-      throw error;
-    }
-    final completer = switchCompleter;
-    if (completer != null) {
-      return completer.future;
-    }
-    return _course(switchCourseId ?? int.parse(courseId));
-  }
-}
-
-CourseSummaryModel _course(int courseId) {
-  return CourseSummaryModel.fromJson({
-    'courseId': courseId,
-    'title': 'KnowLink 固定联调课',
-    'entryType': 'manual_import',
-    'catalogId': null,
-    'lifecycleStatus': 'learning_ready',
-    'pipelineStage': 'handout',
-    'pipelineStatus': 'succeeded',
-    'updatedAt': '2026-05-11T10:00:00+00:00',
-  });
 }

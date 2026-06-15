@@ -14,8 +14,23 @@ void main() {
       isA<RoundedRectangleBorder>().having(
         (shape) => shape.borderRadius,
         'borderRadius',
-        BorderRadius.circular(8),
+        BorderRadius.circular(AppTheme.radiusCard),
       ),
+    );
+    expect(AppTheme.surface, const Color(0xFFE0E5EC));
+    expect(AppTheme.accent, const Color(0xFF6C63FF));
+    expect(AppTheme.raisedShadow, isNotEmpty);
+    expect(
+      theme.filledButtonTheme.style?.elevation?.resolve({
+        WidgetState.hovered,
+      }),
+      7,
+    );
+    expect(
+      theme.outlinedButtonTheme.style?.elevation?.resolve({
+        WidgetState.disabled,
+      }),
+      0,
     );
   });
 }

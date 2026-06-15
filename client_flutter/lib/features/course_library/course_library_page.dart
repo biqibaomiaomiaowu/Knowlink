@@ -3,159 +3,201 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_theme.dart';
-import '../../core/widgets/app_error_view.dart';
-import '../../core/widgets/app_loading_view.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../core/widgets/knowlink_widgets.dart';
-import '../../shared/models/course_lesson_models.dart';
-import '../../shared/providers/course_library_provider.dart';
+import '../../shared/models/soft_ui_models.dart';
+import '../../shared/providers/soft_ui_provider.dart';
 
 class CourseLibraryPage extends ConsumerWidget {
   const CourseLibraryPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final courses = ref.watch(courseLibraryProvider);
+    final state = ref.watch(softUiProvider);
     return AppScaffold(
       title: '课程库',
-      activeTab: KnowLinkTab.home,
-      body: courses.when(
-        loading: () => const AppLoadingView(label: '正在加载课程库'),
-        error: (error, _) => AppErrorView(
-          message: '课程库加载失败：$error',
-          onRetry: () => ref.invalidate(courseLibraryProvider),
-        ),
-        data: (items) => _CourseLibraryBody(items: items),
+      activeTab: KnowLinkTab.library,
+      courseId: state.activeCourseId,
+      lessonId: state.activeLessonId,
+      body: ListView(
+        children: [
+          PageTitle(
+            title: '课程库',
+            subtitle: '管理当前课程范围内的课时、资料和学习状态。',
+            icon: Icons.library_books_outlined,
+            actions: [
+              SoftButton(
+                label: '新建课程',
+                icon: Icons.add_rounded,
+                primary: true,
+                onPressed: () => _showCourseCreateModal(context, ref),
+              ),
+            ],
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 1120
+                  ? 3
+                  : constraints.maxWidth >= 720
+                      ? 2
+                      : 1;
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: state.courses.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columns,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: columns == 1 ? 1.55 : 1.18,
+                ),
+                itemBuilder: (context, index) {
+                  final course = state.courses[index];
+                  return _CourseTile(
+                    course: course,
+                    onContinue: () {
+                      ref.read(softUiProvider.notifier).selectCourse(course.id);
+                      context.go('/courses/${course.id}');
+                    },
+                  );
+                },
+              );
+            },
+          ),
+        ],
       ),
-    );
-  }
-}
-
-class _CourseLibraryBody extends StatelessWidget {
-  const _CourseLibraryBody({required this.items});
-
-  final List<CourseLibraryItemModel> items;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        const PageTitle(
-          title: '课程库',
-          subtitle: '按最近活动查看全部课程，进入课程工作台继续学习。',
-          icon: Icons.library_books_outlined,
-        ),
-        if (items.isEmpty)
-          const SectionCard(child: Text('暂无课程。'))
-        else
-          ...items.map((item) => Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: _CourseTile(item: item),
-              )),
-      ],
     );
   }
 }
 
 class _CourseTile extends StatelessWidget {
-  const _CourseTile({required this.item});
+  const _CourseTile({
+    required this.course,
+    required this.onContinue,
+  });
 
-  final CourseLibraryItemModel item;
+  final SoftCourse course;
+  final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
-    final mastery = item.overallMasteryScore == null
-        ? '掌握度 --'
-        : '掌握度 ${(item.overallMasteryScore! * 100).round()}%';
     return SectionCard(
-      child: InkWell(
-        onTap: () => context.go('/courses/${item.courseId}'),
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(2),
-          child: Column(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      item.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppTheme.ink,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+              Expanded(
+                child: Text(
+                  course.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.text,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    height: 1.12,
                   ),
-                  if (item.isCurrent)
-                    const StatusPill(
-                      label: '当前课程',
-                      color: Color(0xFF16A34A),
-                    ),
-                ],
+                ),
               ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                children: [
-                  StatusPill(label: '学习状态：${item.learningStatus}'),
-                  StatusPill(
-                    label: '${item.pipelineStage} / ${item.pipelineStatus}',
-                    color: const Color(0xFF64748B),
-                  ),
-                  StatusPill(label: item.entryType),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 18,
-                runSpacing: 8,
-                children: [
-                  _InlineMetric('最近活动：${_formatDate(item.lastActivityAt)}'),
-                  _InlineMetric('课时 ${item.lessonCount}'),
-                  _InlineMetric('课程资料 ${item.courseResourceCount}'),
-                  _InlineMetric(
-                    '当前课时：${item.currentLessonTitle ?? '未选择'}',
-                  ),
-                  _InlineMetric(mastery),
-                  _InlineMetric('待复习 ${item.pendingReviewCount}'),
-                ],
-              ),
+              const SizedBox(width: 8),
+              StatusPill(label: course.status, color: AppTheme.success),
             ],
           ),
+          const SizedBox(height: 16),
+          ProgressRail(value: course.progress),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              StatusPill(label: '${(course.progress * 100).round()}%'),
+              StatusPill(label: '${course.lessonCount} 课时'),
+              StatusPill(label: '${course.materialCount} 资料'),
+            ],
+          ),
+          const Spacer(),
+          Text(
+            '上次学习：${_formatDate(course.lastStudiedAt)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppTheme.muted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SoftButton(
+              label: '继续学习',
+              icon: Icons.play_arrow_rounded,
+              primary: true,
+              onPressed: onContinue,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showCourseCreateModal(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final controller = TextEditingController();
+  final formKey = GlobalKey<FormState>();
+  final created = await showDialog<SoftCourse>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        backgroundColor: AppTheme.surface,
+        surfaceTintColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+        title: const Text('新建课程'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: '例如：计算机网络速通'),
+            validator: (value) =>
+                value == null || value.trim().isEmpty ? '请输入课程名称' : null,
+          ),
         ),
-      ),
-    );
+        actions: [
+          SoftButton(
+            label: '取消',
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          SoftButton(
+            label: '创建课程',
+            primary: true,
+            onPressed: () {
+              if (!formKey.currentState!.validate()) {
+                return;
+              }
+              final course = ref
+                  .read(softUiProvider.notifier)
+                  .createCourse(controller.text);
+              Navigator.of(context).pop(course);
+            },
+          ),
+        ],
+      );
+    },
+  );
+  controller.dispose();
+  if (created != null && context.mounted) {
+    context.go('/courses/${created.id}');
   }
 }
 
-class _InlineMetric extends StatelessWidget {
-  const _InlineMetric(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: AppTheme.muted,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
-}
-
-String _formatDate(DateTime? value) {
-  if (value == null) {
-    return '--';
-  }
-  final month = value.month.toString().padLeft(2, '0');
-  final day = value.day.toString().padLeft(2, '0');
-  return '${value.year}-$month-$day';
+String _formatDate(DateTime value) {
+  return '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')} '
+      '${value.hour.toString().padLeft(2, '0')}:'
+      '${value.minute.toString().padLeft(2, '0')}';
 }
