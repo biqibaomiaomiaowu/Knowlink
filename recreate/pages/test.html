@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KnowLink 测试中心</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;1,400;1,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles/knowlink-mono.css" />
+</head>
+<body data-page="test">
+  <div class="prototype">
+    <div class="frame">
+      <div class="topbar">
+        <div class="logo">K</div>
+        <div class="brand-title">KnowLink</div>
+      </div>
+
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="side-label">学习中心</div>
+          <div class="nav-item" data-screen="home">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+            学习总览
+          </div>
+          <div class="nav-item" data-screen="library">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>
+            课程库
+          </div>
+          <div class="nav-item" data-screen="lesson">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+            课时学习
+          </div>
+          <div class="nav-item active" data-screen="test">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/><path d="M8 17h8"/></svg>
+            测试中心
+          </div>
+          <div class="nav-item" data-screen="chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+            AI 问答
+          </div>
+          <div class="nav-item" data-screen="review">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
+            复习中心
+          </div>
+        </aside>
+
+        <main class="content">
+          <section class="screen active" id="test">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/><path d="M8 17h8"/></svg>
+                </div>
+                <div>
+                  <h1>测试中心</h1>
+                  <div class="subtitle">从当前课时生成测试，也可以回看历史测试与错题来源。</div>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="btn primary" type="button" data-generate-test>新建测试</button>
+              </div>
+            </div>
+
+            <div class="test-layout">
+              <aside class="card test-history">
+                <h2 class="section-title">历史测试</h2>
+                <div class="list test-history-list" id="testHistoryList">
+                  <button class="row history-test active" type="button" data-test-title="第 4 课专项测试" data-test-meta="10 题 · 中等 · 82 分" data-test-score="82" data-test-weak="循环队列长度计算">
+                    <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+                    <div class="main"><div class="name">第 4 课专项测试</div><div class="meta">今天 14:20 · 10 题 · 中等 · 82 分</div></div>
+                  </button>
+                  <button class="row history-test" type="button" data-test-title="线性表回顾测试" data-test-meta="8 题 · 基础 · 90 分" data-test-score="90" data-test-weak="链表插入边界">
+                    <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+                    <div class="main"><div class="name">线性表回顾测试</div><div class="meta">昨天 20:10 · 8 题 · 基础 · 90 分</div></div>
+                  </button>
+                  <button class="row history-test" type="button" data-test-title="数据结构阶段测验" data-test-meta="20 题 · 困难 · 76 分" data-test-score="76" data-test-weak="二叉树非递归遍历">
+                    <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+                    <div class="main"><div class="name">数据结构阶段测验</div><div class="meta">6 月 12 日 · 20 题 · 困难 · 76 分</div></div>
+                  </button>
+                </div>
+              </aside>
+
+              <section class="card test-main">
+                <div class="card-head">
+                  <h2 class="section-title" id="activeTestTitle">第 4 课专项测试</h2>
+                  <span class="pill" id="activeTestMeta">10 题 · 中等 · 82 分</span>
+                </div>
+
+                <div class="test-config">
+                  <label>
+                    <div class="modal-label">题目数量</div>
+                    <input class="modal-input" id="testQuestionCount" type="number" min="1" max="50" value="10" />
+                  </label>
+                  <div>
+                    <div class="modal-label">题目难度</div>
+                    <div class="choice-row" id="testDifficultyChoices">
+                      <button class="choice-btn" type="button">基础</button>
+                      <button class="choice-btn active" type="button">中等</button>
+                      <button class="choice-btn" type="button">困难</button>
+                    </div>
+                  </div>
+                  <button class="btn primary" type="button" data-create-test>生成测试</button>
+                </div>
+
+                <div class="test-result-band">
+                  <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-6"/></svg></div><div><div class="value" id="activeTestScore">82</div><div class="label">当前得分</div></div></div>
+                  <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg></div><div><div class="value">18m</div><div class="label">用时</div></div></div>
+                  <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div><div><div class="value" id="activeTestWeak">循环队列</div><div class="label">薄弱点</div></div></div>
+                </div>
+
+                <div class="test-paper" id="testPaper">
+                  <article class="question-card">
+                    <h3>1. 循环队列长度计算公式中，为什么需要加上 maxSize 后再取模？</h3>
+                    <div class="option-list">
+                      <div class="option-item">A. 避免 rear - front 为负数</div>
+                      <div class="option-item">B. 提高数组访问速度</div>
+                      <div class="option-item">C. 表示队列一定已满</div>
+                      <div class="option-item">D. 用于扩容数组</div>
+                    </div>
+                  </article>
+                  <article class="question-card">
+                    <h3>2. 栈的出栈顺序主要体现哪种访问规则？</h3>
+                    <div class="option-list">
+                      <div class="option-item">A. 先进先出</div>
+                      <div class="option-item">B. 后进先出</div>
+                      <div class="option-item">C. 随机访问</div>
+                      <div class="option-item">D. 按优先级访问</div>
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const routeMap = {
+        home: 'index.html',
+        library: 'library.html',
+        workspace: 'workspace.html',
+        lesson: 'lesson.html',
+        test: 'test.html',
+        chat: 'chat.html',
+        review: 'review.html',
+      };
+
+      function currentUrl(screen) {
+        const file = routeMap[screen];
+        if (!file) return null;
+        return screen === 'home' ? '../index.html' : `./${file}`;
+      }
+
+      function goTo(screenId) {
+        if (screenId === 'test') return;
+        const href = currentUrl(screenId);
+        if (href) window.location.href = href;
+      }
+
+      document.querySelectorAll('.nav-item').forEach((item) => {
+        item.addEventListener('click', () => goTo(item.dataset.screen));
+      });
+
+      document.querySelectorAll('.choice-row').forEach((row) => {
+        row.querySelectorAll('.choice-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            row.querySelectorAll('.choice-btn').forEach((item) => item.classList.remove('active'));
+            btn.classList.add('active');
+          });
+        });
+      });
+
+      const testHistoryList = document.getElementById('testHistoryList');
+      const activeTestTitle = document.getElementById('activeTestTitle');
+      const activeTestMeta = document.getElementById('activeTestMeta');
+      const activeTestScore = document.getElementById('activeTestScore');
+      const activeTestWeak = document.getElementById('activeTestWeak');
+      const testPaper = document.getElementById('testPaper');
+      const testQuestionCount = document.getElementById('testQuestionCount');
+
+      function setActiveTest(item) {
+        if (!item) return;
+        testHistoryList?.querySelectorAll('.history-test').forEach((row) => row.classList.remove('active'));
+        item.classList.add('active');
+        if (activeTestTitle) activeTestTitle.textContent = item.dataset.testTitle || '本节测试';
+        if (activeTestMeta) activeTestMeta.textContent = item.dataset.testMeta || '10 题 · 中等';
+        if (activeTestScore) activeTestScore.textContent = item.dataset.testScore || '--';
+        if (activeTestWeak) activeTestWeak.textContent = (item.dataset.testWeak || '待分析').slice(0, 4);
+      }
+
+      testHistoryList?.addEventListener('click', (event) => {
+        const item = event.target.closest('.history-test');
+        if (item) setActiveTest(item);
+      });
+
+      function generateTest() {
+        const count = Math.max(1, Number(testQuestionCount?.value || 10));
+        const difficulty = document.querySelector('#testDifficultyChoices .choice-btn.active')?.textContent.trim() || '中等';
+        const item = document.createElement('button');
+        item.className = 'row history-test';
+        item.type = 'button';
+        item.dataset.testTitle = '第 4 课新测试';
+        item.dataset.testMeta = `${count} 题 · ${difficulty} · 未完成`;
+        item.dataset.testScore = '--';
+        item.dataset.testWeak = '待分析';
+        item.innerHTML = `
+          <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+          <div class="main"><div class="name">第 4 课新测试</div><div class="meta">刚刚生成 · ${count} 题 · ${difficulty} · 未完成</div></div>
+        `;
+        testHistoryList?.prepend(item);
+        setActiveTest(item);
+        if (testPaper) {
+          testPaper.innerHTML = `
+            <article class="question-card">
+              <h3>1. 当前测试已按“${count} 题 · ${difficulty}”生成，第一题会优先覆盖循环队列长度计算。</h3>
+              <div class="option-list">
+                <div class="option-item">A. (rear - front + maxSize) % maxSize</div>
+                <div class="option-item">B. rear + front</div>
+                <div class="option-item">C. front - rear</div>
+                <div class="option-item">D. maxSize - 1</div>
+              </div>
+            </article>
+            <article class="question-card">
+              <h3>2. 系统会根据本节视频、课件和字幕继续补齐剩余题目。</h3>
+              <div class="option-list">
+                <div class="option-item">题型范围：概念判断、出入队模拟、公式应用、错题变式</div>
+              </div>
+            </article>
+          `;
+        }
+      }
+
+      document.querySelector('[data-create-test]')?.addEventListener('click', generateTest);
+      document.querySelector('[data-generate-test]')?.addEventListener('click', generateTest);
+    })();
+  </script>
+</body>
+</html>

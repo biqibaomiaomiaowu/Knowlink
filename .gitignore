@@ -53,6 +53,9 @@ coverage/
 *.swp
 .tmp-py312/
 
+# Generated presentation and speech-script outputs
+recreate/outputs/
+
 # Local Codex workspace data
 .codex
 .agents/

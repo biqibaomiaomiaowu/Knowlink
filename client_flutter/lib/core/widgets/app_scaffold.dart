@@ -2,16 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_theme.dart';
+import 'knowlink_widgets.dart';
 
 enum KnowLinkTab {
   home,
+  library,
+  workspace,
+  lesson,
+  test,
+  chat,
+  review,
   import,
   recommend,
   parse,
   inquiry,
   handout,
   quiz,
-  review,
 }
 
 class AppScaffold extends StatelessWidget {
@@ -21,6 +27,7 @@ class AppScaffold extends StatelessWidget {
     this.subtitle,
     this.activeTab,
     this.courseId,
+    this.lessonId,
     this.quizId,
     super.key,
   });
@@ -30,6 +37,7 @@ class AppScaffold extends StatelessWidget {
   final Widget body;
   final KnowLinkTab? activeTab;
   final String? courseId;
+  final String? lessonId;
   final String? quizId;
 
   @override
@@ -38,52 +46,72 @@ class AppScaffold extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.page,
       body: SafeArea(
-        child: Column(
-          children: [
-            const _KnowLinkTopBar(),
-            Expanded(
-              child: ColoredBox(
-                color: AppTheme.page,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1448),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-                      child: body,
-                    ),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1520),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(36),
+                  boxShadow: AppTheme.raisedShadow,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(36),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isDesktop = constraints.maxWidth >= 900;
+                      return Column(
+                        children: [
+                          _KnowLinkTopbar(
+                            activeTab: tab,
+                            courseId: courseId,
+                            lessonId: lessonId,
+                            showMobileNav: !isDesktop,
+                          ),
+                          Expanded(
+                            child: isDesktop
+                                ? Row(
+                                    children: [
+                                      _Sidebar(
+                                        activeTab: tab,
+                                        courseId: courseId,
+                                        lessonId: lessonId,
+                                      ),
+                                      Expanded(child: _Content(child: body)),
+                                    ],
+                                  )
+                                : _Content(child: body),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
             ),
-            _KnowLinkBottomNav(
-              activeTab: tab,
-              courseId: courseId,
-              quizId: quizId,
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
   KnowLinkTab _tabFromTitle(String title) {
-    if (title.contains('导入')) {
-      return KnowLinkTab.import;
+    if (title.contains('课程库')) {
+      return KnowLinkTab.library;
     }
-    if (title.contains('推荐') && !title.contains('复习')) {
-      return KnowLinkTab.recommend;
+    if (title.contains('工作区') || title.contains('工作台')) {
+      return KnowLinkTab.workspace;
     }
-    if (title.contains('解析')) {
-      return KnowLinkTab.parse;
+    if (title.contains('课时') || title.contains('讲义')) {
+      return KnowLinkTab.lesson;
     }
-    if (title.contains('问询') || title.contains('问答')) {
-      return KnowLinkTab.inquiry;
+    if (title.contains('测验') || title.contains('测试')) {
+      return KnowLinkTab.test;
     }
-    if (title.contains('讲义')) {
-      return KnowLinkTab.handout;
-    }
-    if (title.contains('测验')) {
-      return KnowLinkTab.quiz;
+    if (title.contains('问答') || title.contains('QA')) {
+      return KnowLinkTab.chat;
     }
     if (title.contains('复习')) {
       return KnowLinkTab.review;
@@ -92,314 +120,308 @@ class AppScaffold extends StatelessWidget {
   }
 }
 
-class _KnowLinkTopBar extends StatelessWidget {
-  const _KnowLinkTopBar();
+class _KnowLinkTopbar extends StatelessWidget {
+  const _KnowLinkTopbar({
+    required this.activeTab,
+    required this.courseId,
+    required this.lessonId,
+    required this.showMobileNav,
+  });
 
-  static const double _wideSearchWidth = 460;
+  final KnowLinkTab activeTab;
+  final String? courseId;
+  final String? lessonId;
+  final bool showMobileNav;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 78,
+    return DecoratedBox(
       decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: AppTheme.line)),
+        color: AppTheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x99A3B1C6),
+            blurRadius: 6,
+            offset: Offset(3, 3),
+            blurStyle: BlurStyle.inner,
+          ),
+          BoxShadow(
+            color: Color(0x85FFFFFF),
+            blurRadius: 6,
+            offset: Offset(-3, -3),
+            blurStyle: BlurStyle.inner,
+          ),
+        ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 560;
-          final showSearch = constraints.maxWidth >= 760;
-          final logoSize = compact ? 40.0 : 48.0;
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            height: 78,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  _Logo(),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      'KnowLink',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.text,
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (showMobileNav)
+            _MobileNav(
+              activeTab: activeTab,
+              courseId: courseId,
+              lessonId: lessonId,
+            ),
+        ],
+      ),
+    );
+  }
+}
 
-          return Row(
+class _Sidebar extends StatelessWidget {
+  const _Sidebar({
+    required this.activeTab,
+    required this.courseId,
+    required this.lessonId,
+  });
+
+  final KnowLinkTab activeTab;
+  final String? courseId;
+  final String? lessonId;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _navItems(courseId: courseId, lessonId: lessonId);
+    return SizedBox(
+      width: 244,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x99A3B1C6),
+              blurRadius: 6,
+              offset: Offset(3, 3),
+              blurStyle: BlurStyle.inner,
+            ),
+            BoxShadow(
+              color: Color(0x85FFFFFF),
+              blurRadius: 6,
+              offset: Offset(-3, -3),
+              blurStyle: BlurStyle.inner,
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _LogoMark(size: logoSize),
-              const SizedBox(width: 12),
-              Flexible(
-                fit: FlexFit.loose,
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10),
                 child: Text(
-                  'KnowLink',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  '学习中心',
                   style: TextStyle(
-                    color: AppTheme.ink,
-                    fontSize: compact ? 22 : 28,
+                    color: AppTheme.muted,
+                    fontSize: 12,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0,
                   ),
                 ),
               ),
-              const Spacer(),
-              if (showSearch) ...[
-                Flexible(
-                  flex: 2,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: _wideSearchWidth,
-                    ),
-                    child: const _SearchBox(),
+              const SizedBox(height: 14),
+              ...items.map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _NavButton(
+                    item: item,
+                    active: item.tab == _canonical(activeTab),
                   ),
                 ),
-                const SizedBox(width: 24),
-              ] else
-                const _CompactSearchButton(),
-              const _NotificationButton(),
+              ),
             ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _LogoMark extends StatelessWidget {
-  const _LogoMark({this.size = 48});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF60A5FA), AppTheme.brandBlueDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x332563EB),
-            blurRadius: 14,
-            offset: Offset(0, 6),
           ),
-        ],
-      ),
-      child: Text(
-        'K',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: size * 0.58,
-          fontWeight: FontWeight.w800,
         ),
       ),
     );
   }
 }
 
-class _SearchBox extends StatelessWidget {
-  const _SearchBox();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 52,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFCBD5E1)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      child: const Row(
-        children: [
-          Icon(Icons.search, color: AppTheme.muted),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              '搜索课程、知识点或学习资料',
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Color(0xFF94A3B8),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CompactSearchButton extends StatelessWidget {
-  const _CompactSearchButton();
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: '搜索',
-      onPressed: () {},
-      icon: const Icon(Icons.search, color: AppTheme.muted, size: 28),
-    );
-  }
-}
-
-class _NotificationButton extends StatelessWidget {
-  const _NotificationButton();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 38,
-      height: 42,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned.fill(
-            child: IconButton(
-              tooltip: '通知',
-              onPressed: () {},
-              icon: const Icon(
-                Icons.notifications_none,
-                color: AppTheme.ink,
-                size: 30,
-              ),
-            ),
-          ),
-          Positioned(
-            right: -1,
-            top: 1,
-            child: Container(
-              width: 18,
-              height: 18,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEF4444),
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: const Text(
-                '3',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _KnowLinkBottomNav extends StatelessWidget {
-  const _KnowLinkBottomNav({
+class _MobileNav extends StatelessWidget {
+  const _MobileNav({
     required this.activeTab,
     required this.courseId,
-    required this.quizId,
+    required this.lessonId,
   });
-
-  static const double _itemWidth = 166;
-  static const double _navWidth = _itemWidth * 8;
 
   final KnowLinkTab activeTab;
   final String? courseId;
-  final String? quizId;
+  final String? lessonId;
 
   @override
   Widget build(BuildContext context) {
-    final currentCourseId = courseId;
-    final items = [
-      const _NavItem(KnowLinkTab.home, Icons.home_outlined, '首页', '/'),
-      const _NavItem(
-        KnowLinkTab.import,
-        Icons.file_upload_outlined,
-        '导入',
-        '/import',
-      ),
-      const _NavItem(
-        KnowLinkTab.recommend,
-        Icons.auto_awesome_outlined,
-        '推荐',
-        '/recommend',
-      ),
-      _NavItem(
-        KnowLinkTab.parse,
-        Icons.bar_chart_outlined,
-        '解析',
-        currentCourseId == null ? null : '/courses/$currentCourseId/progress',
-      ),
-      _NavItem(
-        KnowLinkTab.inquiry,
-        Icons.forum_outlined,
-        '问询',
-        currentCourseId == null ? null : '/courses/$currentCourseId/inquiry',
-      ),
-      _NavItem(
-        KnowLinkTab.handout,
-        Icons.menu_book_outlined,
-        '讲义',
-        currentCourseId == null ? null : '/courses/$currentCourseId/handout',
-      ),
-      _NavItem(
-        KnowLinkTab.quiz,
-        Icons.check_box_outlined,
-        '测验',
-        quizId == null
-            ? currentCourseId == null
-                ? null
-                : '/courses/$currentCourseId/quiz'
-            : '/quizzes/$quizId',
-      ),
-      _NavItem(
-        KnowLinkTab.review,
-        Icons.calendar_today_outlined,
-        '复习',
-        currentCourseId == null ? null : '/courses/$currentCourseId/review',
-      ),
-    ];
-
-    return Container(
-      height: 86,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppTheme.line)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final nav = Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: items
-                .map(
-                  (item) => _BottomNavButton(
-                    item: item,
-                    isActive: item.tab == activeTab,
-                    onTap: item.path == null
-                        ? null
-                        : () => _go(context, item.path!),
-                  ),
-                )
-                .toList(),
-          );
-          if (constraints.maxWidth >= _navWidth) {
-            return nav;
-          }
-          return SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(width: _navWidth, child: nav),
+    final items = _navItems(courseId: courseId, lessonId: lessonId);
+    return SizedBox(
+      height: 70,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+        scrollDirection: Axis.horizontal,
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final item = items[index];
+          return _NavButton(
+            item: item,
+            active: item.tab == _canonical(activeTab),
+            compact: true,
           );
         },
       ),
     );
   }
+}
 
-  void _go(BuildContext context, String path) {
-    try {
-      GoRouter.of(context).go(path);
-    } catch (_) {
-      // Widget tests can mount pages without a router.
-    }
+class _Content extends StatelessWidget {
+  const _Content({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppTheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _Logo extends StatelessWidget {
+  const _Logo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 52,
+      height: 52,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: AppTheme.raisedShadow,
+      ),
+      child: Container(
+        width: 32,
+        height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: AppTheme.insetShadow,
+        ),
+        child: const Text(
+          'K',
+          style: TextStyle(
+            color: AppTheme.accent,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavButton extends StatelessWidget {
+  const _NavButton({
+    required this.item,
+    required this.active,
+    this.compact = false,
+  });
+
+  final _NavItem item;
+  final bool active;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = item.path != null;
+    return HoverLift(
+      enabled: enabled,
+      child: Material(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(AppTheme.radiusControl),
+        child: InkWell(
+          onTap: enabled ? () => context.go(item.path!) : null,
+          mouseCursor:
+              enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          borderRadius: BorderRadius.circular(AppTheme.radiusControl),
+          child: Container(
+            width: compact ? null : double.infinity,
+            constraints: BoxConstraints(
+              minWidth: compact ? 120 : 0,
+              minHeight: 48,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(AppTheme.radiusControl),
+              boxShadow: active ? AppTheme.smallShadow : const [],
+            ),
+            child: Row(
+              mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+              children: [
+                Icon(
+                  item.icon,
+                  color: active ? AppTheme.accent : AppTheme.muted,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: active ? AppTheme.text : AppTheme.muted,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
 class _NavItem {
-  const _NavItem(this.tab, this.icon, this.label, this.path);
+  const _NavItem({
+    required this.tab,
+    required this.icon,
+    required this.label,
+    required this.path,
+  });
 
   final KnowLinkTab tab;
   final IconData icon;
@@ -407,52 +429,66 @@ class _NavItem {
   final String? path;
 }
 
-class _BottomNavButton extends StatelessWidget {
-  const _BottomNavButton({
-    required this.item,
-    required this.isActive,
-    required this.onTap,
-  });
+List<_NavItem> _navItems({
+  required String? courseId,
+  required String? lessonId,
+}) {
+  final activeCourse = courseId ?? 'course-1';
+  final activeLesson = lessonId ?? 'lesson-1';
+  return [
+    const _NavItem(
+      tab: KnowLinkTab.home,
+      icon: Icons.home_outlined,
+      label: '学习总览',
+      path: '/',
+    ),
+    const _NavItem(
+      tab: KnowLinkTab.library,
+      icon: Icons.library_books_outlined,
+      label: '课程库',
+      path: '/courses',
+    ),
+    _NavItem(
+      tab: KnowLinkTab.workspace,
+      icon: Icons.dashboard_customize_outlined,
+      label: '课程工作区',
+      path: '/courses/$activeCourse',
+    ),
+    _NavItem(
+      tab: KnowLinkTab.lesson,
+      icon: Icons.play_circle_outline,
+      label: '课时学习',
+      path: '/courses/$activeCourse/lessons/$activeLesson',
+    ),
+    _NavItem(
+      tab: KnowLinkTab.test,
+      icon: Icons.fact_check_outlined,
+      label: '测试中心',
+      path: '/courses/$activeCourse/test',
+    ),
+    _NavItem(
+      tab: KnowLinkTab.chat,
+      icon: Icons.forum_outlined,
+      label: 'AI 问答',
+      path: '/courses/$activeCourse/chat',
+    ),
+    _NavItem(
+      tab: KnowLinkTab.review,
+      icon: Icons.auto_stories_outlined,
+      label: '复习中心',
+      path: '/courses/$activeCourse/review',
+    ),
+  ];
+}
 
-  final _NavItem item;
-  final bool isActive;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isEnabled = onTap != null;
-    final color = isActive
-        ? AppTheme.brandBlue
-        : isEnabled
-            ? AppTheme.muted
-            : const Color(0xFFCBD5E1);
-    return SizedBox(
-      width: 166,
-      height: 66,
-      child: Material(
-        color: isActive ? const Color(0xFFEFF6FF) : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: onTap,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(item.icon, color: color, size: 24),
-              const SizedBox(height: 4),
-              Text(
-                item.label,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                  letterSpacing: 0,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+KnowLinkTab _canonical(KnowLinkTab tab) {
+  return switch (tab) {
+    KnowLinkTab.import => KnowLinkTab.library,
+    KnowLinkTab.recommend => KnowLinkTab.home,
+    KnowLinkTab.parse => KnowLinkTab.workspace,
+    KnowLinkTab.inquiry => KnowLinkTab.chat,
+    KnowLinkTab.handout => KnowLinkTab.lesson,
+    KnowLinkTab.quiz => KnowLinkTab.test,
+    _ => tab,
+  };
 }

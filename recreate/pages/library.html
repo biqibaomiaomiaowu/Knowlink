@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KnowLink 全新前端高保真原型</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,800;1,400;1,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles/knowlink-mono.css" />
+</head>
+<body data-page="library">
+  <div class="prototype">
+    <div class="frame">
+      <div class="topbar">
+        <div class="logo">K</div>
+        <div class="brand-title">KnowLink</div>
+      </div>
+
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="side-label">学习中心</div>
+          <div class="nav-item active" data-screen="home">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+            学习总览
+          </div>
+          <div class="nav-item" data-screen="library">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>
+            课程库
+          </div>
+          <div class="nav-item" data-screen="lesson">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+            课时学习
+          </div>
+          <div class="nav-item" data-screen="test">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/><path d="M8 17h8"/></svg>
+            测试中心
+          </div>
+          <div class="nav-item" data-screen="chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+            AI 问答
+          </div>
+          <div class="nav-item" data-screen="review">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
+            复习中心
+          </div>
+        </aside>
+
+        <main class="content">
+          <!-- LIBRARY -->
+          <section class="screen" id="library">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>
+                </div>
+                <div>
+                  <h1>课程库</h1>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-bottom:16px">
+              <div class="grid cols-3">
+                <div class="field">搜索：数据结构</div>
+                <div class="field">状态：全部课程</div>
+                <div class="field">排序：最近学习优先</div>
+              </div>
+            </div>
+
+            <div class="grid cols-4">
+              <div class="course-tile">
+                <span class="pill green">当前课程</span>
+                <h3 style="margin-top:12px">数据结构期末复习</h3>
+                <div class="stats"><span class="pill">12 课时</span></div>
+                <div class="progress"><span style="width:68%"></span></div>
+                <div class="actions" style="margin-top:14px;justify-content:flex-start">
+                  <button class="btn primary" data-jump="workspace">继续学习</button>
+                </div>
+              </div>
+              <div class="course-tile">
+                <span class="pill course-status-placeholder">当前课程</span>
+                <h3 style="margin-top:12px">机器学习导论</h3>
+                <div class="stats"><span class="pill">8 课时</span></div>
+                <div class="progress"><span style="width:42%"></span></div>
+                <div class="actions" style="margin-top:14px;justify-content:flex-start"><button class="btn primary" data-jump="workspace">继续学习</button></div>
+              </div>
+              <div class="course-tile">
+                <span class="pill course-status-placeholder">当前课程</span>
+                <h3 style="margin-top:12px">数据库系统</h3>
+                <div class="stats"><span class="pill">6 课时</span></div>
+                <div class="progress orange"><span style="width:24%"></span></div>
+                <div class="actions" style="margin-top:14px;justify-content:flex-start"><button class="btn primary" data-jump="workspace">继续学习</button></div>
+              </div>
+            </div>
+          </section>
+
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const routeMap = {
+        home: 'index.html',
+        library: 'library.html',
+        workspace: 'workspace.html',
+        lesson: 'lesson.html',
+        test: 'test.html',
+        chat: 'chat.html',
+        review: 'review.html',
+      };
+
+      const navItems = document.querySelectorAll('.nav-item');
+      const screens = document.querySelectorAll('.screen');
+      const isInPages = /[\\/]pages[\\/]?/i.test(window.location.pathname);
+
+      function currentUrl(screen) {
+        const file = routeMap[screen];
+        if (!file) return null;
+        return isInPages
+          ? (screen === 'home' ? '../index.html' : `./${file}`)
+          : (screen === 'home' ? 'index.html' : `pages/${file}`);
+      }
+
+      function showScreen(screenId) {
+        let activated = false;
+        screens.forEach((screen) => {
+          const active = screen.id === screenId;
+          screen.classList.toggle('active', active);
+          if (active) {
+            activated = true;
+          }
+        });
+
+        if (!activated) return false;
+
+        navItems.forEach((item) => {
+          item.classList.toggle('active', item.dataset.screen === screenId);
+        });
+
+        const content = document.querySelector('.content');
+        if (content) {
+          content.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        return true;
+      }
+
+      function goTo(screenId) {
+        if (!showScreen(screenId)) {
+          const href = currentUrl(screenId);
+          if (href) {
+            window.location.href = href;
+          }
+        }
+      }
+
+      navItems.forEach((item) => {
+        item.addEventListener('click', () => goTo(item.dataset.screen));
+      });
+
+      document.querySelectorAll('[data-jump]').forEach((btn) => {
+        btn.addEventListener('click', () => goTo(btn.dataset.jump));
+      });
+
+      const firstScreen = document.querySelector('.screen[id]');
+      if (firstScreen) {
+        showScreen(firstScreen.id);
+      }
+    })();
+  </script>
+</body>
+</html>
