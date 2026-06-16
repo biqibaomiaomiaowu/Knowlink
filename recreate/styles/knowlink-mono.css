@@ -1507,8 +1507,17 @@ h1 {
 
 .lesson-room {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(410px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 1fr);
   gap: 24px;
+}
+
+.lesson-room > .card {
+  min-width: 0;
+}
+
+.lesson-room > .card:last-child {
+  display: flex;
+  flex-direction: column;
 }
 
 .video-box {
@@ -1535,13 +1544,33 @@ h1 {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.14em;
+  z-index: 2;
+}
+
+.video-box::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.18), transparent 28%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.42), transparent 42%);
+  pointer-events: none;
+}
+
+.video-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .play {
   width: 86px;
   height: 86px;
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   place-items: center;
   color: var(--foreground);
@@ -1555,7 +1584,7 @@ h1 {
   left: 24px;
   right: 24px;
   bottom: 24px;
-  z-index: 1;
+  z-index: 2;
 }
 
 .video-timeline .progress {
@@ -1568,6 +1597,7 @@ h1 {
 }
 
 .handout {
+  flex: 1;
   padding: 24px;
   background: var(--background);
   border: 1px solid var(--foreground);
@@ -1582,6 +1612,18 @@ h1 {
   font-weight: 700;
   line-height: 1;
   letter-spacing: -0.035em;
+}
+
+.handout h3:not(:first-child) {
+  margin-top: 22px;
+}
+
+.handout p {
+  margin: 0;
+}
+
+.handout p + p {
+  margin-top: 12px;
 }
 
 .handout p:first-of-type::first-letter {
@@ -2154,7 +2196,7 @@ h1 {
 }
 
 .lesson-room {
-  grid-template-columns: minmax(0, 1.05fr) minmax(410px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 1fr);
   gap: 16px;
 }
 
