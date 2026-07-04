@@ -2036,9 +2036,19 @@ class RuntimeStore:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         quiz_id = self.next_id("quiz")
         task_id = self.next_id("task")
+        course = self.courses.get(course_id, {})
+        handout_version_id = course.get("activeHandoutVersionId")
+        source_parse_run_id = course.get("activeParseRunId")
         quiz = {
             "quizId": quiz_id,
             "courseId": course_id,
+            "scopeType": "course",
+            "lessonId": None,
+            "startLessonId": None,
+            "endLessonId": None,
+            "quizMode": "objective",
+            "handoutVersionId": handout_version_id,
+            "sourceParseRunId": source_parse_run_id,
             "status": "queued",
             "questionCount": 0,
             "questions": [],
@@ -2054,6 +2064,10 @@ class RuntimeStore:
                 "courseId": course_id,
                 "quizId": quiz_id,
                 "questionCountLevel": question_count_level,
+                "scopeType": "course",
+                "lessonId": None,
+                "startLessonId": None,
+                "endLessonId": None,
             },
             target_type="quiz",
             target_id=quiz_id,
@@ -2063,8 +2077,80 @@ class RuntimeStore:
             "status": "queued",
             "nextAction": "poll",
             "entity": {"type": "quiz", "id": quiz_id},
-            "payload": {"questionCountLevel": question_count_level},
+            "payload": {
+                "questionCountLevel": question_count_level,
+                "scopeType": "course",
+                "lessonId": None,
+                "startLessonId": None,
+                "endLessonId": None,
+            },
         }
+
+    def create_scoped_quiz(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        quiz_payload: dict[str, Any],
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        question_count_level: str = "medium",
+    ) -> dict[str, Any]:
+        artifact = self.create_scoped_artifact(
+            artifact_type="quiz",
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+            status="ready",
+            quizMode="objective",
+            questionCountLevel=question_count_level,
+        )
+        quiz_id = int(artifact["artifactId"])
+        questions = []
+        for index, question in enumerate(quiz_payload.get("questions") or [], start=1):
+            if not isinstance(question, dict):
+                continue
+            question_type = str(question.get("questionType") or question.get("question_type") or "single_choice")
+            if question_type not in {"single_choice", "multiple_choice", "true_false"}:
+                continue
+            questions.append(
+                {
+                    "questionId": quiz_id * 100 + index,
+                    "questionKey": str(question.get("questionKey") or f"q{index}"),
+                    "questionType": question_type,
+                    "stemMd": str(question.get("stemMd") or ""),
+                    "options": list(question.get("options") or []),
+                    "correctAnswer": str(question.get("correctAnswer") or "A"),
+                    "explanationMd": str(question.get("explanationMd") or ""),
+                    "difficultyLevel": str(question.get("difficultyLevel") or "medium"),
+                    "knowledgePointKey": str(question.get("knowledgePointKey") or f"kp-{index}"),
+                    "knowledgePointName": str(question.get("knowledgePointName") or f"Knowledge point {index}"),
+                    "sourceBlockKey": str(question.get("sourceBlockKey") or f"lesson-{lesson_id or course_id}"),
+                    "sourceSegmentKeys": list(question.get("sourceSegmentKeys") or []),
+                }
+            )
+        quiz = self.quizzes[quiz_id]
+        quiz.update(
+            {
+                "quizType": str(quiz_payload.get("quizType") or "scoped_lesson_objective"),
+                "status": "ready",
+                "questionCount": len(questions),
+                "questions": questions,
+                "questionCountLevel": question_count_level,
+            }
+        )
+        return self.public_quiz(quiz_id) or quiz
+
+    def public_quiz(self, quiz_id: int) -> dict[str, Any] | None:
+        quiz = self.quizzes.get(quiz_id)
+        if quiz is None:
+            return None
+        public_quiz = dict(quiz)
+        public_quiz["questions"] = [_public_quiz_question(question) for question in quiz.get("questions") or []]
+        return public_quiz
 
     def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
         quiz = self.quizzes.get(quiz_id)
@@ -2087,15 +2173,30 @@ class RuntimeStore:
     ) -> dict[str, Any]:
         _ = mastery_updates
         attempt_id = self.next_id("attempt")
-        review_run = self.create_review_run(self.quizzes[quiz_id]["courseId"])
+        quiz = self.quizzes[quiz_id]
+        review_task_run_id = None
+        if quiz.get("scopeType", "course") == "course" and _quiz_has_review_context(quiz):
+            review_run = self.create_review_run(quiz["courseId"])
+            review_task_run_id = review_run["reviewTaskRunId"]
+        questions_by_key = {
+            str(question.get("questionKey") or f"q{index}"): question
+            for index, question in enumerate(quiz.get("questions") or [], start=1)
+            if isinstance(question, dict)
+        }
+        items = [
+            _public_quiz_attempt_item(item, question=questions_by_key.get(str(item.get("questionKey") or "")))
+            for item in quiz_attempt_result.get("items", [])
+            if isinstance(item, dict)
+        ]
         return {
             "attemptId": attempt_id,
             "score": int(quiz_attempt_result.get("score", 0)),
             "totalScore": int(quiz_attempt_result.get("totalScore", 0)),
             "accuracy": float(quiz_attempt_result.get("accuracy", 0.0)),
-            "reviewTaskRunId": review_run["reviewTaskRunId"],
+            "reviewTaskRunId": review_task_run_id,
             "masteryDelta": list(quiz_attempt_result.get("masteryDelta", [])),
             "recommendedReviewAction": quiz_attempt_result.get("recommendedReviewAction"),
+            "items": items,
         }
 
     def create_review_run(self, course_id: int) -> dict[str, Any]:
@@ -2353,6 +2454,50 @@ def _ranked_lexical_hit(hit: LexicalSearchHit, *, rank: int) -> LexicalSearchHit
         locator=hit.locator,
         distance=hit.distance,
         rank=rank,
+    )
+
+
+def _public_quiz_question(question: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: question[key]
+        for key in (
+            "questionId",
+            "questionType",
+            "stemMd",
+            "options",
+            "knowledgePointKey",
+            "knowledgePointName",
+            "sourceBlockKey",
+            "sourceSegmentKeys",
+        )
+        if key in question
+    }
+
+
+def _public_quiz_attempt_item(item: Mapping[str, Any], *, question: Mapping[str, Any] | None) -> dict[str, Any]:
+    output: dict[str, Any] = {
+        "questionKey": str(item.get("questionKey") or item.get("question_key") or ""),
+        "selectedOption": str(item.get("selectedOption") or item.get("selected_option") or ""),
+        "isCorrect": bool(item.get("isCorrect") if "isCorrect" in item else item.get("is_correct", False)),
+        "obtainedScore": int(item.get("obtainedScore") or item.get("obtained_score") or 0),
+        "explanationMd": str(item.get("explanationMd") or item.get("explanation_md") or ""),
+        "knowledgePointKey": str(item.get("knowledgePointKey") or item.get("knowledge_point_key") or ""),
+        "sourceBlockKey": str(item.get("sourceBlockKey") or item.get("source_block_key") or ""),
+    }
+    question_id = None
+    if question is not None:
+        question_id = _as_positive_int(question.get("questionId") or question.get("question_id"))
+    if question_id is None:
+        question_id = _as_positive_int(item.get("questionId") or item.get("question_id"))
+    if question_id is not None:
+        output["questionId"] = question_id
+    return output
+
+
+def _quiz_has_review_context(quiz: Mapping[str, Any]) -> bool:
+    return (
+        _as_positive_int(quiz.get("sourceParseRunId") or quiz.get("source_parse_run_id")) is not None
+        and _as_positive_int(quiz.get("handoutVersionId") or quiz.get("handout_version_id")) is not None
     )
 
 

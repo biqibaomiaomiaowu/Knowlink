@@ -332,11 +332,7 @@ class HandoutService:
         self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
         handout = self.handouts.get_latest_handout(course_id, scope_type="lesson", lesson_id=lesson_id)
         if handout is None:
-            raise ServiceError(
-                message="The lesson has no active handout.",
-                error_code="handout.no_active_version",
-                status_code=404,
-            )
+            return self.get_lesson_handout_placeholder(course_id=course_id, lesson_id=lesson_id)
         return self._handout_summary(handout)
 
     def get_lesson_outline(self, *, course_id: int, lesson_id: int) -> dict[str, object]:

@@ -888,7 +888,83 @@ class SqlAlchemyRuntimeRepository:
             .where(CourseResource.course_id == course_id)
             .order_by(CourseResource.sort_order.asc(), CourseResource.id.asc())
         ).all()
-        return [_resource_dict(resource) for resource in resources]
+        items = [_resource_dict(resource) for resource in resources]
+        self._attach_lesson_resource_segment_evidence(course_id=course_id, resources=resources, items=items)
+        return items
+
+    def _attach_lesson_resource_segment_evidence(
+        self,
+        *,
+        course_id: int,
+        resources: Sequence[CourseResource],
+        items: list[dict[str, Any]],
+    ) -> None:
+        lesson_resources = [
+            resource
+            for resource in resources
+            if resource.scope_type == "lesson" and resource.lesson_id is not None
+        ]
+        if not lesson_resources:
+            return
+
+        active_parse_run_id = self.session.scalar(
+            select(Course.active_parse_run_id).where(Course.id == course_id, Course.user_id == self.user_id)
+        )
+        candidate_parse_run_ids = {
+            parse_run_id
+            for parse_run_id in [
+                active_parse_run_id,
+                *(resource.last_parse_run_id for resource in lesson_resources),
+            ]
+            if parse_run_id is not None
+        }
+        if not candidate_parse_run_ids:
+            return
+
+        resource_ids = [resource.id for resource in lesson_resources]
+        segments = self.session.scalars(
+            select(CourseSegment)
+            .join(ParseRun, ParseRun.id == CourseSegment.parse_run_id)
+            .where(
+                CourseSegment.course_id == course_id,
+                CourseSegment.resource_id.in_(resource_ids),
+                CourseSegment.parse_run_id.in_(candidate_parse_run_ids),
+                CourseSegment.is_active.is_(True),
+                ParseRun.status == "succeeded",
+            )
+            .order_by(CourseSegment.resource_id.asc(), CourseSegment.order_no.asc(), CourseSegment.id.asc())
+        ).all()
+        if not segments:
+            return
+
+        segments_by_resource_id: dict[int, list[dict[str, Any]]] = {}
+        for segment in segments:
+            segments_by_resource_id.setdefault(segment.resource_id, []).append(_course_segment_dict(segment))
+
+        for item in items:
+            resource_id = _as_positive_int(item.get("resourceId"))
+            if resource_id is None:
+                continue
+            resource_segments = segments_by_resource_id.get(resource_id)
+            if not resource_segments:
+                continue
+            item["segments"] = resource_segments
+            item["sourceSegmentKeys"] = [str(segment["segmentKey"]) for segment in resource_segments]
+            text_content = "\n\n".join(
+                str(segment["textContent"]).strip()
+                for segment in resource_segments
+                if str(segment.get("textContent") or "").strip()
+            )
+            plain_text = "\n\n".join(
+                str(segment["plainText"]).strip()
+                for segment in resource_segments
+                if str(segment.get("plainText") or "").strip()
+            )
+            if text_content:
+                item["textContent"] = text_content
+                item["evidenceText"] = text_content
+            if plain_text:
+                item["plainText"] = plain_text
 
     def get_resource(self, resource_id: int) -> dict[str, Any] | None:
         resource = self.session.scalar(
@@ -2351,6 +2427,10 @@ class SqlAlchemyRuntimeRepository:
             "handoutVersionId": version.id,
             "sourceParseRunId": version.source_parse_run_id,
             "questionCountLevel": question_count_level,
+            "scopeType": "course",
+            "lessonId": None,
+            "startLessonId": None,
+            "endLessonId": None,
         }
         task = AsyncTask(
             course_id=course_id,
@@ -2370,6 +2450,78 @@ class SqlAlchemyRuntimeRepository:
 
         self._commit_or_flush()
         return _quiz_dict(quiz, questions=[]), _async_trigger_dict(task, "quiz", quiz.id)
+
+    def create_scoped_quiz(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        quiz_payload: Mapping[str, Any],
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        question_count_level: str = "medium",
+    ) -> dict[str, Any]:
+        self._validate_artifact_type_scope(artifact_type="quiz", scope_type=scope_type)
+        lesson_id, start_lesson_id, end_lesson_id = self._validate_artifact_scope(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+        )
+        quiz = Quiz(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+            quiz_mode="objective",
+            quiz_type=str(_payload_value(dict(quiz_payload), "quizType", "quiz_type", default="scoped_objective")),
+            status="ready",
+            question_count=0,
+            payload_json=_json_ready(dict(quiz_payload) | {"questionCountLevel": question_count_level}),
+        )
+        self.session.add(quiz)
+        self.session.flush()
+
+        saved_questions = []
+        for index, question in enumerate(_mapping_list(quiz_payload.get("questions")), start=1):
+            question_type = str(_payload_value(question, "questionType", "question_type", default="single_choice"))
+            if question_type not in {"single_choice", "multiple_choice", "true_false"}:
+                continue
+            row = QuizQuestion(
+                quiz_id=quiz.id,
+                question_key=str(_payload_value(question, "questionKey", "question_key", default=f"q{index}")),
+                question_type=question_type,
+                stem_md=str(_payload_value(question, "stemMd", "stem_md", default="")),
+                options_json=list(_payload_value(question, "options", default=[]) or []),
+                correct_answer=str(_payload_value(question, "correctAnswer", "correct_answer", default="A")),
+                explanation_md=str(_payload_value(question, "explanationMd", "explanation_md", default="")),
+                difficulty_level=str(_payload_value(question, "difficultyLevel", "difficulty_level", default="medium")),
+                knowledge_point_key=str(
+                    _payload_value(question, "knowledgePointKey", "knowledge_point_key", default=f"kp-{index}")
+                ),
+                knowledge_point_name=str(
+                    _payload_value(
+                        question,
+                        "knowledgePointName",
+                        "knowledge_point_name",
+                        default=f"Knowledge point {index}",
+                    )
+                ),
+                source_block_key=str(_payload_value(question, "sourceBlockKey", "source_block_key", default="")),
+                source_segment_keys_json=list(
+                    _payload_value(question, "sourceSegmentKeys", "source_segment_keys", default=[]) or []
+                ),
+                sort_no=index,
+            )
+            self.session.add(row)
+            saved_questions.append(row)
+
+        quiz.question_count = len(saved_questions)
+        self._commit_or_flush()
+        return self.get_quiz(quiz.id) or _quiz_dict(quiz, questions=[])
 
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None:
         quiz = self._get_active_quiz_model(quiz_id)
@@ -2521,6 +2673,7 @@ class SqlAlchemyRuntimeRepository:
         self.session.flush()
 
         questions_by_key = {question.question_key: question for question in questions}
+        public_items: list[dict[str, Any]] = []
         for index, item in enumerate(_mapping_list(result.get("items")), start=1):
             question_key = str(_payload_value(item, "questionKey", "question_key", default=f"q{index}"))
             question = questions_by_key.get(question_key)
@@ -2541,6 +2694,8 @@ class SqlAlchemyRuntimeRepository:
                     sort_no=index,
                 )
             )
+            public_item = _quiz_attempt_item_public_dict(item, question=question)
+            public_items.append(public_item)
 
         self._upsert_mastery_records(
             course_id=quiz.course_id,
@@ -2548,6 +2703,19 @@ class SqlAlchemyRuntimeRepository:
             updates=mastery_updates,
             result_items=_mapping_list(result.get("items")),
         )
+        if quiz.scope_type != "course" or quiz.source_parse_run_id is None or quiz.handout_version_id is None:
+            self._commit_or_flush()
+            return {
+                "attemptId": attempt.id,
+                "score": attempt.score,
+                "totalScore": attempt.total_score,
+                "accuracy": attempt.accuracy,
+                "reviewTaskRunId": None,
+                "masteryDelta": result.get("masteryDelta", []),
+                "recommendedReviewAction": result.get("recommendedReviewAction"),
+                "items": public_items,
+            }
+
         review_run = ReviewTaskRun(
             user_id=self.user_id,
             course_id=quiz.course_id,
@@ -2587,6 +2755,7 @@ class SqlAlchemyRuntimeRepository:
             "reviewTaskRunId": review_run.id,
             "masteryDelta": result.get("masteryDelta", []),
             "recommendedReviewAction": result.get("recommendedReviewAction"),
+            "items": public_items,
             "_reviewRefreshTask": {
                 "taskId": task.id,
                 "payload": payload,
@@ -3503,16 +3672,39 @@ class SqlAlchemyRuntimeRepository:
         )
 
     def _get_active_quiz_model(self, quiz_id: int) -> Quiz | None:
-        return self.session.scalar(
+        quiz = self.session.scalar(
             select(Quiz)
             .join(Course, Course.id == Quiz.course_id)
             .where(
                 Quiz.id == quiz_id,
                 Course.user_id == self.user_id,
-                Course.active_handout_version_id == Quiz.handout_version_id,
-                Course.active_parse_run_id == Quiz.source_parse_run_id,
             )
         )
+        if quiz is None:
+            return None
+        if (
+            quiz.scope_type in {"lesson", "lesson_range"}
+            and quiz.handout_version_id is None
+            and quiz.source_parse_run_id is None
+        ):
+            return quiz
+        if (
+            quiz.scope_type == "course"
+            and quiz.status == "placeholder"
+            and quiz.handout_version_id is None
+            and quiz.source_parse_run_id is None
+        ):
+            return quiz
+        if quiz.handout_version_id is None or quiz.source_parse_run_id is None:
+            return None
+        course = self.session.get(Course, quiz.course_id)
+        if (
+            course is None
+            or course.active_handout_version_id != quiz.handout_version_id
+            or course.active_parse_run_id != quiz.source_parse_run_id
+        ):
+            return None
+        return quiz
 
     def _get_active_handout_block(self, block_id: int) -> HandoutBlock | None:
         block = self.session.scalar(
@@ -4524,8 +4716,13 @@ def _quiz_dict(quiz: Quiz, *, questions: Sequence[dict[str, Any]]) -> dict[str, 
 def _quiz_question_public_dict(question: QuizQuestion) -> dict[str, Any]:
     return {
         "questionId": question.id,
+        "questionType": question.question_type,
         "stemMd": question.stem_md,
         "options": list(question.options_json or []),
+        "knowledgePointKey": question.knowledge_point_key,
+        "knowledgePointName": question.knowledge_point_name,
+        "sourceBlockKey": question.source_block_key,
+        "sourceSegmentKeys": list(question.source_segment_keys_json or []),
     }
 
 
@@ -4544,6 +4741,22 @@ def _quiz_question_private_dict(question: QuizQuestion) -> dict[str, Any]:
         "sourceBlockKey": question.source_block_key,
         "sourceSegmentKeys": list(question.source_segment_keys_json or []),
     }
+
+
+def _quiz_attempt_item_public_dict(item: Mapping[str, Any], *, question: QuizQuestion | None) -> dict[str, Any]:
+    output: dict[str, Any] = {
+        "questionKey": str(_payload_value(item, "questionKey", "question_key", default="")),
+        "selectedOption": str(_payload_value(item, "selectedOption", "selected_option", default="")),
+        "isCorrect": bool(_payload_value(item, "isCorrect", "is_correct", default=False)),
+        "obtainedScore": int(_payload_value(item, "obtainedScore", "obtained_score", default=0)),
+        "explanationMd": str(_payload_value(item, "explanationMd", "explanation_md", default="")),
+        "knowledgePointKey": str(_payload_value(item, "knowledgePointKey", "knowledge_point_key", default="")),
+        "sourceBlockKey": str(_payload_value(item, "sourceBlockKey", "source_block_key", default="")),
+    }
+    question_id = question.id if question is not None else _as_positive_int(_payload_value(item, "questionId", "question_id"))
+    if question_id is not None:
+        output["questionId"] = question_id
+    return output
 
 
 def _mastery_record_dict(record: MasteryRecord) -> dict[str, Any]:

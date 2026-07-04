@@ -119,6 +119,9 @@ def ensure_async_task_for_trigger(
             target_id=target_id,
             parse_run_id=parse_run_id,
         ):
+            update_task = getattr(async_tasks, "update_async_task", None)
+            if update_task is not None:
+                _call_with_supported_kwargs(update_task, task_id=task_id, payload_json=payload)
             return trigger, task_id
         if not allow_create:
             return trigger, None

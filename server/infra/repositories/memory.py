@@ -572,8 +572,29 @@ class MemoryScaffoldRepository:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         return self.store.create_quiz(course_id, question_count_level=question_count_level)
 
+    def create_scoped_quiz(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        quiz_payload: Mapping[str, Any],
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        question_count_level: str = "medium",
+    ) -> dict[str, Any]:
+        return self.store.create_scoped_quiz(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+            question_count_level=question_count_level,
+            quiz_payload=dict(quiz_payload),
+        )
+
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None:
-        return self.store.quizzes.get(quiz_id)
+        return self.store.public_quiz(quiz_id)
 
     def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
         return self.store.get_quiz_submission_context(quiz_id)

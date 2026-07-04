@@ -12,6 +12,11 @@ from server.ai.quiz_strategy import (
     generate_quiz_payload,
     grade_quiz_attempt,
 )
+from server.domain.services.errors import ServiceError
+from server.domain.services.quizzes import QuizService
+from server.infra.repositories.memory import MemoryScaffoldRepository
+from server.infra.repositories.memory_runtime import RuntimeStore
+from server.schemas.requests import SubmitQuizRequest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -429,6 +434,506 @@ def test_grade_quiz_attempt_accepts_api_question_id_answers_without_dto_change()
     assert result["score"] == 3
     assert result["accuracy"] == 1.0
     assert all(item["isCorrect"] for item in result["items"])
+
+
+def test_lesson_quiz_generate_submit_scores_objective_questions():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+        lessons=store,
+        scoped_artifacts=repository,
+        handouts=repository,
+        resources=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    lesson = store.create_lesson(course_id=course["courseId"], title="Indexes")
+    handout, _trigger, blocks = store.create_handout(
+        course["courseId"],
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        artifact_kind="lesson_handout",
+    )
+    block = blocks[0]
+    block.update(
+        {
+            "status": "ready",
+            "generationStatus": "ready",
+            "title": "B-tree index lookup",
+            "summary": "Indexes reduce lookup work by narrowing candidate rows.",
+            "contentMd": "A database index stores ordered keys that help locate matching rows efficiently.",
+            "sourceSegmentKeys": ["seg-index-lookup"],
+            "knowledgePoints": [{"knowledgePointKey": "kp-index-lookup", "displayName": "Index lookup"}],
+            "citations": [{"segmentKey": "seg-index-lookup", "refLabel": "index notes"}],
+        }
+    )
+    handout["readyBlocks"] = 1
+    handout["pendingBlocks"] = max(0, handout["pendingBlocks"] - 1)
+
+    generated = service.generate_lesson_quiz(
+        course_id=course["courseId"],
+        lesson_id=lesson["lessonId"],
+        question_count_level="medium",
+    )
+    quiz = service.get_quiz(quiz_id=generated["quizId"])
+
+    assert quiz["scopeType"] == "lesson"
+    assert quiz["lessonId"] == lesson["lessonId"]
+    assert quiz["status"] == "ready"
+    assert quiz["questionCount"] > 0
+    assert {question["questionType"] for question in quiz["questions"]}.issubset(
+        {"single_choice", "multiple_choice", "true_false"}
+    )
+
+    assert all("correctAnswer" not in question for question in quiz["questions"])
+
+    context = repository.get_quiz_submission_context(quiz["quizId"])
+    assert context is not None
+    private_answers = [question["correctAnswer"] for question in context["quizPayload"]["questions"]]
+    assert set(private_answers) - {"A"}
+    for private_question in context["quizPayload"]["questions"]:
+        assert not any("Ignore this lesson" in option for option in private_question["options"])
+        assert not any("subjective free-form grading" in option for option in private_question["options"])
+        assert not any("unrelated to the current scope" in option for option in private_question["options"])
+    answers = [
+        {
+            "questionId": public_question["questionId"],
+            "selectedOption": private_question["correctAnswer"],
+        }
+        for public_question, private_question in zip(quiz["questions"], context["quizPayload"]["questions"])
+    ]
+    result = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest.model_validate({"answers": answers}),
+    )
+
+    assert result["score"] == quiz["questionCount"]
+    assert result["totalScore"] == quiz["questionCount"]
+    assert result["accuracy"] == 1.0
+    assert result["reviewTaskRunId"] is None
+    assert result["recommendedReviewActions"]
+    assert store.review_runs == {}
+
+
+def test_course_quiz_submit_without_review_context_does_not_create_review_run():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    quiz, _trigger = store.create_quiz(course["courseId"], question_count_level="small")
+    quiz.update(
+        {
+            "status": "ready",
+            "questionCount": 1,
+            "questions": [
+                {
+                    "questionId": quiz["quizId"] * 100 + 1,
+                    "questionKey": "course-q1",
+                    "questionType": "single_choice",
+                    "stemMd": "Which answer is supported by the course evidence?",
+                    "options": ["A. Supported", "B. Unsupported", "C. Unrelated", "D. Subjective"],
+                    "correctAnswer": "A",
+                    "explanationMd": "The answer is supported.",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-course",
+                    "knowledgePointName": "Course evidence",
+                    "sourceBlockKey": "course-block",
+                    "sourceSegmentKeys": ["course-segment"],
+                }
+            ],
+        }
+    )
+
+    result = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest.model_validate(
+            {"answers": [{"questionId": quiz["questions"][0]["questionId"], "selectedOption": "A"}]}
+        ),
+    )
+
+    assert result["score"] == 1
+    assert result["totalScore"] == 1
+    assert result["accuracy"] == 1.0
+    assert result["reviewTaskRunId"] is None
+    assert store.review_runs == {}
+
+
+def test_course_quiz_submit_with_review_context_creates_review_run():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    store.create_parse_run(course["courseId"])
+    store.create_handout(course["courseId"])
+    quiz, _trigger = store.create_quiz(course["courseId"], question_count_level="small")
+    quiz.update(
+        {
+            "status": "ready",
+            "questionCount": 1,
+            "questions": [
+                {
+                    "questionId": quiz["quizId"] * 100 + 1,
+                    "questionKey": "course-q1",
+                    "questionType": "single_choice",
+                    "stemMd": "Which answer is supported by the course evidence?",
+                    "options": ["A. Supported", "B. Unsupported", "C. Unrelated", "D. Subjective"],
+                    "correctAnswer": "A",
+                    "explanationMd": "The answer is supported.",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-course",
+                    "knowledgePointName": "Course evidence",
+                    "sourceBlockKey": "course-block",
+                    "sourceSegmentKeys": ["course-segment"],
+                }
+            ],
+        }
+    )
+
+    result = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest.model_validate(
+            {"answers": [{"questionId": quiz["questions"][0]["questionId"], "selectedOption": "A"}]}
+        ),
+    )
+
+    assert result["score"] == 1
+    assert result["reviewTaskRunId"] in store.review_runs
+
+
+def test_lesson_quiz_generation_fails_without_lesson_handout_or_resources():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+        lessons=store,
+        scoped_artifacts=repository,
+        handouts=repository,
+        resources=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    lesson = store.create_lesson(course_id=course["courseId"], title="No Evidence Lesson")
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.generate_lesson_quiz(
+            course_id=course["courseId"],
+            lesson_id=lesson["lessonId"],
+            question_count_level="small",
+        )
+
+    assert exc_info.value.error_code == "quiz.not_ready"
+    assert exc_info.value.status_code == 409
+
+
+def test_lesson_quiz_generation_fails_when_lesson_handout_blocks_are_pending():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+        lessons=store,
+        scoped_artifacts=repository,
+        handouts=repository,
+        resources=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    lesson = store.create_lesson(course_id=course["courseId"], title="Pending Evidence")
+    _handout, _trigger, blocks = store.create_handout(
+        course["courseId"],
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        artifact_kind="lesson_handout",
+    )
+    blocks[0].update(
+        {
+            "status": "pending",
+            "generationStatus": "pending",
+            "title": "Pending lock evidence",
+            "summary": "This summary alone must not unlock a quiz.",
+            "contentMd": "Two-phase locking uses growing and shrinking phases.",
+            "sourceSegmentKeys": ["seg-2pl"],
+            "knowledgePoints": [{"knowledgePointKey": "kp-2pl", "displayName": "Two-phase locking"}],
+            "citations": [{"segmentKey": "seg-2pl", "refLabel": "lock notes"}],
+        }
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.generate_lesson_quiz(
+            course_id=course["courseId"],
+            lesson_id=lesson["lessonId"],
+            question_count_level="small",
+        )
+
+    assert exc_info.value.error_code == "quiz.not_ready"
+    assert exc_info.value.status_code == 409
+
+
+def test_lesson_quiz_generation_fails_when_ready_handout_has_only_summary_citation_or_knowledge_points():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+        lessons=store,
+        scoped_artifacts=repository,
+        handouts=repository,
+        resources=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    lesson = store.create_lesson(course_id=course["courseId"], title="Summary Only")
+    handout, _trigger, blocks = store.create_handout(
+        course["courseId"],
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        artifact_kind="lesson_handout",
+    )
+    blocks[0].update(
+        {
+            "status": "ready",
+            "generationStatus": "ready",
+            "title": "Summary-only block",
+            "summary": "This summary mentions indexes but has no source evidence.",
+            "contentMd": "",
+            "sourceSegmentKeys": ["seg-summary-only"],
+            "knowledgePoints": [{"knowledgePointKey": "kp-summary", "displayName": "Summary-only concept"}],
+            "citations": [{"segmentKey": "seg-summary-citation", "refLabel": "summary note"}],
+        }
+    )
+    handout["readyBlocks"] = 1
+    handout["pendingBlocks"] = max(0, handout["pendingBlocks"] - 1)
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.generate_lesson_quiz(
+            course_id=course["courseId"],
+            lesson_id=lesson["lessonId"],
+            question_count_level="small",
+        )
+
+    assert exc_info.value.error_code == "quiz.not_ready"
+    assert exc_info.value.status_code == 409
+
+
+def test_lesson_quiz_uses_latest_lesson_handout_block_evidence_before_resources():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+        lessons=store,
+        scoped_artifacts=repository,
+        handouts=repository,
+        resources=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    lesson = store.create_lesson(course_id=course["courseId"], title="B+ Trees")
+    resource = store.create_resource(
+        course["courseId"],
+        {
+            "resourceType": "pdf",
+            "sourceType": "upload",
+            "objectKey": "raw/btree.pdf",
+            "originalName": "btree.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 2048,
+            "checksum": "sha256:btree",
+            "scopeType": "lesson",
+            "lessonId": lesson["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+    handout, _trigger, blocks = store.create_handout(
+        course["courseId"],
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        artifact_kind="lesson_handout",
+    )
+    block = blocks[0]
+    block.update(
+        {
+            "status": "ready",
+            "generationStatus": "ready",
+            "title": "B+ Tree fanout",
+            "summary": "Fanout controls tree height.",
+            "contentMd": "A B+ tree keeps internal nodes broad so lookup height stays small.",
+            "sourceSegmentKeys": ["seg-btree-fanout"],
+            "knowledgePoints": [{"knowledgePointKey": "kp-btree-fanout", "displayName": "B+ tree fanout"}],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": "seg-btree-fanout",
+                    "pageNo": 7,
+                    "refLabel": "btree.pdf page 7",
+                }
+            ],
+        }
+    )
+    handout["readyBlocks"] = 1
+    handout["pendingBlocks"] = max(0, handout["pendingBlocks"] - 1)
+
+    generated = service.generate_lesson_quiz(
+        course_id=course["courseId"],
+        lesson_id=lesson["lessonId"],
+        question_count_level="small",
+    )
+
+    question = generated["questions"][0]
+    assert question["questionType"] in {"single_choice", "multiple_choice", "true_false"}
+    assert question["sourceBlockKey"] == str(block["blockId"])
+    assert question["sourceSegmentKeys"] == ["seg-btree-fanout"]
+    assert question["knowledgePointKey"] == "kp-btree-fanout"
+    assert question["knowledgePointName"] == "B+ tree fanout"
+    assert "correctAnswer" not in question
+
+
+def test_lesson_quiz_generation_fails_with_unparsed_lesson_resource_metadata_only():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+        lessons=store,
+        scoped_artifacts=repository,
+        handouts=repository,
+        resources=repository,
+    )
+    course = store.create_course(
+        title="Operating Systems",
+        entry_type="manual_import",
+        goal_text="Review scheduling",
+        preferred_style="balanced",
+    )
+    lesson = store.create_lesson(course_id=course["courseId"], title="Schedulers")
+    store.create_resource(
+        course["courseId"],
+        {
+            "resourceType": "pdf",
+            "sourceType": "upload",
+            "objectKey": "raw/schedulers.pdf",
+            "originalName": "schedulers.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:schedulers",
+            "scopeType": "lesson",
+            "lessonId": lesson["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.generate_lesson_quiz(
+            course_id=course["courseId"],
+            lesson_id=lesson["lessonId"],
+            question_count_level="small",
+        )
+
+    assert exc_info.value.error_code == "quiz.not_ready"
+    assert exc_info.value.status_code == 409
+
+
+def test_lesson_quiz_generation_fails_with_resource_top_level_text_or_bare_refs():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+        lessons=store,
+        scoped_artifacts=repository,
+        handouts=repository,
+        resources=repository,
+    )
+    course = store.create_course(
+        title="Operating Systems",
+        entry_type="manual_import",
+        goal_text="Review scheduling",
+        preferred_style="balanced",
+    )
+    lesson = store.create_lesson(course_id=course["courseId"], title="Schedulers")
+    resource = store.create_resource(
+        course["courseId"],
+        {
+            "resourceType": "pdf",
+            "sourceType": "upload",
+            "objectKey": "raw/schedulers.pdf",
+            "originalName": "schedulers.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:schedulers",
+            "scopeType": "lesson",
+            "lessonId": lesson["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+    resource.update(
+        {
+            "contentMd": "Round-robin top-level content is not parsed segment evidence.",
+            "textContent": "Priority scheduling top-level text is not parsed segment evidence.",
+            "plainText": "Shortest-job-first top-level plain text is not parsed segment evidence.",
+            "evidenceText": "Evidence text outside segments must not unlock quiz generation.",
+            "sourceSegmentKeys": ["bare-resource-segment"],
+            "citations": [{"segmentKey": "bare-resource-citation", "refLabel": "resource metadata"}],
+        }
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.generate_lesson_quiz(
+            course_id=course["courseId"],
+            lesson_id=lesson["lessonId"],
+            question_count_level="small",
+        )
+
+    assert exc_info.value.error_code == "quiz.not_ready"
+    assert exc_info.value.status_code == 409
 
 
 def test_quiz_question_refs_use_generated_fallback_block_key_consistently():

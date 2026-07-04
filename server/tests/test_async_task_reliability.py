@@ -296,6 +296,7 @@ class _QuizRepo:
         *,
         status: str | None = None,
         progress_pct: int | None = None,
+        payload_json: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
         clear_error: bool = False,
@@ -310,6 +311,8 @@ class _QuizRepo:
             task["status"] = status
         if progress_pct is not None:
             task["progressPct"] = progress_pct
+        if payload_json is not None:
+            task["payloadJson"] = payload_json
         if error_code is not None:
             task["errorCode"] = error_code
         if error_message is not None:
@@ -658,6 +661,9 @@ class _HandoutRepo:
         outline_meta: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        artifact_kind: str = "course_summary_handout",
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         self.next_handout_version_id += 1
         self.next_task_id += 1
@@ -665,6 +671,9 @@ class _HandoutRepo:
             "courseId": course_id,
             "handoutVersionId": self.next_handout_version_id,
             "sourceParseRunId": self.course["activeParseRunId"],
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "artifactKind": artifact_kind,
         }
         self.tasks[self.next_task_id] = {
             "taskId": self.next_task_id,
@@ -754,6 +763,7 @@ class _HandoutRepo:
         *,
         status: str | None = None,
         progress_pct: int | None = None,
+        payload_json: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
         clear_error: bool = False,
@@ -768,6 +778,8 @@ class _HandoutRepo:
             task["status"] = status
         if progress_pct is not None:
             task["progressPct"] = progress_pct
+        if payload_json is not None:
+            task["payloadJson"] = payload_json
         if error_code is not None:
             task["errorCode"] = error_code
         if error_message is not None:
@@ -784,6 +796,9 @@ class _HandoutMissingEntityRepo(_HandoutRepo):
         outline_meta: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        artifact_kind: str = "course_summary_handout",
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         self.next_handout_version_id += 1
         self.next_task_id += 1
@@ -791,6 +806,9 @@ class _HandoutMissingEntityRepo(_HandoutRepo):
             "courseId": course_id,
             "handoutVersionId": self.next_handout_version_id,
             "sourceParseRunId": self.course["activeParseRunId"],
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "artifactKind": artifact_kind,
         }
         self.tasks[self.next_task_id] = {
             "taskId": self.next_task_id,
@@ -2081,6 +2099,36 @@ def test_generate_flow_does_not_reuse_mismatched_existing_async_task_id():
     assert task["taskType"] == "quiz_generate"
     assert task["targetType"] == "quiz"
     assert task["courseId"] == 301
+    assert dispatcher.calls == [("quiz_generate", result["taskId"], task["payloadJson"])]
+
+
+def test_quiz_generate_async_payload_includes_explicit_course_scope():
+    repo = _QuizRepo()
+    dispatcher = _RecordingDispatcher()
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+    )
+
+    result = service.generate_quiz(
+        course_id=301,
+        question_count_level="medium",
+        idempotency_key="quiz-course-scope-payload",
+    )
+
+    task = repo.get_async_task(result["taskId"])
+    assert task is not None
+    assert task["payloadJson"] == {
+        "courseId": 301,
+        "quizId": result["entity"]["id"],
+        "questionCountLevel": "medium",
+        "scopeType": "course",
+        "lessonId": None,
+        "startLessonId": None,
+        "endLessonId": None,
+    }
     assert dispatcher.calls == [("quiz_generate", result["taskId"], task["payloadJson"])]
 
 

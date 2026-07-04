@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+from typing import Any
+
 from server.domain.repositories import (
     AsyncTaskRepository,
     CourseRepository,
+    HandoutRepository,
     IdempotencyRepository,
     LessonRepository,
     QuizRepository,
+    ResourceRepository,
     ScopedArtifactRepository,
     TaskDispatcher,
 )
@@ -31,6 +36,8 @@ class QuizService:
         idempotency: IdempotencyRepository,
         lessons: LessonRepository | None = None,
         scoped_artifacts: ScopedArtifactRepository | None = None,
+        handouts: HandoutRepository | None = None,
+        resources: ResourceRepository | None = None,
         task_dispatcher: TaskDispatcher | None = None,
         async_tasks: AsyncTaskRepository | None = None,
     ) -> None:
@@ -39,6 +46,8 @@ class QuizService:
         self.idempotency = idempotency
         self.lessons = lessons
         self.scoped_artifacts = scoped_artifacts
+        self.handouts = handouts
+        self.resources = resources
         self.task_dispatcher = task_dispatcher
         self.async_tasks = resolve_async_tasks(async_tasks, quizzes)
 
@@ -82,6 +91,10 @@ class QuizService:
                     "courseId": course_id,
                     "quizId": quiz_id,
                     "questionCountLevel": question_count_level,
+                    "scopeType": "course",
+                    "lessonId": None,
+                    "startLessonId": None,
+                    "endLessonId": None,
                 }
                 trigger, task_id = ensure_async_task_for_trigger(
                     self.async_tasks,
@@ -151,13 +164,25 @@ class QuizService:
         lesson_id: int,
         question_count_level: str = "medium",
     ) -> dict[str, object]:
-        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
-        return self._create_scoped_quiz(
-            course_id=course_id,
-            scope_type="lesson",
-            lesson_id=lesson_id,
-            question_count_level=question_count_level,
-        )
+        lesson = self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        try:
+            quiz_payload = _build_scoped_objective_quiz_payload(
+                course_id=course_id,
+                scope_type="lesson",
+                lesson=lesson,
+                sources=self._lesson_quiz_sources(course_id=course_id, lesson=lesson),
+                question_count_level=question_count_level,
+            )
+            quiz = self.quizzes.create_scoped_quiz(
+                course_id=course_id,
+                scope_type="lesson",
+                lesson_id=lesson_id,
+                question_count_level=question_count_level,
+                quiz_payload=quiz_payload,
+            )
+        except ValueError as exc:
+            raise self._service_error_from_value_error(exc) from exc
+        return self._scoped_quiz_response(quiz)
 
     def get_current_lesson_quiz(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
         self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
@@ -328,6 +353,11 @@ class QuizService:
                 dispatcher=self.task_dispatcher,
                 enqueue=lambda: self.task_dispatcher.enqueue_review_refresh(task_id=task_id, payload=payload),
             )
+        action = result.get("recommendedReviewAction")
+        result.setdefault("recommendedReviewActions", [action] if action else [])
+        result["items"] = _public_quiz_attempt_items(
+            result.get("items") if isinstance(result.get("items"), list) else quiz_attempt_result.get("items", [])
+        )
         return result
 
     def _ensure_course(self, course_id: int) -> dict[str, object]:
@@ -417,8 +447,41 @@ class QuizService:
                 "artifact.scope_invalid": 400,
                 "lesson.not_found": 404,
                 "course.not_found": 404,
+                "quiz.not_ready": 409,
             }.get(error_code, 400),
         )
+
+    def _lesson_quiz_sources(self, *, course_id: int, lesson: dict[str, object]) -> list[dict[str, object]]:
+        lesson_id = _int_value(lesson.get("lessonId"))
+        if lesson_id is None:
+            return []
+
+        handout_sources: list[dict[str, object]] = []
+        if self.handouts is not None:
+            handout = self.handouts.get_latest_handout(course_id, scope_type="lesson", lesson_id=lesson_id)
+            if handout is not None:
+                blocks = [block for block in list(handout.get("blocks") or []) if isinstance(block, dict)]
+                ready_blocks = [
+                    block
+                    for block in blocks
+                    if block.get("status") == "ready" or block.get("generationStatus") == "ready"
+                ]
+                for block in ready_blocks:
+                    source = _source_from_handout_block(block)
+                    if source is not None:
+                        handout_sources.append(source)
+        if handout_sources:
+            return handout_sources
+
+        if self.resources is None:
+            return []
+        return [
+            source
+            for resource in self.resources.list_resources(course_id)
+            if resource.get("scopeType") == "lesson" and resource.get("lessonId") == lesson_id
+            for source in [_source_from_lesson_resource(resource, lesson=lesson)]
+            if source is not None
+        ]
 
 
 def _int_value(value: object) -> int | None:
@@ -439,3 +502,186 @@ def _entity_id(trigger: dict[str, object]) -> int | None:
 
 def _should_enqueue_trigger(trigger: dict[str, object]) -> bool:
     return trigger.get("status") == "queued" and trigger.get("nextAction") == "poll"
+
+
+def _build_scoped_objective_quiz_payload(
+    *,
+    course_id: int,
+    scope_type: str,
+    lesson: dict[str, Any],
+    sources: list[dict[str, object]],
+    question_count_level: str,
+) -> dict[str, Any]:
+    count_by_level = {"small": 1, "medium": 3, "large": 5}
+    question_count = count_by_level.get(question_count_level)
+    if question_count is None:
+        raise ValueError("quiz.not_ready")
+
+    lesson_id = int(lesson["lessonId"])
+    lesson_title = str(lesson.get("title") or f"Lesson {lesson_id}")
+    if not sources:
+        raise ValueError("quiz.not_ready")
+    questions = []
+    for index in range(1, question_count + 1):
+        source = sources[(index - 1) % len(sources)]
+        knowledge_point_name = str(source["knowledgePointName"])
+        evidence_text = str(source.get("evidenceText") or knowledge_point_name)
+        correct_answer = _scoped_correct_answer(
+            lesson_id=lesson_id,
+            question_index=index,
+            source_key=str(source["sourceBlockKey"]),
+        )
+        options = _scoped_options(
+            correct_answer=correct_answer,
+            correct_text=evidence_text,
+            knowledge_point_name=knowledge_point_name,
+        )
+        questions.append(
+            {
+                "questionKey": f"lesson-{lesson_id}-q{index}",
+                "questionType": "single_choice",
+                "stemMd": f"Which statement best matches {knowledge_point_name} in {lesson_title}?",
+                "options": options,
+                "correctAnswer": correct_answer,
+                "explanationMd": f"The answer is grounded in {knowledge_point_name} evidence from the lesson scope.",
+                "difficultyLevel": "medium",
+                "knowledgePointKey": str(source["knowledgePointKey"]),
+                "knowledgePointName": knowledge_point_name,
+                "sourceBlockKey": str(source["sourceBlockKey"]),
+                "sourceSegmentKeys": list(source.get("sourceSegmentKeys") or []),
+            }
+        )
+
+    return {
+        "quizType": "scoped_lesson_objective",
+        "scopeType": scope_type,
+        "courseId": course_id,
+        "lessonId": lesson_id,
+        "questions": questions,
+    }
+
+
+def _source_from_handout_block(block: dict[str, Any]) -> dict[str, object] | None:
+    if block.get("status") != "ready" and block.get("generationStatus") != "ready":
+        return None
+    block_key = _stable_text(block.get("blockId")) or _stable_text(block.get("outlineKey"))
+    if block_key is None:
+        return None
+    content_md = _stable_text(block.get("contentMd"))
+    if content_md is None:
+        return None
+    source_segment_keys = _stable_text_list(block.get("sourceSegmentKeys"))
+    for citation in [item for item in list(block.get("citations") or []) if isinstance(item, dict)]:
+        segment_key = _stable_text(citation.get("segmentKey"))
+        if segment_key and segment_key not in source_segment_keys:
+            source_segment_keys.append(segment_key)
+    knowledge_points = [item for item in list(block.get("knowledgePoints") or []) if isinstance(item, dict)]
+    first_point = knowledge_points[0] if knowledge_points else {}
+    knowledge_point_key = (
+        _stable_text(first_point.get("knowledgePointKey"))
+        or _stable_text(first_point.get("key"))
+        or f"block-{block_key}"
+    )
+    knowledge_point_name = (
+        _stable_text(first_point.get("displayName"))
+        or _stable_text(first_point.get("name"))
+        or _stable_text(block.get("title"))
+        or f"Block {block_key}"
+    )
+    return {
+        "sourceBlockKey": block_key,
+        "sourceSegmentKeys": source_segment_keys,
+        "knowledgePointKey": knowledge_point_key,
+        "knowledgePointName": knowledge_point_name,
+        "evidenceText": content_md,
+    }
+
+
+def _source_from_lesson_resource(resource: dict[str, Any], *, lesson: dict[str, object]) -> dict[str, object] | None:
+    resource_id = _int_value(resource.get("resourceId"))
+    if resource_id is None:
+        return None
+    lesson_title = str(lesson.get("title") or "Lesson")
+    resource_name = _stable_text(resource.get("originalName")) or f"resource {resource_id}"
+    source_key = f"resource-{resource_id}"
+    source_segment_keys: list[str] = []
+    segments = [item for item in list(resource.get("segments") or []) if isinstance(item, dict)]
+    evidence_text = None
+    for segment in segments:
+        segment_key = _stable_text(segment.get("segmentKey"))
+        if segment_key and segment_key not in source_segment_keys:
+            source_segment_keys.append(segment_key)
+        if evidence_text is None:
+            evidence_text = _stable_text(segment.get("textContent")) or _stable_text(segment.get("plainText"))
+    if evidence_text is None:
+        return None
+    return {
+        "sourceBlockKey": source_key,
+        "sourceSegmentKeys": source_segment_keys,
+        "knowledgePointKey": source_key,
+        "knowledgePointName": f"{lesson_title} {resource_name}",
+        "evidenceText": evidence_text,
+    }
+
+
+def _public_quiz_attempt_items(items: object) -> list[dict[str, object]]:
+    if not isinstance(items, list):
+        return []
+    public_items: list[dict[str, object]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        public_item: dict[str, object] = {
+            "questionKey": str(item.get("questionKey") or item.get("question_key") or ""),
+            "selectedOption": str(item.get("selectedOption") or item.get("selected_option") or ""),
+            "isCorrect": bool(item.get("isCorrect") if "isCorrect" in item else item.get("is_correct", False)),
+            "obtainedScore": _int_value(item.get("obtainedScore") or item.get("obtained_score")) or 0,
+            "explanationMd": str(item.get("explanationMd") or item.get("explanation_md") or ""),
+            "knowledgePointKey": str(item.get("knowledgePointKey") or item.get("knowledge_point_key") or ""),
+            "sourceBlockKey": str(item.get("sourceBlockKey") or item.get("source_block_key") or ""),
+        }
+        question_id = _int_value(item.get("questionId") or item.get("question_id"))
+        if question_id is not None:
+            public_item["questionId"] = question_id
+        public_items.append(public_item)
+    return public_items
+
+
+def _scoped_correct_answer(*, lesson_id: int, question_index: int, source_key: str) -> str:
+    digest = hashlib.sha256(f"{lesson_id}:{question_index}:{source_key}".encode("utf-8")).digest()
+    return ("A", "B", "C", "D")[digest[0] % 4]
+
+
+def _scoped_options(*, correct_answer: str, correct_text: str, knowledge_point_name: str) -> list[str]:
+    distractors = [
+        f"{knowledge_point_name} means the process must scan every item before using any structure.",
+        f"{knowledge_point_name} means ordering and relationships do not affect the result.",
+        f"{knowledge_point_name} means the same rule applies even when the evidence describes a different case.",
+    ]
+    labels = ["A", "B", "C", "D"]
+    output: list[str] = []
+    distractor_index = 0
+    for label in labels:
+        if label == correct_answer:
+            text = correct_text
+        else:
+            text = distractors[distractor_index]
+            distractor_index += 1
+        output.append(f"{label}. {text}")
+    return output
+
+
+def _stable_text(value: object) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def _stable_text_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        text = _stable_text(item)
+        if text and text not in items:
+            items.append(text)
+    return items

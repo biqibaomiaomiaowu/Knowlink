@@ -74,12 +74,22 @@ class QuizModel {
     required this.status,
     required this.questionCount,
     required this.questions,
+    this.scopeType = 'course',
+    this.lessonId,
+    this.startLessonId,
+    this.endLessonId,
+    this.quizMode = 'objective',
   });
 
   final int quizId;
   final int courseId;
   final String status;
   final int questionCount;
+  final String scopeType;
+  final int? lessonId;
+  final int? startLessonId;
+  final int? endLessonId;
+  final String quizMode;
   final List<QuizQuestionModel> questions;
 
   bool get isReady => status == 'ready';
@@ -90,6 +100,11 @@ class QuizModel {
       courseId: json['courseId'] as int,
       status: json['status'] as String? ?? 'unknown',
       questionCount: json['questionCount'] as int? ?? 0,
+      scopeType: json['scopeType'] as String? ?? 'course',
+      lessonId: json['lessonId'] as int?,
+      startLessonId: json['startLessonId'] as int?,
+      endLessonId: json['endLessonId'] as int?,
+      quizMode: json['quizMode'] as String? ?? 'objective',
       questions: (json['questions'] as List<dynamic>? ?? const [])
           .map(
             (item) => QuizQuestionModel.fromJson(
@@ -106,11 +121,21 @@ class QuizQuestionModel {
     required this.questionId,
     required this.stemMd,
     required this.options,
+    this.questionType,
+    this.knowledgePointKey,
+    this.knowledgePointName,
+    this.sourceBlockKey,
+    this.sourceSegmentKeys = const [],
   });
 
   final int questionId;
   final String stemMd;
   final List<String> options;
+  final String? questionType;
+  final String? knowledgePointKey;
+  final String? knowledgePointName;
+  final String? sourceBlockKey;
+  final List<String> sourceSegmentKeys;
 
   factory QuizQuestionModel.fromJson(Map<String, dynamic> json) {
     return QuizQuestionModel(
@@ -119,6 +144,14 @@ class QuizQuestionModel {
       options: (json['options'] as List<dynamic>? ?? const [])
           .map((item) => item.toString())
           .toList(),
+      questionType: json['questionType'] as String?,
+      knowledgePointKey: json['knowledgePointKey'] as String?,
+      knowledgePointName: json['knowledgePointName'] as String?,
+      sourceBlockKey: json['sourceBlockKey'] as String?,
+      sourceSegmentKeys:
+          (json['sourceSegmentKeys'] as List<dynamic>? ?? const [])
+              .map((item) => item.toString())
+              .toList(),
     );
   }
 }
@@ -163,25 +196,48 @@ class SubmitQuizResultModel {
     required this.reviewTaskRunId,
     required this.masteryDelta,
     required this.items,
-    this.recommendedReviewAction,
+    this.recommendedReviewActions = const [],
   });
 
   final int attemptId;
   final int score;
   final int totalScore;
   final double accuracy;
-  final int reviewTaskRunId;
+  final int? reviewTaskRunId;
   final List<MasteryDeltaModel> masteryDelta;
   final List<QuizAttemptItemResultModel> items;
-  final RecommendedReviewActionModel? recommendedReviewAction;
+  final List<RecommendedReviewActionModel> recommendedReviewActions;
+
+  RecommendedReviewActionModel? get recommendedReviewAction =>
+      recommendedReviewActions.firstOrNull;
 
   factory SubmitQuizResultModel.fromJson(Map<String, dynamic> json) {
+    final recommendedReviewActionsJson =
+        json['recommendedReviewActions'] as List<dynamic>?;
+    final legacyRecommendedReviewActionJson =
+        json['recommendedReviewAction'] as Map?;
+    final recommendedReviewActions = recommendedReviewActionsJson != null
+        ? recommendedReviewActionsJson
+            .map(
+              (item) => RecommendedReviewActionModel.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList()
+        : legacyRecommendedReviewActionJson == null
+            ? <RecommendedReviewActionModel>[]
+            : [
+                RecommendedReviewActionModel.fromJson(
+                  Map<String, dynamic>.from(legacyRecommendedReviewActionJson),
+                ),
+              ];
+
     return SubmitQuizResultModel(
       attemptId: json['attemptId'] as int,
       score: json['score'] as int? ?? 0,
       totalScore: json['totalScore'] as int? ?? 0,
       accuracy: (json['accuracy'] as num?)?.toDouble() ?? 0,
-      reviewTaskRunId: json['reviewTaskRunId'] as int,
+      reviewTaskRunId: json['reviewTaskRunId'] as int?,
       masteryDelta: (json['masteryDelta'] as List<dynamic>? ?? const [])
           .map(
             (item) => MasteryDeltaModel.fromJson(
@@ -196,13 +252,7 @@ class SubmitQuizResultModel {
             ),
           )
           .toList(),
-      recommendedReviewAction: json['recommendedReviewAction'] == null
-          ? null
-          : RecommendedReviewActionModel.fromJson(
-              Map<String, dynamic>.from(
-                json['recommendedReviewAction'] as Map,
-              ),
-            ),
+      recommendedReviewActions: recommendedReviewActions,
     );
   }
 }
@@ -212,7 +262,6 @@ class QuizAttemptItemResultModel {
     this.questionId,
     this.questionKey,
     this.selectedOption,
-    this.correctAnswer,
     this.isCorrect,
     this.obtainedScore,
     this.explanationMd,
@@ -223,7 +272,6 @@ class QuizAttemptItemResultModel {
   final int? questionId;
   final String? questionKey;
   final String? selectedOption;
-  final String? correctAnswer;
   final bool? isCorrect;
   final int? obtainedScore;
   final String? explanationMd;
@@ -235,7 +283,6 @@ class QuizAttemptItemResultModel {
       questionId: json['questionId'] as int?,
       questionKey: json['questionKey'] as String?,
       selectedOption: json['selectedOption'] as String?,
-      correctAnswer: json['correctAnswer'] as String?,
       isCorrect: json['isCorrect'] as bool?,
       obtainedScore: json['obtainedScore'] as int?,
       explanationMd: json['explanationMd'] as String?,

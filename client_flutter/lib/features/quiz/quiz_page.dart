@@ -477,13 +477,16 @@ class _QuestionCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        for (final option in question.options) ...[
+        for (final optionEntry in question.options.indexed) ...[
           _OptionTile(
-            option: option,
-            selected: selectedOption == option,
+            option: optionEntry.$2,
+            selected: selectedOption == _optionKeyForIndex(optionEntry.$1),
             locked: locked,
             result: result,
-            onTap: () => onSelectAnswer(question.questionId, option),
+            onTap: () => onSelectAnswer(
+              question.questionId,
+              _optionKeyForIndex(optionEntry.$1),
+            ),
           ),
           const SizedBox(height: 10),
         ],
@@ -513,11 +516,9 @@ class _OptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final correctAnswer = result?.correctAnswer;
-    final isCorrectAnswer = correctAnswer != null && correctAnswer == option;
-    final isWrongSelection =
-        selected && result?.isCorrect == false && correctAnswer != option;
-    final color = isCorrectAnswer
+    final isCorrectSelection = selected && result?.isCorrect == true;
+    final isWrongSelection = selected && result?.isCorrect == false;
+    final color = isCorrectSelection
         ? const Color(0xFF16A34A)
         : isWrongSelection
             ? const Color(0xFFEF4444)
@@ -532,9 +533,7 @@ class _OptionTile extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: selected || isCorrectAnswer
-              ? color.withValues(alpha: 0.08)
-              : Colors.white,
+          color: selected ? color.withValues(alpha: 0.08) : Colors.white,
           border: Border.all(color: color, width: selected ? 1.4 : 1),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -544,7 +543,7 @@ class _OptionTile extends StatelessWidget {
               selected
                   ? Icons.radio_button_checked
                   : Icons.radio_button_unchecked,
-              color: selected || isCorrectAnswer ? color : AppTheme.muted,
+              color: selected ? color : AppTheme.muted,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -557,7 +556,7 @@ class _OptionTile extends StatelessWidget {
                 ),
               ),
             ),
-            if (isCorrectAnswer)
+            if (isCorrectSelection)
               const Icon(Icons.check_circle, color: Color(0xFF16A34A))
             else if (isWrongSelection)
               const Icon(Icons.cancel, color: Color(0xFFEF4444)),
@@ -640,7 +639,7 @@ class _QuizResultPanel extends StatelessWidget {
               icon: Icons.send_rounded,
               onPressed: onSubmit,
             )
-          else
+          else if (result.reviewTaskRunId != null)
             GradientButton(
               label: '查看复习任务',
               icon: Icons.calendar_today_outlined,
@@ -725,9 +724,13 @@ class _AfterSubmitSummary extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 8),
               child: _MasteryDeltaRow(delta: delta),
             ),
-        if (result.recommendedReviewAction != null) ...[
+        if (result.recommendedReviewActions.isNotEmpty) ...[
           const SizedBox(height: 12),
-          _RecommendedActionCard(action: result.recommendedReviewAction!),
+          for (final action in result.recommendedReviewActions)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _RecommendedActionCard(action: action),
+            ),
         ],
       ],
     );
@@ -850,4 +853,9 @@ Color _statusColor(String status) {
     'queued' || 'running' || 'generating' => const Color(0xFFF97316),
     _ => const Color(0xFF64748B),
   };
+}
+
+String _optionKeyForIndex(int index) {
+  const keys = ['A', 'B', 'C', 'D'];
+  return index < keys.length ? keys[index] : '${index + 1}';
 }

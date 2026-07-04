@@ -36,15 +36,19 @@ void main() {
 
     expect(fakeApiClient.submittedAnswers.single.toJson(), {
       'answers': [
-        {'questionId': 8101, 'selectedOption': '自变量趋近与函数值趋近'},
-        {'questionId': 8102, 'selectedOption': '切线斜率'},
+        {'questionId': 8101, 'selectedOption': 'A'},
+        {'questionId': 8102, 'selectedOption': 'A'},
       ],
     });
+    expect(find.text('自变量趋近与函数值趋近'), findsOneWidget);
+    expect(find.text('切线斜率'), findsOneWidget);
     expect(find.text('80/100'), findsOneWidget);
     expect(find.text('80%'), findsOneWidget);
     expect(find.text('极限定义'), findsOneWidget);
     expect(find.text('查看复习任务'), findsOneWidget);
     expect(find.text('待巩固'), findsOneWidget);
+    expect(find.text('Review block 4001'), findsOneWidget);
+    expect(find.text('Practice similar questions'), findsOneWidget);
   });
 
   testWidgets('course quiz page can generate a quiz', (tester) async {
@@ -214,17 +218,23 @@ class _QuizPageFakeApiClient extends ApiClient {
       'items': [
         {
           'questionId': 8101,
-          'selectedOption': '自变量趋近与函数值趋近',
-          'correctAnswer': '只关注图像',
+          'selectedOption': 'A',
           'isCorrect': false,
           'explanationMd': '需要同时关注自变量趋近和函数值趋近。',
         },
       ],
-      'recommendedReviewAction': {
-        'type': 'revisit_block',
-        'targetBlockId': 4001,
-        'reason': '建议先回看易错知识块。',
-      },
+      'recommendedReviewActions': [
+        {
+          'type': 'revisit_block',
+          'targetBlockId': 4001,
+          'reason': 'Review block 4001',
+        },
+        {
+          'type': 'practice_questions',
+          'targetId': 5001,
+          'reason': 'Practice similar questions',
+        },
+      ],
     });
   }
 }

@@ -1064,6 +1064,173 @@ asyncio.run(main())
     assert payload["review_ref_count"] >= 1
 
 
+def test_lesson_quiz_service_reads_and_scores_sql_scoped_quiz_on_sqlite():
+    import server.infra.db.models
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from server.infra.db.base import Base
+    from server.infra.db.models import AsyncTask
+    from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+
+    _ = server.infra.db.models
+    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, future=True)
+    session = session_factory()
+    try:
+        repo = SqlAlchemyRuntimeRepository(session)
+        service = QuizService(
+            courses=repo,
+            quizzes=repo,
+            idempotency=repo,
+            task_dispatcher=_NoopReviewDispatcher(),
+            async_tasks=repo,
+            lessons=repo,
+            scoped_artifacts=repo,
+            handouts=repo,
+            resources=repo,
+        )
+        course = repo.create_course(
+            title="SQL lesson quiz course",
+            entry_type="manual_import",
+            goal_text="verify SQL lesson quiz generation",
+            preferred_style="balanced",
+        )
+        lesson = repo.create_lesson(course_id=course["courseId"], title="B+ Tree Indexes")
+        resource = repo.create_resource(
+            course["courseId"],
+            {
+                "resourceType": "pdf",
+                "sourceType": "upload",
+                "objectKey": "raw/sql-lesson/btree.pdf",
+                "originalName": "btree.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 2048,
+                "checksum": "sha256:sql-lesson-btree",
+                "scopeType": "lesson",
+                "lessonId": lesson["lessonId"],
+                "usageRole": "lesson_material",
+            },
+        )
+        parse_run, _ = repo.create_parse_run(course["courseId"])
+        repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+        segments = repo.create_course_segments(
+            course_id=course["courseId"],
+            resource_id=resource["resourceId"],
+            parse_run_id=parse_run["parseRunId"],
+            segments=[
+                {
+                    "segmentType": "pdf_page_text",
+                    "title": "B+ Tree Indexes",
+                    "textContent": "A B+ tree keeps keys sorted and uses high fanout to reduce lookup depth.",
+                    "plainText": "A B+ tree keeps keys sorted and uses high fanout to reduce lookup depth.",
+                    "pageNo": 4,
+                    "orderNo": 1,
+                    "tokenCount": 16,
+                }
+            ],
+        )
+        segment_key = segments[0]["segmentKey"]
+        _handout, _handout_trigger, blocks = repo.create_handout(
+            course["courseId"],
+            scope_type="lesson",
+            lesson_id=lesson["lessonId"],
+            artifact_kind="lesson_handout",
+            outline={
+                "title": "B+ Tree Indexes",
+                "summary": "Lesson outline for B+ tree evidence.",
+                "items": [
+                    {
+                        "outlineKey": "section-btree",
+                        "title": "B+ Tree Indexes",
+                        "summary": "B+ tree lookup evidence.",
+                        "sortNo": 1,
+                        "children": [
+                            {
+                                "outlineKey": "block-btree",
+                                "title": "B+ Tree fanout",
+                                "summary": "Fanout reduces lookup depth.",
+                                "startSec": 0,
+                                "endSec": 60,
+                                "sortNo": 1,
+                                "generationStatus": "pending",
+                                "sourceSegmentKeys": [segment_key],
+                                "topicTags": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        repo.save_handout_block_result(
+            blocks[0]["blockId"],
+            {
+                "title": "B+ Tree fanout",
+                "summary": "Fanout reduces lookup depth.",
+                "contentMd": "A B+ tree keeps keys sorted and uses high fanout to reduce lookup depth.",
+                "knowledgePoints": [{"knowledgePointKey": "kp-btree-fanout", "displayName": "B+ tree fanout"}],
+                "citations": [
+                    {
+                        "resourceId": resource["resourceId"],
+                        "segmentKey": segment_key,
+                        "pageNo": 4,
+                        "refLabel": "btree.pdf page 4",
+                    }
+                ],
+            },
+        )
+
+        generated = service.generate_lesson_quiz(
+            course_id=course["courseId"],
+            lesson_id=lesson["lessonId"],
+            question_count_level="small",
+        )
+        assert generated["questionCount"] == 1
+        assert len(generated["questions"]) == 1
+
+        quiz = service.get_quiz(quiz_id=generated["quizId"])
+
+        assert quiz["scopeType"] == "lesson"
+        assert quiz["lessonId"] == lesson["lessonId"]
+        assert quiz["questionCount"] == 1
+        assert len(quiz["questions"]) == 1
+        public_question = quiz["questions"][0]
+        assert public_question["sourceBlockKey"] == str(blocks[0]["blockId"])
+        assert public_question["sourceSegmentKeys"] == [segment_key]
+        assert public_question["knowledgePointName"] == "B+ tree fanout"
+        assert "correctAnswer" not in public_question
+
+        context = repo.get_quiz_submission_context(quiz["quizId"])
+        assert context is not None
+        private_question = context["quizPayload"]["questions"][0]
+        assert private_question["correctAnswer"] in {"A", "B", "C", "D"}
+        result = service.submit_quiz(
+            quiz_id=quiz["quizId"],
+            payload=SubmitQuizRequest.model_validate(
+                {
+                    "answers": [
+                        {
+                            "questionId": public_question["questionId"],
+                            "selectedOption": private_question["correctAnswer"],
+                        }
+                    ]
+                }
+            ),
+        )
+
+        assert result["score"] == 1
+        assert result["totalScore"] == 1
+        assert result["accuracy"] == 1.0
+        assert result["reviewTaskRunId"] is None
+
+        review_refresh_tasks = session.query(AsyncTask).filter_by(task_type="review_refresh").all()
+        assert review_refresh_tasks == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_stale_quiz_generate_task_does_not_update_current_course_after_reparse(tmp_path):
     script = """
 import json
@@ -1210,6 +1377,175 @@ finally:
     assert payload["course_pipeline_status"] == "succeeded"
     assert payload["course_last_error"] is None
     assert payload["active_handout_version_id"] is None
+
+
+def test_quiz_generate_worker_rejects_payload_scope_mismatch_before_saving(tmp_path):
+    script = """
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.models import Quiz
+from server.infra.db.session import create_session, get_engine
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.quizzes import run_quiz_generate
+
+Base.metadata.create_all(get_engine())
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL scoped quiz course",
+        entry_type="manual_import",
+        goal_text="verify quiz scope validation",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/scope.pdf",
+            "originalName": "scope.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:scope",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run["parseRunId"],
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": "Scope validation evidence.",
+                "plainText": "Scope validation evidence.",
+                "pageNo": 1,
+            }
+        ],
+    )
+    _, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "Scope outline",
+            "summary": "Scope summary",
+            "items": [
+                {
+                    "outlineKey": "scope-section",
+                    "title": "Scope section",
+                    "summary": "Scope section summary",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "scope-block",
+                            "title": "Scope block",
+                            "summary": "Scope block summary",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segments[0]["segmentKey"]],
+                            "topicTags": [],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "Scope block",
+            "summary": "Scope section summary",
+            "contentMd": "Scope validation evidence.",
+            "knowledgePoints": [{"knowledgePointKey": "kp-scope", "displayName": "Scope validation"}],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": segments[0]["segmentKey"],
+                    "pageNo": 1,
+                    "refLabel": "scope.pdf page 1",
+                }
+            ],
+        },
+    )
+    _, trigger = repo.create_quiz(course_id)
+    task_id = trigger["taskId"]
+    quiz_id = trigger["entity"]["id"]
+finally:
+    session.close()
+
+def fake_generate_quiz(block_payloads, *, segments, course_context, preferences, question_count_level):
+    block_key = str(block_payloads[0]["blockId"])
+    segment_key = block_payloads[0]["sourceSegmentKeys"][0]
+    return {
+        "quizType": "chapter_review",
+        "questions": [
+            {
+                "questionKey": "q1-kp-scope",
+                "questionType": "single_choice",
+                "stemMd": "Which statement matches the scoped evidence?",
+                "options": ["A. Scope validation evidence.", "B. Wrong scope.", "C. No evidence.", "D. Subjective."],
+                "correctAnswer": "A",
+                "explanationMd": "Uses the current course handout block.",
+                "difficultyLevel": "medium",
+                "knowledgePointKey": "kp-scope",
+                "knowledgePointName": "Scope validation",
+                "sourceBlockKey": block_key,
+                "sourceSegmentKeys": [segment_key],
+            }
+        ],
+    }
+
+result = run_quiz_generate(
+    {
+        "taskId": task_id,
+        "courseId": course_id,
+        "quizId": quiz_id,
+        "scopeType": "lesson",
+        "lessonId": 999,
+        "startLessonId": None,
+        "endLessonId": None,
+    },
+    generate_quiz_func=fake_generate_quiz,
+)
+
+session = create_session()
+try:
+    quiz_row = session.get(Quiz, quiz_id)
+    print(json.dumps({
+        "result_status": result["status"],
+        "quiz_status": quiz_row.status,
+        "question_count": quiz_row.question_count,
+        "error_message": quiz_row.error_message,
+    }))
+finally:
+    session.close()
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'quiz-scope-mismatch.sqlite3'}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["result_status"] == "failed"
+    assert payload["quiz_status"] == "failed"
+    assert payload["question_count"] == 0
+    assert "scope" in payload["error_message"]
 
 
 def test_quiz_generate_worker_marks_failed_without_saving_questions_on_deepseek_error(tmp_path):

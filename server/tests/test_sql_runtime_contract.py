@@ -839,6 +839,42 @@ def test_sql_handout_block_generation_metadata_persists_to_read_models():
     engine.dispose()
 
 
+def test_sql_comprehensive_scoped_quiz_can_be_read_without_handout_or_parse_context():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        scoped_artifacts=repo,
+    )
+    course = repo.create_course(
+        title="SQLite comprehensive quiz course",
+        entry_type="manual_import",
+        goal_text="Verify scoped comprehensive quiz readback",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+
+    generated = service.generate_comprehensive_quiz(
+        course_id=course_id,
+        question_count_level="small",
+    )
+    quiz = service.get_quiz(quiz_id=generated["quizId"])
+
+    assert generated["scopeType"] == "course"
+    assert generated["lessonId"] is None
+    assert quiz["quizId"] == generated["quizId"]
+    assert quiz["scopeType"] == "course"
+    assert quiz["lessonId"] is None
+    assert quiz["status"] == "placeholder"
+    assert quiz["questionCount"] == 0
+    assert quiz["questions"] == []
+
+    session.close()
+    engine.dispose()
+
+
 def test_sql_legacy_ready_handout_block_without_metadata_returns_fallback_marker():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)
@@ -1394,6 +1430,19 @@ def test_quiz_service_sql_submit_persists_attempt_and_review_refresh_task():
 
     assert result["score"] == 1
     assert result["totalScore"] == 1
+    assert result["items"] == [
+        {
+            "questionId": first_question["questionId"],
+            "questionKey": "q1-submit",
+            "selectedOption": "A",
+            "isCorrect": True,
+            "obtainedScore": 1,
+            "explanationMd": "依据当前讲义块。",
+            "knowledgePointKey": "kp-limit-submit",
+            "sourceBlockKey": str(blocks[0]["blockId"]),
+        }
+    ]
+    assert "correctAnswer" not in result["items"][0]
     attempts = Base.metadata.tables.get("quiz_attempts")
     async_tasks = Base.metadata.tables.get("async_tasks")
     assert attempts is not None
@@ -1421,3 +1470,124 @@ def test_quiz_service_sql_submit_persists_attempt_and_review_refresh_task():
 
     session.close()
     engine.dispose()
+
+
+def test_sql_lesson_quiz_fallback_uses_lesson_scoped_parsed_resource_segments():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    try:
+        course = repo.create_course(
+            title="SQLite lesson quiz fallback",
+            entry_type="manual_import",
+            goal_text="验证课节资源 fallback",
+            preferred_style="balanced",
+        )
+        course_id = _value(course, "courseId", "course_id", "id")
+        lesson = repo.create_lesson(course_id=course_id, title="B+ Tree lesson")
+        lesson_id = lesson["lessonId"]
+        resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pdf",
+                "objectKey": f"raw/1/{course_id}/btree.pdf",
+                "originalName": "btree.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 1024,
+                "checksum": "sha256:btree",
+                "scopeType": "lesson",
+                "lessonId": lesson_id,
+                "usageRole": "lesson_material",
+            },
+        )
+        parse_run, _ = repo.create_parse_run(course_id)
+        parse_run_id = parse_run["parseRunId"]
+        segments = repo.create_course_segments(
+            course_id=course_id,
+            resource_id=resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "pdf_page_text",
+                    "title": "B+ tree fanout",
+                    "textContent": "A B+ tree uses high fanout to reduce lookup depth.",
+                    "plainText": "A B+ tree uses high fanout to reduce lookup depth.",
+                    "pageNo": 4,
+                    "orderNo": 1,
+                    "tokenCount": 12,
+                }
+            ],
+        )
+        segment_key = segments[0]["segmentKey"]
+        repo.mark_parse_run_succeeded(parse_run_id)
+        service = QuizService(
+            courses=repo,
+            lessons=repo,
+            quizzes=repo,
+            idempotency=repo,
+            resources=repo,
+            scoped_artifacts=repo,
+        )
+
+        generated = service.generate_lesson_quiz(
+            course_id=course_id,
+            lesson_id=lesson_id,
+            question_count_level="small",
+        )
+
+        assert generated["questionCount"] == 1
+        question = generated["questions"][0]
+        assert question["sourceBlockKey"] == f"resource-{resource['resourceId']}"
+        assert question["sourceSegmentKeys"] == [segment_key]
+        assert "correctAnswer" not in question
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_lesson_quiz_fallback_rejects_lesson_metadata_only_resource():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    try:
+        course = repo.create_course(
+            title="SQLite lesson quiz metadata only",
+            entry_type="manual_import",
+            goal_text="验证 metadata-only 资源不生成 quiz",
+            preferred_style="balanced",
+        )
+        course_id = _value(course, "courseId", "course_id", "id")
+        lesson = repo.create_lesson(course_id=course_id, title="Metadata only lesson")
+        repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pdf",
+                "objectKey": f"raw/1/{course_id}/metadata-only.pdf",
+                "originalName": "metadata-only.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 1024,
+                "checksum": "sha256:metadata-only",
+                "scopeType": "lesson",
+                "lessonId": lesson["lessonId"],
+                "usageRole": "lesson_material",
+            },
+        )
+        service = QuizService(
+            courses=repo,
+            lessons=repo,
+            quizzes=repo,
+            idempotency=repo,
+            resources=repo,
+            scoped_artifacts=repo,
+        )
+
+        with pytest.raises(ServiceError) as exc_info:
+            service.generate_lesson_quiz(
+                course_id=course_id,
+                lesson_id=lesson["lessonId"],
+                question_count_level="small",
+            )
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.error_code == "quiz.not_ready"
+    finally:
+        session.close()
+        engine.dispose()

@@ -942,11 +942,21 @@ void main() {
               'courseId': 101,
               'status': 'ready',
               'questionCount': 1,
+              'scopeType': 'lesson',
+              'lessonId': 201,
+              'startLessonId': 201,
+              'endLessonId': 203,
+              'quizMode': 'objective',
               'questions': [
                 {
                   'questionId': 8101,
                   'stemMd': '下列关于极限的说法哪项正确？',
-                  'options': ['A', 'B', 'C', 'D'],
+                  'options': ['自变量趋近与函数值趋近', '只关注图像', '只关注导数', '只关注面积'],
+                  'questionType': 'single_choice',
+                  'knowledgePointKey': 'kp-limit',
+                  'knowledgePointName': '极限定义',
+                  'sourceBlockKey': 'block-limit',
+                  'sourceSegmentKeys': ['seg-limit-1'],
                 },
               ],
             },
@@ -1109,6 +1119,17 @@ void main() {
 
     expect(generated.entity.type, 'quiz');
     expect(quiz.questions.single.questionId, 8101);
+    expect(quiz.scopeType, 'lesson');
+    expect(quiz.lessonId, 201);
+    expect(quiz.startLessonId, 201);
+    expect(quiz.endLessonId, 203);
+    expect(quiz.quizMode, 'objective');
+    expect(quiz.questions.single.options.first, '自变量趋近与函数值趋近');
+    expect(quiz.questions.single.questionType, 'single_choice');
+    expect(quiz.questions.single.knowledgePointKey, 'kp-limit');
+    expect(quiz.questions.single.knowledgePointName, '极限定义');
+    expect(quiz.questions.single.sourceBlockKey, 'block-limit');
+    expect(quiz.questions.single.sourceSegmentKeys, ['seg-limit-1']);
     expect(attempt.masteryDelta.single.knowledgePoint, '极限定义');
     expect(reviewTasks.items.single.recommendedSegment?.blockId, 4001);
     expect(regenerated.entity.id, 8302);

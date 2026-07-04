@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from server.schemas.responses import QuizData
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = "docs/contracts/v2-course-lesson-workbench-contract.md"
@@ -129,14 +131,57 @@ def test_v2_course_lesson_contract_freezes_scope_and_no_resource_qa() -> None:
         "`primary_video`",
         "`lesson_material`",
         "`handoutBlockId`",
+        "`questionType`",
+        "`knowledgePointKey`",
+        "`knowledgePointName`",
+        "`sourceBlockKey`",
+        "`sourceSegmentKeys`",
+        "`correctAnswer`",
+        "`recommendedReviewActions`",
         "`qa.block_not_found`",
         "embedded lesson-study QA",
+        "latest lesson-scoped handout blocks first",
+        "falls back to lesson-scoped resources",
     ):
         assert token in contract
 
     assert "不做单资料 QA" in contract
     assert "No single-resource QA" in contract
     assert "/resources/{resourceId}/qa" not in contract
+
+
+def test_public_quiz_read_schema_and_contract_include_explicit_scope_fields() -> None:
+    dumped = QuizData.model_validate(
+        {
+            "quizId": 8001,
+            "courseId": 101,
+            "scopeType": "lesson",
+            "lessonId": 201,
+            "startLessonId": None,
+            "endLessonId": None,
+            "quizMode": "objective",
+            "status": "ready",
+            "questionCount": 0,
+            "questions": [],
+        }
+    ).model_dump(by_alias=True)
+
+    for key in ("scopeType", "lessonId", "startLessonId", "endLessonId", "quizMode"):
+        assert key in dumped
+
+    section = section_between(
+        text("docs/contracts/api-contract.md"),
+        '### `GET /api/v1/quizzes/{quizId}`',
+        '### `POST /api/v1/quizzes/{quizId}/attempts`',
+    )
+    for token in (
+        '"scopeType": "lesson"',
+        '"lessonId": 201',
+        '"startLessonId": null',
+        '"endLessonId": null',
+        '"quizMode": "objective"',
+    ):
+        assert token in section
 
 
 def test_v2_course_lesson_contract_freezes_error_codes() -> None:

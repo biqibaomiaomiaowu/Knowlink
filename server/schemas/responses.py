@@ -334,13 +334,23 @@ class ScopedQaMessageData(QaMessageData):
 
 class QuizQuestion(CamelModel):
     question_id: int
+    question_type: Literal["single_choice", "multiple_choice", "true_false"] = "single_choice"
     stem_md: str
     options: list[str]
+    knowledge_point_key: str | None = None
+    knowledge_point_name: str | None = None
+    source_block_key: str | None = None
+    source_segment_keys: list[str] = Field(default_factory=list)
 
 
 class QuizData(CamelModel):
     quiz_id: int
     course_id: int
+    scope_type: Literal["course", "lesson", "lesson_range"]
+    lesson_id: int | None = None
+    start_lesson_id: int | None = None
+    end_lesson_id: int | None = None
+    quiz_mode: str = "objective"
     status: str
     question_count: int
     questions: list[QuizQuestion]
@@ -377,14 +387,27 @@ class SubjectiveGradingPlaceholderData(CamelModel):
     needs_human_review: bool = False
 
 
+class SubmitQuizResultItem(CamelModel):
+    question_id: int | None = None
+    question_key: str
+    selected_option: str
+    is_correct: bool
+    obtained_score: int
+    explanation_md: str = ""
+    knowledge_point_key: str = ""
+    source_block_key: str = ""
+
+
 class SubmitQuizResult(CamelModel):
     attempt_id: int
     score: int
     total_score: int
     accuracy: float
-    review_task_run_id: int
+    review_task_run_id: int | None = None
     mastery_delta: list[dict[str, object]] = []
     recommended_review_action: dict[str, object] | None = None
+    recommended_review_actions: list[dict[str, object]] = Field(default_factory=list)
+    items: list[SubmitQuizResultItem] = Field(default_factory=list)
 
 
 class ReviewTask(CamelModel):

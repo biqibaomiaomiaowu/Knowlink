@@ -96,6 +96,7 @@ def _run_quiz_generate_with_session(
     version = _require_model(session, HandoutVersion, quiz.handout_version_id, "handout.not_found")
     _validate_quiz_task_ownership(task=task, course=course, quiz=quiz, version=version)
     task_payload = _task_payload(task=task, message=message)
+    _validate_quiz_task_scope(quiz=quiz, payload=task_payload)
 
     if task.status in {"succeeded", "failed", "canceled", "skipped"}:
         return _terminal_quiz_task_result(task=task, quiz=quiz)
@@ -197,6 +198,23 @@ def _validate_quiz_task_ownership(
         raise QuizTaskInputError("quiz source parse run does not match handout version")
     if task.parse_run_id != version.source_parse_run_id:
         raise QuizTaskInputError("quiz task does not match source parse run")
+
+
+def _validate_quiz_task_scope(*, quiz: Quiz, payload: Mapping[str, Any]) -> None:
+    expected = {
+        "scopeType": quiz.scope_type or "course",
+        "lessonId": quiz.lesson_id,
+        "startLessonId": quiz.start_lesson_id,
+        "endLessonId": quiz.end_lesson_id,
+    }
+    actual = {
+        "scopeType": str(payload.get("scopeType") or payload.get("scope_type") or "course"),
+        "lessonId": _optional_int(payload, "lessonId", "lesson_id"),
+        "startLessonId": _optional_int(payload, "startLessonId", "start_lesson_id"),
+        "endLessonId": _optional_int(payload, "endLessonId", "end_lesson_id"),
+    }
+    if actual != expected:
+        raise QuizTaskInputError("quiz task payload scope does not match quiz scope")
 
 
 def _quiz_task_targets_active_course(
@@ -399,3 +417,15 @@ def _required_int(message: Mapping[str, Any], *keys: str) -> int:
         except (TypeError, ValueError):
             break
     raise QuizTaskInputError(f"Missing required integer field: {'/'.join(keys)}")
+
+
+def _optional_int(message: Mapping[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = message.get(key)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise QuizTaskInputError(f"Invalid integer field: {key}") from None
+    return None

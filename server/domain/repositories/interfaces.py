@@ -437,6 +437,18 @@ class QuizRepository(Protocol):
         question_count_level: str = "medium",
     ) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
+    def create_scoped_quiz(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        quiz_payload: Mapping[str, Any],
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
+        question_count_level: str = "medium",
+    ) -> dict[str, Any]: ...
+
     def get_quiz(self, quiz_id: int) -> dict[str, Any] | None: ...
 
     def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None: ...

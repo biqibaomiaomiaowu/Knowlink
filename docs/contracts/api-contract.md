@@ -1214,22 +1214,39 @@ V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知
 {
   "quizId": 8001,
   "courseId": 101,
+  "scopeType": "lesson",
+  "lessonId": 201,
+  "startLessonId": null,
+  "endLessonId": null,
+  "quizMode": "objective",
   "status": "ready",
   "questionCount": 3,
   "questions": [
     {
       "questionId": 8101,
+      "questionType": "single_choice",
       "stemMd": "下列关于极限的说法哪项正确？",
       "options": [
         "A",
         "B",
         "C",
         "D"
-      ]
+      ],
+      "knowledgePointKey": "kp-limit",
+      "knowledgePointName": "极限定义",
+      "sourceBlockKey": "4001",
+      "sourceSegmentKeys": ["segment-7001"]
     }
   ]
 }
 ```
+
+说明：
+
+- `questionType` 当前用于区分客观题类型，可取 `single_choice`、`multiple_choice`、`true_false`。
+- `scopeType`、`lessonId`、`startLessonId`、`endLessonId`、`quizMode` 显式描述测验范围；课程级测验 `lessonId/startLessonId/endLessonId` 为 `null`。
+- `knowledgePointKey`、`knowledgePointName`、`sourceBlockKey`、`sourceSegmentKeys` 是公开证据字段，用于题目来源展示和后续复习链路。
+- `GET /api/v1/quizzes/{quizId}` 不返回 `correctAnswer`；答案只在服务端提交判分上下文中使用。
 
 ### `POST /api/v1/quizzes/{quizId}/attempts`
 
@@ -1277,9 +1294,31 @@ V2 主观题判卷说明：
     "type": "revisit_block",
     "targetBlockId": 4001,
     "reason": "建议先回看易错知识块，再进入下一轮练习。"
-  }
+  },
+  "recommendedReviewActions": [
+    {
+      "type": "revisit_block",
+      "targetBlockId": 4001,
+      "reason": "建议先回看易错知识块，再进入下一轮练习。"
+    }
+  ],
+  "items": [
+    {
+      "questionId": 8101,
+      "questionKey": "q1-limit",
+      "selectedOption": "A",
+      "isCorrect": true,
+      "obtainedScore": 1,
+      "explanationMd": "依据当前讲义块。",
+      "knowledgePointKey": "kp-limit",
+      "sourceBlockKey": "4001"
+    }
+  ]
 }
 ```
+
+说明：当测验没有可用于课程复习刷新的 parse / handout 上下文时，`reviewTaskRunId` 为 `null`，提交结果仍返回判分和推荐动作；后端不会创建必然失败的 `review_refresh` 异步任务。
+`items[]` 是公共逐题判分结果，只包含题目定位、用户选择、是否正确、得分、解释和知识点 / 来源块定位；提交响应不得暴露 `correctAnswer`，正确答案只允许存在于服务端提交判分上下文和内部持久化记录中。
 
 ### `GET /api/v1/courses/{courseId}/review-tasks`
 

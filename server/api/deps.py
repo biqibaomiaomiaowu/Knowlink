@@ -322,6 +322,8 @@ async def get_quiz_service(
         idempotency=repo,
         lessons=lesson_repo,
         scoped_artifacts=lesson_repo,
+        handouts=repo,
+        resources=repo,
         task_dispatcher=task_dispatcher,
         async_tasks=async_tasks,
     )

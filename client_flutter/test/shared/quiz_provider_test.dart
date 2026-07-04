@@ -162,6 +162,28 @@ void main() {
     expect(container.read(courseFlowProvider).quizAttemptId, 8201);
     expect(container.read(courseFlowProvider).reviewTaskRunId, 8301);
   });
+
+  test('submit keeps result when review run is absent', () async {
+    final fakeApiClient = _FakeQuizApiClient()..reviewTaskRunId = null;
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(quizProvider.notifier).loadQuiz(8001);
+    container.read(quizProvider.notifier)
+      ..selectAnswer(questionId: 8101, selectedOption: 'A')
+      ..selectAnswer(questionId: 8102, selectedOption: 'B');
+    await container.read(quizProvider.notifier).submit(8001);
+
+    final state = container.read(quizProvider);
+    expect(state.submissionValue?.attemptId, 8201);
+    expect(state.submissionValue?.reviewTaskRunId, isNull);
+    expect(container.read(courseFlowProvider).quizAttemptId, 8201);
+    expect(container.read(courseFlowProvider).reviewTaskRunId, isNull);
+  });
 }
 
 class _FakeQuizApiClient extends ApiClient {
@@ -169,6 +191,7 @@ class _FakeQuizApiClient extends ApiClient {
   final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
   final submittedAnswers = <SubmitQuizRequestModel>[];
+  int? reviewTaskRunId = 8301;
 
   @override
   Future<QuizGenerateResultModel> generateQuiz({
@@ -220,7 +243,7 @@ class _FakeQuizApiClient extends ApiClient {
       'score': 80,
       'totalScore': 100,
       'accuracy': 0.8,
-      'reviewTaskRunId': 8301,
+      'reviewTaskRunId': reviewTaskRunId,
       'masteryDelta': [
         {'knowledgePoint': '极限定义', 'delta': 0.1, 'status': 'improved'},
       ],

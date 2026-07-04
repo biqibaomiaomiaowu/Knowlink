@@ -159,6 +159,27 @@ def test_scoped_quiz_generation_and_subjective_grading_placeholder() -> None:
     first = _lesson(course["courseId"], "第 1 节")
     second = _lesson(course["courseId"], "第 2 节")
 
+    handout, _trigger, blocks = runtime_store.create_handout(
+        course["courseId"],
+        scope_type="lesson",
+        lesson_id=first["lessonId"],
+        artifact_kind="lesson_handout",
+    )
+    block = blocks[0]
+    block.update(
+        {
+            "status": "ready",
+            "generationStatus": "ready",
+            "title": "Lesson one evidence",
+            "contentMd": "Lesson one notes explain the scoped quiz evidence for this lesson.",
+            "sourceSegmentKeys": ["lesson-one-segment"],
+            "knowledgePoints": [{"knowledgePointKey": "kp-lesson-one", "displayName": "Lesson one evidence"}],
+            "citations": [{"segmentKey": "lesson-one-segment", "refLabel": "lesson notes"}],
+        }
+    )
+    handout["readyBlocks"] = 1
+    handout["pendingBlocks"] = max(0, handout["pendingBlocks"] - 1)
+
     lesson_status, lesson_body = _api(
         "POST",
         f"/api/v1/courses/{course['courseId']}/lessons/{first['lessonId']}/quizzes/generate",
