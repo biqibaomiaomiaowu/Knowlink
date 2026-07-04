@@ -9,11 +9,173 @@ from server.ai.review_strategy import (
     build_review_task_refs,
     generate_review_tasks,
 )
+from server.domain.services.reviews import ReviewService
+from server.infra.repositories.memory_runtime import RuntimeStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
 REVIEW_SCHEMA = json.loads((ROOT / "schemas/ai/review_tasks.schema.json").read_text(encoding="utf-8"))
 REVIEW_VALIDATOR = Draft202012Validator(REVIEW_SCHEMA)
+
+
+def _review_service(repo):
+    return ReviewService(
+        courses=repo,
+        reviews=repo,
+        idempotency=repo,
+        lessons=repo,
+    )
+
+
+def test_review_center_returns_task_evidence_and_jump_route():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="review course",
+        entry_type="manual_import",
+        goal_text="review",
+        preferred_style="balanced",
+    )
+    lesson = repo.create_lesson(course_id=course["courseId"], title="lesson 1")
+    repo.create_review_run(course["courseId"])
+    task = repo.list_review_tasks(course["courseId"])[0]
+    task["scopeType"] = "lesson"
+    task["lessonId"] = lesson["lessonId"]
+    task["linkedHandoutBlockId"] = 4001
+    task["knowledgePointKey"] = "kp-set"
+    task["sourceQuestionKeys"] = ["q-set"]
+    task["title"] = "set definition weak point"
+    task["recommendedAction"] = {"type": "revisit_block", "label": "Review weak point"}
+
+    service = _review_service(repo)
+    dashboard = service.get_course_review(course_id=course["courseId"])
+
+    assert dashboard["todayTaskCount"] == 3
+    assert dashboard["weakPointCount"] >= 1
+    assert dashboard["mistakeCount"] == 1
+    assert "masteryScore" in dashboard
+    assert len(dashboard["items"]) == 3
+    assert dashboard["topTasks"][0]["taskId"] == task["reviewTaskId"]
+    assert dashboard["topTasks"][0]["sourceLesson"]["lessonId"] == lesson["lessonId"]
+    assert dashboard["topTasks"][0]["linkedHandoutBlockId"] == 4001
+    assert dashboard["topTasks"][0]["recommendedAction"]["type"] == "revisit_block"
+    assert (
+        dashboard["topTasks"][0]["jumpRoute"]
+        == f"/courses/{course['courseId']}/lessons/{lesson['lessonId']}/handout"
+    )
+
+    completed = service.complete_review_task(review_task_id=task["reviewTaskId"])
+
+    assert completed == {"reviewTaskId": task["reviewTaskId"], "completed": True}
+    remaining = service.list_review_tasks(course_id=course["courseId"])["items"]
+    assert len(remaining) == 2
+    assert task["reviewTaskId"] not in {item["reviewTaskId"] for item in remaining}
+
+
+def test_review_task_list_preserves_default_runtime_tasks_with_frontend_fields():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="runtime review course",
+        entry_type="manual_import",
+        goal_text="review",
+        preferred_style="balanced",
+    )
+    repo.create_review_run(course["courseId"])
+
+    tasks = _review_service(repo).list_review_tasks(course_id=course["courseId"])["items"]
+
+    assert len(tasks) == 3
+    assert tasks[0]["reviewTaskId"] == repo.list_review_tasks(course["courseId"])[0]["reviewTaskId"]
+    assert tasks[0]["sourceLesson"] is None
+    assert tasks[0]["linkedHandoutBlockId"] == 4001
+    assert tasks[0]["recommendedAction"]["type"] == "revisit_block"
+    assert tasks[0]["jumpRoute"] == f"/courses/{course['courseId']}/review"
+
+    dashboard = _review_service(repo).get_course_review(course_id=course["courseId"])
+
+    assert dashboard["todayTaskCount"] == 3
+    assert len(dashboard["items"]) == 3
+    assert len(dashboard["topTasks"]) == 3
+    assert dashboard["topTasks"][0]["reviewTaskId"] == tasks[0]["reviewTaskId"]
+
+
+def test_review_task_list_preserves_plain_pending_task_with_core_fields():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="plain review course",
+        entry_type="manual_import",
+        goal_text="review",
+        preferred_style="balanced",
+    )
+    repo.create_review_run(course["courseId"])
+    plain_task = repo.list_review_tasks(course["courseId"])[0]
+    plain_task.pop("recommendedSegment", None)
+    plain_task.pop("practiceEntry", None)
+
+    service = _review_service(repo)
+    tasks = service.list_review_tasks(course_id=course["courseId"])["items"]
+    by_id = {task["reviewTaskId"]: task for task in tasks}
+
+    assert plain_task["reviewTaskId"] in by_id
+    assert by_id[plain_task["reviewTaskId"]]["sourceLesson"] is None
+    assert by_id[plain_task["reviewTaskId"]]["linkedHandoutBlockId"] is None
+    assert by_id[plain_task["reviewTaskId"]]["recommendedAction"]["type"] == plain_task["taskType"]
+    assert by_id[plain_task["reviewTaskId"]]["jumpRoute"] == f"/courses/{course['courseId']}/review"
+
+    dashboard = service.get_course_review(course_id=course["courseId"])
+
+    assert dashboard["todayTaskCount"] == 3
+    assert plain_task["reviewTaskId"] in {task["reviewTaskId"] for task in dashboard["items"]}
+
+
+def test_lesson_review_tasks_include_frontend_evidence_fields():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="lesson review course",
+        entry_type="manual_import",
+        goal_text="review",
+        preferred_style="balanced",
+    )
+    lesson = repo.create_lesson(course_id=course["courseId"], title="lesson 1")
+
+    review = _review_service(repo).get_lesson_review(
+        course_id=course["courseId"],
+        lesson_id=lesson["lessonId"],
+    )
+    task = review["items"][0]
+
+    assert task["reviewTaskId"] < 0
+    assert task["taskId"] is None
+    assert task["sourceLesson"]["lessonId"] == lesson["lessonId"]
+    assert task["linkedHandoutBlockId"] is None
+    assert task["recommendedAction"]["type"] == "revisit_lesson"
+    assert task["completionSupported"] is False
+    assert task["jumpRoute"] == f"/courses/{course['courseId']}/lessons/{lesson['lessonId']}/handout"
+
+
+def test_lesson_review_placeholder_completion_cannot_complete_persisted_task():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="lesson review completion course",
+        entry_type="manual_import",
+        goal_text="review",
+        preferred_style="balanced",
+    )
+    lesson = repo.create_lesson(course_id=course["courseId"], title="lesson 1")
+    repo.create_review_run(course["courseId"])
+    persisted_task_id = repo.list_review_tasks(course["courseId"])[0]["reviewTaskId"]
+    service = _review_service(repo)
+    placeholder = service.get_lesson_review(
+        course_id=course["courseId"],
+        lesson_id=lesson["lessonId"],
+    )["items"][0]
+
+    result = service.complete_review_task(review_task_id=placeholder["reviewTaskId"])
+
+    assert result == {"reviewTaskId": placeholder["reviewTaskId"], "completed": False}
+    assert persisted_task_id in {
+        task["reviewTaskId"]
+        for task in service.list_review_tasks(course_id=course["courseId"])["items"]
+    }
 
 
 def test_mastery_updates_raise_correct_points_and_lower_wrong_points():

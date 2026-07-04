@@ -2342,6 +2342,17 @@ class RuntimeStore:
             self.create_review_run(course_id)
         return self.review_tasks.get(course_id, [])
 
+    def complete_review_task(self, review_task_id: int) -> dict[str, Any]:
+        for tasks in self.review_tasks.values():
+            for task in tasks:
+                if task.get("reviewTaskId") != review_task_id:
+                    continue
+                if task.get("status") == "completed":
+                    return {"reviewTaskId": review_task_id, "completed": False}
+                task["status"] = "completed"
+                return {"reviewTaskId": review_task_id, "completed": True}
+        return {"reviewTaskId": review_task_id, "completed": False}
+
     def get_review_run(self, review_run_id: int) -> dict[str, Any] | None:
         return self.review_runs.get(review_run_id)
 

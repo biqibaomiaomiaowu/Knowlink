@@ -412,20 +412,30 @@ class SubmitQuizResult(CamelModel):
 
 class ReviewTask(CamelModel):
     review_task_id: int
+    task_id: int | None = None
+    task_key: str | None = None
     task_type: str
     priority_score: int
     reason_text: str
     recommended_minutes: int
+    completion_supported: bool | None = None
     scope_type: Literal["course", "lesson"] | None = None
     lesson_id: int | None = None
+    source_lesson: dict[str, object] | None = None
     knowledge_point_key: str | None = None
+    source_block_key: str | None = None
     source_question_keys: list[str] = Field(default_factory=list)
+    source_segment_keys: list[str] = Field(default_factory=list)
+    linked_handout_block_id: int | None = None
+    recommended_action: dict[str, object] | None = None
     recommended_handout_block: dict[str, object] | None = None
     evidence_chain: list[dict[str, object]] = Field(default_factory=list)
     recommended_segment: dict[str, object] | None = None
     practice_entry: dict[str, object] | None = None
     review_order: int | None = None
     intensity: str | None = None
+    status: str | None = None
+    jump_route: str | None = None
 
 
 class ReviewTasksData(CamelModel):
@@ -444,6 +454,11 @@ class ScopedReviewTasksData(CamelModel):
     lesson_id: int | None = None
     status: str
     items: list[ReviewTask]
+    today_task_count: int | None = None
+    weak_point_count: int | None = None
+    mistake_count: int | None = None
+    mastery_score: float | None = None
+    top_tasks: list[ReviewTask] = Field(default_factory=list)
     weak_lessons: list[dict[str, object]] = Field(default_factory=list)
     cross_lesson_weak_points: list[dict[str, object]] = Field(default_factory=list)
 

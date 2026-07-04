@@ -464,8 +464,14 @@ Review task fields:
 - `recommendedSegment`
 - `recommendedHandoutBlock`
 - `evidenceChain`
+- `sourceLesson`
+- `linkedHandoutBlockId`
+- `recommendedAction`
+- `jumpRoute`
 
-Course review aggregates weak lessons and cross-lesson weak points. Lesson review only returns lesson-scoped tasks and necessary course-level evidence.
+Course review aggregates weak lessons and cross-lesson weak points. It also exposes Review Center summary fields `todayTaskCount`, `weakPointCount`, `mistakeCount`, `masteryScore`, and `topTasks`.
+Lesson review only returns lesson-scoped tasks and necessary course-level evidence.
+Synthetic lesson review placeholders must include `completionSupported=false`, `taskId=null`, and a negative `reviewTaskId` sentinel; clients must not call the task completion endpoint for those placeholders unless the task is backed by a persisted `review_tasks` row.
 
 ## 9. Graph Report Export And Streaming Placeholders
 

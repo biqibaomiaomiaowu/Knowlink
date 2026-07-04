@@ -39,15 +39,22 @@ class ReviewService:
 
     def list_review_tasks(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
-        return {"items": self.reviews.list_review_tasks(course_id)}
+        return {"items": self._review_task_views(course_id=course_id)}
 
     def get_lesson_review(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
         lesson = self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        task = self._lesson_review_task(lesson=lesson)
         return {
             "scopeType": "lesson",
             "lessonId": lesson_id,
             "status": "placeholder",
-            "items": [self._lesson_review_task(lesson=lesson)],
+            "items": [
+                self._review_task_view(
+                    course_id=course_id,
+                    task=task,
+                    lessons_by_id={lesson_id: lesson},
+                )
+            ],
         }
 
     def regenerate_lesson_review(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
@@ -56,6 +63,7 @@ class ReviewService:
     def get_course_review(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
         lessons = self._course_lessons(course_id)
+        task_views = self._review_task_views(course_id=course_id, lessons=lessons)
         weak_lessons = [
             {
                 "lessonId": lesson["lessonId"],
@@ -65,11 +73,27 @@ class ReviewService:
             }
             for lesson in lessons
         ]
+        knowledge_point_keys = {
+            str(task["knowledgePointKey"])
+            for task in task_views
+            if task.get("knowledgePointKey") is not None
+        }
+        source_question_keys = {
+            str(question_key)
+            for task in task_views
+            for question_key in _list_value(task.get("sourceQuestionKeys"))
+            if question_key is not None
+        }
         return {
             "scopeType": "course",
             "lessonId": None,
             "status": "placeholder",
-            "items": [],
+            "items": task_views,
+            "todayTaskCount": len(task_views),
+            "weakPointCount": len(knowledge_point_keys) if knowledge_point_keys else len(weak_lessons),
+            "mistakeCount": len(source_question_keys),
+            "masteryScore": self._course_mastery_score(lessons),
+            "topTasks": task_views[:3],
             "weakLessons": weak_lessons,
             "crossLessonWeakPoints": [
                 {
@@ -241,16 +265,127 @@ class ReviewService:
             return []
         return list(self.lessons.list_lessons(course_id))
 
+    def _review_task_views(
+        self,
+        *,
+        course_id: int,
+        lessons: list[dict[str, object]] | None = None,
+    ) -> list[dict[str, object]]:
+        lessons_by_id = {
+            int(lesson["lessonId"]): lesson
+            for lesson in (lessons if lessons is not None else self._course_lessons(course_id))
+            if lesson.get("lessonId") is not None
+        }
+        tasks = list(self.reviews.list_review_tasks(course_id))
+        task_views = [
+            self._review_task_view(course_id=course_id, task=task, lessons_by_id=lessons_by_id)
+            for task in tasks
+            if self._is_pending_review_task(task)
+            and self._has_core_review_task_fields(task)
+        ]
+        return sorted(
+            task_views,
+            key=lambda task: (
+                _int_value(task.get("reviewOrder")) or 9999,
+                -(_int_value(task.get("priorityScore")) or 0),
+                _int_value(task.get("reviewTaskId")) or 0,
+            ),
+        )
+
+    def _review_task_view(
+        self,
+        *,
+        course_id: int,
+        task: dict[str, object],
+        lessons_by_id: dict[int, dict[str, object]],
+    ) -> dict[str, object]:
+        view = dict(task)
+        review_task_id = _int_value(view.get("reviewTaskId"))
+        if view.get("completionSupported") is False:
+            view["taskId"] = None
+        elif review_task_id is not None:
+            view["taskId"] = review_task_id
+        lesson_id = _int_value(view.get("lessonId"))
+        lesson = lessons_by_id.get(lesson_id) if lesson_id is not None else None
+        view["sourceLesson"] = self._source_lesson_view(lesson)
+        linked_block_id = self._linked_handout_block_id(view)
+        view["linkedHandoutBlockId"] = linked_block_id
+        view["recommendedAction"] = self._recommended_action(view, linked_block_id=linked_block_id)
+        view["jumpRoute"] = self._jump_route(course_id=course_id, lesson_id=lesson_id)
+        if view.get("recommendedHandoutBlock") is None and linked_block_id is not None:
+            view["recommendedHandoutBlock"] = {"blockId": linked_block_id}
+        return view
+
+    def _is_pending_review_task(self, task: dict[str, object]) -> bool:
+        return task.get("status") not in {"completed", "superseded", "canceled", "cancelled"}
+
+    def _has_core_review_task_fields(self, task: dict[str, object]) -> bool:
+        if _int_value(task.get("reviewTaskId")) is None:
+            return False
+        if _text_value(task.get("taskType")) is None:
+            return False
+        if _int_value(task.get("priorityScore")) is None:
+            return False
+        if _text_value(task.get("reasonText")) is None:
+            return False
+        return _int_value(task.get("recommendedMinutes")) is not None
+
+    def _source_lesson_view(self, lesson: dict[str, object] | None) -> dict[str, object] | None:
+        if lesson is None:
+            return None
+        return {
+            "lessonId": lesson.get("lessonId"),
+            "title": lesson.get("title"),
+            "masteryScore": lesson.get("masteryScore"),
+        }
+
+    def _linked_handout_block_id(self, task: dict[str, object]) -> int | None:
+        direct = _int_value(task.get("linkedHandoutBlockId"))
+        if direct is not None:
+            return direct
+        for container_key in ("recommendedHandoutBlock", "recommendedAction", "recommendedSegment"):
+            container = task.get(container_key)
+            if not isinstance(container, dict):
+                continue
+            for value_key in ("blockId", "handoutBlockId", "targetBlockId", "targetBlockKey"):
+                value = _int_value(container.get(value_key))
+                if value is not None:
+                    return value
+        return _int_value(task.get("sourceBlockKey"))
+
+    def _recommended_action(self, task: dict[str, object], *, linked_block_id: int | None) -> dict[str, object]:
+        action = task.get("recommendedAction")
+        if isinstance(action, dict):
+            return action
+        task_type = str(task.get("taskType") or "revisit_block")
+        label = "Review weak point" if task_type == "revisit_block" else "Continue review"
+        result: dict[str, object] = {"type": task_type, "label": label}
+        if linked_block_id is not None:
+            result["targetBlockId"] = linked_block_id
+        return result
+
+    def _jump_route(self, *, course_id: int, lesson_id: int | None) -> str:
+        if lesson_id is not None:
+            return f"/courses/{course_id}/lessons/{lesson_id}/handout"
+        return f"/courses/{course_id}/review"
+
+    def _course_mastery_score(self, lessons: list[dict[str, object]]) -> float | None:
+        scores = [float(lesson["masteryScore"]) for lesson in lessons if lesson.get("masteryScore") is not None]
+        if not scores:
+            return None
+        return round(sum(scores) / len(scores), 4)
+
     def _lesson_review_task(self, *, lesson: dict[str, object]) -> dict[str, object]:
         lesson_id = int(lesson["lessonId"])
         return {
-            "reviewTaskId": lesson_id * 10 + 1,
+            "reviewTaskId": -(lesson_id * 10 + 1),
             "taskType": "revisit_lesson",
             "scopeType": "lesson",
             "lessonId": lesson_id,
             "priorityScore": 80,
             "reasonText": "该课时存在待复习知识点占位。",
             "recommendedMinutes": 15,
+            "completionSupported": False,
             "knowledgePointKey": f"lesson-{lesson_id}-placeholder",
             "sourceQuestionKeys": [],
             "recommendedHandoutBlock": None,
@@ -283,3 +418,18 @@ def _int_value(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _text_value(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _list_value(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []

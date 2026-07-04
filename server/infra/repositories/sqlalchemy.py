@@ -2919,9 +2919,21 @@ class SqlAlchemyRuntimeRepository:
                 continue
             source_block_key = _stable_key(_payload_value(item, "sourceBlockKey", "source_block_key"))
             block = blocks_by_key.get(source_block_key)
+            lesson_id = _as_positive_int(_payload_value(item, "lessonId", "lesson_id", default=run.lesson_id))
+            scope_type = str(
+                _payload_value(
+                    item,
+                    "scopeType",
+                    "scope_type",
+                    default=("lesson" if lesson_id is not None else run.scope_type),
+                )
+                or "course"
+            )
             row = ReviewTask(
                 review_task_run_id=run.id,
                 course_id=run.course_id,
+                scope_type=scope_type,
+                lesson_id=lesson_id,
                 task_key=task_key,
                 task_type=str(_payload_value(item, "taskType", "task_type", default="revisit_block")),
                 priority_score=int(_payload_value(item, "priorityScore", "priority_score", default=0)),
@@ -2937,6 +2949,7 @@ class SqlAlchemyRuntimeRepository:
                 ),
                 recommended_action_json=_payload_value(item, "recommendedAction", "recommended_action"),
                 recommended_segment_json=_recommended_segment(block),
+                evidence_chain_json=_json_ready(_payload_value(item, "evidenceChain", "evidence_chain", default=[])),
                 practice_entry_json=self._practice_entry_for_review_run(run),
                 review_order=int(_payload_value(item, "reviewOrder", "review_order", default=len(task_rows) + 1)),
                 intensity=_intensity(int(_payload_value(item, "priorityScore", "priority_score", default=0))),
@@ -4786,14 +4799,25 @@ def _review_run_dict(run: ReviewTaskRun) -> dict[str, Any]:
 def _review_task_dict(task: ReviewTask) -> dict[str, Any]:
     return {
         "reviewTaskId": task.id,
+        "taskKey": task.task_key,
         "taskType": task.task_type,
+        "scopeType": task.scope_type,
+        "lessonId": task.lesson_id,
         "priorityScore": task.priority_score,
         "reasonText": task.reason_text,
         "recommendedMinutes": task.recommended_minutes,
+        "knowledgePointKey": task.knowledge_point_key,
+        "sourceBlockKey": task.source_block_key,
+        "sourceQuestionKeys": task.source_question_keys_json or [],
+        "sourceSegmentKeys": task.source_segment_keys_json or [],
+        "recommendedAction": task.recommended_action_json,
+        "recommendedHandoutBlock": None,
         "recommendedSegment": task.recommended_segment_json,
+        "evidenceChain": task.evidence_chain_json or [],
         "practiceEntry": task.practice_entry_json,
         "reviewOrder": task.review_order,
         "intensity": task.intensity,
+        "status": task.status,
     }
 
 

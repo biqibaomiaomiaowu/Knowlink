@@ -666,7 +666,7 @@ class MemoryScaffoldRepository:
         return self.store.get_review_run(review_task_run_id)
 
     def complete_review_task(self, review_task_id: int) -> dict[str, Any]:
-        return {"reviewTaskId": review_task_id, "completed": True}
+        return self.store.complete_review_task(review_task_id)
 
     def list_daily_recommended_knowledge_points(self, *, limit: int = 3) -> list[dict[str, Any]]:
         return self.store.list_daily_recommended_knowledge_points(limit=limit)

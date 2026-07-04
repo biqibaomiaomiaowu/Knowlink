@@ -22,6 +22,7 @@ from server.domain.services.errors import ServiceError
 from server.domain.services.idempotency import build_request_hash
 from server.domain.services.pipelines import PipelineService
 from server.domain.services.quizzes import QuizService
+from server.domain.services.reviews import ReviewService
 from server.infra.db.base import Base
 from server.infra.db.models import IdempotencyRecord
 from server.schemas.requests import CreateCourseRequest, SubmitQuizRequest
@@ -1467,6 +1468,204 @@ def test_quiz_service_sql_submit_persists_attempt_and_review_refresh_task():
             "payload": refresh_task["payload_json"],
         }
     ]
+
+    session.close()
+    engine.dispose()
+
+
+def test_review_service_sql_reads_persisted_task_evidence_fields():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite review service",
+        entry_type="manual_import",
+        goal_text="verify review service evidence fields",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    lesson = repo.create_lesson(course_id=course_id, title="Limit review")
+    lesson_id = lesson["lessonId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/review-service.pdf",
+            "originalName": "review-service.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:review-service",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Limit definition",
+                "textContent": "Limit definition evidence.",
+                "plainText": "Limit definition evidence.",
+                "pageNo": 2,
+                "orderNo": 1,
+                "tokenCount": 20,
+            }
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    _, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "SQLite review handout",
+            "summary": "Review service handout.",
+            "items": [
+                {
+                    "outlineKey": "section-review",
+                    "title": "Limit",
+                    "summary": "Limit definition.",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-review",
+                            "title": "Limit definition",
+                            "summary": "Review this block.",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                            "topicTags": ["limit"],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "Limit definition",
+            "summary": "Review this block.",
+            "contentMd": "Limit definition evidence.",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-limit-review-service",
+                    "displayName": "Limit definition",
+                    "description": "A traceable review knowledge point.",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [
+                {
+                    "resourceId": resource["resourceId"],
+                    "segmentKey": segment_key,
+                    "pageNo": 2,
+                    "refLabel": "PDF p2",
+                }
+            ],
+        },
+    )
+    quiz, _ = repo.create_quiz(course_id)
+    repo.save_quiz_generation_result(
+        quiz["quizId"],
+        {
+            "quizType": "chapter_review",
+            "questions": [
+                {
+                    "questionKey": "q1-review-service",
+                    "questionType": "single_choice",
+                    "stemMd": "What should the limit review revisit?",
+                    "options": ["A. block", "B. unrelated", "C. none", "D. unknown"],
+                    "correctAnswer": "A",
+                    "explanationMd": "Use the current handout block.",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-limit-review-service",
+                    "knowledgePointName": "Limit definition",
+                    "sourceBlockKey": str(blocks[0]["blockId"]),
+                    "sourceSegmentKeys": [segment_key],
+                }
+            ],
+        },
+        [],
+    )
+    first_question = repo.get_quiz(quiz["quizId"])["questions"][0]
+    quiz_service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=_RecordingDispatcher(),
+        async_tasks=repo,
+    )
+    submit_result = quiz_service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest(
+            answers=[
+                {
+                    "questionId": first_question["questionId"],
+                    "selectedOption": "A",
+                }
+            ],
+        ),
+    )
+    evidence_chain = [{"type": "quiz_attempt", "questionKey": "q1-review-service"}]
+    repo.save_review_task_run_result(
+        submit_result["reviewTaskRunId"],
+        {
+            "tasks": [
+                {
+                    "taskKey": "review-service",
+                    "taskType": "revisit_block",
+                    "scopeType": "lesson",
+                    "lessonId": lesson_id,
+                    "priorityScore": 93,
+                    "reasonText": "Review the traceable weak point.",
+                    "recommendedMinutes": 12,
+                    "knowledgePointKey": "kp-limit-review-service",
+                    "sourceQuestionKeys": ["q1-review-service"],
+                    "sourceBlockKey": str(blocks[0]["blockId"]),
+                    "sourceSegmentKeys": [segment_key],
+                    "reviewOrder": 1,
+                    "recommendedAction": {
+                        "type": "revisit_block",
+                        "targetBlockKey": str(blocks[0]["blockId"]),
+                    },
+                    "evidenceChain": evidence_chain,
+                }
+            ]
+        },
+        [],
+    )
+    review_service = ReviewService(
+        courses=repo,
+        reviews=repo,
+        idempotency=repo,
+        lessons=repo,
+    )
+
+    task = review_service.list_review_tasks(course_id=course_id)["items"][0]
+
+    assert task["scopeType"] == "lesson"
+    assert task["lessonId"] == lesson_id
+    assert task["sourceLesson"]["lessonId"] == lesson_id
+    assert task["knowledgePointKey"] == "kp-limit-review-service"
+    assert task["sourceQuestionKeys"] == ["q1-review-service"]
+    assert task["sourceSegmentKeys"] == [segment_key]
+    assert task["recommendedAction"]["targetBlockKey"] == str(blocks[0]["blockId"])
+    assert task["linkedHandoutBlockId"] == blocks[0]["blockId"]
+    assert task["recommendedHandoutBlock"] == {"blockId": blocks[0]["blockId"]}
+    assert task["evidenceChain"] == evidence_chain
+    assert task["jumpRoute"] == f"/courses/{course_id}/lessons/{lesson_id}/handout"
+
+    dashboard = review_service.get_course_review(course_id=course_id)
+    assert dashboard["todayTaskCount"] == 1
+    assert dashboard["topTasks"][0]["reviewTaskId"] == task["reviewTaskId"]
 
     session.close()
     engine.dispose()

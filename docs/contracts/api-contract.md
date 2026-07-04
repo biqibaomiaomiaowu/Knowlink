@@ -1320,6 +1320,130 @@ V2 主观题判卷说明：
 说明：当测验没有可用于课程复习刷新的 parse / handout 上下文时，`reviewTaskRunId` 为 `null`，提交结果仍返回判分和推荐动作；后端不会创建必然失败的 `review_refresh` 异步任务。
 `items[]` 是公共逐题判分结果，只包含题目定位、用户选择、是否正确、得分、解释和知识点 / 来源块定位；提交响应不得暴露 `correctAnswer`，正确答案只允许存在于服务端提交判分上下文和内部持久化记录中。
 
+### `GET /api/v1/courses/{courseId}/review`
+
+响应 `data`：
+
+```json
+{
+  "scopeType": "course",
+  "lessonId": null,
+  "status": "placeholder",
+  "todayTaskCount": 3,
+  "weakPointCount": 2,
+  "mistakeCount": 1,
+  "masteryScore": 0.68,
+  "items": [
+    {
+      "reviewTaskId": 8401,
+      "taskId": 8401,
+      "taskType": "revisit_block",
+      "priorityScore": 95,
+      "reasonText": "该块是考试高频点",
+      "recommendedMinutes": 20,
+      "sourceLesson": {
+        "lessonId": 2101,
+        "title": "极限定义",
+        "masteryScore": 0.62
+      },
+      "linkedHandoutBlockId": 4001,
+      "recommendedAction": {
+        "type": "revisit_block",
+        "label": "Review weak point",
+        "targetBlockId": 4001
+      },
+      "jumpRoute": "/courses/101/lessons/2101/handout",
+      "reviewOrder": 1,
+      "intensity": "high"
+    }
+  ],
+  "topTasks": [
+    {
+      "reviewTaskId": 8401,
+      "taskId": 8401,
+      "taskType": "revisit_block",
+      "priorityScore": 95,
+      "reasonText": "该块是考试高频点",
+      "recommendedMinutes": 20,
+      "sourceLesson": {
+        "lessonId": 2101,
+        "title": "极限定义",
+        "masteryScore": 0.62
+      },
+      "linkedHandoutBlockId": 4001,
+      "recommendedAction": {
+        "type": "revisit_block",
+        "label": "Review weak point",
+        "targetBlockId": 4001
+      },
+      "jumpRoute": "/courses/101/lessons/2101/handout",
+      "reviewOrder": 1,
+      "intensity": "high"
+    }
+  ],
+  "weakLessons": [
+    {
+      "lessonId": 2101,
+      "title": "极限定义",
+      "masteryScore": 0.62,
+      "reasonText": "该课时存在待复习知识点占位。"
+    }
+  ],
+  "crossLessonWeakPoints": [
+    {
+      "knowledgePointKey": "kp-cross-lesson-placeholder",
+      "title": "跨课时薄弱点占位",
+      "lessonIds": [2101, 2102],
+      "evidenceChain": [
+        {"type": "course_review", "scopeType": "course", "courseId": 101}
+      ]
+    }
+  ]
+}
+```
+
+说明：`items[]` 与 `topTasks[]` 复用 `GET /api/v1/courses/{courseId}/review-tasks` 的 item 形态，包含 `sourceLesson`、`linkedHandoutBlockId`、`recommendedAction` 与 `jumpRoute`。
+
+### `GET /api/v1/courses/{courseId}/lessons/{lessonId}/review`
+
+响应 `data`：
+
+```json
+{
+  "scopeType": "lesson",
+  "lessonId": 2101,
+  "status": "placeholder",
+  "items": [
+    {
+      "reviewTaskId": -21011,
+      "taskId": null,
+      "taskType": "revisit_lesson",
+      "scopeType": "lesson",
+      "lessonId": 2101,
+      "priorityScore": 80,
+      "reasonText": "该课时存在待复习知识点占位。",
+      "recommendedMinutes": 15,
+      "completionSupported": false,
+      "sourceLesson": {
+        "lessonId": 2101,
+        "title": "极限定义",
+        "masteryScore": 0.62
+      },
+      "linkedHandoutBlockId": null,
+      "recommendedAction": {
+        "type": "revisit_lesson",
+        "label": "Continue review"
+      },
+      "jumpRoute": "/courses/101/lessons/2101/handout",
+      "reviewOrder": 1,
+      "intensity": "medium"
+    }
+  ]
+}
+```
+
+说明：课时复习占位任务是前端入口提示，不绑定持久化 `review_tasks` 行；`completionSupported=false` 时 `taskId` 为 `null`，`reviewTaskId` 使用负数 sentinel，前端不得调用 `POST /api/v1/review-tasks/{reviewTaskId}/complete`。
+
 ### `GET /api/v1/courses/{courseId}/review-tasks`
 
 响应 `data.items[*]`：
@@ -1327,10 +1451,23 @@ V2 主观题判卷说明：
 ```json
 {
   "reviewTaskId": 8401,
+  "taskId": 8401,
   "taskType": "revisit_block",
   "priorityScore": 95,
   "reasonText": "该块是考试高频点",
   "recommendedMinutes": 20,
+  "sourceLesson": {
+    "lessonId": 2101,
+    "title": "极限定义",
+    "masteryScore": 0.62
+  },
+  "linkedHandoutBlockId": 4001,
+  "recommendedAction": {
+    "type": "revisit_block",
+    "label": "Review weak point",
+    "targetBlockId": 4001
+  },
+  "jumpRoute": "/courses/101/lessons/2101/handout",
   "recommendedSegment": {
     "blockId": 4001,
     "startSec": 120,
@@ -1346,6 +1483,12 @@ V2 主观题判卷说明：
   "intensity": "high"
 }
 ```
+
+字段说明：
+
+- `recommendedSegment` / `practiceEntry` 是第一版复习任务的默认运行时字段，仍必须原样返回，前端可继续用它们展示片段回看和练习入口。
+- `sourceLesson`、`linkedHandoutBlockId`、`recommendedAction`、`jumpRoute` 是 Review Center 前端证据字段；课程复习中心的 `items[]` / `topTasks[]` 和课时复习中心的 `items[]` 均复用该 item 形态。
+- 当任务没有绑定课时时，`sourceLesson` 为 `null`，`jumpRoute` 回退为 `/courses/{courseId}/review`；当任务只携带 legacy `recommendedSegment.blockId` 时，`linkedHandoutBlockId` 由该 block id 推导。
 
 ### `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
 
