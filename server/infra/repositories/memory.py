@@ -551,6 +551,7 @@ class MemoryScaffoldRepository:
         answer_md: str,
         citations: Sequence[dict[str, Any]],
         session_id: int | None = None,
+        handout_block_id: int | None = None,
     ) -> dict[str, Any]:
         return self.store.create_scoped_qa_exchange(
             course_id=course_id,
@@ -560,6 +561,7 @@ class MemoryScaffoldRepository:
             answer_md=answer_md,
             citations=list(citations),
             session_id=session_id,
+            handout_block_id=handout_block_id,
         )
 
     def create_quiz(

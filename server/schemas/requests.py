@@ -231,6 +231,7 @@ class QaMessageRequest(CamelModel):
 class ScopedQaMessageRequest(CamelModel):
     question: str = Field(min_length=1)
     session_id: int | None = None
+    handout_block_id: int | None = Field(default=None, ge=1)
 
 
 class QuizGenerateRequest(CamelModel):

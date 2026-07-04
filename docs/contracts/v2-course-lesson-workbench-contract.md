@@ -345,8 +345,17 @@ GET  /api/v1/qa/sessions/{sessionId}/messages
 
 - `scopeType`: `course|lesson`
 - `lessonId`
+- `handoutBlockId`: nullable; present when an embedded lesson-study QA session is anchored to one lesson handout block.
 - `title`
 - `lastMessageAt`
+
+Scoped QA message request / response fields:
+
+- request: `question`, optional `sessionId`, optional `handoutBlockId`
+- response: `courseId`, `scopeType`, `lessonId`, `handoutBlockId`, `sessionId`, `messageId`, `answerMd`, `answerType`, `citations`, `generationMetadata`
+- `handoutBlockId` is only a block anchor for course QA or lesson QA. It is not single-resource QA and does not create a resource-specific route.
+- For embedded lesson-study QA, `handoutBlockId` must belong to the requested `courseId + scopeType + lessonId` handout version. Unknown blocks return `qa.block_not_found`; cross-course or cross-scope blocks return `qa.scope_invalid`.
+- Responses are non-streaming in this phase.
 
 Course QA 检索范围:
 
@@ -364,7 +373,7 @@ Lesson QA 检索范围:
 - 当前节课讲义
 - 必要课程级资料
 
-课程 QA 和节课 QA 历史会话互不混用。`qa.scope_invalid` 用于 scope 与 session、lesson 或 course 不匹配。明确不做单资料 QA；No single-resource QA.
+课程 QA 和节课 QA 历史会话互不混用。embedded lesson-study QA 可以携带 `handoutBlockId` 作为当前讲义块锚点，但仍归属课程 QA 或节课 QA。`qa.scope_invalid` 用于 scope 与 session、lesson、course 或 handout block 不匹配；`qa.block_not_found` 用于请求的讲义块不存在。明确不做单资料 QA；No single-resource QA.
 
 Frozen route tokens:
 
@@ -533,6 +542,7 @@ Required error codes:
 - `resource.lesson_mismatch`: 资料声明的 lesson 不存在或不属于当前课程。
 - `course.delete_blocked`: 删除课程前发现 blocker，不能安全删除。
 - `artifact.scope_invalid`: 讲义、测验、复习、图谱、报告或导出请求 scope 非法。
+- `qa.block_not_found`: 请求的讲义块不存在。
 - `qa.scope_invalid`: QA session 或消息请求 scope 与 course / lesson 不匹配。
 
 Deletion blocker DTO:

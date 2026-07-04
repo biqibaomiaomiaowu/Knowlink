@@ -10,6 +10,12 @@ def text(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def section_between(source: str, start: str, end: str) -> str:
+    start_index = source.index(start)
+    end_index = source.index(end, start_index)
+    return source[start_index:end_index]
+
+
 def test_v2_course_lesson_contract_is_linked_from_docs() -> None:
     docs_readme = text("docs/README.md")
     api_contract = text("docs/contracts/api-contract.md")
@@ -122,6 +128,9 @@ def test_v2_course_lesson_contract_freezes_scope_and_no_resource_qa() -> None:
         "`course_material`",
         "`primary_video`",
         "`lesson_material`",
+        "`handoutBlockId`",
+        "`qa.block_not_found`",
+        "embedded lesson-study QA",
     ):
         assert token in contract
 
@@ -133,6 +142,11 @@ def test_v2_course_lesson_contract_freezes_scope_and_no_resource_qa() -> None:
 def test_v2_course_lesson_contract_freezes_error_codes() -> None:
     contract = text(CONTRACT_PATH)
     error_codes = text("docs/contracts/error-codes.md")
+    required_error_codes_section = section_between(
+        contract,
+        "Required error codes:",
+        "Deletion blocker DTO:",
+    )
     required_codes = {
         "lesson.not_found",
         "lesson.scope_required",
@@ -142,12 +156,15 @@ def test_v2_course_lesson_contract_freezes_error_codes() -> None:
         "resource.lesson_mismatch",
         "course.delete_blocked",
         "artifact.scope_invalid",
+        "qa.block_not_found",
         "qa.scope_invalid",
     }
 
     for code in required_codes:
         assert f"`{code}`" in contract
         assert f"`{code}`" in error_codes
+
+    assert "`qa.block_not_found`" in required_error_codes_section
 
 
 def test_v2_course_lesson_handoff_skeleton_exists() -> None:

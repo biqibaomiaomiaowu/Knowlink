@@ -1739,6 +1739,7 @@ class RuntimeStore:
                     "courseId": session["courseId"],
                     "scopeType": session["scopeType"],
                     "lessonId": session.get("lessonId"),
+                    "handoutBlockId": session.get("handoutBlockId"),
                     "title": session.get("title"),
                     "lastMessageAt": session.get("lastMessageAt"),
                 }
@@ -1755,6 +1756,7 @@ class RuntimeStore:
         answer_md: str,
         citations: list[dict[str, Any]],
         session_id: int | None = None,
+        handout_block_id: int | None = None,
     ) -> dict[str, Any]:
         if self.get_course(course_id) is None:
             raise ValueError("course.not_found")
@@ -1763,6 +1765,33 @@ class RuntimeStore:
                 raise ValueError("qa.scope_invalid")
         elif scope_type != "course" or lesson_id is not None:
             raise ValueError("qa.scope_invalid")
+        if handout_block_id is not None:
+            active_handout = None
+            for handout in self.handouts.values():
+                if not any(block.get("blockId") == handout_block_id for block in handout.get("blocks", [])):
+                    continue
+                course = self.courses.get(int(handout.get("courseId") or 0))
+                latest_handout = self.get_latest_handout(
+                    int(handout.get("courseId") or 0),
+                    scope_type=str(handout.get("scopeType") or "course"),
+                    lesson_id=handout.get("lessonId"),
+                )
+                if (
+                    course is not None
+                    and handout.get("sourceParseRunId") == course.get("activeParseRunId")
+                    and latest_handout is not None
+                    and latest_handout.get("handoutVersionId") == handout.get("handoutVersionId")
+                ):
+                    active_handout = handout
+                    break
+            if active_handout is None:
+                raise ValueError("qa.block_not_found")
+            if (
+                active_handout.get("courseId") != course_id
+                or active_handout.get("scopeType") != scope_type
+                or active_handout.get("lessonId") != (lesson_id if scope_type == "lesson" else None)
+            ):
+                raise ValueError("qa.scope_invalid")
 
         now = utcnow()
         if session_id is None:
@@ -1772,6 +1801,7 @@ class RuntimeStore:
                 "courseId": course_id,
                 "scopeType": scope_type,
                 "lessonId": lesson_id if scope_type == "lesson" else None,
+                "handoutBlockId": handout_block_id,
                 "title": question[:80],
                 "status": "active",
                 "messages": [],
@@ -1783,6 +1813,7 @@ class RuntimeStore:
             or session.get("courseId") != course_id
             or session.get("scopeType") != scope_type
             or session.get("lessonId") != (lesson_id if scope_type == "lesson" else None)
+            or session.get("handoutBlockId") != handout_block_id
         ):
             raise ValueError("qa.scope_invalid")
 
@@ -1818,6 +1849,7 @@ class RuntimeStore:
             "courseId": course_id,
             "scopeType": scope_type,
             "lessonId": lesson_id if scope_type == "lesson" else None,
+            "handoutBlockId": handout_block_id,
             "answerMd": answer_md,
             "answerType": "placeholder",
             "citations": list(citations),

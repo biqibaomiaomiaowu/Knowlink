@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -71,6 +72,188 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
     finally:
         session.close()
         engine.dispose()
+
+
+def test_lesson_qa_creates_lesson_scoped_exchange_with_citations_and_block_scope():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _segment_keys = _create_course_with_active_video_segments(repo)
+        lesson = repo.create_lesson(course_id=course_id, title="第 1 节", source_type="manual")
+        lesson_id = lesson["lessonId"]
+        video_resource = repo.list_resources(course_id)[0]
+        repo.update_resource_scope(
+            course_id=course_id,
+            resource_id=video_resource["resourceId"],
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            usage_role="primary_video",
+        )
+        handout_service = _handout_service(repo, lessons=repo, resources=repo)
+        handout_service.generate_lesson_handout(course_id=course_id, lesson_id=lesson_id, idempotency_key=None)
+        block = handout_service.get_lesson_blocks(course_id=course_id, lesson_id=lesson_id)["items"][0]
+        service = QaService(courses=repo, qa=repo, lessons=repo, resources=repo)
+
+        result = service.create_lesson_message(
+            course_id=course_id,
+            lesson_id=lesson_id,
+            payload=_ScopedQaPayload(
+                question="lesson question",
+                session_id=None,
+                handout_block_id=block["blockId"],
+            ),
+        )
+
+        assert result["scopeType"] == "lesson"
+        assert result["lessonId"] == lesson_id
+        assert result["sessionId"] > 0
+        assert result["messageId"] > 0
+        assert result["answerMd"]
+        assert result["citations"]
+        assert "stream" not in result
+
+        qa_sessions = Base.metadata.tables["qa_sessions"]
+        session_row = session.execute(sa.select(qa_sessions)).mappings().one()
+        assert session_row["scope_type"] == "lesson"
+        assert session_row["lesson_id"] == lesson_id
+        assert session_row["handout_block_id"] == block["blockId"]
+
+        sessions = service.list_lesson_sessions(course_id=course_id, lesson_id=lesson_id)
+        assert sessions["items"] == [
+            {
+                "sessionId": result["sessionId"],
+                "courseId": course_id,
+                "scopeType": "lesson",
+                "lessonId": lesson_id,
+                "handoutBlockId": block["blockId"],
+                "title": "lesson question",
+                "lastMessageAt": session_row["last_message_at"].replace(tzinfo=datetime.UTC),
+            }
+        ]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_memory_lesson_qa_unknown_handout_block_raises_block_not_found():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="memory scoped qa",
+        entry_type="manual_import",
+        goal_text="verify scoped QA errors",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    lesson = repo.create_lesson(course_id=course_id, title="Lesson 1", source_type="manual")
+    service = QaService(courses=repo, qa=repo, lessons=repo, resources=repo)
+
+    try:
+        service.create_lesson_message(
+            course_id=course_id,
+            lesson_id=lesson["lessonId"],
+            payload=_ScopedQaPayload(
+                question="unknown block",
+                session_id=None,
+                handout_block_id=999999,
+            ),
+        )
+    except Exception as exc:
+        assert getattr(exc, "error_code", None) == "qa.block_not_found"
+    else:
+        raise AssertionError("Expected qa.block_not_found")
+
+
+def test_lesson_qa_api_returns_404_for_unknown_handout_block_anchor():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="memory scoped qa api",
+        entry_type="manual_import",
+        goal_text="verify scoped QA HTTP semantics",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    lesson = repo.create_lesson(course_id=course_id, title="Lesson 1", source_type="manual")
+    lesson_id = lesson["lessonId"]
+    repo.create_handout(
+        course_id,
+        scope_type="lesson",
+        lesson_id=lesson_id,
+        artifact_kind="lesson_handout",
+    )
+    service = QaService(courses=repo, qa=repo, lessons=repo, resources=repo)
+
+    with _override_qa_service(service):
+        status, body = asyncio.run(
+            request(
+                "POST",
+                f"/api/v1/courses/{course_id}/lessons/{lesson_id}/qa/messages",
+                headers=AUTH_HEADERS,
+                json_body={
+                    "question": "unknown block",
+                    "handoutBlockId": 999999,
+                },
+            )
+        )
+
+    assert status == 404
+    assert body["errorCode"] == "qa.block_not_found"
+
+
+def test_memory_lesson_qa_rejects_stale_handout_block_and_accepts_latest_block():
+    repo = RuntimeStore()
+    course = repo.create_course(
+        title="memory scoped qa latest handout",
+        entry_type="manual_import",
+        goal_text="verify latest lesson handout anchoring",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    parse_run, _ = repo.create_parse_run(course_id)
+    repo.mark_parse_run_succeeded(parse_run["parseRunId"])
+    lesson = repo.create_lesson(course_id=course_id, title="Lesson 1", source_type="manual")
+    lesson_id = lesson["lessonId"]
+    old_handout, _old_trigger, old_blocks = repo.create_handout(
+        course_id,
+        scope_type="lesson",
+        lesson_id=lesson_id,
+        artifact_kind="lesson_handout",
+    )
+    latest_handout, _latest_trigger, latest_blocks = repo.create_handout(
+        course_id,
+        scope_type="lesson",
+        lesson_id=lesson_id,
+        artifact_kind="lesson_handout",
+    )
+
+    assert latest_handout["handoutVersionId"] > old_handout["handoutVersionId"]
+
+    try:
+        repo.create_scoped_qa_exchange(
+            course_id=course_id,
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            handout_block_id=old_blocks[0]["blockId"],
+            question="old block",
+            answer_md="old block answer",
+            citations=[],
+        )
+    except ValueError as exc:
+        assert str(exc) == "qa.block_not_found"
+    else:
+        raise AssertionError("Expected stale lesson handout block to be rejected")
+
+    result = repo.create_scoped_qa_exchange(
+        course_id=course_id,
+        scope_type="lesson",
+        lesson_id=lesson_id,
+        handout_block_id=latest_blocks[0]["blockId"],
+        question="latest block",
+        answer_md="latest block answer",
+        citations=[],
+    )
+
+    assert result["handoutBlockId"] == latest_blocks[0]["blockId"]
 
 
 def test_sql_qa_uses_course_wide_original_segments_without_block_origin_refs():
@@ -893,3 +1076,16 @@ class _Payload:
         self.course_id = course_id
         self.handout_block_id = handout_block_id
         self.question = question
+
+
+class _ScopedQaPayload:
+    def __init__(
+        self,
+        *,
+        question: str,
+        session_id: int | None,
+        handout_block_id: int | None = None,
+    ) -> None:
+        self.question = question
+        self.session_id = session_id
+        self.handout_block_id = handout_block_id

@@ -3,6 +3,49 @@ from __future__ import annotations
 from typing import Any
 
 
+def test_course_and_lesson_qa_sessions_are_separate():
+    from server.domain.services.qa import QaService
+    from server.tests.test_qa_runtime import (
+        _ScopedQaPayload,
+        _build_sqlite_repository,
+        _create_course_with_active_video_segments,
+    )
+
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _segment_keys = _create_course_with_active_video_segments(repo)
+        lesson = repo.create_lesson(course_id=course_id, title="第 1 节", source_type="manual")
+        lesson_id = lesson["lessonId"]
+        video_resource = repo.list_resources(course_id)[0]
+        repo.update_resource_scope(
+            course_id=course_id,
+            resource_id=video_resource["resourceId"],
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            usage_role="primary_video",
+        )
+        service = QaService(courses=repo, qa=repo, lessons=repo, resources=repo)
+
+        course_result = service.create_course_message(
+            course_id=course_id,
+            payload=_ScopedQaPayload(question="course question", session_id=None),
+        )
+        lesson_result = service.create_lesson_message(
+            course_id=course_id,
+            lesson_id=lesson_id,
+            payload=_ScopedQaPayload(question="lesson question", session_id=None),
+        )
+
+        assert course_result["scopeType"] == "course"
+        assert course_result["lessonId"] is None
+        assert lesson_result["scopeType"] == "lesson"
+        assert lesson_result["lessonId"] == lesson_id
+        assert course_result["sessionId"] != lesson_result["sessionId"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_orchestrator_uses_far_ready_handout_block_as_unreferenced_context():
     from server.ai.qa_orchestrator import QaOrchestrator
 

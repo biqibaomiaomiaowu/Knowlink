@@ -2148,7 +2148,6 @@ class SqlAlchemyRuntimeRepository:
                 QaSession.course_id == course_id,
                 QaSession.scope_type == scope_type,
                 QaSession.handout_version_id.is_(None),
-                QaSession.handout_block_id.is_(None),
             )
             .order_by(QaSession.id.asc())
         )
@@ -2162,6 +2161,7 @@ class SqlAlchemyRuntimeRepository:
                 "courseId": session.course_id,
                 "scopeType": session.scope_type,
                 "lessonId": session.lesson_id,
+                "handoutBlockId": session.handout_block_id,
                 "title": session.title,
                 "lastMessageAt": _aware_datetime(session.last_message_at),
             }
@@ -2178,6 +2178,7 @@ class SqlAlchemyRuntimeRepository:
         answer_md: str,
         citations: Sequence[dict[str, Any]],
         session_id: int | None = None,
+        handout_block_id: int | None = None,
     ) -> dict[str, Any]:
         if self._get_course_model(course_id) is None:
             raise ValueError("course.not_found")
@@ -2186,6 +2187,18 @@ class SqlAlchemyRuntimeRepository:
                 raise ValueError("qa.scope_invalid")
         elif scope_type != "course" or lesson_id is not None:
             raise ValueError("qa.scope_invalid")
+        if handout_block_id is not None:
+            block = self._get_active_handout_block(handout_block_id)
+            if block is None:
+                raise ValueError("qa.block_not_found")
+            version = self.session.get(HandoutVersion, block.handout_version_id)
+            if (
+                version is None
+                or version.course_id != course_id
+                or version.scope_type != scope_type
+                or version.lesson_id != (lesson_id if scope_type == "lesson" else None)
+            ):
+                raise ValueError("qa.scope_invalid")
 
         now = utcnow()
         if session_id is None:
@@ -2194,9 +2207,13 @@ class SqlAlchemyRuntimeRepository:
                 course_id=course_id,
                 scope_type=scope_type,
                 lesson_id=lesson_id if scope_type == "lesson" else None,
+                handout_block_id=handout_block_id,
                 title=question[:80],
                 status="active",
-                context_snapshot_json={"source": "scoped_placeholder"},
+                context_snapshot_json={
+                    "source": "scoped_placeholder",
+                    "handoutBlockId": handout_block_id,
+                },
                 message_count=0,
                 last_message_at=now,
             )
@@ -2211,7 +2228,7 @@ class SqlAlchemyRuntimeRepository:
                     QaSession.scope_type == scope_type,
                     QaSession.lesson_id == (lesson_id if scope_type == "lesson" else None),
                     QaSession.handout_version_id.is_(None),
-                    QaSession.handout_block_id.is_(None),
+                    QaSession.handout_block_id == handout_block_id,
                 )
             )
             if qa_session is None:
@@ -2266,6 +2283,7 @@ class SqlAlchemyRuntimeRepository:
             "courseId": course_id,
             "scopeType": scope_type,
             "lessonId": lesson_id if scope_type == "lesson" else None,
+            "handoutBlockId": handout_block_id,
             "answerMd": answer_md,
             "answerType": "placeholder",
             "citations": list(citations),

@@ -316,6 +316,7 @@ class QaSessionSummary(CamelModel):
     course_id: int
     scope_type: Literal["course", "lesson"]
     lesson_id: int | None = None
+    handout_block_id: int | None = None
     title: str | None = None
     last_message_at: datetime | None = None
 
@@ -328,6 +329,7 @@ class ScopedQaMessageData(QaMessageData):
     course_id: int
     scope_type: Literal["course", "lesson"]
     lesson_id: int | None = None
+    handout_block_id: int | None = None
 
 
 class QuizQuestion(CamelModel):

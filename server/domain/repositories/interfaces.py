@@ -425,6 +425,7 @@ class QaRepository(Protocol):
         answer_md: str,
         citations: Sequence[dict[str, Any]],
         session_id: int | None = None,
+        handout_block_id: int | None = None,
     ) -> dict[str, Any]: ...
 
 
