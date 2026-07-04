@@ -54,7 +54,12 @@ class _WorkbenchBody extends StatelessWidget {
         ),
         _ProgressCard(model: model),
         const SizedBox(height: 14),
-        _QuickEntryGrid(courseId: course.courseId, entries: model.quickEntries),
+        _QuickEntryGrid(
+          courseId: course.courseId,
+          currentLessonId:
+              model.currentLesson?.lessonId ?? course.currentLessonId,
+          entries: model.quickEntries,
+        ),
         const SizedBox(height: 14),
         _LessonList(courseId: course.courseId, lessons: model.lessons),
         const SizedBox(height: 14),
@@ -132,10 +137,12 @@ class _ProgressCard extends StatelessWidget {
 class _QuickEntryGrid extends StatelessWidget {
   const _QuickEntryGrid({
     required this.courseId,
+    required this.currentLessonId,
     required this.entries,
   });
 
   final String courseId;
+  final String? currentLessonId;
   final List<PlaceholderEntryModel> entries;
 
   @override
@@ -154,7 +161,9 @@ class _QuickEntryGrid extends StatelessWidget {
                 .map(
                   (entry) => _EntryButton(
                     entry: entry,
-                    onTap: () => _goEntry(context, courseId, entry.key),
+                    onTap: entry.enabled
+                        ? () => _goEntry(context, courseId, entry)
+                        : null,
                   ),
                 )
                 .toList(),
@@ -170,36 +179,42 @@ class _QuickEntryGrid extends StatelessWidget {
         key: 'course_qa',
         title: '全课程 QA',
         status: 'placeholder',
+        enabled: false,
         message: '基于全部课时提问',
       ),
       const PlaceholderEntryModel(
         key: 'course_graph',
         title: '课程图谱',
         status: 'placeholder',
+        enabled: false,
         message: '图谱生成暂未启用',
       ),
       const PlaceholderEntryModel(
         key: 'comprehensive_quiz',
         title: '综合测验',
         status: 'placeholder',
+        enabled: false,
         message: '综合测验等待生成',
       ),
       const PlaceholderEntryModel(
         key: 'course_review',
         title: '课程总复习',
         status: 'placeholder',
+        enabled: false,
         message: '复习计划等待生成',
       ),
       const PlaceholderEntryModel(
         key: 'report',
         title: '学习报告',
         status: 'placeholder',
+        enabled: false,
         message: '报告暂未启用',
       ),
       const PlaceholderEntryModel(
         key: 'export',
         title: '课程导出',
         status: 'placeholder',
+        enabled: false,
         message: '导出暂未启用',
       ),
       const PlaceholderEntryModel(
@@ -211,8 +226,31 @@ class _QuickEntryGrid extends StatelessWidget {
     ];
   }
 
-  void _goEntry(BuildContext context, String courseId, String key) {
-    final path = switch (key) {
+  void _goEntry(
+    BuildContext context,
+    String courseId,
+    PlaceholderEntryModel entry,
+  ) {
+    final path = entry.route ??
+        entry.target ??
+        entry.targetPath ??
+        _fallbackEntryPath(
+          courseId: courseId,
+          currentLessonId: currentLessonId,
+          key: entry.key,
+        );
+    context.go(path);
+  }
+
+  String _fallbackEntryPath({
+    required String courseId,
+    required String? currentLessonId,
+    required String key,
+  }) {
+    return switch (key) {
+      'lesson_study' when currentLessonId != null =>
+        '/courses/$courseId/lessons/$currentLessonId/handout',
+      'lesson_study' => '/courses/$courseId/handout',
       'course_qa' => '/courses/$courseId/qa',
       'course_graph' => '/courses/$courseId/graph',
       'comprehensive_quiz' =>
@@ -225,7 +263,6 @@ class _QuickEntryGrid extends StatelessWidget {
       'settings' => '/courses/$courseId/settings',
       _ => '/courses/$courseId/review',
     };
-    context.go(path);
   }
 }
 
@@ -264,7 +301,7 @@ class _LessonList extends StatelessWidget {
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => context.go(
-                  '/courses/$courseId/lessons/${lesson.lessonId}',
+                  '/courses/$courseId/lessons/${lesson.lessonId}/handout',
                 ),
               ),
             ),
@@ -314,7 +351,7 @@ class _EntryButton extends StatelessWidget {
   });
 
   final PlaceholderEntryModel entry;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -364,6 +401,7 @@ class _SectionLabel extends StatelessWidget {
 
 IconData _iconFor(String key) {
   return switch (key) {
+    'lesson_study' => Icons.menu_book_outlined,
     'course_qa' => Icons.forum_outlined,
     'course_graph' => Icons.hub_outlined,
     'comprehensive_quiz' => Icons.quiz_outlined,

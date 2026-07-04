@@ -335,10 +335,14 @@ def test_course_workbench_aggregates_course_lessons_resources_and_quick_entries(
     assert data["progress"]["completedLessonCount"] == 1
     assert data["progress"]["courseResourceCount"] == 1
     assert data["progress"]["lessonResourceCount"] == 1
-    assert data["currentLesson"]["lessonId"] == first["lessonId"]
+    assert data["currentLesson"]["lessonId"] == second["lessonId"]
+    assert data["nextActions"][0]["route"] == f"/courses/{course['courseId']}/lessons/{second['lessonId']}/handout"
+    assert data["nextActions"][0]["action"] == "open_lesson_study"
     assert [lesson["lessonId"] for lesson in data["lessons"]] == [first["lessonId"], second["lessonId"]]
     assert [resource["scopeType"] for resource in data["courseResources"]] == ["course"]
-    assert {entry["key"] for entry in data["quickEntries"]} == {
+    quick_entries = {entry["key"]: entry for entry in data["quickEntries"]}
+    assert set(quick_entries) == {
+        "lesson_study",
         "course_qa",
         "course_graph",
         "comprehensive_quiz",
@@ -347,4 +351,30 @@ def test_course_workbench_aggregates_course_lessons_resources_and_quick_entries(
         "export",
         "settings",
     }
+    assert (
+        quick_entries["lesson_study"]["target"]
+        == f"/courses/{course['courseId']}/lessons/{second['lessonId']}/handout"
+    )
     assert data["placeholderStates"]["graph"]["status"] == "placeholder"
+
+
+def test_workbench_quick_entries_use_route_action_contract() -> None:
+    course = _create_course("Workbench quick entry contract")
+    lesson = runtime_store.create_lesson(course_id=course["courseId"], title="Lesson 1")
+    runtime_store.set_current_course(course["courseId"])
+
+    status, body = _api("GET", f"/api/v1/courses/{course['courseId']}/workbench")
+
+    assert status == 200
+    entries = {entry["key"]: entry for entry in body["data"]["quickEntries"]}
+    lesson_study = entries["lesson_study"]
+    assert lesson_study["enabled"] is True
+    assert lesson_study["target"] == f"/courses/{course['courseId']}/lessons/{lesson['lessonId']}/handout"
+    assert lesson_study["route"] == lesson_study["target"]
+    assert lesson_study["action"] == "open_lesson_study"
+    assert lesson_study["message"]
+
+    for key in ("course_qa", "comprehensive_quiz", "course_review"):
+        assert entries[key]["enabled"] is True
+        assert entries[key]["route"].startswith(f"/courses/{course['courseId']}")
+        assert entries[key]["action"]

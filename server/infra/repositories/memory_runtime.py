@@ -380,8 +380,21 @@ class RuntimeStore:
         lessons: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         for lesson in lessons:
-            progress = self.get_user_lesson_progress(course_id=course_id, lesson_id=lesson["lessonId"])
-            if lesson.get("lessonStatus") != "completed" and (progress or {}).get("quizStatus") != "completed":
+            progress = self.get_user_lesson_progress(course_id=course_id, lesson_id=lesson["lessonId"]) or {}
+            quiz_completed = (
+                lesson.get("quizStatus") == "completed"
+                or progress.get("quizStatus") == "completed"
+            )
+            handout_completed = any(
+                isinstance(value, (int, float)) and value >= 100
+                for value in (lesson.get("handoutReadPercent"), progress.get("handoutReadPercent"))
+            )
+            is_completed = (
+                lesson.get("lessonStatus") == "completed"
+                or quiz_completed
+                or handout_completed
+            )
+            if not is_completed:
                 return lesson
         return lessons[0] if lessons else None
 

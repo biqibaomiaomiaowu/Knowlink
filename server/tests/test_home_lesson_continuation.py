@@ -219,11 +219,12 @@ def test_home_dashboard_continues_current_lesson_and_returns_course_next_actions
         "lessonId": second["lessonId"],
         "lastPositionSec": 420,
         "lastHandoutBlockId": block_id,
-        "nextRoute": f"/courses/{course['courseId']}/lessons/{second['lessonId']}",
+        "nextRoute": f"/courses/{course['courseId']}/lessons/{second['lessonId']}/handout",
         "nextAction": {
             "type": "continue_video",
             "label": "继续学习 SQL 查询",
             "positionSec": 420,
+            "action": "open_lesson_study",
         },
     }
     assert data["nextStep"]["type"] == "continue_lesson"
@@ -233,6 +234,7 @@ def test_home_dashboard_continues_current_lesson_and_returns_course_next_actions
     assert data["recommendedStageQuiz"]["type"] == "stage_quiz"
     assert data["recommendedStageQuiz"]["completedLessonCount"] == 1
     assert {entry["key"] for entry in data["courseQuickEntries"]} == {
+        "lesson_study",
         "course_qa",
         "course_graph",
         "comprehensive_quiz",
@@ -241,6 +243,70 @@ def test_home_dashboard_continues_current_lesson_and_returns_course_next_actions
         "export",
         "settings",
     }
+
+
+def test_home_dashboard_points_next_step_to_lesson_study() -> None:
+    course = _create_course("Lesson study home route")
+    lesson = runtime_store.create_lesson(course_id=course["courseId"], title="Lesson 1")
+    runtime_store.upsert_user_lesson_progress(
+        course_id=course["courseId"],
+        lesson_id=lesson["lessonId"],
+        payload={"lastPositionSec": 90},
+    )
+    runtime_store.set_current_course(course["courseId"])
+
+    status, body = _api("GET", "/api/v1/home/dashboard")
+
+    assert status == 200
+    data = body["data"]
+    expected_route = f"/courses/{course['courseId']}/lessons/{lesson['lessonId']}/handout"
+    assert data["currentCourse"]["courseId"] == course["courseId"]
+    assert data["currentLesson"]["lessonId"] == lesson["lessonId"]
+    assert data["continueLearning"]["nextRoute"] == expected_route
+    assert data["nextStep"]["nextRoute"] == expected_route
+    assert data["nextStep"]["action"] == "open_lesson_study"
+    assert data["recentCourses"][0]["courseId"] == course["courseId"]
+
+
+def test_home_dashboard_treats_over_100_handout_progress_as_completed() -> None:
+    course = _create_course("Overread handout progress")
+    first = runtime_store.create_lesson(course_id=course["courseId"], title="Lesson 1")
+    second = runtime_store.create_lesson(course_id=course["courseId"], title="Lesson 2")
+    runtime_store.upsert_user_lesson_progress(
+        course_id=course["courseId"],
+        lesson_id=first["lessonId"],
+        payload={"handoutReadPercent": 120},
+    )
+    runtime_store.set_current_course(course["courseId"])
+
+    status, body = _api("GET", "/api/v1/home/dashboard")
+
+    assert status == 200
+    data = body["data"]
+    expected_route = f"/courses/{course['courseId']}/lessons/{second['lessonId']}/handout"
+    assert data["currentLesson"]["lessonId"] == second["lessonId"]
+    assert data["recentCourses"][0]["currentLessonId"] == second["lessonId"]
+    assert data["continueLearning"]["nextRoute"] == expected_route
+    assert data["nextStep"]["lessonId"] == second["lessonId"]
+
+
+def test_home_dashboard_treats_lesson_level_completed_quiz_as_completed() -> None:
+    course = _create_course("Lesson quiz completed")
+    first = runtime_store.create_lesson(course_id=course["courseId"], title="Lesson 1")
+    second = runtime_store.create_lesson(course_id=course["courseId"], title="Lesson 2")
+    runtime_store.update_lesson(
+        course_id=course["courseId"],
+        lesson_id=first["lessonId"],
+        changes={"quizStatus": "completed"},
+    )
+    runtime_store.set_current_course(course["courseId"])
+
+    status, body = _api("GET", "/api/v1/home/dashboard")
+
+    assert status == 200
+    data = body["data"]
+    assert data["currentLesson"]["lessonId"] == second["lessonId"]
+    assert data["recentCourses"][0]["currentLessonId"] == second["lessonId"]
 
 
 def test_in_course_recommendations_use_deterministic_lesson_rules() -> None:

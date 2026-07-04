@@ -14,13 +14,13 @@ from server.domain.services.course_recommendations import CourseRecommendationSe
 
 
 _COURSE_QUICK_ENTRIES = (
-    ("course_qa", "课程问答", "placeholder"),
-    ("course_graph", "课程图谱", "placeholder"),
-    ("comprehensive_quiz", "综合测验", "placeholder"),
-    ("course_review", "总复习", "placeholder"),
-    ("report", "学习报告", "placeholder"),
-    ("export", "导出", "placeholder"),
-    ("settings", "设置", "ready"),
+    ("course_qa", "课程问答", "ready", "基于全课程内容提问", "open_course_qa"),
+    ("course_graph", "课程图谱", "placeholder", "课程图谱暂未启用", "open_course_graph"),
+    ("comprehensive_quiz", "综合测验", "ready", "开始全课程综合测验", "start_comprehensive_quiz"),
+    ("course_review", "总复习", "ready", "进入课程复习中心", "open_course_review"),
+    ("report", "学习报告", "placeholder", "学习报告暂未启用", "open_course_report"),
+    ("export", "导出", "placeholder", "课程导出暂未启用", "open_course_export"),
+    ("settings", "设置", "ready", "调整课程设置", "open_course_settings"),
 )
 
 
@@ -124,7 +124,7 @@ class HomeService:
             "todayReviewTasks": self._today_review_tasks(course_id=course_id, lessons=lessons),
             "recommendedNextLesson": self.recommendations.recommended_next_lesson(course_id=course_id),
             "recommendedStageQuiz": self.recommendations.recommended_stage_quiz(course_id=course_id),
-            "courseQuickEntries": self._course_quick_entries(course_id),
+            "courseQuickEntries": self._course_quick_entries(course_id, current_lesson),
         }
 
     def _merge_lesson_progress(self, course_id: int, lesson: dict[str, Any]) -> dict[str, Any]:
@@ -171,11 +171,12 @@ class HomeService:
             "lessonId": lesson["lessonId"],
             "lastPositionSec": position_sec,
             "lastHandoutBlockId": lesson.get("lastHandoutBlockId"),
-            "nextRoute": f"/courses/{course_id}/lessons/{lesson['lessonId']}",
+            "nextRoute": _lesson_handout_route(course_id, int(lesson["lessonId"])),
             "nextAction": {
                 "type": "continue_video" if position_sec > 0 else "start_lesson",
                 "label": f"继续学习 {lesson['title']}",
                 "positionSec": position_sec,
+                "action": "open_lesson_study",
             },
         }
 
@@ -187,7 +188,8 @@ class HomeService:
             "courseId": course_id,
             "lessonId": lesson["lessonId"],
             "title": lesson["title"],
-            "nextRoute": f"/courses/{course_id}/lessons/{lesson['lessonId']}",
+            "nextRoute": _lesson_handout_route(course_id, int(lesson["lessonId"])),
+            "action": "open_lesson_study",
         }
 
     def _today_review_tasks(self, *, course_id: int, lessons: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -208,23 +210,56 @@ class HomeService:
             )
         return tasks
 
-    def _course_quick_entries(self, course_id: int) -> list[dict[str, Any]]:
-        return [
+    def _course_quick_entries(self, course_id: int, current_lesson: dict[str, Any] | None) -> list[dict[str, Any]]:
+        entries = []
+        if current_lesson is not None:
+            lesson_route = _lesson_handout_route(course_id, int(current_lesson["lessonId"]))
+            entries.append(
+                {
+                    "key": "lesson_study",
+                    "title": "课时学习",
+                    "status": "ready",
+                    "enabled": True,
+                    "target": lesson_route,
+                    "message": "继续当前课时讲义学习",
+                    "route": lesson_route,
+                    "action": "open_lesson_study",
+                }
+            )
+        else:
+            entries.append(
+                {
+                    "key": "lesson_study",
+                    "title": "课时学习",
+                    "status": "placeholder",
+                    "enabled": False,
+                    "target": None,
+                    "message": "创建课时后可进入学习",
+                    "route": None,
+                    "action": "open_lesson_study",
+                }
+            )
+        entries.extend(
             {
                 "key": key,
                 "title": title,
                 "status": status,
-                "enabled": True,
-                "target": f"/courses/{course_id}/{key}",
+                "enabled": status == "ready",
+                "target": _course_quick_entry_route(course_id, key),
+                "message": message,
+                "route": _course_quick_entry_route(course_id, key),
+                "action": action,
             }
-            for key, title, status in _COURSE_QUICK_ENTRIES
-        ]
+            for key, title, status, message, action in _COURSE_QUICK_ENTRIES
+        )
+        return entries
 
     def _is_lesson_completed(self, lesson: dict[str, Any]) -> bool:
+        handout_read_percent = lesson.get("handoutReadPercent")
         return (
             lesson.get("lessonStatus") == "completed"
             or lesson.get("quizStatus") == "completed"
-            or lesson.get("handoutReadPercent") == 100
+            or (isinstance(handout_read_percent, (int, float)) and handout_read_percent >= 100)
         )
 
 
@@ -244,3 +279,20 @@ def _int_or_none(value: object) -> int | None:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _lesson_handout_route(course_id: int, lesson_id: int) -> str:
+    return f"/courses/{course_id}/lessons/{lesson_id}/handout"
+
+
+def _course_quick_entry_route(course_id: int, key: str) -> str:
+    routes = {
+        "course_qa": f"/courses/{course_id}/qa",
+        "course_graph": f"/courses/{course_id}/graph",
+        "comprehensive_quiz": f"/courses/{course_id}/review?kind=comprehensive_quiz",
+        "course_review": f"/courses/{course_id}/review",
+        "report": f"/courses/{course_id}/review?kind=report",
+        "export": f"/courses/{course_id}/exports",
+        "settings": f"/courses/{course_id}/settings",
+    }
+    return routes[key]

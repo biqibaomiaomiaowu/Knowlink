@@ -59,7 +59,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
   }
 
-  Future<void> _resumeCourse(CourseSummaryModel course) async {
+  Future<void> _resumeCourse(
+    CourseSummaryModel course,
+    String? backendNextRoute,
+  ) async {
     final notifier = ref.read(homeProvider.notifier);
     final cached =
         ref.read(homeProvider).progressByCourseId[course.courseId]?.valueOrNull;
@@ -88,7 +91,10 @@ class _HomePageState extends ConsumerState<HomePage> {
         lessonId: lessonId,
         positionSec: progress?.lastPositionSec ?? course.lastPositionSec ?? 0,
       );
-      context.go('/courses/${course.courseId}/lessons/$lessonId');
+      context.go(
+        backendNextRoute ??
+            '/courses/${course.courseId}/lessons/$lessonId/handout',
+      );
       return;
     }
     context.go('/courses/${course.courseId}/handout');
@@ -125,7 +131,10 @@ class _HomeBody extends StatelessWidget {
 
   final HomeState state;
   final VoidCallback onRetry;
-  final Future<void> Function(CourseSummaryModel course) onResumeCourse;
+  final Future<void> Function(
+    CourseSummaryModel course,
+    String? backendNextRoute,
+  ) onResumeCourse;
   final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
@@ -183,7 +192,10 @@ class _HomeWideLayout extends StatelessWidget {
   final HomeDashboardModel? dashboard;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
   final bool isSwitchingCourse;
-  final Future<void> Function(CourseSummaryModel course) onResumeCourse;
+  final Future<void> Function(
+    CourseSummaryModel course,
+    String? backendNextRoute,
+  ) onResumeCourse;
   final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
@@ -223,7 +235,10 @@ class _HomeWideLayout extends StatelessWidget {
                 recentCourses: dashboard?.recentCourses ?? const [],
                 progressByCourseId: progressByCourseId,
                 isSwitchingCourse: isSwitchingCourse,
-                onResumeCourse: onResumeCourse,
+                onResumeCourse: (course) => onResumeCourse(
+                  course,
+                  _backendResumeRoute(dashboard, course),
+                ),
                 onSwitchCourse: onSwitchCourse,
               ),
             ),
@@ -268,7 +283,10 @@ class _HomeNarrowLayout extends StatelessWidget {
   final HomeDashboardModel? dashboard;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
   final bool isSwitchingCourse;
-  final Future<void> Function(CourseSummaryModel course) onResumeCourse;
+  final Future<void> Function(
+    CourseSummaryModel course,
+    String? backendNextRoute,
+  ) onResumeCourse;
   final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
@@ -296,7 +314,10 @@ class _HomeNarrowLayout extends StatelessWidget {
           recentCourses: dashboard?.recentCourses ?? const [],
           progressByCourseId: progressByCourseId,
           isSwitchingCourse: isSwitchingCourse,
-          onResumeCourse: onResumeCourse,
+          onResumeCourse: (course) => onResumeCourse(
+            course,
+            _backendResumeRoute(dashboard, course),
+          ),
           onSwitchCourse: onSwitchCourse,
         ),
         const SizedBox(height: 16),
@@ -859,6 +880,38 @@ String _formatSec(int seconds) {
   final minutes = seconds ~/ 60;
   final rest = seconds % 60;
   return '$minutes:${rest.toString().padLeft(2, '0')}';
+}
+
+String? _backendResumeRoute(
+  HomeDashboardModel? dashboard,
+  CourseSummaryModel course,
+) {
+  final currentCourseId = dashboard?.currentCourse?.courseId;
+  return _matchingRoute(
+        dashboard?.continueLearning,
+        course.courseId,
+        currentCourseId,
+      ) ??
+      _matchingRoute(
+        dashboard?.nextStep,
+        course.courseId,
+        currentCourseId,
+      );
+}
+
+String? _matchingRoute(
+  HomeRouteTargetModel? target,
+  int courseId,
+  int? currentCourseId,
+) {
+  if (target == null) {
+    return null;
+  }
+  final targetCourseId = target.courseId ?? currentCourseId;
+  if (targetCourseId != courseId) {
+    return null;
+  }
+  return target.nextRoute;
 }
 
 int? _firstRecentCourseId(HomeDashboardModel? dashboard) {

@@ -44,6 +44,33 @@ void main() {
     expect(detail.nextAction?.type, 'continue_video');
     expect(detail.nextAction?.label, '继续看视频');
     expect(detail.nextAction?.route, '/courses/101/lessons/l-2');
+
+    final quickEntry = PlaceholderEntryModel.fromJson({
+      'key': 'lesson_study',
+      'title': 'Lesson study',
+      'status': 'ready',
+      'enabled': false,
+      'target': '/courses/101/lessons/42',
+      'route': '/courses/101/lessons/42/handout',
+      'action': 'open_lesson_study',
+      'message': 'Continue the current lesson',
+    });
+    expect(quickEntry.enabled, isFalse);
+    expect(quickEntry.target, '/courses/101/lessons/42');
+    expect(quickEntry.route, '/courses/101/lessons/42/handout');
+    expect(quickEntry.action, 'open_lesson_study');
+    expect(quickEntry.targetPath, '/courses/101/lessons/42/handout');
+  });
+
+  test('placeholder quick entry without enabled defaults to disabled', () {
+    final quickEntry = PlaceholderEntryModel.fromJson({
+      'key': 'report',
+      'title': 'Report',
+      'status': 'placeholder',
+      'message': 'Report is not ready',
+    });
+
+    expect(quickEntry.enabled, isFalse);
   });
 
   test('ApiClient and CourseLessonApi use aggregate course/lesson paths',
@@ -183,7 +210,10 @@ void main() {
     expect(courses.single.title, '数据库系统');
     expect(workbench.lessons.single.title, '关系模型');
     expect(workbench.nextActions.single.label, '继续学习关系模型');
-    expect(workbench.nextActions.single.route, '/courses/101/lessons/l-2');
+    expect(
+      workbench.nextActions.single.route,
+      '/courses/101/lessons/l-2/handout',
+    );
     expect(lessons.single.lessonId, 'l-2');
     expect(created.lessonId, 'l-2');
     expect(updated.lessonId, 'l-2');

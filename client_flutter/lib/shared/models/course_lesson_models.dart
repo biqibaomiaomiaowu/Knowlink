@@ -168,7 +168,10 @@ Map<String, dynamic> _workbenchNextActionJson(
   final type = action['type'] as String? ?? action['actionType'] as String?;
   final lessonId = _nullableString(action['lessonId']);
   if (type == 'continue_lesson' && lessonId != null) {
-    action.putIfAbsent('route', () => '/courses/$courseId/lessons/$lessonId');
+    action.putIfAbsent(
+      'route',
+      () => '/courses/$courseId/lessons/$lessonId/handout',
+    );
     action.putIfAbsent('label', () {
       final title =
           action['title'] as String? ?? action['lessonTitle'] as String?;
@@ -360,6 +363,10 @@ class PlaceholderEntryModel {
     required this.title,
     required this.status,
     required this.message,
+    this.enabled = true,
+    this.target,
+    this.route,
+    this.action,
     this.targetPath,
   });
 
@@ -367,6 +374,10 @@ class PlaceholderEntryModel {
   final String title;
   final String status;
   final String message;
+  final bool enabled;
+  final String? target;
+  final String? route;
+  final String? action;
   final String? targetPath;
 
   factory PlaceholderEntryModel.fromJson(Map<String, dynamic> json) {
@@ -374,12 +385,20 @@ class PlaceholderEntryModel {
         json['artifactType'] as String? ??
         json['type'] as String? ??
         'placeholder';
+    final target = _nullableString(json['target']);
+    final route =
+        _nullableString(json['route']) ?? _nullableString(json['targetPath']);
+    final status = json['status'] as String? ?? 'placeholder';
     return PlaceholderEntryModel(
       key: key,
       title: json['title'] as String? ?? _placeholderTitle(key),
-      status: json['status'] as String? ?? 'placeholder',
+      status: status,
       message: json['message'] as String? ?? '',
-      targetPath: json['targetPath'] as String? ?? json['route'] as String?,
+      enabled: json['enabled'] as bool? ?? status == 'ready',
+      target: target,
+      route: route,
+      action: _nullableString(json['action']),
+      targetPath: route ?? target,
     );
   }
 }
@@ -533,6 +552,7 @@ Map<String, dynamic> _primaryVideoJson(
 
 String _placeholderTitle(String key) {
   return switch (key) {
+    'lesson_study' => '课时学习',
     'handout' || 'handout_version' || 'lesson_handout' => '本节讲义',
     'qa' || 'qa_session' || 'lesson_qa' => '本节 QA',
     'quiz' => '本节测验',

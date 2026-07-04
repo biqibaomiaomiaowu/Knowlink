@@ -65,6 +65,59 @@ void main() {
     expect(container.read(playerStateProvider).positionSec, 180);
   });
 
+  testWidgets('home continue opens lesson handout route for current lesson',
+      (tester) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _HomePageFakeApiClient(
+      currentLessonId: 'l-2',
+      currentLessonTitle: 'Lesson 2',
+      backendContinueRoute: '/courses/101/lessons/l-2/handout',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const HomePage(),
+        ),
+        GoRoute(
+          path: '/courses/:courseId/lessons/:lessonId',
+          builder: (context, state) => Text(
+            'lesson-base-${state.pathParameters['courseId']}-'
+            '${state.pathParameters['lessonId']}',
+          ),
+        ),
+        GoRoute(
+          path: '/courses/:courseId/lessons/:lessonId/handout',
+          builder: (context, state) => Text(
+            'lesson-handout-${state.pathParameters['courseId']}-'
+            '${state.pathParameters['lessonId']}',
+          ),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '继续学习').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('lesson-handout-101-l-2'), findsOneWidget);
+    expect(find.text('lesson-base-101-l-2'), findsNothing);
+    expect(container.read(activeLessonProvider)?.lessonId, 'l-2');
+  });
+
   testWidgets('recent learning opens course detail from the course list',
       (tester) async {
     _useTestSurface(tester);
@@ -282,6 +335,9 @@ class _HomePageFakeApiClient extends ApiClient {
     this.empty = false,
     this.progressBlockId = 4001,
     this.progressPositionSec = 180,
+    this.currentLessonId,
+    this.currentLessonTitle,
+    this.backendContinueRoute,
     this.switchCourseId,
     this.switchCompleter,
     this.switchError,
@@ -290,6 +346,9 @@ class _HomePageFakeApiClient extends ApiClient {
   final bool empty;
   final int? progressBlockId;
   final int? progressPositionSec;
+  final String? currentLessonId;
+  final String? currentLessonTitle;
+  final String? backendContinueRoute;
   final int? switchCourseId;
   final Completer<CourseSummaryModel>? switchCompleter;
   final Object? switchError;
@@ -317,6 +376,9 @@ class _HomePageFakeApiClient extends ApiClient {
           'pipelineStage': 'handout',
           'pipelineStatus': 'succeeded',
           'updatedAt': '2026-05-11T10:00:00+00:00',
+          if (currentLessonId != null) 'currentLessonId': currentLessonId,
+          if (currentLessonTitle != null)
+            'currentLessonTitle': currentLessonTitle,
         },
         {
           'courseId': 202,
@@ -354,6 +416,37 @@ class _HomePageFakeApiClient extends ApiClient {
         'reviewTasksCompleted': 2,
         'totalLearningMinutes': 95,
       },
+      if (currentLessonId != null) ...{
+        'currentCourse': {
+          'courseId': 101,
+          'title': 'KnowLink current course',
+          'entryType': 'manual_import',
+          'catalogId': null,
+          'lifecycleStatus': 'learning_ready',
+          'pipelineStage': 'handout',
+          'pipelineStatus': 'succeeded',
+          'updatedAt': '2026-05-11T10:00:00+00:00',
+        },
+        'currentLesson': {
+          'lessonId': currentLessonId,
+          'title': currentLessonTitle ?? 'Lesson',
+        },
+        'continueLearning': {
+          'courseId': 101,
+          'lessonId': currentLessonId,
+          'lastPositionSec': progressPositionSec ?? 0,
+          'lastHandoutBlockId': progressBlockId,
+          'nextRoute': backendContinueRoute,
+        },
+        'nextStep': {
+          'type': 'continue_lesson',
+          'courseId': 101,
+          'lessonId': currentLessonId,
+          'title': currentLessonTitle ?? 'Lesson',
+          'nextRoute': backendContinueRoute,
+          'action': 'open_lesson_study',
+        },
+      },
     });
   }
 
@@ -365,6 +458,10 @@ class _HomePageFakeApiClient extends ApiClient {
       'handoutVersionId': 3001,
       'lastHandoutBlockId': parsedCourseId == 101 ? progressBlockId : null,
       'lastPositionSec': parsedCourseId == 101 ? progressPositionSec : null,
+      if (parsedCourseId == 101 && currentLessonId != null)
+        'currentLessonId': currentLessonId,
+      if (parsedCourseId == 101 && currentLessonTitle != null)
+        'currentLessonTitle': currentLessonTitle,
       'lastActivityAt': '2026-05-11T10:00:00+00:00',
     });
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/course_workbench/course_workbench_page.dart';
 import 'package:knowlink_client/shared/models/course_lesson_models.dart';
@@ -39,6 +40,116 @@ void main() {
     expect(find.text('课程设置'), findsOneWidget);
     expect(find.text('继续学习关系模型'), findsOneWidget);
   });
+
+  testWidgets('quick entry uses backend route for lesson study',
+      (tester) async {
+    _useTestSurface(tester, const Size(1200, 1600));
+    final router = _workbenchRouter();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(
+          _CourseWorkbenchFakeApiClient(
+            quickEntries: [
+              {
+                'key': 'lesson_study',
+                'title': 'Lesson study',
+                'status': 'ready',
+                'enabled': true,
+                'route': '/courses/101/lessons/42/handout',
+                'target': '/courses/101/lessons/42',
+                'action': 'open_lesson_study',
+                'message': 'Continue the current lesson',
+              },
+            ],
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Lesson study'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('lesson-handout-route 101 42'), findsOneWidget);
+    expect(find.text('review-route 101'), findsNothing);
+  });
+
+  testWidgets('lesson list opens the lesson handout route', (tester) async {
+    _useTestSurface(tester, const Size(1200, 1600));
+    final router = _workbenchRouter();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_CourseWorkbenchFakeApiClient()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, '第 2 课'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('lesson-handout-route 101 l-2'), findsOneWidget);
+    expect(find.text('lesson-root-route 101 l-2'), findsNothing);
+  });
+
+  testWidgets('placeholder quick entry without enabled is not clickable',
+      (tester) async {
+    _useTestSurface(tester, const Size(1200, 1600));
+    final router = _workbenchRouter();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(
+          _CourseWorkbenchFakeApiClient(
+            quickEntries: [
+              {
+                'key': 'report',
+                'title': 'Disabled report',
+                'status': 'placeholder',
+                'route': '/courses/101/review?kind=report',
+                'target': '/courses/101/review',
+                'action': 'open_report',
+                'message': 'Report is not ready',
+              },
+            ],
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = find.widgetWithText(OutlinedButton, 'Disabled report');
+    expect(button, findsOneWidget);
+    expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
+
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CourseWorkbenchPage), findsOneWidget);
+    expect(find.text('review-route 101'), findsNothing);
+  });
 }
 
 void _useTestSurface(WidgetTester tester, Size size) {
@@ -48,7 +159,46 @@ void _useTestSurface(WidgetTester tester, Size size) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
+GoRouter _workbenchRouter() {
+  return GoRouter(
+    initialLocation: '/courses/101',
+    routes: [
+      GoRoute(
+        path: '/courses/:courseId',
+        builder: (context, state) => CourseWorkbenchPage(
+          courseId: state.pathParameters['courseId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/courses/:courseId/lessons/:lessonId/handout',
+        builder: (context, state) => Text(
+          'lesson-handout-route '
+          '${state.pathParameters['courseId']} '
+          '${state.pathParameters['lessonId']}',
+        ),
+      ),
+      GoRoute(
+        path: '/courses/:courseId/lessons/:lessonId',
+        builder: (context, state) => Text(
+          'lesson-root-route '
+          '${state.pathParameters['courseId']} '
+          '${state.pathParameters['lessonId']}',
+        ),
+      ),
+      GoRoute(
+        path: '/courses/:courseId/review',
+        builder: (context, state) =>
+            Text('review-route ${state.pathParameters['courseId']}'),
+      ),
+    ],
+  );
+}
+
 class _CourseWorkbenchFakeApiClient extends ApiClient {
+  _CourseWorkbenchFakeApiClient({this.quickEntries});
+
+  final List<Map<String, dynamic>>? quickEntries;
+
   @override
   Future<CourseWorkbenchModel> fetchCourseWorkbench(String courseId) async {
     return CourseWorkbenchModel.fromJson({
@@ -92,50 +242,51 @@ class _CourseWorkbenchFakeApiClient extends ApiClient {
           'sortOrder': 1,
         },
       ],
-      'quickEntries': [
-        {
-          'key': 'course_qa',
-          'title': '全课程 QA',
-          'status': 'ready',
-          'message': '基于全部课时提问',
-        },
-        {
-          'key': 'course_graph',
-          'title': '课程图谱',
-          'status': 'placeholder',
-          'message': '图谱生成暂未启用',
-        },
-        {
-          'key': 'comprehensive_quiz',
-          'title': '综合测验',
-          'status': 'placeholder',
-          'message': '综合测验等待生成',
-        },
-        {
-          'key': 'course_review',
-          'title': '课程总复习',
-          'status': 'generating',
-          'message': '复习计划生成中',
-        },
-        {
-          'key': 'report',
-          'title': '学习报告',
-          'status': 'placeholder',
-          'message': '报告暂未启用',
-        },
-        {
-          'key': 'export',
-          'title': '课程导出',
-          'status': 'placeholder',
-          'message': '导出暂未启用',
-        },
-        {
-          'key': 'settings',
-          'title': '课程设置',
-          'status': 'ready',
-          'message': '调整课程信息',
-        },
-      ],
+      'quickEntries': quickEntries ??
+          [
+            {
+              'key': 'course_qa',
+              'title': '全课程 QA',
+              'status': 'ready',
+              'message': '基于全部课时提问',
+            },
+            {
+              'key': 'course_graph',
+              'title': '课程图谱',
+              'status': 'placeholder',
+              'message': '图谱生成暂未启用',
+            },
+            {
+              'key': 'comprehensive_quiz',
+              'title': '综合测验',
+              'status': 'placeholder',
+              'message': '综合测验等待生成',
+            },
+            {
+              'key': 'course_review',
+              'title': '课程总复习',
+              'status': 'generating',
+              'message': '复习计划生成中',
+            },
+            {
+              'key': 'report',
+              'title': '学习报告',
+              'status': 'placeholder',
+              'message': '报告暂未启用',
+            },
+            {
+              'key': 'export',
+              'title': '课程导出',
+              'status': 'placeholder',
+              'message': '导出暂未启用',
+            },
+            {
+              'key': 'settings',
+              'title': '课程设置',
+              'status': 'ready',
+              'message': '调整课程信息',
+            },
+          ],
       'nextActions': [
         {
           'type': 'continue_lesson',

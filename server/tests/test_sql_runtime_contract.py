@@ -680,6 +680,62 @@ def test_sql_repository_current_course_uses_recent_then_explicit_switch():
     engine.dispose()
 
 
+def test_sql_repository_current_library_lesson_skips_overread_handout():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite overread handout course",
+        entry_type="manual_import",
+        goal_text="verify current lesson completion semantics",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    first = repo.create_lesson(course_id=course_id, title="Lesson 1")
+    second = repo.create_lesson(course_id=course_id, title="Lesson 2")
+    repo.upsert_user_lesson_progress(
+        course_id=course_id,
+        lesson_id=first["lessonId"],
+        payload={"handoutReadPercent": 120},
+    )
+
+    current_lesson = repo._current_library_lesson(course_id=course_id, lessons=repo.list_lessons(course_id))
+
+    assert current_lesson is not None
+    assert current_lesson["lessonId"] == second["lessonId"]
+
+    session.close()
+    engine.dispose()
+
+
+def test_sql_repository_current_library_lesson_skips_lesson_level_completed_quiz():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite lesson quiz completed course",
+        entry_type="manual_import",
+        goal_text="verify lesson-level quiz completion semantics",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    first = repo.create_lesson(course_id=course_id, title="Lesson 1")
+    second = repo.create_lesson(course_id=course_id, title="Lesson 2")
+    repo.update_lesson(
+        course_id=course_id,
+        lesson_id=first["lessonId"],
+        changes={"quizStatus": "completed"},
+    )
+
+    current_lesson = repo._current_library_lesson(course_id=course_id, lessons=repo.list_lessons(course_id))
+
+    assert current_lesson is not None
+    assert current_lesson["lessonId"] == second["lessonId"]
+
+    session.close()
+    engine.dispose()
+
+
 def test_sql_repository_normalizes_non_utc_exam_at_to_utc_for_sqlite_round_trip():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)

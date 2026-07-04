@@ -112,7 +112,30 @@ GET    /api/v1/courses/{courseId}/workbench
 - `nextActions`
 - `placeholderStates`
 
-Quick entries include: `course_qa`、`course_graph`、`comprehensive_quiz`、`course_review`、`report`、`export`、`settings`。
+Quick entries include primary keys `lesson_study`, `course_qa`, `comprehensive_quiz`, and `course_review`.
+Reserved entries may include `course_graph`, `report`, `export`, and `settings`.
+
+Each quick entry returns:
+
+- `key`
+- `title`
+- `status`
+- `enabled`
+- `target`
+- `message`
+- `route`
+- `action`
+
+`target` is preserved for backward compatibility. For route entries, `route` equals `target`.
+`lesson_study` points to `/courses/{courseId}/lessons/{lessonId}/handout` when a current lesson exists.
+
+Workbench `nextActions` includes the current lesson continuation action:
+
+- `type=continue_lesson`
+- `lessonId`
+- `title`
+- `route`: `/courses/{courseId}/lessons/{lessonId}/handout`
+- `action`: `open_lesson_study`
 
 Frozen route tokens for tests and downstream DTO alignment:
 
@@ -533,6 +556,9 @@ PUT /api/v1/courses/{courseId}/lessons/{lessonId}/progress
 - `lastHandoutBlockId`
 - `nextRoute`
 - `nextAction`
+
+`nextRoute` uses the lesson study handout route: `/courses/{courseId}/lessons/{lessonId}/handout`.
+Home `nextStep` uses the same route and returns `action=open_lesson_study`.
 
 Course progress remains an aggregate. `user_lesson_progress` stores lesson position, handout reading position, quiz status and review status.
 `lastHandoutBlockId` must reference a handout block visible to the current course or lesson scope; unknown or cross-course block ids are invalid.
