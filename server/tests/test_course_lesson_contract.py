@@ -74,6 +74,41 @@ def test_v2_course_lesson_contract_freezes_required_sections() -> None:
         assert token in contract
 
 
+def test_v2_contract_freezes_frontend_prototype_parity() -> None:
+    contract = text(CONTRACT_PATH)
+    for token in (
+        "recreateUI/index-soft-ui-neumorphism.html",
+        "frontend prototype parity",
+        "LessonStudyPage",
+        "/courses/:courseId/lessons/:lessonId/handout",
+        "本节资料",
+        "进入测试",
+        "left outline drawer",
+    ):
+        assert token in contract
+    assert "加入复习" in contract
+    assert "top primary action" in contract
+
+
+def test_v2_contract_freezes_lesson_handout_real_routes() -> None:
+    contract = text(CONTRACT_PATH)
+    for route in (
+        "GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout",
+        "POST /api/v1/courses/{courseId}/lessons/{lessonId}/handout/generate",
+        "GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout/outline",
+        "GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout/blocks",
+        "GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout/current-block",
+    ):
+        assert route in contract
+    for token in (
+        "scopeType=lesson",
+        "artifactKind=lesson_handout",
+        "reuse course-level handout generation",
+        "two-level outline",
+        "handout_blocks",
+    ):
+        assert token in contract
+
 def test_v2_course_lesson_contract_freezes_scope_and_no_resource_qa() -> None:
     contract = text(CONTRACT_PATH)
 

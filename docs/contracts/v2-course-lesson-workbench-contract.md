@@ -4,6 +4,31 @@
 
 本文冻结 V2 Phase 2 课程库、节课、课程工作台、分层资料和分层学习产物的 API / DTO / 错误码口径。第二版仍然是单用户多课程，不引入团队共享、权限模型或多用户隔离。所有接口继续使用 `/api/v1` 前缀，状态拼写统一使用 `canceled`。
 
+## Frontend Prototype Parity
+
+The real Flutter frontend must keep frontend prototype parity with `recreateUI/index-soft-ui-neumorphism.html`. This prototype is the parity source for the seven-screen information architecture, primary navigation, page hierarchy, lesson-study layout, materials modal, visible action wording, and left outline drawer behavior.
+
+Frozen screen and route mapping:
+
+| Prototype signal | Flutter target | Route |
+|---|---|---|
+| 学习总览 | `HomePage` | `/` |
+| 课程库 | `CourseLibraryPage` | `/courses` |
+| 课程工作台 | `CourseWorkbenchPage` | `/courses/:courseId` |
+| 课时学习 | `LessonStudyPage` | `/courses/:courseId/lessons/:lessonId/handout` |
+| 测试中心 | `QuizPage` | `/courses/:courseId/quiz` and lesson quiz entry |
+| AI 问答 | `CourseQaPage` | `/courses/:courseId/qa` |
+| 复习中心 | `ReviewPage` | `/courses/:courseId/review` |
+
+LessonStudyPage parity requirements:
+
+- Top primary action row includes `本节资料` and `进入测试`.
+- `加入复习` is explicitly excluded as a top primary action in lesson study.
+- The handout generation action uses `生成讲义`, not `根据资料生成讲义`.
+- The lesson workspace keeps the primary video centered, AI below the video, and the selected single handout block on the right.
+- The outline is a hidden two-level left outline drawer opened by a left-side icon; the closed drawer must not consume main layout width.
+- The materials modal is opened by `本节资料` and blurs the background.
+- Course workbench is entered from home or library and is not a primary navigation item.
 ## 1. Scope And Non-goals
 
 In scope:
@@ -294,6 +319,17 @@ Placeholder response:
 - `citations`
 
 Lesson handout 默认读取本节主视频、本节资料和必要课程级资料。Course summary handout 可读取所有 lesson、课程级资料和已生成 lesson handout。
+### Lesson Study And Lesson Handout
+
+| Route | Purpose |
+|---|---|
+| GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout | Read the latest real lesson handout summary for LessonStudyPage. |
+| POST /api/v1/courses/{courseId}/lessons/{lessonId}/handout/generate | Generate or reuse a lesson-scoped handout version. |
+| GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout/outline | Read the two-level outline for the lesson handout. |
+| GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout/blocks | Read handout_blocks for the current lesson handout version. |
+| GET /api/v1/courses/{courseId}/lessons/{lessonId}/handout/current-block | Resolve the current lesson block by video position. |
+
+Lesson handout generation must reuse course-level handout generation policy and block generation primitives. The frozen invariant is `scopeType=lesson`, `lessonId=<current lesson>`, and `artifactKind=lesson_handout`. The generated artifact must persist one `handout_version`, a two-level outline, and `handout_blocks`; course-scope latest reads and lesson-scope latest reads must not mix.
 
 ## 6. Course QA And Lesson QA
 

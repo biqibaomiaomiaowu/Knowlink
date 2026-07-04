@@ -58,6 +58,9 @@ class CourseQuickEntry(CamelModel):
     status: str
     enabled: bool = True
     target: str | None = None
+    message: str | None = None
+    route: str | None = None
+    action: str | None = None
 
 
 class CourseProgressSummary(CamelModel):
@@ -243,6 +246,9 @@ class HandoutOutlineData(CamelModel):
     title: str
     summary: str
     items: list[HandoutOutlineSection]
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    artifact_kind: Literal["lesson_handout", "course_summary_handout"] | None = None
 
 
 class HandoutStatusData(CamelModel):
@@ -250,6 +256,9 @@ class HandoutStatusData(CamelModel):
     status: str
     total_blocks: int
     source_parse_run_id: int | None = None
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    artifact_kind: Literal["lesson_handout", "course_summary_handout"] | None = None
 
 
 class HandoutSummaryData(CamelModel):
@@ -258,10 +267,16 @@ class HandoutSummaryData(CamelModel):
     summary: str
     total_blocks: int
     status: str
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    artifact_kind: Literal["lesson_handout", "course_summary_handout"] | None = None
 
 
 class HandoutBlocksData(CamelModel):
     items: list[HandoutBlock]
+    scope_type: Literal["course", "lesson"] | None = None
+    lesson_id: int | None = None
+    artifact_kind: Literal["lesson_handout", "course_summary_handout"] | None = None
 
 
 class JumpTargetData(CamelModel):
