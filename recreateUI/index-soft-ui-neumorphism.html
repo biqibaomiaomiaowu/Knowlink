@@ -1,0 +1,2118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KnowLink 全页面原型 · Soft UI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --surface: #e0e5ec;
+      --text: #3d4852;
+      --muted: #6b7280;
+      --accent: #6c63ff;
+      --accent-light: #8b84ff;
+      --success: #38b2ac;
+      --warning: #7c6dff;
+      --danger: #c45163;
+      --on-accent: #ffffff;
+      --placeholder: #7e8997;
+      --shadow-raised: 9px 9px 16px rgba(163, 177, 198, 0.62), -9px -9px 16px rgba(255, 255, 255, 0.54);
+      --shadow-hover: 12px 12px 20px rgba(163, 177, 198, 0.7), -12px -12px 20px rgba(255, 255, 255, 0.62);
+      --shadow-small: 5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.52);
+      --shadow-inset: inset 6px 6px 10px rgba(163, 177, 198, 0.62), inset -6px -6px 10px rgba(255, 255, 255, 0.52);
+      --shadow-inset-deep: inset 10px 10px 20px rgba(163, 177, 198, 0.7), inset -10px -10px 20px rgba(255, 255, 255, 0.62);
+      --shadow-inset-small: inset 3px 3px 6px rgba(163, 177, 198, 0.62), inset -3px -3px 6px rgba(255, 255, 255, 0.52);
+      --shadow-accent: 8px 8px 16px rgba(84, 76, 210, 0.28), -7px -7px 16px rgba(255, 255, 255, 0.42);
+      --shadow-accent-pressed: inset 4px 4px 9px rgba(69, 61, 186, 0.45), inset -4px -4px 9px rgba(157, 151, 255, 0.38);
+      --font-display: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+      --font-body: "DM Sans", "Segoe UI", system-ui, sans-serif;
+      --radius-card: 32px;
+      --radius-control: 16px;
+      --duration: 300ms;
+      --ease: ease-out;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--surface); scroll-behavior: smooth; }
+    body {
+      min-width: 320px;
+      margin: 0;
+      color: var(--text);
+      background: var(--surface);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.55;
+      letter-spacing: 0;
+    }
+    button, input, textarea, select { font: inherit; }
+    button { touch-action: manipulation; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, .tab:focus-visible, .choice-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+    svg { flex: 0 0 auto; stroke-width: 1.8; }
+
+    .prototype { width: 100%; min-height: 100vh; padding: 24px; background: var(--surface); }
+    .frame {
+      width: min(1520px, 100%);
+      min-height: 880px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--surface);
+      border-radius: 36px;
+      box-shadow: var(--shadow-raised);
+    }
+    .topbar {
+      height: 78px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 24px;
+      background: var(--surface);
+      box-shadow: var(--shadow-inset-small);
+    }
+    .logo {
+      width: 52px;
+      height: 52px;
+      position: relative;
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      background: var(--surface);
+      border-radius: 18px;
+      box-shadow: var(--shadow-raised);
+    }
+    .logo::before {
+      content: "";
+      position: absolute;
+      inset: 10px;
+      border-radius: 999px;
+      box-shadow: var(--shadow-inset);
+    }
+    .logo-mark {
+      position: relative;
+      z-index: 1;
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 800;
+    }
+    .brand-title {
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 30px;
+      font-weight: 800;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .mobile-nav {
+      display: none;
+      gap: 8px;
+      padding: 12px;
+      overflow-x: auto;
+      background: var(--surface);
+      box-shadow: var(--shadow-inset-small);
+    }
+
+    .shell {
+      height: 802px;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 244px minmax(0, 1fr);
+      overflow: hidden;
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 18px 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow-inset-small);
+    }
+    .side-label, .kicker {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .side-label { padding: 0 10px; }
+    .nav-item {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 0;
+      border-radius: var(--radius-control);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      text-align: left;
+      white-space: nowrap;
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease), color var(--duration) var(--ease);
+    }
+    .nav-item svg { width: 20px; height: 20px; }
+    .nav-item:hover, .nav-item.active {
+      color: var(--text);
+      box-shadow: var(--shadow-small);
+      transform: translateY(-1px);
+    }
+    .nav-item.active svg { color: var(--accent); }
+    .nav-item:active { box-shadow: var(--shadow-inset-small); transform: translateY(0.5px); }
+
+    .content {
+      position: relative;
+      min-height: 0;
+      overflow: auto;
+      padding: 24px;
+      background: var(--surface);
+      scroll-behavior: smooth;
+    }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .page-title {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+    .title-left {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      min-width: 0;
+    }
+    .title-icon {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      color: var(--accent);
+      background: var(--surface);
+      border-radius: var(--radius-control);
+      box-shadow: var(--shadow-inset-deep);
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      margin-bottom: 0;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1.02;
+    }
+    .subtitle {
+      max-width: 760px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .btn {
+      min-height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 20px;
+      color: var(--text);
+      background: var(--surface);
+      border: 0;
+      border-radius: var(--radius-control);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.1;
+      text-decoration: none;
+      white-space: nowrap;
+      box-shadow: var(--shadow-small);
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease), color var(--duration) var(--ease), background-color var(--duration) var(--ease);
+    }
+    .btn::after {
+      content: ">";
+      font-size: 13px;
+      transform: translateY(-1px);
+      transition: transform var(--duration) var(--ease);
+    }
+    .btn.primary { color: var(--on-accent); background: var(--accent); box-shadow: var(--shadow-accent); }
+    .btn:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+    .btn:hover::after { transform: translate(4px, -1px); }
+    .btn.primary:hover { background: var(--accent-light); }
+    .btn:active { box-shadow: var(--shadow-inset-small); transform: translateY(0.5px) scale(0.99); }
+    .btn.primary:active { box-shadow: var(--shadow-accent-pressed); }
+
+    .grid { display: grid; gap: 16px; }
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .card {
+      position: relative;
+      padding: 22px;
+      background: var(--surface);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-raised);
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+    }
+    .card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 14px;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.15;
+    }
+    .section-title::before {
+      content: "";
+      width: 24px;
+      height: 24px;
+      flex: 0 0 auto;
+      background: var(--surface);
+      border-radius: 999px;
+      box-shadow: var(--shadow-inset);
+    }
+    .card-mark {
+      position: absolute;
+      right: 22px;
+      top: 22px;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .card-mark.sage { background: var(--success); }
+    .card-mark.clay { background: var(--accent-light); }
+    .list { display: flex; flex-direction: column; gap: 12px; }
+    .small { font-size: 13px; line-height: 1.55; }
+    .muted { color: var(--muted); }
+    .divider {
+      height: 12px;
+      margin: 20px 0;
+      border-radius: 999px;
+      box-shadow: var(--shadow-inset-small);
+    }
+
+    .pill {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 13px;
+      color: var(--text);
+      background: var(--surface);
+      border: 0;
+      border-radius: 999px;
+      box-shadow: var(--shadow-inset-small);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .pill::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      background: var(--accent);
+      border-radius: 999px;
+      box-shadow: 0 0 0 5px rgba(108, 99, 255, 0.12);
+    }
+    .pill.green::before, .pill.purple::before { background: var(--success); box-shadow: 0 0 0 5px rgba(56, 178, 172, 0.12); }
+    .pill.orange::before { background: var(--accent-light); box-shadow: 0 0 0 5px rgba(139, 132, 255, 0.12); }
+    .pill.red::before { background: var(--danger); box-shadow: 0 0 0 5px rgba(196, 81, 99, 0.14); }
+
+    .field, .textarea {
+      min-height: 50px;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      color: var(--muted);
+      background: var(--surface);
+      border-radius: var(--radius-control);
+      box-shadow: var(--shadow-inset);
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .textarea { min-height: 68px; align-items: flex-start; padding: 16px; }
+    .progress {
+      height: 12px;
+      overflow: hidden;
+      padding: 3px;
+      background: var(--surface);
+      border-radius: 999px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .progress span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+      border-radius: inherit;
+      box-shadow: 2px 2px 6px rgba(84, 76, 210, 0.24), -2px -2px 6px rgba(255, 255, 255, 0.32);
+    }
+    .progress.green span { background: var(--success); }
+    .progress.orange span { background: var(--accent-light); }
+    .progress.red span { background: var(--danger); }
+
+    .hero-dashboard {
+      min-height: 220px;
+      position: relative;
+      display: grid;
+      grid-template-columns: 1.25fr 0.75fr;
+      gap: 20px;
+      overflow: hidden;
+      padding: 28px;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-raised);
+    }
+    .hero-dashboard::before, .hero-dashboard::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+      border-radius: 999px;
+    }
+    .hero-dashboard::before {
+      right: -52px;
+      top: -72px;
+      width: 220px;
+      height: 220px;
+      box-shadow: var(--shadow-inset-deep);
+      animation: float-soft 4s ease-in-out infinite;
+    }
+    .hero-dashboard::after {
+      right: 128px;
+      bottom: -70px;
+      width: 150px;
+      height: 150px;
+      box-shadow: var(--shadow-small);
+      animation: float-soft 5.5s ease-in-out infinite reverse;
+    }
+    .hero-copy, .hero-card { position: relative; z-index: 1; }
+    .hero-dashboard h2 {
+      max-width: 710px;
+      margin: 14px 0 12px;
+      font-family: var(--font-display);
+      font-size: 34px;
+      font-weight: 800;
+      line-height: 1.08;
+    }
+    .hero-dashboard p {
+      max-width: 620px;
+      margin-bottom: 22px;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 1.7;
+    }
+    .hero-card {
+      align-self: stretch;
+      overflow: hidden;
+      padding: 22px;
+      background: var(--surface);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-inset-deep);
+    }
+    .hero-card::before, .hero-card::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      pointer-events: none;
+    }
+    .hero-card::before {
+      right: 22px;
+      top: 18px;
+      width: 82px;
+      height: 82px;
+      box-shadow: var(--shadow-raised);
+    }
+    .hero-card::after {
+      right: 49px;
+      top: 45px;
+      width: 28px;
+      height: 28px;
+      background: var(--success);
+      box-shadow: var(--shadow-small);
+    }
+    .corner-shape { display: none; }
+    .big {
+      position: relative;
+      z-index: 1;
+      margin-bottom: 4px;
+      color: var(--accent);
+      font-family: var(--font-display);
+      font-size: 48px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .hero-card-label { position: relative; z-index: 1; font-weight: 700; }
+    .hero-card-meta { position: relative; z-index: 1; margin: 16px 0 8px; color: var(--muted); font-size: 13px; }
+
+    .task-card {
+      display: grid;
+      grid-template-columns: 42px 1fr auto;
+      align-items: center;
+      gap: 14px;
+      padding: 14px;
+      background: var(--surface);
+      border-radius: 24px;
+      box-shadow: var(--shadow-inset-small);
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+    }
+    .task-card:hover, .course-tile:hover, .row:hover, .weak-card:hover, .metric:hover {
+      box-shadow: var(--shadow-small);
+      transform: translateY(-2px);
+    }
+    .task-num {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      background: var(--surface);
+      border-radius: var(--radius-control);
+      font-size: 13px;
+      font-weight: 800;
+      box-shadow: var(--shadow-raised);
+    }
+    .task-card:nth-child(2) .task-num { color: var(--success); }
+    .task-card:nth-child(3) .task-num { color: var(--text); }
+    .name { color: var(--text); font-weight: 700; }
+    .meta { margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
+
+    .course-tile, .weak-card {
+      min-height: auto;
+      padding: 18px;
+      background: var(--surface);
+      border-radius: 28px;
+      box-shadow: var(--shadow-inset-small);
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+    }
+    .course-tile h3, .weak-card h3 {
+      margin: 0 0 14px;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 800;
+      line-height: 1.15;
+    }
+    .course-tile .stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+    .lesson-tile { display: flex; flex-direction: column; gap: 10px; }
+    .lesson-tile .actions { margin-top: auto; justify-content: flex-start; }
+
+    .metric {
+      min-height: 104px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 18px;
+      background: var(--surface);
+      border-radius: 26px;
+      box-shadow: var(--shadow-inset-small);
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+    }
+    .metric .value {
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: clamp(28px, 3vw, 42px);
+      font-weight: 800;
+      line-height: 1;
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .soft-icon, .file-badge {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      color: var(--accent);
+      background: var(--surface);
+      border-radius: var(--radius-control);
+      box-shadow: var(--shadow-raised);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .file-badge.pdf { color: var(--danger); }
+    .file-badge.ppt, .file-badge.mp4 { color: var(--accent); }
+    .file-badge.doc, .file-badge.srt { color: var(--success); }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px;
+      background: var(--surface);
+      border-radius: 22px;
+      box-shadow: var(--shadow-inset-small);
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
+    }
+    .row .main { min-width: 0; flex: 1; }
+    .row .name, .row .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .lesson-room {
+      display: grid;
+      grid-template-columns: minmax(520px, 1fr) minmax(320px, 420px);
+      gap: 16px;
+      align-items: start;
+      position: relative;
+    }
+    .lesson-room > .card { min-width: 0; }
+    .lesson-outline-trigger {
+      position: absolute;
+      left: -30px;
+      top: 16px;
+      z-index: 4;
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      background: var(--surface);
+      border: 0;
+      border-radius: 18px;
+      box-shadow: var(--shadow-raised);
+      cursor: pointer;
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease), color var(--duration) var(--ease);
+    }
+    .lesson-outline-trigger:hover {
+      transform: translateY(-2px);
+      color: var(--accent-strong);
+      box-shadow: var(--shadow-accent);
+    }
+    .lesson-outline-trigger svg {
+      width: 22px;
+      height: 22px;
+      stroke-width: 2.2;
+    }
+    .lesson-video-card {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .lesson-handout-block-card {
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .lesson-ai-card {
+      grid-column: 1 / 3;
+      grid-row: 2;
+    }
+    .video-box {
+      position: relative;
+      height: clamp(320px, 36vw, 460px);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-inset-deep);
+    }
+    .video-box::before {
+      content: "LECTURE";
+      position: absolute;
+      left: 24px;
+      top: 20px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      z-index: 2;
+    }
+    .video-box::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background:
+        linear-gradient(180deg, rgba(28, 39, 58, 0.12), transparent 30%),
+        linear-gradient(0deg, rgba(28, 39, 58, 0.34), transparent 44%);
+      pointer-events: none;
+    }
+    .video-cover {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .play {
+      width: 78px;
+      height: 78px;
+      position: relative;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      background: var(--surface);
+      border-radius: 999px;
+      box-shadow: var(--shadow-raised);
+    }
+    .video-timeline {
+      position: absolute;
+      left: 22px;
+      right: 22px;
+      bottom: 24px;
+      z-index: 2;
+    }
+    .handout {
+      flex: 1;
+      padding: 18px;
+      background: var(--surface);
+      border-radius: 24px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .handout-block { min-height: 360px; }
+    .handout h3 {
+      margin: 0 0 8px;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 800;
+    }
+    .handout h3:not(:first-child) { margin-top: 18px; }
+    .handout p { margin: 0; color: var(--muted); font-weight: 500; }
+    .handout p + p { margin-top: 10px; }
+    .quote {
+      margin: 12px 0;
+      padding: 12px 14px;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: var(--radius-control);
+      box-shadow: var(--shadow-raised-small);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .handout-status, .modal-help, .selected-files {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .lesson-outline-drawer {
+      position: absolute;
+      left: 0;
+      top: 116px;
+      z-index: 45;
+      width: min(340px, calc(100% - 32px));
+      max-height: calc(100% - 136px);
+      overflow: auto;
+      padding: 22px;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: 0 var(--radius-card) var(--radius-card) 0;
+      box-shadow: var(--shadow-raised);
+      transform: translateX(calc(-100% - 28px));
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 260ms var(--ease), opacity 180ms var(--ease), box-shadow var(--duration) var(--ease);
+    }
+    .lesson-outline-drawer.active {
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .lesson-outline-drawer .modal-head {
+      margin-bottom: 18px;
+    }
+    .lesson-outline-drawer .modal-head h2 {
+      font-size: 28px;
+    }
+    .handout-outline-tree { display: grid; gap: 12px; }
+    .handout-outline-group {
+      padding: 12px;
+      background: var(--surface);
+      border-radius: 22px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .handout-outline-parent {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 900;
+    }
+    .handout-outline-parent span { color: var(--accent); font-size: 14px; }
+    .handout-outline-children { display: grid; gap: 8px; padding-left: 24px; }
+    .handout-outline-child {
+      width: 100%;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 5px 10px;
+      align-items: start;
+      padding: 10px 12px;
+      color: var(--text);
+      background: var(--surface);
+      border: 0;
+      border-radius: 16px;
+      box-shadow: var(--shadow-raised-small);
+      text-align: left;
+      cursor: pointer;
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease), background var(--duration) var(--ease), color var(--duration) var(--ease);
+    }
+    .handout-outline-child span {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.25;
+    }
+    .handout-outline-child strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .handout-outline-child small {
+      grid-column: 2;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .handout-outline-child:hover { transform: translateY(-1px); box-shadow: var(--shadow-raised); }
+    .handout-outline-child.active { color: var(--on-accent); background: var(--accent); box-shadow: var(--shadow-accent); }
+    .handout-outline-child.active span,
+    .handout-outline-child.active small { color: rgba(255, 255, 255, 0.86); }
+
+    .lesson-ai-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      background: var(--surface);
+      border-radius: 24px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .lesson-ai-panel .card-head { margin-bottom: 0; }
+    .lesson-chat-preview {
+      max-height: 172px;
+      overflow-y: auto;
+      padding: 2px 6px 2px 2px;
+      scroll-behavior: smooth;
+    }
+    .lesson-ai-bubble {
+      width: fit-content;
+      max-width: 86%;
+      margin-bottom: 8px;
+      padding: 9px 12px;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: var(--shadow-raised-small);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .lesson-ai-bubble.ai { border-top-left-radius: 8px; }
+    .lesson-ai-bubble.user {
+      margin-left: auto;
+      color: var(--on-accent);
+      background: var(--accent);
+      border-top-right-radius: 8px;
+      box-shadow: var(--shadow-accent);
+    }
+    .lesson-ai-citations { display: flex; flex-wrap: wrap; gap: 8px; margin-top: -2px; }
+    .lesson-ai-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+    .lesson-ai-input {
+      width: 100%;
+      min-height: 52px;
+      resize: vertical;
+      padding: 10px 13px;
+      color: var(--text);
+      background: var(--surface);
+      border: 0;
+      border-radius: var(--radius-control);
+      outline: none;
+      box-shadow: var(--shadow-inset);
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+    .lesson-ai-input::placeholder { color: var(--placeholder); }
+    .compact-material-list {
+      max-height: 320px;
+      overflow-y: auto;
+      padding: 2px 6px 2px 0;
+      scroll-behavior: smooth;
+    }
+    .compact-material-list .row { padding: 11px 12px; border-radius: 18px; }
+    @media (max-width: 1180px) {
+      .lesson-video-card,
+      .lesson-handout-block-card,
+      .lesson-ai-card { grid-column: auto; grid-row: auto; }
+    }
+
+    .chat-layout {
+      min-height: 650px;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 16px;
+    }
+    .chat-history { display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+    .chat-item {
+      padding: 14px;
+      background: var(--surface);
+      border-radius: 22px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .chat-main {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 14px;
+    }
+    .chat-window {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+      background: var(--surface);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-inset-deep);
+    }
+    .bubble {
+      max-width: 78%;
+      margin: 0 0 14px;
+      padding: 16px;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: 24px;
+      box-shadow: var(--shadow-small);
+    }
+    .bubble.user {
+      margin-left: auto;
+      color: var(--on-accent);
+      background: var(--accent);
+      box-shadow: var(--shadow-accent);
+    }
+    .bubble p { margin: 8px 0 0; color: var(--muted); }
+    .bubble.user p { color: var(--on-accent); }
+    .citation { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .composer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .tabs, .choice-row {
+      display: inline-grid;
+      grid-auto-flow: column;
+      gap: 8px;
+      padding: 8px;
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .tab, .choice-btn {
+      min-height: 42px;
+      padding: 0 14px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      border-radius: 14px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .tab.active, .choice-btn.active {
+      color: var(--text);
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+    }
+
+    .review-map {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .timeline {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-left: 22px;
+    }
+    .timeline::before {
+      content: "";
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      left: 6px;
+      width: 8px;
+      border-radius: 999px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .tl {
+      position: relative;
+      padding: 14px;
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .tl::before {
+      content: "";
+      position: absolute;
+      left: -22px;
+      top: 18px;
+      width: 14px;
+      height: 14px;
+      background: var(--accent);
+      border-radius: 999px;
+      box-shadow: 0 0 0 5px rgba(108, 99, 255, 0.12);
+    }
+
+    .test-layout {
+      min-height: 650px;
+      display: grid;
+      grid-template-columns: minmax(280px, 0.42fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+    .test-history {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .test-history-list {
+      min-height: 0;
+      overflow: auto;
+    }
+    .history-test {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      cursor: pointer;
+    }
+    .history-test.active {
+      box-shadow: var(--shadow-raised-small);
+    }
+    .test-main {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 16px;
+    }
+    .test-config {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.5fr) minmax(220px, 0.8fr) auto;
+      gap: 12px;
+      align-items: end;
+    }
+    .test-paper {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .question-card {
+      padding: 16px;
+      background: var(--surface);
+      border-radius: 22px;
+      box-shadow: var(--shadow-inset-small);
+    }
+    .question-card h3 {
+      margin: 0 0 10px;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+    .option-list {
+      display: grid;
+      gap: 8px;
+    }
+    .option-item {
+      padding: 10px 12px;
+      color: var(--muted);
+      background: var(--surface);
+      border-radius: 16px;
+      box-shadow: var(--shadow-inset-small);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .test-result-band {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .test-result-band .metric {
+      min-height: 82px;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(61, 72, 82, 0.34);
+      backdrop-filter: blur(10px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--duration) var(--ease);
+    }
+    .modal-backdrop.active { opacity: 1; pointer-events: auto; }
+    .course-modal, .quiz-modal, .lesson-modal {
+      width: min(560px, calc(100vw - 32px));
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      padding: 28px;
+      color: var(--text);
+      background: var(--surface);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-raised);
+    }
+    .lesson-modal { width: min(680px, calc(100vw - 32px)); }
+    .lesson-materials-modal { width: min(760px, calc(100vw - 32px)); }
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .modal-head h2 {
+      margin: 0;
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: 36px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .modal-close {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      color: var(--text);
+      background: var(--surface);
+      border: 0;
+      border-radius: var(--radius-control);
+      box-shadow: var(--shadow-small);
+      cursor: pointer;
+      font-size: 24px;
+      line-height: 1;
+      transition: transform var(--duration) var(--ease), box-shadow var(--duration) var(--ease), color var(--duration) var(--ease);
+    }
+    .modal-close:hover { color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+    .modal-form { display: flex; flex-direction: column; gap: 18px; }
+    .modal-label {
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .modal-input {
+      width: 100%;
+      height: 50px;
+      padding: 0 16px;
+      color: var(--text);
+      background: var(--surface);
+      border: 0;
+      border-radius: var(--radius-control);
+      box-shadow: var(--shadow-inset);
+      outline: none;
+      transition: box-shadow var(--duration) var(--ease);
+    }
+    .modal-input::placeholder { color: var(--placeholder); }
+    .modal-input:focus { box-shadow: var(--shadow-inset-deep), 0 0 0 3px rgba(108, 99, 255, 0.24); }
+    .upload-input { display: none; }
+    .file-choice, .input-with-unit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .input-with-unit .modal-input { flex: 1; min-width: 180px; }
+    .input-unit { color: var(--muted); font-weight: 800; }
+
+    @keyframes float-soft {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-10px) scale(1.02); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+    @media (max-width: 1180px) {
+      .frame { min-height: 860px; }
+      .mobile-nav { display: flex; }
+      .shell { height: auto; min-height: 782px; grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .content { min-height: 782px; }
+      .hero-dashboard, .split, .lesson-room, .chat-layout, .test-layout { grid-template-columns: 1fr; }
+      .grid.cols-4, .grid.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .chat-layout { min-height: auto; }
+      .chat-history { max-height: 240px; }
+    }
+    @media (max-width: 760px) {
+      .prototype { padding: 8px; }
+      .frame { border-radius: 28px; }
+      .topbar { padding: 0 14px; }
+      .brand-title { font-size: 24px; }
+      .content { padding: 18px; }
+      .page-title, .card-head { flex-direction: column; align-items: flex-start; }
+      .actions, .btn { width: 100%; }
+      .actions { justify-content: flex-start; }
+      h1 { font-size: 34px; }
+      .hero-dashboard { padding: 24px; }
+      .hero-dashboard h2 { font-size: 30px; }
+      .task-card, .composer, .test-config, .test-result-band { grid-template-columns: 1fr; }
+      .task-card .btn { grid-column: 1 / -1; }
+      .grid.cols-4, .grid.cols-3, .grid.cols-2, .review-map { grid-template-columns: 1fr; }
+      .lesson-room { grid-template-columns: 1fr; }
+      .lesson-ai-composer { grid-template-columns: 1fr; }
+      .bubble { max-width: 100%; }
+      .mobile-nav .nav-item { min-width: 116px; }
+      .tabs, .choice-row { grid-auto-flow: row; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype">
+    <div class="frame">
+      <header class="topbar">
+        <div class="logo" aria-label="KnowLink"><span class="logo-mark">K</span></div>
+        <div class="brand-title">KnowLink</div>
+      </header>
+
+      <nav class="mobile-nav" aria-label="移动端页面导航">
+        <button class="nav-item active" type="button" data-screen="home">学习总览</button>
+        <button class="nav-item" type="button" data-screen="library">课程库</button>
+        <button class="nav-item" type="button" data-screen="lesson">课时学习</button>
+        <button class="nav-item" type="button" data-screen="test">测试中心</button>
+        <button class="nav-item" type="button" data-screen="chat">AI 问答</button>
+        <button class="nav-item" type="button" data-screen="review">复习中心</button>
+      </nav>
+
+      <div class="shell">
+        <aside class="sidebar" aria-label="学习中心导航">
+          <div class="side-label">学习中心</div>
+          <button class="nav-item active" type="button" data-screen="home">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+            学习总览
+          </button>
+          <button class="nav-item" type="button" data-screen="library">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>
+            课程库
+          </button>
+          <button class="nav-item" type="button" data-screen="lesson">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+            课时学习
+          </button>
+          <button class="nav-item" type="button" data-screen="test">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/><path d="M8 17h8"/></svg>
+            测试中心
+          </button>
+          <button class="nav-item" type="button" data-screen="chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+            AI 问答
+          </button>
+          <button class="nav-item" type="button" data-screen="review">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
+            复习中心
+          </button>
+        </aside>
+
+        <main class="content">
+          <section class="screen active" id="home" aria-labelledby="overviewTitle">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+                </div>
+                <div>
+                  <span class="kicker">KnowLink / Study Center</span>
+                  <h1 id="overviewTitle">学习总览</h1>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="btn ghost" type="button" data-jump="library">查看课程库</button>
+                <button class="btn primary" type="button" data-open-course-modal>新建课程</button>
+              </div>
+            </div>
+
+            <div class="hero-dashboard">
+              <div class="hero-copy">
+                <span class="pill">今日学习计划</span>
+                <h2>继续学习「数据结构」第 4 课：栈与队列</h2>
+                <p>系统已根据上次进度、薄弱点和考试时间，安排 45 分钟视频讲义学习、5 分钟测验和 10 分钟错题复盘。</p>
+                <button class="btn primary" type="button" data-jump="lesson">进入当前课时</button>
+              </div>
+              <div class="hero-card" aria-label="课程整体进度 68%">
+                <span class="corner-shape leaf" aria-hidden="true"></span>
+                <span class="corner-shape seed" aria-hidden="true"></span>
+                <span class="corner-shape arch" aria-hidden="true"></span>
+                <div class="big">68%</div>
+                <div class="hero-card-label">课程整体进度</div>
+                <div class="hero-card-meta">已完成 7 / 12 课时</div>
+                <div class="progress" aria-hidden="true"><span style="width:68%"></span></div>
+              </div>
+            </div>
+
+            <div class="split">
+              <section class="card" aria-labelledby="reviewTitle">
+                <span class="card-mark sage" aria-hidden="true"></span>
+                <h2 class="section-title" id="reviewTitle">推荐复习</h2>
+                <div class="list">
+                  <article class="task-card">
+                    <div class="task-num"><span>1</span></div>
+                    <div><div class="name">复习任务：栈的应用</div><div class="meta">预计 12 分钟 · 薄弱知识点 3 个 · 来源第 4 课时</div></div>
+                    <button class="btn ghost" type="button" data-jump="review">开始复习</button>
+                  </article>
+                  <article class="task-card">
+                    <div class="task-num"><span>2</span></div>
+                    <div><div class="name">复习任务：循环队列</div><div class="meta">预计 10 分钟 · 薄弱知识点 2 个 · 来源第 4 课时</div></div>
+                    <button class="btn ghost" type="button" data-jump="review">开始复习</button>
+                  </article>
+                  <article class="task-card">
+                    <div class="task-num"><span>3</span></div>
+                    <div><div class="name">复习任务：二叉树遍历</div><div class="meta">预计 8 分钟 · 薄弱知识点 2 个 · 来源第 3 课时</div></div>
+                    <button class="btn ghost" type="button" data-jump="review">开始复习</button>
+                  </article>
+                </div>
+              </section>
+
+              <section class="card" aria-labelledby="recentTitle">
+                <span class="card-mark clay" aria-hidden="true"></span>
+                <h2 class="section-title" id="recentTitle">最近课程</h2>
+                <div class="list">
+                  <article class="course-tile">
+                    <h3>数据结构期末复习</h3>
+                    <div class="stats"><span class="pill green">可继续学习</span><span class="pill">12 课时</span><span class="pill orange">3 份待整理资料</span></div>
+                    <div class="progress" aria-hidden="true"><span style="width:68%"></span></div>
+                  </article>
+                  <article class="course-tile">
+                    <h3>机器学习导论</h3>
+                    <div class="stats"><span class="pill">8 课时</span><span class="pill purple">AI 问答已就绪</span></div>
+                    <div class="progress" aria-hidden="true"><span style="width:42%"></span></div>
+                  </article>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="screen" id="library" aria-labelledby="libraryTitle">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>
+                </div>
+                <div><h1 id="libraryTitle">课程库</h1></div>
+              </div>
+            </div>
+            <div class="card" style="margin-bottom:16px">
+              <div class="grid cols-3">
+                <div class="field">搜索：数据结构</div>
+                <div class="field">状态：全部课程</div>
+                <div class="field">排序：最近学习优先</div>
+              </div>
+            </div>
+            <div class="grid cols-4">
+              <article class="course-tile">
+                <span class="pill green">当前课程</span>
+                <h3 style="margin-top:12px">数据结构期末复习</h3>
+                <div class="stats"><span class="pill">12 课时</span></div>
+                <div class="progress"><span style="width:68%"></span></div>
+                <div class="actions" style="margin-top:14px;justify-content:flex-start"><button class="btn primary" type="button" data-jump="workspace">继续学习</button></div>
+              </article>
+              <article class="course-tile">
+                <span class="pill">当前课程</span>
+                <h3 style="margin-top:12px">机器学习导论</h3>
+                <div class="stats"><span class="pill">8 课时</span></div>
+                <div class="progress"><span style="width:42%"></span></div>
+                <div class="actions" style="margin-top:14px;justify-content:flex-start"><button class="btn primary" type="button" data-jump="workspace">继续学习</button></div>
+              </article>
+              <article class="course-tile">
+                <span class="pill">当前课程</span>
+                <h3 style="margin-top:12px">数据库系统</h3>
+                <div class="stats"><span class="pill">6 课时</span></div>
+                <div class="progress orange"><span style="width:24%"></span></div>
+                <div class="actions" style="margin-top:14px;justify-content:flex-start"><button class="btn primary" type="button" data-jump="workspace">继续学习</button></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="screen" id="workspace" aria-labelledby="workspaceTitle">
+            <button class="btn light" type="button" data-jump="library" style="margin-bottom:16px">返回课程库</button>
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h5M7 16h8"/></svg>
+                </div>
+                <div><h1 id="workspaceTitle">数据结构期末复习</h1></div>
+              </div>
+              <div class="actions">
+                <button class="btn ghost" type="button" data-jump="chat">问 AI</button>
+                <button class="btn primary" type="button" data-open-lesson-modal>新建课时</button>
+              </div>
+            </div>
+            <div class="grid cols-2" style="margin-top:16px">
+              <section class="card">
+                <div class="card-head">
+                  <h2 class="section-title">课程资料</h2>
+                  <button class="btn primary" type="button" data-upload-materials>上传资料</button>
+                </div>
+                <input class="upload-input" id="courseMaterialInput" type="file" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.mp4,.srt" />
+                <div class="list" id="courseMaterialList">
+                  <div class="row"><div class="file-badge pdf">PDF</div><div class="main"><div class="name">数据结构教材.pdf</div><div class="meta">课程级资料 · 全课程 QA 可引用</div></div></div>
+                  <div class="row"><div class="file-badge doc">DOC</div><div class="main"><div class="name">期末复习大纲.docx</div><div class="meta">课程级资料 · 复习中心可用</div></div></div>
+                </div>
+              </section>
+              <section class="card">
+                <h2 class="section-title">综合测验</h2>
+                <div class="grid cols-2">
+                  <div class="metric"><div><div class="label">题目数量</div><div class="value">12 / 24</div></div></div>
+                  <div class="metric"><div><div class="label">正确率</div><div class="value">83%</div></div></div>
+                </div>
+                <div class="progress" style="margin-top:16px"><span style="width:50%"></span></div>
+                <div class="actions" style="margin-top:16px;justify-content:flex-start">
+                  <button class="btn primary" type="button">开始测验</button>
+                  <button class="btn light" type="button" data-open-quiz-modal>重新生成</button>
+                  <button class="btn light" type="button">历史测验</button>
+                </div>
+              </section>
+            </div>
+            <section class="card" style="margin-top:16px">
+              <h2 class="section-title">课时</h2>
+              <div class="grid cols-4">
+                <article class="course-tile lesson-tile"><span class="pill green">已完成</span><h3 style="margin-top:12px">绪论与课程导入</h3><div class="stats"><span class="pill">100%</span></div><div class="progress green"><span style="width:100%"></span></div><div class="actions"><button class="btn primary" type="button" data-jump="lesson">继续学习</button></div></article>
+                <article class="course-tile lesson-tile"><span class="pill orange">未完成</span><h3 style="margin-top:12px">线性表：顺序表与链表</h3><div class="stats"><span class="pill">0%</span></div><div class="progress orange"><span style="width:0%"></span></div><div class="actions"><button class="btn primary" type="button" data-jump="lesson">继续学习</button></div></article>
+                <article class="course-tile lesson-tile"><span class="pill orange">未完成</span><h3 style="margin-top:12px">树与二叉树</h3><div class="stats"><span class="pill">70%</span></div><div class="progress"><span style="width:70%"></span></div><div class="actions"><button class="btn primary" type="button" data-jump="lesson">继续学习</button></div></article>
+                <article class="course-tile lesson-tile"><span class="pill orange">未完成</span><h3 style="margin-top:12px">栈与队列</h3><div class="stats"><span class="pill">45%</span></div><div class="progress"><span style="width:45%"></span></div><div class="actions"><button class="btn primary" type="button" data-jump="lesson">继续学习</button></div></article>
+              </div>
+            </section>
+          </section>
+
+          <section class="screen" id="lesson" aria-labelledby="lessonTitle">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+                </div>
+                <div><h1 id="lessonTitle">第 4 课：栈与队列</h1></div>
+              </div>
+              <div class="actions">
+                <button class="btn light" type="button" data-open-lesson-materials-modal>本节资料</button>
+                <button class="btn primary" type="button" data-jump="test">进入测试</button>
+              </div>
+            </div>
+            <div class="lesson-room">
+              <button class="lesson-outline-trigger" type="button" data-open-lesson-outline-drawer aria-label="打开讲义目录" title="讲义目录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16"/><path d="M4 12h10"/><path d="M4 19h7"/><path d="M17 12v7"/><path d="M14 16h6"/></svg>
+              </button>
+              <section class="card lesson-video-card">
+                <h2 class="section-title">主视频</h2>
+                <div class="video-box">
+                  <img class="video-cover" src="./assets/lesson-data-structure-cover.png" alt="数据结构与算法基础课件画面" />
+                  <div class="play" aria-hidden="true"><svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+                  <div class="video-timeline">
+                    <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:12px;font-weight:800;margin-bottom:8px"><span>18:20</span><span>45:33</span></div>
+                    <div class="progress"><span style="width:43%"></span></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="card lesson-handout-block-card">
+                <div class="card-head">
+                  <h2 class="section-title">讲义块</h2>
+                  <button class="btn primary" type="button" data-generate-handout>生成讲义</button>
+                </div>
+                <div class="handout handout-block" id="lessonHandout">
+                  <h3>4.1.1 定义与操作端</h3>
+                  <p>栈是一种只允许在一端进行插入和删除的线性表。允许操作的一端称为栈顶，另一端称为栈底。入栈、出栈和取栈顶元素都围绕同一个操作端完成。</p>
+                  <div class="quote">来源：第4讲 栈与队列.mp4 · 05:18 - 07:42；栈与队列.pptx · 第 3 页</div>
+                  <p>判断题型时先看删除端：如果删除总发生在最新插入元素所在的一端，通常可以抽象为栈。</p>
+                </div>
+                <div class="handout-status" id="handoutStatus">当前讲义基于 3 份资料生成。</div>
+              </section>
+
+              <section class="card lesson-ai-card">
+                <div class="lesson-ai-panel" aria-labelledby="lessonAiTitle">
+                  <div class="card-head">
+                    <h2 class="section-title" id="lessonAiTitle">AI 问答</h2>
+                  </div>
+                  <div class="lesson-chat-preview" id="lessonAiThread" aria-live="polite">
+                    <div class="lesson-ai-bubble ai">我会基于当前视频、课件和字幕回答。你可以问“循环队列为什么要空一个位置？”</div>
+                    <div class="lesson-ai-bubble user">栈和队列最核心的区别是什么？</div>
+                    <div class="lesson-ai-bubble ai">栈是后进先出，队列是先进先出。做题时先看删除端：只在同一端删除通常是栈，从队头删除则是队列。</div>
+                  </div>
+                  <div class="lesson-ai-citations">
+                    <span class="pill">第 4 讲视频 · 05:18</span>
+                    <span class="pill">栈与队列.pptx · 第 3 页</span>
+                  </div>
+                  <div class="lesson-ai-composer">
+                    <textarea class="lesson-ai-input" id="lessonAiInput" rows="2" placeholder="问本节 AI：例如 循环队列判满公式怎么记？"></textarea>
+                    <button class="btn primary" type="button" data-lesson-ai-send>发送</button>
+                  </div>
+                </div>
+              </section>
+            </div>          </section>
+
+          <section class="screen" id="test" aria-labelledby="testTitle">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/><path d="M8 17h8"/></svg>
+                </div>
+                <div>
+                  <h1 id="testTitle">测试中心</h1>
+                  <div class="subtitle">从当前课时生成测试，也可以回看历史测试与错题来源。</div>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="btn primary" type="button" data-generate-test>新建测试</button>
+              </div>
+            </div>
+
+            <div class="test-layout">
+              <aside class="card test-history">
+                <h2 class="section-title">历史测试</h2>
+                <div class="list test-history-list" id="testHistoryList">
+                  <button class="row history-test active" type="button" data-test-title="第 4 课专项测试" data-test-meta="10 题 · 中等 · 82 分" data-test-score="82" data-test-weak="循环队列长度计算">
+                    <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+                    <div class="main"><div class="name">第 4 课专项测试</div><div class="meta">今天 14:20 · 10 题 · 中等 · 82 分</div></div>
+                  </button>
+                  <button class="row history-test" type="button" data-test-title="线性表回顾测试" data-test-meta="8 题 · 基础 · 90 分" data-test-score="90" data-test-weak="链表插入边界">
+                    <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+                    <div class="main"><div class="name">线性表回顾测试</div><div class="meta">昨天 20:10 · 8 题 · 基础 · 90 分</div></div>
+                  </button>
+                  <button class="row history-test" type="button" data-test-title="数据结构阶段测验" data-test-meta="20 题 · 困难 · 76 分" data-test-score="76" data-test-weak="二叉树非递归遍历">
+                    <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+                    <div class="main"><div class="name">数据结构阶段测验</div><div class="meta">6 月 12 日 · 20 题 · 困难 · 76 分</div></div>
+                  </button>
+                </div>
+              </aside>
+
+              <section class="card test-main">
+                <div class="card-head">
+                  <h2 class="section-title" id="activeTestTitle">第 4 课专项测试</h2>
+                  <span class="pill" id="activeTestMeta">10 题 · 中等 · 82 分</span>
+                </div>
+
+                <div class="test-config" aria-label="新建测试配置">
+                  <label>
+                    <div class="modal-label">题目数量</div>
+                    <input class="modal-input" id="testQuestionCount" type="number" min="1" max="50" value="10" />
+                  </label>
+                  <div>
+                    <div class="modal-label">题目难度</div>
+                    <div class="choice-row test-difficulty" id="testDifficultyChoices">
+                      <button class="choice-btn" type="button">基础</button>
+                      <button class="choice-btn active" type="button">中等</button>
+                      <button class="choice-btn" type="button">困难</button>
+                    </div>
+                  </div>
+                  <button class="btn primary" type="button" data-create-test>生成测试</button>
+                </div>
+
+                <div class="test-result-band">
+                  <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-6"/></svg></div><div><div class="value" id="activeTestScore">82</div><div class="label">当前得分</div></div></div>
+                  <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg></div><div><div class="value">18m</div><div class="label">用时</div></div></div>
+                  <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></div><div><div class="value" id="activeTestWeak">循环队列</div><div class="label">薄弱点</div></div></div>
+                </div>
+
+                <div class="test-paper" id="testPaper">
+                  <article class="question-card">
+                    <h3>1. 循环队列长度计算公式中，为什么需要加上 maxSize 后再取模？</h3>
+                    <div class="option-list">
+                      <div class="option-item">A. 避免 rear - front 为负数</div>
+                      <div class="option-item">B. 提高数组访问速度</div>
+                      <div class="option-item">C. 表示队列一定已满</div>
+                      <div class="option-item">D. 用于扩容数组</div>
+                    </div>
+                  </article>
+                  <article class="question-card">
+                    <h3>2. 栈的出栈顺序主要体现哪种访问规则？</h3>
+                    <div class="option-list">
+                      <div class="option-item">A. 先进先出</div>
+                      <div class="option-item">B. 后进先出</div>
+                      <div class="option-item">C. 随机访问</div>
+                      <div class="option-item">D. 按优先级访问</div>
+                    </div>
+                  </article>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="screen" id="chat" aria-labelledby="chatTitle">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+                </div>
+                <div>
+                  <h1 id="chatTitle">AI 学习问答</h1>
+                  <div class="subtitle">问答页保留学习范围切换和来源回溯，整体采用主流 AI 产品的对话结构。</div>
+                </div>
+              </div>
+              <div class="actions">
+                <div class="tabs"><button class="tab active" type="button">全课程</button><button class="tab" type="button">当前课时</button><button class="tab" type="button">指定章节</button></div>
+              </div>
+            </div>
+            <div class="chat-layout">
+              <aside class="card" style="min-height:0;display:flex;flex-direction:column">
+                <h2 class="section-title">历史会话</h2>
+                <div class="chat-history">
+                  <div class="chat-item"><div class="name">循环队列怎么判断满？</div><div class="meta">范围：第 4 课 · 3 条引用</div></div>
+                  <div class="chat-item"><div class="name">线性表和链表适用场景</div><div class="meta">范围：全课程 · 5 条引用</div></div>
+                  <div class="chat-item"><div class="name">二叉树遍历模板</div><div class="meta">范围：第 3 课 · 已加入复习</div></div>
+                </div>
+              </aside>
+              <div class="chat-main">
+                <div class="card" style="padding:14px 18px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                      <span class="pill green">当前范围：全课程</span>
+                      <span class="pill">可引用：12 课时 / 4 份课程资料</span>
+                      <span class="pill orange">排除：3 份待整理资料</span>
+                    </div>
+                    <button class="btn ghost" type="button">新建会话</button>
+                  </div>
+                </div>
+                <div class="chat-window">
+                  <div class="bubble user">循环队列为什么要空一个位置？</div>
+                  <div class="bubble">
+                    <b>答复</b>
+                    <p>循环队列常见实现会空出一个位置，是为了区分“队空”和“队满”。如果不空出位置，front == rear 既可能表示空队列，也可能表示满队列。</p>
+                    <p>采用空一格策略后：队空条件是 front == rear，队满条件是 (rear + 1) % maxSize == front。</p>
+                    <div class="citation"><span class="pill">第 4 课 · 视频 18:20</span><span class="pill">栈与队列.pptx · 第 7 页</span><span class="pill purple">相关测验：Q4</span></div>
+                  </div>
+                  <div class="bubble user">那队列长度怎么计算？</div>
+                  <div class="bubble">
+                    <b>答复</b>
+                    <p>循环队列长度通常用 (rear - front + maxSize) % maxSize 计算。你之前在这类题上错过 2 次，建议把该公式加入复习卡片。</p>
+                    <div class="citation"><span class="pill">第 4 课 · 讲义 4.2</span><span class="pill orange">加入薄弱点</span></div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="textarea">继续追问：请用一道选择题考我循环队列长度计算</div>
+                  <button class="btn primary" type="button">发送</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" id="review" aria-labelledby="reviewCenterTitle">
+            <div class="page-title">
+              <div class="title-left">
+                <div class="title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
+                </div>
+                <div>
+                  <h1 id="reviewCenterTitle">复习中心</h1>
+                  <div class="subtitle">复习中心整合薄弱知识、错题、阶段测验、考前冲刺、学习报告和导出。</div>
+                </div>
+              </div>
+              <div class="actions"><button class="btn primary" type="button">生成今日复习</button></div>
+            </div>
+            <div class="grid cols-4" style="margin-bottom:16px">
+              <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg></div><div><div class="label">今日复习</div><div class="value">18 个</div></div></div>
+              <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div><div><div class="label">薄弱点</div><div class="value">6 个</div></div></div>
+              <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div><div><div class="label">错题</div><div class="value">21 道</div></div></div>
+              <div class="metric"><div class="soft-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg></div><div><div class="label">掌握度</div><div class="value">76%</div></div></div>
+            </div>
+            <div class="split">
+              <section class="card">
+                <h2 class="section-title">薄弱知识图谱</h2>
+                <div class="review-map">
+                  <article class="weak-card"><span class="pill red">高优先级</span><h3 style="margin-top:10px">循环队列长度计算</h3><p class="small muted">来自第 4 课 · 错误 2 次 · 推荐复习 12 分钟</p><div class="progress red"><span style="width:82%"></span></div></article>
+                  <article class="weak-card"><span class="pill orange">中优先级</span><h3 style="margin-top:10px">二叉树非递归遍历</h3><p class="small muted">来自第 3 课 · 错误 3 次 · 推荐做模板题</p><div class="progress orange"><span style="width:66%"></span></div></article>
+                  <article class="weak-card"><span class="pill">普通</span><h3 style="margin-top:10px">链表插入边界条件</h3><p class="small muted">来自第 2 课 · 错误 1 次 · 复习讲义例题</p><div class="progress"><span style="width:44%"></span></div></article>
+                  <article class="weak-card"><span class="pill purple">综合</span><h3 style="margin-top:10px">算法复杂度分析</h3><p class="small muted">跨第 1-3 课 · 建议做阶段测验</p><div class="progress"><span style="width:58%"></span></div></article>
+                </div>
+              </section>
+              <section class="card">
+                <h2 class="section-title">今日复习路径</h2>
+                <div class="timeline">
+                  <div class="tl"><div class="name">1. 快速回看讲义</div><div class="meta">第 4 课 · 循环队列公式 · 8 分钟</div></div>
+                  <div class="tl"><div class="name">2. 做 5 道针对题</div><div class="meta">覆盖队满判断、长度计算、出入队模拟</div></div>
+                  <div class="tl"><div class="name">3. 复盘错题</div><div class="meta">二叉树遍历错题 3 道 · 自动生成改错说明</div></div>
+                  <div class="tl"><div class="name">4. 阶段测验</div><div class="meta">第 1-4 课综合测验 · 预计 25 分钟</div></div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <div class="modal-backdrop" id="courseCreateModal" aria-hidden="true">
+            <div class="course-modal" role="dialog" aria-modal="true" aria-labelledby="courseCreateTitle">
+              <div class="modal-head">
+                <div><h2 id="courseCreateTitle">新建课程</h2><div class="subtitle">填写课程基础信息后，可继续补充资料并生成学习计划。</div></div>
+                <button class="modal-close" type="button" data-close-course-modal aria-label="关闭">×</button>
+              </div>
+              <div class="modal-form">
+                <label><div class="modal-label">课程名称</div><input class="modal-input" type="text" placeholder="例如：操作系统期末复习" /></label>
+              </div>
+              <div class="actions" style="margin-top:20px"><button class="btn light" type="button" data-close-course-modal>取消</button><button class="btn primary" type="button" data-close-course-modal>创建课程</button></div>
+            </div>
+          </div>
+
+          <div class="modal-backdrop" id="quizRegenerateModal" aria-hidden="true">
+            <div class="quiz-modal" role="dialog" aria-modal="true" aria-labelledby="quizRegenerateTitle">
+              <div class="modal-head">
+                <div><h2 id="quizRegenerateTitle">重新生成综合测验</h2><div class="subtitle">选择题目数量和题目难度后生成新的测验。</div></div>
+                <button class="modal-close" type="button" data-close-quiz-modal aria-label="关闭">×</button>
+              </div>
+              <div class="modal-form">
+                <div><div class="modal-label">题目数量</div><input class="modal-input" type="number" min="1" placeholder="请输入题目数量" value="20" /></div>
+                <div><div class="modal-label">题目难度</div><div class="choice-row"><button class="choice-btn" type="button">基础</button><button class="choice-btn active" type="button">中等</button><button class="choice-btn" type="button">困难</button></div></div>
+              </div>
+              <div class="actions" style="margin-top:20px"><button class="btn light" type="button" data-close-quiz-modal>取消</button><button class="btn primary" type="button" data-close-quiz-modal>生成测验</button></div>
+            </div>
+          </div>
+
+          <div class="modal-backdrop" id="lessonCreateModal" aria-hidden="true">
+            <div class="quiz-modal lesson-modal" role="dialog" aria-modal="true" aria-labelledby="lessonCreateTitle">
+              <div class="modal-head">
+                <div><h2 id="lessonCreateTitle">新建课时</h2><div class="subtitle">填写课时信息后，可上传资料或导入 B 站视频作为学习内容。</div></div>
+                <button class="modal-close" type="button" data-close-lesson-modal aria-label="关闭">×</button>
+              </div>
+              <div class="modal-form">
+                <div><div class="modal-label">课时名称</div><input class="modal-input" type="text" placeholder="例如：栈与队列专项复习" /></div>
+                <div>
+                  <div class="modal-label">上传资料</div>
+                  <div class="file-choice"><button class="btn light" type="button" data-pick-lesson-materials>上传资料</button><div class="selected-files" id="lessonMaterialNames">暂未选择文件</div></div>
+                  <input class="upload-input" id="lessonMaterialInput" type="file" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.mp4,.mov,.mkv,.avi,video/*" />
+                  <div class="modal-help">支持 PDF、DOCX、PPT、视频等格式。</div>
+                </div>
+                <div><div class="modal-label">导入 B 站链接</div><input class="modal-input" type="url" placeholder="https://www.bilibili.com/video/BV..." /></div>
+                <div><div class="modal-label">学习目标</div><select class="modal-input"><option>期末复习</option><option>日常学习</option></select></div>
+                <div><div class="modal-label">当前掌握程度</div><select class="modal-input"><option>零基础</option><option>基础一般</option><option>已经学过，想查漏补缺</option></select></div>
+                <div><div class="modal-label">时间预算</div><div class="input-with-unit"><input class="modal-input" type="number" min="0.5" step="0.5" placeholder="例如：2" /><span class="input-unit">小时</span></div></div>
+              </div>
+              <div class="actions" style="margin-top:20px"><button class="btn light" type="button" data-close-lesson-modal>取消</button><button class="btn primary" type="button" data-close-lesson-modal>创建课时</button></div>
+            </div>
+          </div>
+          <aside class="lesson-outline-drawer" id="lessonOutlineDrawer" aria-hidden="true" aria-labelledby="lessonOutlineTitle">
+            <div class="modal-head">
+              <div><h2 id="lessonOutlineTitle">讲义目录</h2><div class="subtitle">选择小节后只切换右侧讲义块。</div></div>
+              <button class="modal-close" type="button" data-close-lesson-outline-drawer aria-label="关闭">×</button>
+            </div>
+            <div class="handout-outline-tree" aria-label="本节讲义两级目录">
+              <section class="handout-outline-group">
+                <div class="handout-outline-parent"><span>4.1</span><strong>栈</strong></div>
+                <div class="handout-outline-children">
+                  <button class="handout-outline-child active" type="button" data-handout-block="stackOps" data-close-lesson-outline-drawer><span>4.1.1</span><strong>定义与操作端</strong><small>视频 05:18 · PPT 第 3 页</small></button>
+                  <button class="handout-outline-child" type="button" data-handout-block="stackApps" data-close-lesson-outline-drawer><span>4.1.2</span><strong>典型应用</strong><small>函数调用栈 · 括号匹配</small></button>
+                </div>
+              </section>
+              <section class="handout-outline-group">
+                <div class="handout-outline-parent"><span>4.2</span><strong>队列与循环队列</strong></div>
+                <div class="handout-outline-children">
+                  <button class="handout-outline-child" type="button" data-handout-block="queueRule" data-close-lesson-outline-drawer><span>4.2.1</span><strong>队列规则</strong><small>先进先出 · 队头队尾</small></button>
+                  <button class="handout-outline-child" type="button" data-handout-block="queueFormula" data-close-lesson-outline-drawer><span>4.2.2</span><strong>循环队列公式</strong><small>长度计算 · 判空判满</small></button>
+                </div>
+              </section>
+              <section class="handout-outline-group">
+                <div class="handout-outline-parent"><span>4.3</span><strong>易错点</strong></div>
+                <div class="handout-outline-children">
+                  <button class="handout-outline-child" type="button" data-handout-block="pitfallOrder" data-close-lesson-outline-drawer><span>4.3.1</span><strong>逻辑顺序与存储位置</strong><small>薄弱点 · 容易混淆</small></button>
+                  <button class="handout-outline-child" type="button" data-handout-block="pitfallPractice" data-close-lesson-outline-drawer><span>4.3.2</span><strong>公式复盘建议</strong><small>视频 18:20 · 例题</small></button>
+                </div>
+              </section>
+              <section class="handout-outline-group">
+                <div class="handout-outline-parent"><span>4.4</span><strong>课后检查</strong></div>
+                <div class="handout-outline-children">
+                  <button class="handout-outline-child" type="button" data-handout-block="checkConcept" data-close-lesson-outline-drawer><span>4.4.1</span><strong>概念确认</strong><small>栈 · 队列 · 循环队列</small></button>
+                  <button class="handout-outline-child" type="button" data-handout-block="checkAction" data-close-lesson-outline-drawer><span>4.4.2</span><strong>下一步行动</strong><small>专项题 · 快测</small></button>
+                </div>
+              </section>
+            </div>
+          </aside>
+          <div class="modal-backdrop" id="lessonMaterialsModal" aria-hidden="true">
+            <div class="quiz-modal lesson-materials-modal" role="dialog" aria-modal="true" aria-labelledby="lessonMaterialsTitle">
+              <div class="modal-head">
+                <div><h2 id="lessonMaterialsTitle">本节资料</h2><div class="subtitle">当前课时的视频、课件和字幕资料。</div></div>
+                <button class="modal-close" type="button" data-close-lesson-materials-modal aria-label="关闭">×</button>
+              </div>
+              <input class="upload-input" id="lessonStudyMaterialInput" type="file" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.mp4,.mov,.mkv,.avi,.srt,video/*" />
+              <div class="list compact-material-list" id="lessonStudyMaterialList">
+                <div class="row"><div class="file-badge mp4">MP4</div><div class="main"><div class="name">第 4 讲 栈与队列.mp4</div><div class="meta">主视频 · 支持时间点引用</div></div></div>
+                <div class="row"><div class="file-badge ppt">PPT</div><div class="main"><div class="name">栈与队列.pptx</div><div class="meta">本课时课件 · 支持页码引用</div></div></div>
+                <div class="row"><div class="file-badge srt">SRT</div><div class="main"><div class="name">第 4 讲字幕.srt</div><div class="meta">字幕 · 用于本节讲义和 QA</div></div></div>
+              </div>
+              <div class="actions" style="margin-top:20px">
+                <button class="btn light" type="button" data-upload-lesson-study-materials>上传资料</button>
+                <button class="btn primary" type="button" data-close-lesson-materials-modal>完成</button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const navItems = document.querySelectorAll('.nav-item');
+      const screens = document.querySelectorAll('.screen');
+
+      function showScreen(screenId) {
+        let activated = false;
+        screens.forEach((screen) => {
+          const active = screen.id === screenId;
+          screen.classList.toggle('active', active);
+          if (active) activated = true;
+        });
+        if (!activated) return false;
+
+        const activeNav = screenId === 'workspace' ? 'library' : screenId;
+        navItems.forEach((item) => {
+          item.classList.toggle('active', item.dataset.screen === activeNav);
+        });
+
+        const content = document.querySelector('.content');
+        if (content) content.scrollTo({ top: 0, behavior: 'smooth' });
+        return true;
+      }
+
+      function goTo(screenId) {
+        showScreen(screenId);
+      }
+
+      navItems.forEach((item) => {
+        item.addEventListener('click', () => goTo(item.dataset.screen));
+      });
+      document.querySelectorAll('[data-jump]').forEach((btn) => {
+        btn.addEventListener('click', () => goTo(btn.dataset.jump));
+      });
+
+      function bindModal(openSelector, modalId, closeSelector) {
+        const modal = document.getElementById(modalId);
+        const open = document.querySelector(openSelector);
+        const closeButtons = document.querySelectorAll(closeSelector);
+        function set(opened) {
+          if (!modal) return;
+          modal.classList.toggle('active', opened);
+          modal.setAttribute('aria-hidden', opened ? 'false' : 'true');
+        }
+        open?.addEventListener('click', () => set(true));
+        closeButtons.forEach((btn) => btn.addEventListener('click', () => set(false)));
+        modal?.addEventListener('click', (event) => {
+          if (event.target === modal) set(false);
+        });
+        return set;
+      }
+
+      function bindDrawer(openSelector, drawerId, closeSelector) {
+        const drawer = document.getElementById(drawerId);
+        const open = document.querySelector(openSelector);
+        const closeButtons = document.querySelectorAll(closeSelector);
+        function set(opened) {
+          if (!drawer) return;
+          drawer.classList.toggle('active', opened);
+          drawer.setAttribute('aria-hidden', opened ? 'false' : 'true');
+        }
+        open?.addEventListener('click', () => set(true));
+        closeButtons.forEach((btn) => btn.addEventListener('click', () => set(false)));
+        return set;
+      }
+      const setCourseModal = bindModal('[data-open-course-modal]', 'courseCreateModal', '[data-close-course-modal]');
+      const setQuizModal = bindModal('[data-open-quiz-modal]', 'quizRegenerateModal', '[data-close-quiz-modal]');
+      const setLessonModal = bindModal('[data-open-lesson-modal]', 'lessonCreateModal', '[data-close-lesson-modal]');
+      const setLessonMaterialsModal = bindModal('[data-open-lesson-materials-modal]', 'lessonMaterialsModal', '[data-close-lesson-materials-modal]');
+      const setLessonOutlineDrawer = bindDrawer('[data-open-lesson-outline-drawer]', 'lessonOutlineDrawer', '[data-close-lesson-outline-drawer]');
+
+      document.querySelectorAll('.choice-row').forEach((row) => {
+        row.querySelectorAll('.choice-btn').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            row.querySelectorAll('.choice-btn').forEach((item) => item.classList.remove('active'));
+            btn.classList.add('active');
+          });
+        });
+      });
+
+      document.querySelectorAll('.tabs').forEach((tabs) => {
+        tabs.querySelectorAll('.tab').forEach((tab) => {
+          tab.addEventListener('click', () => {
+            tabs.querySelectorAll('.tab').forEach((item) => item.classList.remove('active'));
+            tab.classList.add('active');
+          });
+        });
+      });
+
+      const testHistoryList = document.getElementById('testHistoryList');
+      const activeTestTitle = document.getElementById('activeTestTitle');
+      const activeTestMeta = document.getElementById('activeTestMeta');
+      const activeTestScore = document.getElementById('activeTestScore');
+      const activeTestWeak = document.getElementById('activeTestWeak');
+      const testPaper = document.getElementById('testPaper');
+      const testQuestionCount = document.getElementById('testQuestionCount');
+
+      function setActiveTest(item) {
+        if (!item) return;
+        testHistoryList?.querySelectorAll('.history-test').forEach((row) => row.classList.remove('active'));
+        item.classList.add('active');
+        if (activeTestTitle) activeTestTitle.textContent = item.dataset.testTitle || '本节测试';
+        if (activeTestMeta) activeTestMeta.textContent = item.dataset.testMeta || '10 题 · 中等';
+        if (activeTestScore) activeTestScore.textContent = item.dataset.testScore || '--';
+        if (activeTestWeak) activeTestWeak.textContent = (item.dataset.testWeak || '待分析').slice(0, 4);
+      }
+
+      testHistoryList?.addEventListener('click', (event) => {
+        const item = event.target.closest('.history-test');
+        if (item) setActiveTest(item);
+      });
+
+      function generateTest() {
+        const count = Math.max(1, Number(testQuestionCount?.value || 10));
+        const difficulty = document.querySelector('#testDifficultyChoices .choice-btn.active')?.textContent.trim() || '中等';
+        const title = `第 4 课新测试`;
+        const score = '--';
+        const item = document.createElement('button');
+        item.className = 'row history-test';
+        item.type = 'button';
+        item.dataset.testTitle = title;
+        item.dataset.testMeta = `${count} 题 · ${difficulty} · 未完成`;
+        item.dataset.testScore = score;
+        item.dataset.testWeak = '待分析';
+        item.innerHTML = `
+          <div class="soft-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"><path d="M9 11l2 2 4-5"/><path d="M5 3h14v18H5z"/></svg></div>
+          <div class="main"><div class="name"></div><div class="meta">刚刚生成 · ${count} 题 · ${difficulty} · 未完成</div></div>
+        `;
+        item.querySelector('.name').textContent = title;
+        testHistoryList?.prepend(item);
+        setActiveTest(item);
+        if (testPaper) {
+          testPaper.innerHTML = `
+            <article class="question-card">
+              <h3>1. 当前测试已按“${count} 题 · ${difficulty}”生成，第一题会优先覆盖循环队列长度计算。</h3>
+              <div class="option-list">
+                <div class="option-item">A. (rear - front + maxSize) % maxSize</div>
+                <div class="option-item">B. rear + front</div>
+                <div class="option-item">C. front - rear</div>
+                <div class="option-item">D. maxSize - 1</div>
+              </div>
+            </article>
+            <article class="question-card">
+              <h3>2. 系统会根据本节视频、课件和字幕继续补齐剩余题目。</h3>
+              <div class="option-list">
+                <div class="option-item">题型范围：概念判断、出入队模拟、公式应用、错题变式</div>
+              </div>
+            </article>
+          `;
+        }
+      }
+
+      document.querySelector('[data-create-test]')?.addEventListener('click', generateTest);
+      document.querySelector('[data-generate-test]')?.addEventListener('click', generateTest);
+
+      const lessonAiThread = document.getElementById('lessonAiThread');
+      const lessonAiInput = document.getElementById('lessonAiInput');
+      const lessonAiSend = document.querySelector('[data-lesson-ai-send]');
+
+      function appendLessonAiBubble(role, text) {
+        if (!lessonAiThread) return;
+        const bubble = document.createElement('div');
+        bubble.className = `lesson-ai-bubble ${role}`;
+        bubble.textContent = text;
+        lessonAiThread.appendChild(bubble);
+        lessonAiThread.scrollTop = lessonAiThread.scrollHeight;
+      }
+
+      function askLessonAi(question) {
+        const text = question.trim();
+        if (!text) return;
+        appendLessonAiBubble('user', text);
+        appendLessonAiBubble('ai', '我会优先引用本节视频、PPT 和字幕来回答，并把关键来源保留在下方。');
+        if (lessonAiInput) lessonAiInput.value = '';
+      }
+
+      lessonAiSend?.addEventListener('click', () => askLessonAi(lessonAiInput?.value || ''));
+      lessonAiInput?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          askLessonAi(lessonAiInput.value);
+        }
+      });
+
+      function materialBadgeFor(fileName) {
+        const ext = (fileName.split('.').pop() || '').toLowerCase();
+        if (ext === 'pdf') return { label: 'PDF', className: 'pdf' };
+        if (ext === 'doc' || ext === 'docx') return { label: 'DOC', className: 'doc' };
+        if (ext === 'ppt' || ext === 'pptx') return { label: 'PPT', className: 'ppt' };
+        if (['mp4', 'mov', 'mkv', 'avi'].includes(ext)) return { label: 'MP4', className: 'mp4' };
+        if (ext === 'srt') return { label: 'SRT', className: 'srt' };
+        return { label: ext.slice(0, 3).toUpperCase() || 'FILE', className: '' };
+      }
+
+      function addMaterialRow(list, file, meta) {
+        if (!list) return;
+        const badge = materialBadgeFor(file.name);
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = `
+          <div class="file-badge ${badge.className}">${badge.label}</div>
+          <div class="main">
+            <div class="name"></div>
+            <div class="meta">${meta}</div>
+          </div>
+        `;
+        row.querySelector('.name').textContent = file.name;
+        list.prepend(row);
+      }
+
+      const courseMaterialInput = document.getElementById('courseMaterialInput');
+      const courseMaterialList = document.getElementById('courseMaterialList');
+      document.querySelectorAll('[data-upload-materials]').forEach((btn) => {
+        btn.addEventListener('click', () => courseMaterialInput?.click());
+      });
+      courseMaterialInput?.addEventListener('change', () => {
+        Array.from(courseMaterialInput.files || []).forEach((file) => addMaterialRow(courseMaterialList, file, '课程级资料 · 刚刚上传'));
+        courseMaterialInput.value = '';
+      });
+
+      const lessonHandoutBlocks = {
+        stackOps: `
+          <h3>4.1.1 定义与操作端</h3>
+          <p>栈是一种只允许在一端进行插入和删除的线性表。允许操作的一端称为栈顶，另一端称为栈底。入栈、出栈和取栈顶元素都围绕同一个操作端完成。</p>
+          <div class="quote">来源：第4讲 栈与队列.mp4 · 05:18 - 07:42；栈与队列.pptx · 第 3 页</div>
+          <p>判断题型时先看删除端：如果删除总发生在最新插入元素所在的一端，通常可以抽象为栈。</p>
+        `,
+        stackApps: `
+          <h3>4.1.2 典型应用</h3>
+          <p>栈天然适合处理“最近一步优先返回”的问题，常见应用包括函数调用栈、表达式求值、括号匹配和深度优先搜索。</p>
+          <div class="quote">记忆线索：看到递归、撤销、括号匹配，优先联想到栈。</div>
+          <p>做应用题时先抽象操作顺序，再判断是否满足后进先出，而不是先盯数组下标。</p>
+        `,
+        queueRule: `
+          <h3>4.2.1 队列规则</h3>
+          <p>队列遵循先进先出，插入端称为队尾，删除端称为队头。排队、缓冲区和广度优先遍历都体现了这种访问顺序。</p>
+          <div class="quote">判断线索：从队头删除、从队尾加入，通常就是队列。</div>
+          <p>普通队列题重点看 front 与 rear 的移动含义，避免把物理下标误认为逻辑顺序。</p>
+        `,
+        queueFormula: `
+          <h3>4.2.2 循环队列公式</h3>
+          <p>循环队列通过取模运算复用数组空间，长度通常写作 (rear - front + maxSize) % maxSize。</p>
+          <div class="quote">薄弱提示：你在“循环队列长度计算”相关题目中错误率较高，建议重点复习公式。</div>
+          <p>若采用空一格区分队空和队满，则队满条件为 (rear + 1) % maxSize == front。</p>
+        `,
+        pitfallOrder: `
+          <h3>4.3.1 逻辑顺序与存储位置</h3>
+          <p>线性结构题目最容易混淆“逻辑顺序”和“存储位置”。栈与队列的重点不是数组下标本身，而是受限操作带来的访问顺序。</p>
+          <div class="quote">先判断进出规则，再写下标变化。</div>
+          <p>如果题目要求模拟过程，建议逐步列出每次入队、出队或入栈、出栈后的状态。</p>
+        `,
+        pitfallPractice: `
+          <h3>4.3.2 公式复盘建议</h3>
+          <p>遇到循环队列长度题，可先写出通用公式，再代入容量和指针位置。不要直接凭直觉数下标。</p>
+          <div class="quote">复习建议：先回看 18:20 之后的循环队列例题，再完成 3 道判空判满专项题。</div>
+          <p>错题复盘时记录 front、rear、maxSize 三个值，以及当前采用的是“空一格”还是“计数器”方案。</p>
+        `,
+        checkConcept: `
+          <h3>4.4.1 概念确认</h3>
+          <p>能够口述栈和队列的操作限制；能够根据题意选择栈、普通队列或循环队列；能够解释循环队列空一格的原因。</p>
+          <div class="quote">完成标准：不看笔记也能说清 LIFO、FIFO 和队满判断。</div>
+        `,
+        checkAction: `
+          <h3>4.4.2 下一步行动</h3>
+          <p>用 front、rear 和数组容量计算当前元素个数后，进入测试中心做 3 道判空判满专项题。</p>
+          <div class="quote">完成检查后，把仍然出错的公式题加入复习中心。</div>
+        `,
+      };
+      const lessonHandoutBlock = document.getElementById('lessonHandout');
+      document.querySelectorAll('[data-handout-block]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const content = lessonHandoutBlocks[btn.dataset.handoutBlock];
+          if (!lessonHandoutBlock || !content) return;
+          document.querySelectorAll('[data-handout-block]').forEach((item) => item.classList.remove('active'));
+          btn.classList.add('active');
+          lessonHandoutBlock.innerHTML = content;
+        });
+      });
+      const lessonStudyMaterialInput = document.getElementById('lessonStudyMaterialInput');
+      const lessonStudyMaterialList = document.getElementById('lessonStudyMaterialList');
+      const handoutStatus = document.getElementById('handoutStatus');
+      document.querySelector('[data-upload-lesson-study-materials]')?.addEventListener('click', () => lessonStudyMaterialInput?.click());
+      lessonStudyMaterialInput?.addEventListener('change', () => {
+        const files = Array.from(lessonStudyMaterialInput.files || []);
+        files.forEach((file) => addMaterialRow(lessonStudyMaterialList, file, '新增资料 · 可用于生成讲义'));
+        if (handoutStatus && files.length) {
+          handoutStatus.textContent = `已加入 ${files.length} 份新资料，可基于当前 ${lessonStudyMaterialList.querySelectorAll('.row').length} 份资料生成新讲义。`;
+        }
+        lessonStudyMaterialInput.value = '';
+      });
+
+      document.querySelector('[data-generate-handout]')?.addEventListener('click', () => {
+        const lessonHandout = document.getElementById('lessonHandout');
+        if (!lessonHandout) return;
+        const names = Array.from(document.querySelectorAll('#lessonStudyMaterialList .name')).map((item) => item.textContent.trim());
+        lessonHandout.innerHTML = `
+          <h3>基于全部资料生成的讲义</h3>
+          <p>系统已综合当前资料，更新本节重点：栈的操作边界、循环队列判空判满、典型题型与易错点。建议先用 8 分钟回看视频中的操作演示，再按讲义顺序完成公式和例题复盘。</p>
+          <div class="quote">来源：${names.slice(0, 4).join('；')}${names.length > 4 ? ` 等 ${names.length} 份资料` : ''}</div>
+          <h3>核心概念</h3>
+          <p>栈强调同端插入和删除，适合处理递归、撤销、括号匹配等最近状态优先的问题。队列强调队尾进入、队头离开，适合处理排队、缓冲区和广度优先遍历等先进先出的场景。</p>
+          <h3>易错公式</h3>
+          <p>循环队列长度通常写作 (rear - front + maxSize) % maxSize。若采用空一格区分队空和队满，则队满条件为 (rear + 1) % maxSize == front。</p>
+          <h3>学习建议</h3>
+          <p>优先复习栈顶操作、循环队列容量判断和队列应用题，再结合新上传资料补齐细节。完成后用 3 道选择题检查概念，用 2 道手算题检查 front 与 rear 的变化过程。</p>
+          <div class="quote">下一步：把本节薄弱点加入复习中心，并在明天的计划里安排一次 10 分钟快测。</div>
+        `;
+        if (handoutStatus) handoutStatus.textContent = `已基于当前 ${names.length} 份资料生成新的讲义。`;
+      });
+
+      const lessonMaterialInput = document.getElementById('lessonMaterialInput');
+      const lessonMaterialNames = document.getElementById('lessonMaterialNames');
+      document.querySelector('[data-pick-lesson-materials]')?.addEventListener('click', () => lessonMaterialInput?.click());
+      lessonMaterialInput?.addEventListener('change', () => {
+        const names = Array.from(lessonMaterialInput.files || []).map((file) => file.name);
+        if (lessonMaterialNames) lessonMaterialNames.textContent = names.length ? names.join('、') : '暂未选择文件';
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          setCourseModal(false);
+          setQuizModal(false);
+          setLessonModal(false);
+          setLessonMaterialsModal(false);
+          setLessonOutlineDrawer(false);
+        }
+      });
+
+      showScreen('home');
+    })();
+  </script>
+</body>
+</html>
