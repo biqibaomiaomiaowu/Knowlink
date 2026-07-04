@@ -69,6 +69,144 @@ def test_sql_handout_generate_persists_latest_outline_and_api_read_model():
         engine.dispose()
 
 
+def test_lesson_handout_generate_persists_scope_outline_and_blocks():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_active_video_segments(repo)
+        lesson = repo.create_lesson(course_id=course_id, title="第 1 节", source_type="manual")
+        lesson_id = lesson["lessonId"]
+        video_resource = repo.list_resources(course_id)[0]
+        repo.update_resource_scope(
+            course_id=course_id,
+            resource_id=video_resource["resourceId"],
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            usage_role="primary_video",
+        )
+        dispatcher = _RecordingHandoutDispatcher()
+        service = _handout_service(repo, lessons=repo, resources=repo, task_dispatcher=dispatcher)
+        trigger = service.generate_lesson_handout(course_id=course_id, lesson_id=lesson_id, idempotency_key=None)
+        version_id = trigger["entity"]["id"]
+
+        latest = service.get_lesson_handout(course_id=course_id, lesson_id=lesson_id)
+        outline = service.get_lesson_outline(course_id=course_id, lesson_id=lesson_id)
+        blocks = service.get_lesson_blocks(course_id=course_id, lesson_id=lesson_id)
+        block_id = blocks["items"][0]["blockId"]
+        block_trigger = service.generate_block(block_id=block_id, idempotency_key=None)
+
+        assert latest["scopeType"] == "lesson"
+        assert latest["lessonId"] == lesson_id
+        assert latest["artifactKind"] == "lesson_handout"
+        assert repo.get_latest_handout(course_id) is None
+        assert outline["handoutVersionId"] == version_id
+        assert outline["items"][0]["children"][0]["sourceSegmentKeys"] == segment_keys
+        assert blocks["items"][0]["handoutVersionId"] == version_id
+        assert dispatcher.block_calls == [
+            {
+                "taskId": block_trigger["taskId"],
+                "payload": {
+                    "courseId": course_id,
+                    "handoutVersionId": version_id,
+                    "handoutBlockId": block_id,
+                    "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                    "scopeType": "lesson",
+                    "lessonId": lesson_id,
+                    "artifactKind": "lesson_handout",
+                },
+            }
+        ]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_lesson_handout_workers_reject_mismatched_scope_payload():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _ = _create_course_with_active_video_segments(repo)
+        lesson = repo.create_lesson(course_id=course_id, title="第 1 节", source_type="manual")
+        other_lesson = repo.create_lesson(course_id=course_id, title="第 2 节", source_type="manual")
+        lesson_id = lesson["lessonId"]
+        service = _handout_service(repo, lessons=repo, resources=repo)
+        trigger = service.generate_lesson_handout(course_id=course_id, lesson_id=lesson_id, idempotency_key=None)
+        version_id = trigger["entity"]["id"]
+        blocks = service.get_lesson_blocks(course_id=course_id, lesson_id=lesson_id)
+        block_trigger = service.generate_block(block_id=blocks["items"][0]["blockId"], idempotency_key=None)
+
+        try:
+            run_handout_generate(
+                {
+                    "taskId": trigger["taskId"],
+                    "courseId": course_id,
+                    "handoutVersionId": version_id,
+                    "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                },
+                session_factory=lambda: session,
+            )
+        except ValueError as exc:
+            assert "scope" in str(exc)
+        else:
+            raise AssertionError("lesson scope payload without scope fields was accepted")
+
+        try:
+            run_handout_generate(
+                {
+                    "taskId": trigger["taskId"],
+                    "courseId": course_id,
+                    "handoutVersionId": version_id,
+                    "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                    "scopeType": "lesson",
+                    "lessonId": other_lesson["lessonId"],
+                    "artifactKind": "lesson_handout",
+                },
+                session_factory=lambda: session,
+            )
+        except ValueError as exc:
+            assert "scope" in str(exc)
+        else:
+            raise AssertionError("mismatched lesson scope payload was accepted")
+
+        try:
+            run_handout_block_generate(
+                {
+                    "taskId": block_trigger["taskId"],
+                    "courseId": course_id,
+                    "handoutVersionId": version_id,
+                    "handoutBlockId": blocks["items"][0]["blockId"],
+                    "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                },
+                session_factory=lambda: session,
+                generate_block_func=lambda *args, **kwargs: {},
+            )
+        except ValueError as exc:
+            assert "scope" in str(exc)
+        else:
+            raise AssertionError("lesson block scope payload without scope fields was accepted")
+
+        try:
+            run_handout_block_generate(
+                {
+                    "taskId": block_trigger["taskId"],
+                    "courseId": course_id,
+                    "handoutVersionId": version_id,
+                    "handoutBlockId": blocks["items"][0]["blockId"],
+                    "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                    "scopeType": "lesson",
+                    "lessonId": other_lesson["lessonId"],
+                    "artifactKind": "lesson_handout",
+                },
+                session_factory=lambda: session,
+                generate_block_func=lambda *args, **kwargs: {},
+            )
+        except ValueError as exc:
+            assert "scope" in str(exc)
+        else:
+            raise AssertionError("mismatched lesson block scope payload was accepted")
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_sql_handout_generate_uses_semantic_outline_client_and_document_context():
     repo, session, engine = _build_sqlite_repository()
     try:
@@ -176,6 +314,9 @@ def test_sql_handout_generate_enqueues_root_task_with_contract_payload_only():
                     "courseId": course_id,
                     "handoutVersionId": handout_version_id,
                     "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                    "scopeType": "course",
+                    "lessonId": None,
+                    "artifactKind": "course_summary_handout",
                 },
             }
         ]
@@ -678,6 +819,9 @@ def test_handout_block_generate_is_idempotent_and_does_not_duplicate_generating_
                     "handoutVersionId": repo.get_course(course_id)["activeHandoutVersionId"],
                     "handoutBlockId": block_id,
                     "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                    "scopeType": "course",
+                    "lessonId": None,
+                    "artifactKind": "course_summary_handout",
                 },
             }
         ]
@@ -713,6 +857,9 @@ def test_generating_handout_block_status_is_visible_and_no_key_generate_is_idemp
                     "handoutVersionId": repo.get_course(course_id)["activeHandoutVersionId"],
                     "handoutBlockId": block_id,
                     "sourceParseRunId": repo.get_course(course_id)["activeParseRunId"],
+                    "scopeType": "course",
+                    "lessonId": None,
+                    "artifactKind": "course_summary_handout",
                 },
             }
         ]

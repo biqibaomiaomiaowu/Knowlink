@@ -259,8 +259,20 @@ class MemoryScaffoldRepository:
         outline_meta: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        artifact_kind: str = "course_summary_handout",
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-        return self.store.create_handout(course_id)
+        return self.store.create_handout(
+            course_id,
+            outline=outline,
+            outline_meta=outline_meta,
+            error_code=error_code,
+            error_message=error_message,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            artifact_kind=artifact_kind,
+        )
 
     def get_handout_outline_context(self, course_id: int) -> dict[str, Any] | None:
         return None
@@ -272,15 +284,27 @@ class MemoryScaffoldRepository:
             return _memory_public_handout(handout)
         return None
 
-    def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
-        handout = self.store.get_latest_handout(course_id)
+    def get_latest_handout(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        handout = self.store.get_latest_handout(course_id, scope_type=scope_type, lesson_id=lesson_id)
         if handout is not None:
             _sync_memory_handout_statuses(handout)
             return _memory_public_handout(handout)
         return None
 
-    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
-        handout = self.store.get_latest_handout(course_id)
+    def get_latest_outline(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        handout = self.store.get_latest_handout(course_id, scope_type=scope_type, lesson_id=lesson_id)
         if handout is None:
             return None
         _sync_memory_handout_statuses(handout)
@@ -327,15 +351,15 @@ class MemoryScaffoldRepository:
                 task_id = self.store.next_id("task")
                 _set_memory_block_status(handout, block, "generating")
                 block["taskId"] = task_id
+                course_id = int(handout["courseId"])
                 payload = {
-                    "courseId": next(
-                        course_id
-                        for course_id, handout_version_id in self.store.handout_by_course.items()
-                        if handout_version_id == handout["handoutVersionId"]
-                    ),
+                    "courseId": course_id,
                     "handoutVersionId": handout["handoutVersionId"],
                     "handoutBlockId": block_id,
                     "sourceParseRunId": handout.get("sourceParseRunId"),
+                    "scopeType": handout.get("scopeType"),
+                    "lessonId": handout.get("lessonId"),
+                    "artifactKind": handout.get("artifactKind"),
                 }
                 self.store.register_async_task(
                     task_id=task_id,
@@ -406,8 +430,15 @@ class MemoryScaffoldRepository:
                     return payload
         return None
 
-    def get_current_handout_block(self, course_id: int, current_sec: int) -> dict[str, Any] | None:
-        handout = self.store.get_latest_handout(course_id)
+    def get_current_handout_block(
+        self,
+        course_id: int,
+        current_sec: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        handout = self.store.get_latest_handout(course_id, scope_type=scope_type, lesson_id=lesson_id)
         if handout is None:
             return None
         blocks = sorted(handout["blocks"], key=lambda block: block.get("startSec") or 0)

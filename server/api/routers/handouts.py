@@ -45,7 +45,7 @@ async def get_lesson_handout(
     request: Request,
     service: HandoutService = Depends(get_handout_service),
 ):
-    return api_ok(request, service.get_lesson_handout_placeholder(course_id=courseId, lesson_id=lessonId))
+    return api_ok(request, service.get_lesson_handout(course_id=courseId, lesson_id=lessonId))
 
 
 @router.post("/courses/{courseId}/lessons/{lessonId}/handout/generate")
@@ -55,7 +55,48 @@ async def generate_lesson_handout(
     request: Request,
     service: HandoutService = Depends(get_handout_service),
 ):
-    return api_ok(request, service.generate_lesson_handout_placeholder(course_id=courseId, lesson_id=lessonId))
+    return api_ok(
+        request,
+        service.generate_lesson_handout(
+            course_id=courseId,
+            lesson_id=lessonId,
+            idempotency_key=request.headers.get("Idempotency-Key"),
+        ),
+    )
+
+
+@router.get("/courses/{courseId}/lessons/{lessonId}/handout/outline")
+async def get_lesson_handout_outline(
+    courseId: int,
+    lessonId: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(request, service.get_lesson_outline(course_id=courseId, lesson_id=lessonId))
+
+
+@router.get("/courses/{courseId}/lessons/{lessonId}/handout/blocks")
+async def get_lesson_handout_blocks(
+    courseId: int,
+    lessonId: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(request, service.get_lesson_blocks(course_id=courseId, lesson_id=lessonId))
+
+
+@router.get("/courses/{courseId}/lessons/{lessonId}/handout/current-block")
+async def get_lesson_current_handout_block(
+    courseId: int,
+    lessonId: int,
+    currentSec: int,
+    request: Request,
+    service: HandoutService = Depends(get_handout_service),
+):
+    return api_ok(
+        request,
+        service.get_lesson_current_block(course_id=courseId, lesson_id=lessonId, current_sec=currentSec),
+    )
 
 
 @router.get("/handout-versions/{handoutVersionId}/status")

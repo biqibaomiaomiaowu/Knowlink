@@ -306,13 +306,28 @@ class HandoutRepository(Protocol):
         outline_meta: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        artifact_kind: str = "course_summary_handout",
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]: ...
 
     def get_handout(self, handout_version_id: int) -> dict[str, Any] | None: ...
 
-    def get_latest_handout(self, course_id: int) -> dict[str, Any] | None: ...
+    def get_latest_handout(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None: ...
 
-    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None: ...
+    def get_latest_outline(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None: ...
 
     def get_block_jump_target(self, block_id: int) -> dict[str, Any] | None: ...
 
@@ -329,7 +344,14 @@ class HandoutRepository(Protocol):
 
     def get_handout_block_status(self, block_id: int) -> dict[str, Any] | None: ...
 
-    def get_current_handout_block(self, course_id: int, current_sec: int) -> dict[str, Any] | None: ...
+    def get_current_handout_block(
+        self,
+        course_id: int,
+        current_sec: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None: ...
 
 
 class QaRepository(Protocol):

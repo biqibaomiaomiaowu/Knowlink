@@ -29,6 +29,9 @@ def run_handout_generate(
     course_id = _required_int(message, "courseId", "course_id")
     handout_version_id = _required_int(message, "handoutVersionId", "handout_version_id")
     source_parse_run_id = _required_int(message, "sourceParseRunId", "source_parse_run_id")
+    scope_type = _optional_str(message, "scopeType", "scope_type")
+    lesson_id = _optional_int(message, "lessonId", "lesson_id")
+    artifact_kind = _optional_str(message, "artifactKind", "artifact_kind")
 
     session = session_factory()
     try:
@@ -38,6 +41,9 @@ def run_handout_generate(
             course_id=course_id,
             handout_version_id=handout_version_id,
             source_parse_run_id=source_parse_run_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            artifact_kind=artifact_kind,
         )
     finally:
         session.close()
@@ -55,6 +61,9 @@ def run_handout_block_generate(
     handout_version_id = _required_int(message, "handoutVersionId", "handout_version_id")
     handout_block_id = _required_int(message, "handoutBlockId", "handout_block_id")
     source_parse_run_id = _required_int(message, "sourceParseRunId", "source_parse_run_id")
+    scope_type = _optional_str(message, "scopeType", "scope_type")
+    lesson_id = _optional_int(message, "lessonId", "lesson_id")
+    artifact_kind = _optional_str(message, "artifactKind", "artifact_kind")
 
     session = session_factory()
     try:
@@ -65,6 +74,9 @@ def run_handout_block_generate(
             handout_version_id=handout_version_id,
             handout_block_id=handout_block_id,
             source_parse_run_id=source_parse_run_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            artifact_kind=artifact_kind,
             generate_block_func=generate_block_func,
             embedding_client_factory=embedding_client_factory,
         )
@@ -79,15 +91,22 @@ def _run_handout_generate_with_session(
     course_id: int,
     handout_version_id: int,
     source_parse_run_id: int,
+    scope_type: str | None,
+    lesson_id: int | None,
+    artifact_kind: str | None,
 ) -> dict[str, Any]:
     task = _require_model(session, AsyncTask, task_id, "async_task.not_found")
     version = _require_model(session, HandoutVersion, handout_version_id, "handout.not_found")
     course = _require_model(session, Course, course_id, "course.not_found")
     _validate_root_handout_task(
+        session=session,
         task=task,
         version=version,
         course=course,
         source_parse_run_id=source_parse_run_id,
+        scope_type=scope_type,
+        lesson_id=lesson_id,
+        artifact_kind=artifact_kind,
     )
 
     now = utcnow()
@@ -108,6 +127,9 @@ def _run_handout_generate_with_session(
         "courseId": course.id,
         "handoutVersionId": version.id,
         "sourceParseRunId": version.source_parse_run_id,
+        "scopeType": version.scope_type,
+        "lessonId": version.lesson_id,
+        "artifactKind": version.artifact_kind,
         "status": version.status,
         "outlineStatus": version.outline_status,
         "totalBlocks": version.total_blocks,
@@ -125,6 +147,9 @@ def _run_handout_generate_with_session(
         "courseId": course.id,
         "handoutVersionId": version.id,
         "sourceParseRunId": version.source_parse_run_id,
+        "scopeType": version.scope_type,
+        "lessonId": version.lesson_id,
+        "artifactKind": version.artifact_kind,
         "status": version.status,
         "outlineStatus": version.outline_status,
         "totalBlocks": version.total_blocks,
@@ -141,6 +166,9 @@ def _run_handout_block_generate_with_session(
     handout_version_id: int,
     handout_block_id: int,
     source_parse_run_id: int,
+    scope_type: str | None,
+    lesson_id: int | None,
+    artifact_kind: str | None,
     generate_block_func: Callable[..., dict[str, Any]],
     embedding_client_factory: Callable[[], Any] | None,
 ) -> dict[str, Any]:
@@ -149,11 +177,15 @@ def _run_handout_block_generate_with_session(
     version = _require_model(session, HandoutVersion, handout_version_id, "handout.not_found")
     block = _require_model(session, HandoutBlock, handout_block_id, "handout_block.not_found")
     _validate_block_task(
+        session=session,
         task=task,
         course=course,
         version=version,
         block=block,
         source_parse_run_id=source_parse_run_id,
+        scope_type=scope_type,
+        lesson_id=lesson_id,
+        artifact_kind=artifact_kind,
     )
     if task.status in {"succeeded", "failed", "canceled", "skipped"}:
         return _terminal_block_task_result(task=task, course=course, version=version, block=block)
@@ -164,6 +196,9 @@ def _run_handout_block_generate_with_session(
             "courseId": course.id,
             "handoutVersionId": version.id,
             "handoutBlockId": block.id,
+            "scopeType": version.scope_type,
+            "lessonId": version.lesson_id,
+            "artifactKind": version.artifact_kind,
             "status": "ready",
             "reason": "block_already_ready",
         }
@@ -215,6 +250,9 @@ def _run_handout_block_generate_with_session(
             "courseId": course.id,
             "handoutVersionId": version.id,
             "handoutBlockId": block.id,
+            "scopeType": version.scope_type,
+            "lessonId": version.lesson_id,
+            "artifactKind": version.artifact_kind,
             "status": "failed",
             "errorMessage": str(exc),
         }
@@ -227,6 +265,9 @@ def _run_handout_block_generate_with_session(
         "courseId": course.id,
         "handoutVersionId": version.id,
         "handoutBlockId": block.id,
+        "scopeType": version.scope_type,
+        "lessonId": version.lesson_id,
+        "artifactKind": version.artifact_kind,
         "status": "ready",
     }
     if generation_metadata:
@@ -242,6 +283,9 @@ def _run_handout_block_generate_with_session(
         "courseId": course.id,
         "handoutVersionId": version.id,
         "handoutBlockId": block.id,
+        "scopeType": version.scope_type,
+        "lessonId": version.lesson_id,
+        "artifactKind": version.artifact_kind,
         "status": "ready",
     }
     if generation_metadata:
@@ -261,6 +305,9 @@ def _terminal_block_task_result(
         "courseId": course.id,
         "handoutVersionId": version.id,
         "handoutBlockId": block.id,
+        "scopeType": version.scope_type,
+        "lessonId": version.lesson_id,
+        "artifactKind": version.artifact_kind,
         "status": block.status if task.status == "succeeded" else task.status,
         "taskStatus": task.status,
     }
@@ -268,10 +315,14 @@ def _terminal_block_task_result(
 
 def _validate_root_handout_task(
     *,
+    session: Session,
     task: AsyncTask,
     version: HandoutVersion,
     course: Course,
     source_parse_run_id: int,
+    scope_type: str | None,
+    lesson_id: int | None,
+    artifact_kind: str | None,
 ) -> None:
     if task.course_id != course.id or version.course_id != course.id:
         raise HandoutTaskInputError("handout task message does not match task/course/version ownership")
@@ -279,40 +330,115 @@ def _validate_root_handout_task(
         raise HandoutTaskInputError(f"async task is not handout_generate: {task.task_type}")
     if task.target_type != "handout_version" or task.target_id != version.id:
         raise HandoutTaskInputError("handout task target does not match handout version")
-    if course.active_handout_version_id != version.id:
-        raise HandoutTaskInputError("handout task does not target the active handout version")
     if version.source_parse_run_id != source_parse_run_id:
         raise HandoutTaskInputError("handout task source parse run does not match handout version")
     if course.active_parse_run_id != version.source_parse_run_id:
         raise HandoutTaskInputError("handout task does not match the active parse run")
     if task.parse_run_id != source_parse_run_id:
         raise HandoutTaskInputError("handout task does not match source parse run")
+    _validate_scope_payload(
+        version=version,
+        scope_type=scope_type,
+        lesson_id=lesson_id,
+        artifact_kind=artifact_kind,
+        task_label="handout task",
+    )
+    if not _handout_version_is_active(session=session, version=version, course=course):
+        raise HandoutTaskInputError("handout task does not target the active handout version")
     if version.status != "outline_ready" or version.outline_status != "ready":
         raise HandoutTaskInputError("handout root task only supports outline-ready versions")
 
 
 def _validate_block_task(
     *,
+    session: Session,
     task: AsyncTask,
     course: Course,
     version: HandoutVersion,
     block: HandoutBlock,
     source_parse_run_id: int,
+    scope_type: str | None,
+    lesson_id: int | None,
+    artifact_kind: str | None,
 ) -> None:
     if version.course_id != course.id or block.handout_version_id != version.id:
         raise HandoutTaskInputError("handout block task message does not match course/version/block ownership")
-    if course.active_handout_version_id != version.id:
-        raise HandoutTaskInputError("handout block task does not target the active handout version")
     if version.source_parse_run_id != source_parse_run_id:
         raise HandoutTaskInputError("handout block task source parse run does not match handout version")
     if course.active_parse_run_id != version.source_parse_run_id:
         raise HandoutTaskInputError("handout block task does not match the active parse run")
     if task.course_id != course.id or task.parse_run_id != source_parse_run_id:
         raise HandoutTaskInputError("handout block task does not match course/source parse run")
+    _validate_scope_payload(
+        version=version,
+        scope_type=scope_type,
+        lesson_id=lesson_id,
+        artifact_kind=artifact_kind,
+        task_label="handout block task",
+    )
+    if not _handout_version_is_active(session=session, version=version, course=course):
+        raise HandoutTaskInputError("handout block task does not target the active handout version")
     if task.task_type != "handout_block_generate":
         raise HandoutTaskInputError(f"async task is not handout_block_generate: {task.task_type}")
     if task.target_type != "handout_block" or task.target_id != block.id:
         raise HandoutTaskInputError("handout block task target does not match block")
+
+
+def _validate_scope_payload(
+    *,
+    version: HandoutVersion,
+    scope_type: str | None,
+    lesson_id: int | None,
+    artifact_kind: str | None,
+    task_label: str,
+) -> None:
+    if scope_type is None and lesson_id is None and artifact_kind is None:
+        if version.scope_type == "course" and version.lesson_id is None:
+            return
+        raise HandoutTaskInputError(f"{task_label} scope is required for scoped handout version")
+    if scope_type is None or artifact_kind is None:
+        raise HandoutTaskInputError(f"{task_label} scope is incomplete for handout version")
+    if scope_type == "lesson" and lesson_id is None:
+        raise HandoutTaskInputError(f"{task_label} scope is incomplete for handout version")
+    if scope_type == "course" and lesson_id is not None:
+        raise HandoutTaskInputError(f"{task_label} scope does not match handout version")
+    if scope_type not in {"course", "lesson"}:
+        raise HandoutTaskInputError(f"{task_label} scope does not match handout version")
+    if artifact_kind not in {"course_summary_handout", "lesson_handout"}:
+        raise HandoutTaskInputError(f"{task_label} artifact kind does not match handout version scope")
+    if scope_type == "course" and artifact_kind != "course_summary_handout":
+        raise HandoutTaskInputError(f"{task_label} artifact kind does not match handout version scope")
+    if scope_type == "lesson" and artifact_kind != "lesson_handout":
+        raise HandoutTaskInputError(f"{task_label} artifact kind does not match handout version scope")
+    if scope_type != version.scope_type:
+        raise HandoutTaskInputError(f"{task_label} scope does not match handout version")
+    if lesson_id != version.lesson_id:
+        raise HandoutTaskInputError(f"{task_label} scope does not match handout version")
+    if artifact_kind != version.artifact_kind:
+        raise HandoutTaskInputError(f"{task_label} artifact kind does not match handout version scope")
+
+
+def _handout_version_is_active(
+    *,
+    session: Session,
+    version: HandoutVersion,
+    course: Course,
+) -> bool:
+    if version.course_id != course.id or version.source_parse_run_id != course.active_parse_run_id:
+        return False
+    if version.scope_type == "course":
+        return version.lesson_id is None and course.active_handout_version_id == version.id
+    latest_id = session.scalars(
+        select(HandoutVersion.id)
+        .where(
+            HandoutVersion.course_id == course.id,
+            HandoutVersion.scope_type == version.scope_type,
+            HandoutVersion.lesson_id == version.lesson_id,
+            HandoutVersion.source_parse_run_id == course.active_parse_run_id,
+        )
+        .order_by(HandoutVersion.created_at.desc(), HandoutVersion.id.desc())
+    ).first()
+    return latest_id == version.id
 
 
 def _outline_item_from_block(block: HandoutBlock) -> dict[str, Any]:
@@ -504,6 +630,16 @@ def _optional_int(payload: Mapping[str, Any], *keys: str) -> int | None:
             return int(value)
         except (TypeError, ValueError):
             return None
+    return None
+
+
+def _optional_str(payload: Mapping[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        return text or None
     return None
 
 

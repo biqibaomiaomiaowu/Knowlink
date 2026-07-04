@@ -1244,6 +1244,14 @@ class RuntimeStore:
     def create_handout(
         self,
         course_id: int,
+        *,
+        outline: dict[str, Any] | None = None,
+        outline_meta: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        artifact_kind: str = "course_summary_handout",
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         handout_version_id = self.next_id("handout_version")
         task_id = self.next_id("task")
@@ -1286,6 +1294,10 @@ class RuntimeStore:
 
         outline = {
             "handoutVersionId": handout_version_id,
+            "courseId": course_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "artifactKind": artifact_kind,
             "title": "高数期末冲刺讲义",
             "summary": "按演示讲义块组织的目录",
             "items": [
@@ -1316,6 +1328,10 @@ class RuntimeStore:
         }
         handout = {
             "handoutVersionId": handout_version_id,
+            "courseId": course_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "artifactKind": artifact_kind,
             "title": "高数期末冲刺讲义",
             "summary": "按定义、题型和考试应用整理的知识块",
             "totalBlocks": len(blocks),
@@ -1328,9 +1344,10 @@ class RuntimeStore:
             "blocks": blocks,
         }
         self.handouts[handout_version_id] = handout
-        self.handout_by_course[course_id] = handout_version_id
         course = self.courses[course_id]
-        course["activeHandoutVersionId"] = handout_version_id
+        if scope_type == "course":
+            self.handout_by_course[course_id] = handout_version_id
+            course["activeHandoutVersionId"] = handout_version_id
         course["lifecycleStatus"] = "learning_ready"
         course["pipelineStage"] = "handout"
         course["pipelineStatus"] = "succeeded"
@@ -1339,6 +1356,9 @@ class RuntimeStore:
             "courseId": course_id,
             "handoutVersionId": handout_version_id,
             "sourceParseRunId": handout["sourceParseRunId"],
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "artifactKind": artifact_kind,
         }
         self.register_async_task(
             task_id=task_id,
@@ -1358,14 +1378,37 @@ class RuntimeStore:
             "entity": {"type": "handout_version", "id": handout_version_id},
         }, blocks
 
-    def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
-        handout_version_id = self.handout_by_course.get(course_id)
-        if handout_version_id is None:
+    def get_latest_handout(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        if scope_type == "course":
+            handout_version_id = self.handout_by_course.get(course_id)
+            if handout_version_id is None:
+                return None
+            return self.handouts.get(handout_version_id)
+        candidates = [
+            handout
+            for handout in self.handouts.values()
+            if handout.get("courseId") == course_id
+            and handout.get("scopeType") == scope_type
+            and handout.get("lessonId") == lesson_id
+        ]
+        if not candidates:
             return None
-        return self.handouts.get(handout_version_id)
+        return max(candidates, key=lambda item: int(item.get("handoutVersionId") or 0))
 
-    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
-        handout = self.get_latest_handout(course_id)
+    def get_latest_outline(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        handout = self.get_latest_handout(course_id, scope_type=scope_type, lesson_id=lesson_id)
         if handout is None:
             return None
         outline = handout.get("outline")

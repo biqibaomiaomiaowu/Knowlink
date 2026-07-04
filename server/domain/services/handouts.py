@@ -91,6 +91,39 @@ class HandoutService:
         return self.get_lesson_handout_placeholder(course_id=course_id, lesson_id=lesson_id)
 
     def generate_handout(self, *, course_id: int, idempotency_key: str | None) -> dict[str, object]:
+        return self._generate_scoped_handout(
+            course_id=course_id,
+            idempotency_key=idempotency_key,
+            scope_type="course",
+            lesson_id=None,
+            artifact_kind="course_summary_handout",
+        )
+
+    def generate_lesson_handout(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        idempotency_key: str | None,
+    ) -> dict[str, object]:
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        return self._generate_scoped_handout(
+            course_id=course_id,
+            idempotency_key=idempotency_key,
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            artifact_kind="lesson_handout",
+        )
+
+    def _generate_scoped_handout(
+        self,
+        *,
+        course_id: int,
+        idempotency_key: str | None,
+        scope_type: str,
+        lesson_id: int | None,
+        artifact_kind: str,
+    ) -> dict[str, object]:
         course = self._ensure_course(course_id)
         if course.get("activeParseRunId") is None:
             raise ServiceError(
@@ -111,6 +144,9 @@ class HandoutService:
                 outline_meta=outline_meta,
                 error_code=error_code,
                 error_message=error_message,
+                scope_type=scope_type,
+                lesson_id=lesson_id,
+                artifact_kind=artifact_kind,
             )
             if _should_enqueue_trigger(trigger):
                 task_id = _int_value(trigger.get("taskId"))
@@ -131,6 +167,9 @@ class HandoutService:
                     "courseId": course_id,
                     "handoutVersionId": handout_version_id,
                     "sourceParseRunId": course.get("activeParseRunId"),
+                    "scopeType": scope_type,
+                    "lessonId": lesson_id,
+                    "artifactKind": artifact_kind,
                 }
                 trigger, task_id = ensure_async_task_for_trigger(
                     self.async_tasks,
@@ -153,21 +192,35 @@ class HandoutService:
             created_response = trigger
             return trigger
 
-        result = run_fingerprinted_idempotent(
-            self.idempotency,
-            scope=f"handouts.generate:{course_id}",
-            key=idempotency_key,
-            request_payload={"courseId": course_id},
-            factory=factory,
-            legacy_action="handouts.generate",
-            legacy_matches=lambda legacy: async_trigger_matches_course(
+        request_payload: dict[str, object] = {"courseId": course_id}
+        if scope_type != "course":
+            request_payload["scopeType"] = scope_type
+            request_payload["lessonId"] = lesson_id
+            request_payload["artifactKind"] = artifact_kind
+        idempotency_scope = (
+            f"handouts.generate:{course_id}"
+            if scope_type == "course"
+            else f"handouts.generate:{scope_type}:{course_id}:{lesson_id}"
+        )
+        legacy_action = "handouts.generate" if scope_type == "course" else None
+        legacy_matches = None
+        if scope_type == "course":
+            legacy_matches = lambda legacy: async_trigger_matches_course(
                 legacy,
                 course_id=course_id,
                 entity_type="handout_version",
                 task_type="handout_generate",
                 async_tasks=self.async_tasks,
                 target_type="handout_version",
-            ),
+            )
+        result = run_fingerprinted_idempotent(
+            self.idempotency,
+            scope=idempotency_scope,
+            key=idempotency_key,
+            request_payload=request_payload,
+            factory=factory,
+            legacy_action=legacy_action,
+            legacy_matches=legacy_matches,
         )
         if enqueue_request is not None and result is created_response:
             task_id, payload = enqueue_request
@@ -251,13 +304,7 @@ class HandoutService:
                 error_code="handout.no_active_version",
                 status_code=404,
             )
-        return {
-            "handoutVersionId": handout["handoutVersionId"],
-            "title": handout["title"],
-            "summary": handout["summary"],
-            "totalBlocks": handout["totalBlocks"],
-            "status": handout["status"],
-        }
+        return self._handout_summary(handout)
 
     def get_latest_outline(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
@@ -280,6 +327,44 @@ class HandoutService:
                 status_code=404,
             )
         return {"items": handout["blocks"]}
+
+    def get_lesson_handout(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        handout = self.handouts.get_latest_handout(course_id, scope_type="lesson", lesson_id=lesson_id)
+        if handout is None:
+            raise ServiceError(
+                message="The lesson has no active handout.",
+                error_code="handout.no_active_version",
+                status_code=404,
+            )
+        return self._handout_summary(handout)
+
+    def get_lesson_outline(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        outline = self.handouts.get_latest_outline(course_id, scope_type="lesson", lesson_id=lesson_id)
+        if outline is None:
+            raise ServiceError(
+                message="The lesson has no active handout outline.",
+                error_code="handout.no_active_version",
+                status_code=404,
+            )
+        return outline
+
+    def get_lesson_blocks(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        handout = self.handouts.get_latest_handout(course_id, scope_type="lesson", lesson_id=lesson_id)
+        if handout is None:
+            raise ServiceError(
+                message="The lesson has no active handout.",
+                error_code="handout.no_active_version",
+                status_code=404,
+            )
+        return {
+            "scopeType": handout.get("scopeType"),
+            "lessonId": handout.get("lessonId"),
+            "artifactKind": handout.get("artifactKind"),
+            "items": handout["blocks"],
+        }
 
     def generate_block(self, *, block_id: int, idempotency_key: str | None) -> dict[str, object]:
         current_status = self.handouts.get_handout_block_status(block_id)
@@ -375,6 +460,22 @@ class HandoutService:
             )
         return current
 
+    def get_lesson_current_block(self, *, course_id: int, lesson_id: int, current_sec: int) -> dict[str, object]:
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        current = self.handouts.get_current_handout_block(
+            course_id,
+            current_sec,
+            scope_type="lesson",
+            lesson_id=lesson_id,
+        )
+        if current is None:
+            raise ServiceError(
+                message="The lesson has no matching handout block.",
+                error_code="handout.block_not_found",
+                status_code=404,
+            )
+        return current
+
     def get_jump_target(self, *, block_id: int) -> dict[str, object]:
         jump_target = self.handouts.get_block_jump_target(block_id)
         if jump_target is None:
@@ -384,6 +485,18 @@ class HandoutService:
                 status_code=404,
             )
         return jump_target
+
+    def _handout_summary(self, handout: dict[str, object]) -> dict[str, object]:
+        return {
+            "handoutVersionId": handout["handoutVersionId"],
+            "scopeType": handout.get("scopeType"),
+            "lessonId": handout.get("lessonId"),
+            "artifactKind": handout.get("artifactKind"),
+            "title": handout["title"],
+            "summary": handout["summary"],
+            "totalBlocks": handout["totalBlocks"],
+            "status": handout["status"],
+        }
 
     def _ensure_course(self, course_id: int) -> dict[str, object]:
         course = self.courses.get_course(course_id)

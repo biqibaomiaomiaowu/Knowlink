@@ -1257,6 +1257,9 @@ class SqlAlchemyRuntimeRepository:
         outline_meta: dict[str, Any] | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        artifact_kind: str = "course_summary_handout",
     ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         course = self._get_course_model(course_id)
         if course is None:
@@ -1284,6 +1287,9 @@ class SqlAlchemyRuntimeRepository:
 
         version = HandoutVersion(
             course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            artifact_kind=artifact_kind,
             source_parse_run_id=source_parse_run_id,
             title=title,
             summary=summary,
@@ -1345,6 +1351,9 @@ class SqlAlchemyRuntimeRepository:
                 "courseId": course_id,
                 "handoutVersionId": version.id,
                 "sourceParseRunId": source_parse_run_id,
+                "scopeType": scope_type,
+                "lessonId": lesson_id,
+                "artifactKind": artifact_kind,
             },
             error_code=error_code,
             error_message=error_message,
@@ -1352,7 +1361,8 @@ class SqlAlchemyRuntimeRepository:
         )
         self.session.add(task)
 
-        course.active_handout_version_id = version.id
+        if scope_type == "course":
+            course.active_handout_version_id = version.id
         course.pipeline_stage = "handout"
         course.pipeline_status = "succeeded" if status == "outline_ready" else "failed"
         if status == "outline_ready":
@@ -1375,22 +1385,30 @@ class SqlAlchemyRuntimeRepository:
         if version is None:
             return None
         course = self._get_course_model(version.course_id)
-        if (
-            course is None
-            or course.active_handout_version_id != version.id
-            or course.active_parse_run_id != version.source_parse_run_id
-        ):
+        if course is None or not self._handout_version_is_active(version, course):
             return None
         return _handout_version_dict(version, blocks=self._list_handout_blocks(version.id))
 
-    def get_latest_handout(self, course_id: int) -> dict[str, Any] | None:
-        version = self._get_latest_handout_version_model(course_id)
+    def get_latest_handout(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        version = self._get_latest_handout_version_model(course_id, scope_type=scope_type, lesson_id=lesson_id)
         if version is None:
             return None
         return _handout_version_dict(version, blocks=self._list_handout_blocks(version.id))
 
-    def get_latest_outline(self, course_id: int) -> dict[str, Any] | None:
-        version = self._get_latest_handout_version_model(course_id)
+    def get_latest_outline(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        version = self._get_latest_handout_version_model(course_id, scope_type=scope_type, lesson_id=lesson_id)
         if version is None:
             return None
         outline = self.session.scalar(
@@ -1456,8 +1474,15 @@ class SqlAlchemyRuntimeRepository:
             status["taskStatus"] = task.status
         return status
 
-    def get_current_handout_block(self, course_id: int, current_sec: int) -> dict[str, Any] | None:
-        version = self._get_latest_handout_version_model(course_id)
+    def get_current_handout_block(
+        self,
+        course_id: int,
+        current_sec: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        version = self._get_latest_handout_version_model(course_id, scope_type=scope_type, lesson_id=lesson_id)
         if version is None:
             return None
         blocks = self.session.scalars(
@@ -1543,6 +1568,9 @@ class SqlAlchemyRuntimeRepository:
             "handoutVersionId": version.id,
             "handoutBlockId": block.id,
             "sourceParseRunId": version.source_parse_run_id,
+            "scopeType": version.scope_type,
+            "lessonId": version.lesson_id,
+            "artifactKind": version.artifact_kind,
         }
         task = AsyncTask(
             course_id=version.course_id,
@@ -1567,16 +1595,7 @@ class SqlAlchemyRuntimeRepository:
         block_id: int,
         payload: dict[str, Any],
     ) -> dict[str, Any] | None:
-        block = self.session.scalar(
-            select(HandoutBlock)
-            .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
-            .join(Course, Course.id == HandoutVersion.course_id)
-            .where(
-                HandoutBlock.id == block_id,
-                Course.user_id == self.user_id,
-                Course.active_handout_version_id == HandoutBlock.handout_version_id,
-            )
-        )
+        block = self._get_active_handout_block(block_id)
         if block is None:
             return None
         version = self.session.get(HandoutVersion, block.handout_version_id)
@@ -3478,17 +3497,25 @@ class SqlAlchemyRuntimeRepository:
         )
 
     def _get_active_handout_block(self, block_id: int) -> HandoutBlock | None:
-        return self.session.scalar(
+        block = self.session.scalar(
             select(HandoutBlock)
             .join(HandoutVersion, HandoutVersion.id == HandoutBlock.handout_version_id)
             .join(Course, Course.id == HandoutVersion.course_id)
             .where(
                 HandoutBlock.id == block_id,
                 Course.user_id == self.user_id,
-                Course.active_handout_version_id == HandoutBlock.handout_version_id,
                 HandoutVersion.source_parse_run_id == Course.active_parse_run_id,
             )
         )
+        if block is None:
+            return None
+        version = self.session.get(HandoutVersion, block.handout_version_id)
+        if version is None:
+            return None
+        course = self._get_course_model(version.course_id)
+        if course is None or not self._handout_version_is_active(version, course):
+            return None
+        return block
 
     def _qa_context_is_active(
         self,
@@ -3721,15 +3748,51 @@ class SqlAlchemyRuntimeRepository:
             .where(HandoutVersion.id == handout_version_id, Course.user_id == self.user_id)
         )
 
-    def _get_latest_handout_version_model(self, course_id: int) -> HandoutVersion | None:
+    def _get_latest_handout_version_model(
+        self,
+        course_id: int,
+        *,
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+    ) -> HandoutVersion | None:
         course = self._get_course_model(course_id)
         if course is None:
             return None
-        if course.active_handout_version_id is not None:
+        if scope_type == "course" and course.active_handout_version_id is not None:
             version = self._get_handout_version_model(course.active_handout_version_id)
-            if version is not None and version.source_parse_run_id == course.active_parse_run_id:
+            if (
+                version is not None
+                and version.source_parse_run_id == course.active_parse_run_id
+                and version.scope_type == "course"
+                and version.lesson_id is None
+            ):
                 return version
+        if scope_type != "course":
+            stmt = select(HandoutVersion).where(
+                HandoutVersion.course_id == course_id,
+                HandoutVersion.scope_type == scope_type,
+                HandoutVersion.source_parse_run_id == course.active_parse_run_id,
+            )
+            if lesson_id is None:
+                stmt = stmt.where(HandoutVersion.lesson_id.is_(None))
+            else:
+                stmt = stmt.where(HandoutVersion.lesson_id == lesson_id)
+            return self.session.scalars(
+                stmt.order_by(HandoutVersion.created_at.desc(), HandoutVersion.id.desc())
+            ).first()
         return None
+
+    def _handout_version_is_active(self, version: HandoutVersion, course: Course) -> bool:
+        if version.course_id != course.id or version.source_parse_run_id != course.active_parse_run_id:
+            return False
+        if version.scope_type == "course":
+            return version.lesson_id is None and course.active_handout_version_id == version.id
+        latest = self._get_latest_handout_version_model(
+            version.course_id,
+            scope_type=version.scope_type,
+            lesson_id=version.lesson_id,
+        )
+        return latest is not None and latest.id == version.id
 
     def _list_active_video_caption_segments(
         self,
@@ -4695,6 +4758,9 @@ def _handout_version_dict(
     return {
         "handoutVersionId": version.id,
         "courseId": version.course_id,
+        "scopeType": version.scope_type,
+        "lessonId": version.lesson_id,
+        "artifactKind": version.artifact_kind,
         "title": version.title,
         "summary": version.summary,
         "status": version.status,
@@ -4740,6 +4806,9 @@ def _handout_outline_dict(
 
     return {
         "handoutVersionId": version.id,
+        "scopeType": version.scope_type,
+        "lessonId": version.lesson_id,
+        "artifactKind": version.artifact_kind,
         "title": outline.title,
         "summary": outline.summary,
         "items": items,
