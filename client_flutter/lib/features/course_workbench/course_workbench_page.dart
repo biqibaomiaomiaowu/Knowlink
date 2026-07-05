@@ -680,7 +680,7 @@ class LessonPreparationPage extends ConsumerStatefulWidget {
 }
 
 const _lessonPreparationPollInterval = Duration(seconds: 1);
-const _lessonPreparationMaxAttempts = 60;
+const _lessonPreparationMaxAttempts = 360;
 const _bilibiliLessonImportPollInterval = Duration(seconds: 2);
 const _bilibiliLessonImportMaxAttempts = 30;
 const _invalidTimeBudget = -1;
@@ -1162,7 +1162,7 @@ class _LessonPreparationSteps extends StatelessWidget {
           icon: Icons.description_outlined,
           label: '解析资料',
           status: documentStatus,
-          progressPct: _stepProgress(status, 'document_parse'),
+          progressPct: _parseStepProgress(status),
         ),
         const SizedBox(height: 10),
         _LessonPreparationStepTile(
@@ -2724,6 +2724,14 @@ int? _stepProgress(PipelineStatusModel? status, String code) {
     }
   }
   return null;
+}
+
+int? _parseStepProgress(PipelineStatusModel? status) {
+  final documentProgress = _stepProgress(status, 'document_parse');
+  if (documentProgress != null || status == null) {
+    return documentProgress;
+  }
+  return status.progressPct.clamp(0, 100).toInt();
 }
 
 String _combinedParseStatus(PipelineStatusModel? status) {

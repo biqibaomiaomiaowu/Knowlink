@@ -122,6 +122,140 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('lesson preparation keeps polling slow parse beyond one minute',
+      (tester) async {
+    _useTestSurface(tester, const Size(1200, 1600));
+    final slowPipelineStatuses = [
+      for (var index = 0; index < 60; index += 1)
+        _pipelineStatusJson(
+          pipelineStatus: 'running',
+          stepStatuses: const {
+            'caption_extract': 'running',
+            'document_parse': 'running',
+            'knowledge_extract': 'queued',
+          },
+          progressPct: 20,
+          outlineReady: false,
+        ),
+      _pipelineStatusJson(
+        pipelineStatus: 'partial_success',
+        stepStatuses: const {
+          'caption_extract': 'succeeded',
+          'document_parse': 'succeeded',
+          'knowledge_extract': 'succeeded',
+        },
+        progressPct: 100,
+        outlineReady: true,
+      ),
+    ];
+    final fakeApiClient = _CourseWorkbenchFakeApiClient(
+      pipelineStatuses: slowPipelineStatuses,
+    );
+    final router = GoRouter(
+      initialLocation: '/',
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const LessonPreparationPage(
+            courseId: '101',
+            lessonId: 'l-new',
+          ),
+        ),
+        GoRoute(
+          path: '/courses/:courseId/lessons/:lessonId/handout',
+          builder: (context, state) => Text(
+            'lesson-handout-route '
+            '${state.pathParameters['courseId']} '
+            '${state.pathParameters['lessonId']}',
+          ),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 61));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(fakeApiClient.fetchPipelineStatusCount, greaterThan(60));
+    expect(fakeApiClient.generatedLessonHandouts, ['101/l-new']);
+    expect(find.text('lesson-handout-route 101 l-new'), findsOneWidget);
+    expect(find.textContaining('资料解析等待超时'), findsNothing);
+  });
+
+  testWidgets('lesson preparation parse step falls back to pipeline progress',
+      (tester) async {
+    _useTestSurface(tester, const Size(1200, 1600));
+    final runningStatus = _pipelineStatusJson(
+      pipelineStatus: 'running',
+      stepStatuses: const {
+        'caption_extract': 'running',
+        'document_parse': 'running',
+        'knowledge_extract': 'queued',
+      },
+      progressPct: 20,
+      outlineReady: false,
+    );
+    for (final step in runningStatus['steps'] as List<dynamic>) {
+      (step as Map<String, dynamic>).remove('progressPct');
+    }
+    final fakeApiClient = _CourseWorkbenchFakeApiClient(
+      pipelineStatuses: [
+        runningStatus,
+        _pipelineStatusJson(
+          pipelineStatus: 'partial_success',
+          stepStatuses: const {
+            'caption_extract': 'succeeded',
+            'document_parse': 'succeeded',
+            'knowledge_extract': 'succeeded',
+          },
+          progressPct: 100,
+          outlineReady: true,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(
+          home: LessonPreparationPage(
+            courseId: '101',
+            lessonId: 'l-new',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    for (var index = 0;
+        index < 5 && fakeApiClient.fetchPipelineStatusCount == 0;
+        index += 1) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pump();
+    expect(fakeApiClient.fetchPipelineStatusCount, greaterThan(0));
+
+    final preparationSteps = find.byKey(const Key('lesson_preparation_steps'));
+    expect(preparationSteps, findsOneWidget);
+    expect(
+      find.descendant(of: preparationSteps, matching: find.text('20%')),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('workspace title actions keep routed course behavior',
       (tester) async {
     _useTestSurface(tester, const Size(1200, 1600));
