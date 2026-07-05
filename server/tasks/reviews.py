@@ -12,6 +12,7 @@ from server.infra.db.base import utcnow
 from server.infra.db.models import (
     AsyncTask,
     Course,
+    CourseResource,
     CourseSegment,
     HandoutBlock,
     HandoutVersion,
@@ -102,10 +103,12 @@ def _run_review_refresh_with_session(
     if attempt is None:
         raise ReviewTaskInputError("review refresh requires a quiz attempt")
     quiz = _require_model(session, Quiz, attempt.quiz_id, "quiz.not_found")
-    version = _require_model(session, HandoutVersion, quiz.handout_version_id, "handout.not_found")
-    if task.parse_run_id != quiz.source_parse_run_id or task.parse_run_id != version.source_parse_run_id:
+    version = _optional_handout_version(session, quiz)
+    if task.parse_run_id != quiz.source_parse_run_id:
         raise ReviewTaskInputError("review task does not match source parse run")
-    if not _review_refresh_targets_active_course(course=course, quiz=quiz, version=version):
+    if version is not None and task.parse_run_id != version.source_parse_run_id:
+        raise ReviewTaskInputError("review task does not match source parse run")
+    if not _review_refresh_targets_current_context(session=session, course=course, quiz=quiz, version=version):
         raise ReviewTaskInputError("review refresh does not match the active course parse/handout context")
 
     now = utcnow()
@@ -120,11 +123,11 @@ def _run_review_refresh_with_session(
     quiz_payload = _quiz_payload(session, quiz)
     result_json = dict(attempt.result_json or {})
     mastery_updates = result_json.get("masteryUpdates")
-    blocks = _ready_handout_blocks(session, version)
+    blocks = _source_blocks_for_review(session=session, course=course, quiz=quiz, version=version)
     if not blocks:
-        raise ReviewTaskInputError("active handout version has no ready blocks for review refresh")
-    block_payloads = [_handout_block_payload(block) for block in blocks]
-    segments = _segments_for_review(session, course_id=course.id, parse_run_id=version.source_parse_run_id)
+        raise ReviewTaskInputError("review refresh has no ready source blocks")
+    block_payloads = blocks
+    segments = _segments_for_review(session, course_id=course.id, parse_run_id=quiz.source_parse_run_id)
     segment_payloads = [_segment_payload(segment) for segment in segments]
 
     review_payload = generate_review_tasks_func(
@@ -203,20 +206,61 @@ def _validate_review_refresh_task_ownership(
         raise ReviewTaskInputError("review task missing source parse run")
 
 
-def _review_refresh_targets_active_course(
+def _optional_handout_version(session: Session, quiz: Quiz) -> HandoutVersion | None:
+    if quiz.handout_version_id is None:
+        return None
+    return _require_model(session, HandoutVersion, quiz.handout_version_id, "handout.not_found")
+
+
+def _review_refresh_targets_current_context(
     *,
+    session: Session,
     course: Course,
     quiz: Quiz,
-    version: HandoutVersion,
+    version: HandoutVersion | None,
 ) -> bool:
-    return (
-        course.active_handout_version_id == version.id
-        and course.active_parse_run_id == version.source_parse_run_id
-        and quiz.handout_version_id == version.id
-        and quiz.source_parse_run_id == version.source_parse_run_id
-        and quiz.source_parse_run_id == course.active_parse_run_id
-        and quiz.course_id == course.id
-    )
+    if quiz.course_id != course.id or quiz.source_parse_run_id != course.active_parse_run_id:
+        return False
+    if version is None:
+        if quiz.handout_version_id is not None:
+            return False
+        if quiz.scope_type == "course":
+            return course.active_handout_version_id is None
+        if quiz.scope_type == "lesson":
+            latest = _latest_lesson_handout_version(
+                session,
+                course_id=course.id,
+                lesson_id=quiz.lesson_id,
+                parse_run_id=quiz.source_parse_run_id,
+            )
+            return quiz.lesson_id is not None and latest is None
+        return False
+    if (
+        version.course_id != course.id
+        or version.source_parse_run_id != quiz.source_parse_run_id
+        or quiz.handout_version_id != version.id
+    ):
+        return False
+    if version.scope_type == "course":
+        return (
+            quiz.scope_type == "course"
+            and version.lesson_id is None
+            and course.active_handout_version_id == version.id
+        )
+    if version.scope_type == "lesson":
+        latest = _latest_lesson_handout_version(
+            session,
+            course_id=course.id,
+            lesson_id=version.lesson_id,
+            parse_run_id=version.source_parse_run_id,
+        )
+        return (
+            quiz.scope_type == "lesson"
+            and quiz.lesson_id == version.lesson_id
+            and latest is not None
+            and latest.id == version.id
+        )
+    return False
 
 
 def _source_attempt(session: Session, run: ReviewTaskRun) -> QuizAttempt | None:
@@ -268,6 +312,188 @@ def _ready_handout_blocks(session: Session, version: HandoutVersion) -> list[Han
             .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
         ).all()
     )
+
+
+def _source_blocks_for_review(
+    *,
+    session: Session,
+    course: Course,
+    quiz: Quiz,
+    version: HandoutVersion | None,
+) -> list[dict[str, Any]]:
+    if version is not None:
+        return [_handout_block_payload(block) for block in _ready_handout_blocks(session, version)]
+    if quiz.scope_type == "course":
+        blocks: list[dict[str, Any]] = []
+        for lesson_version in _latest_lesson_handout_versions_for_review(
+            session,
+            course_id=course.id,
+            parse_run_id=quiz.source_parse_run_id,
+        ):
+            blocks.extend(_handout_block_payload(block) for block in _ready_handout_blocks(session, lesson_version))
+        if blocks:
+            return blocks
+        return _resource_segment_source_blocks(
+            session,
+            course_id=course.id,
+            parse_run_id=quiz.source_parse_run_id,
+            scope_type="course",
+            lesson_id=None,
+        )
+    if quiz.scope_type == "lesson":
+        latest = _latest_lesson_handout_version(
+            session,
+            course_id=course.id,
+            lesson_id=quiz.lesson_id,
+            parse_run_id=quiz.source_parse_run_id,
+        )
+        if latest is not None:
+            return [_handout_block_payload(block) for block in _ready_handout_blocks(session, latest)]
+        return _resource_segment_source_blocks(
+            session,
+            course_id=course.id,
+            parse_run_id=quiz.source_parse_run_id,
+            scope_type="lesson",
+            lesson_id=quiz.lesson_id,
+        )
+    return []
+
+
+def _latest_lesson_handout_version(
+    session: Session,
+    *,
+    course_id: int,
+    lesson_id: int | None,
+    parse_run_id: int | None,
+) -> HandoutVersion | None:
+    if lesson_id is None:
+        return None
+    versions = _latest_lesson_handout_versions_for_review(
+        session,
+        course_id=course_id,
+        parse_run_id=parse_run_id,
+    )
+    for version in versions:
+        if version.lesson_id == lesson_id:
+            return version
+    return None
+
+
+def _latest_lesson_handout_versions_for_review(
+    session: Session,
+    *,
+    course_id: int,
+    parse_run_id: int | None,
+) -> list[HandoutVersion]:
+    stmt = select(HandoutVersion).where(
+        HandoutVersion.course_id == course_id,
+        HandoutVersion.scope_type == "lesson",
+        HandoutVersion.lesson_id.is_not(None),
+    )
+    if parse_run_id is None:
+        stmt = stmt.where(HandoutVersion.source_parse_run_id.is_(None))
+    else:
+        stmt = stmt.where(HandoutVersion.source_parse_run_id == parse_run_id)
+    rows = session.scalars(
+        stmt.order_by(
+            HandoutVersion.lesson_id.asc(),
+            HandoutVersion.created_at.desc(),
+            HandoutVersion.id.desc(),
+        )
+    ).all()
+    latest_by_lesson: dict[int, HandoutVersion] = {}
+    for version in rows:
+        if version.lesson_id is None:
+            continue
+        latest_by_lesson.setdefault(version.lesson_id, version)
+    return list(latest_by_lesson.values())
+
+
+def _resource_segment_source_blocks(
+    session: Session,
+    *,
+    course_id: int,
+    parse_run_id: int | None,
+    scope_type: str,
+    lesson_id: int | None,
+) -> list[dict[str, Any]]:
+    if parse_run_id is None:
+        return []
+    rows = _scoped_resource_segments(
+        session,
+        course_id=course_id,
+        parse_run_id=parse_run_id,
+        scope_type=scope_type,
+        lesson_id=lesson_id,
+    )
+    return [_resource_segment_source_block(segment, resource) for segment, resource in rows]
+
+
+def _scoped_resource_segments(
+    session: Session,
+    *,
+    course_id: int,
+    parse_run_id: int,
+    scope_type: str,
+    lesson_id: int | None,
+) -> list[tuple[CourseSegment, CourseResource]]:
+    stmt = (
+        select(CourseSegment, CourseResource)
+        .join(CourseResource, CourseResource.id == CourseSegment.resource_id)
+        .where(
+            CourseSegment.course_id == course_id,
+            CourseSegment.parse_run_id == parse_run_id,
+            CourseSegment.is_active.is_(True),
+            CourseResource.course_id == course_id,
+            CourseResource.scope_type == scope_type,
+        )
+        .order_by(CourseSegment.order_no.asc(), CourseSegment.id.asc())
+    )
+    if scope_type == "course":
+        stmt = stmt.where(CourseResource.lesson_id.is_(None))
+    elif scope_type == "lesson":
+        if lesson_id is None:
+            return []
+        stmt = stmt.where(CourseResource.lesson_id == lesson_id)
+    else:
+        return []
+    return [(segment, resource) for segment, resource in session.execute(stmt).all()]
+
+
+def _resource_segment_source_block(segment: CourseSegment, resource: CourseResource) -> dict[str, Any]:
+    segment_key = f"segment-{segment.id}"
+    block_key = f"resource-{resource.id}-segment-{segment.id}"
+    title = segment.title or resource.original_name or f"Resource segment {segment.id}"
+    content = segment.text_content or segment.plain_text or ""
+    citation: dict[str, Any] = {
+        "resourceId": resource.id,
+        "segmentId": segment.id,
+        "segmentKey": segment_key,
+        "refLabel": resource.original_name or f"Resource {resource.id}",
+    }
+    if segment.page_no is not None:
+        citation["pageNo"] = segment.page_no
+    if segment.slide_no is not None:
+        citation["slideNo"] = segment.slide_no
+    if segment.start_sec is not None:
+        citation["startSec"] = int(segment.start_sec)
+    if segment.end_sec is not None:
+        citation["endSec"] = int(segment.end_sec)
+    return {
+        "blockId": block_key,
+        "outlineKey": block_key,
+        "title": title,
+        "summary": content[:240],
+        "contentMd": content,
+        "sourceSegmentKeys": [segment_key],
+        "knowledgePoints": [
+            {
+                "knowledgePointKey": f"{block_key}-main",
+                "displayName": title,
+            }
+        ],
+        "citations": [citation],
+    }
 
 
 def _segments_for_review(session: Session, *, course_id: int, parse_run_id: int | None) -> list[CourseSegment]:

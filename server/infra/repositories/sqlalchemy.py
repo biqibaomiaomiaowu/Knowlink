@@ -2943,7 +2943,7 @@ class SqlAlchemyRuntimeRepository:
             updates=mastery_updates,
             result_items=_mapping_list(result.get("items")),
         )
-        if quiz.scope_type != "course" or quiz.source_parse_run_id is None or quiz.handout_version_id is None:
+        if not self._quiz_matches_review_refresh_context(quiz, self.session.get(Course, quiz.course_id)):
             self._commit_or_flush()
             return {
                 "attemptId": attempt.id,
@@ -2959,6 +2959,8 @@ class SqlAlchemyRuntimeRepository:
         review_run = ReviewTaskRun(
             user_id=self.user_id,
             course_id=quiz.course_id,
+            scope_type=quiz.scope_type,
+            lesson_id=quiz.lesson_id if quiz.scope_type == "lesson" else None,
             source_quiz_attempt_id=attempt.id,
             status="queued",
             generated_count=0,
@@ -3016,6 +3018,8 @@ class SqlAlchemyRuntimeRepository:
         review_run = ReviewTaskRun(
             user_id=self.user_id,
             course_id=course_id,
+            scope_type=source_quiz.scope_type,
+            lesson_id=source_quiz.lesson_id if source_quiz.scope_type == "lesson" else None,
             source_quiz_attempt_id=latest_attempt.id,
             status="queued",
             generated_count=0,
@@ -3051,29 +3055,33 @@ class SqlAlchemyRuntimeRepository:
 
     def _latest_review_refresh_source(self, course: Course) -> tuple[QuizAttempt, Quiz] | None:
         if course.active_parse_run_id is None or course.active_handout_version_id is None:
-            return None
-        row = self.session.execute(
+            has_fallback_source = self._course_has_ready_lesson_handout_blocks(
+                course_id=course.id,
+                parse_run_id=course.active_parse_run_id,
+            ) or self._has_quiz_resource_segments(
+                course_id=course.id,
+                parse_run_id=course.active_parse_run_id,
+                scope_type="course",
+                lesson_id=None,
+            )
+            if not has_fallback_source:
+                return None
+        rows = self.session.execute(
             select(QuizAttempt, Quiz)
             .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
-            .join(HandoutVersion, HandoutVersion.id == Quiz.handout_version_id)
             .where(
                 QuizAttempt.user_id == self.user_id,
                 QuizAttempt.course_id == course.id,
                 Quiz.course_id == course.id,
-                Quiz.scope_type == "course",
                 Quiz.source_parse_run_id == course.active_parse_run_id,
-                Quiz.handout_version_id == course.active_handout_version_id,
-                HandoutVersion.id == course.active_handout_version_id,
-                HandoutVersion.course_id == course.id,
-                HandoutVersion.scope_type == "course",
-                HandoutVersion.lesson_id.is_(None),
-                HandoutVersion.source_parse_run_id == course.active_parse_run_id,
+                Quiz.scope_type == "course",
             )
             .order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc())
-        ).first()
-        if row is None:
-            return None
-        return row[0], row[1]
+        ).all()
+        for attempt, quiz in rows:
+            if self._quiz_matches_review_refresh_context(quiz, course):
+                return attempt, quiz
+        return None
 
     def list_review_tasks(self, course_id: int) -> list[dict[str, Any]]:
         latest_run_id = self._latest_active_review_run_id(course_id, statuses=("queued", "running", "ready"))
@@ -3111,15 +3119,11 @@ class SqlAlchemyRuntimeRepository:
             select(ReviewTask)
             .join(Course, Course.id == ReviewTask.course_id)
             .join(ReviewTaskRun, ReviewTaskRun.id == ReviewTask.review_task_run_id)
-            .join(QuizAttempt, QuizAttempt.id == ReviewTaskRun.source_quiz_attempt_id)
-            .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
             .where(
                 ReviewTask.id == review_task_id,
                 ReviewTask.status == "pending",
                 ReviewTaskRun.status == "ready",
                 Course.user_id == self.user_id,
-                Course.active_parse_run_id == Quiz.source_parse_run_id,
-                Course.active_handout_version_id == Quiz.handout_version_id,
             )
         )
         latest_run_id = (
@@ -3172,7 +3176,7 @@ class SqlAlchemyRuntimeRepository:
 
         self._supersede_pending_review_tasks_before(run_id=run.id, course_id=run.course_id)
 
-        active_blocks = self._active_handout_blocks_for_course(run.course_id)
+        active_blocks = self._active_handout_blocks_for_review_run(run)
         blocks_by_key = _blocks_by_strategy_key(active_blocks)
         task_rows: dict[str, ReviewTask] = {}
         for item in _mapping_list(payload.get("tasks")):
@@ -3796,8 +3800,11 @@ class SqlAlchemyRuntimeRepository:
     def _latest_active_review_run_id(self, course_id: int, *, statuses: tuple[str, ...]) -> int | None:
         if not statuses:
             return None
-        return self.session.scalar(
-            select(func.max(ReviewTaskRun.id))
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        rows = self.session.execute(
+            select(ReviewTaskRun, Quiz)
             .join(Course, Course.id == ReviewTaskRun.course_id)
             .join(QuizAttempt, QuizAttempt.id == ReviewTaskRun.source_quiz_attempt_id)
             .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
@@ -3806,10 +3813,80 @@ class SqlAlchemyRuntimeRepository:
                 ReviewTaskRun.course_id == course_id,
                 ReviewTaskRun.status.in_(statuses),
                 Course.user_id == self.user_id,
-                Course.active_parse_run_id == Quiz.source_parse_run_id,
-                Course.active_handout_version_id == Quiz.handout_version_id,
             )
-        )
+            .order_by(ReviewTaskRun.id.desc())
+        ).all()
+        for run, quiz in rows:
+            if self._quiz_matches_review_refresh_context(quiz, course):
+                return run.id
+        return None
+
+    def _quiz_matches_review_refresh_context(self, quiz: Quiz, course: Course | None) -> bool:
+        if course is None:
+            return False
+        if (
+            quiz.course_id != course.id
+            or quiz.source_parse_run_id is None
+            or quiz.source_parse_run_id != course.active_parse_run_id
+        ):
+            return False
+        if quiz.handout_version_id is None:
+            return self._quiz_without_handout_matches_review_context(quiz=quiz, course=course)
+
+        version = self.session.get(HandoutVersion, quiz.handout_version_id)
+        if (
+            version is None
+            or version.course_id != course.id
+            or version.source_parse_run_id != quiz.source_parse_run_id
+            or quiz.handout_version_id != version.id
+        ):
+            return False
+        if version.scope_type == "course":
+            return (
+                quiz.scope_type == "course"
+                and version.lesson_id is None
+                and course.active_handout_version_id == version.id
+            )
+        if version.scope_type == "lesson":
+            latest = self._get_latest_handout_version_model(
+                course.id,
+                scope_type="lesson",
+                lesson_id=version.lesson_id,
+            )
+            return (
+                quiz.scope_type == "lesson"
+                and quiz.lesson_id == version.lesson_id
+                and latest is not None
+                and latest.id == version.id
+            )
+        return False
+
+    def _quiz_without_handout_matches_review_context(self, *, quiz: Quiz, course: Course) -> bool:
+        if quiz.scope_type == "course":
+            if course.active_handout_version_id is not None:
+                return False
+            return self._course_has_ready_lesson_handout_blocks(
+                course_id=course.id,
+                parse_run_id=quiz.source_parse_run_id,
+            ) or self._has_quiz_resource_segments(
+                course_id=course.id,
+                parse_run_id=quiz.source_parse_run_id,
+                scope_type="course",
+                lesson_id=None,
+            )
+        if quiz.scope_type == "lesson" and quiz.lesson_id is not None:
+            latest = self._get_latest_handout_version_model(
+                course.id,
+                scope_type="lesson",
+                lesson_id=quiz.lesson_id,
+            )
+            return latest is None and self._has_quiz_resource_segments(
+                course_id=course.id,
+                parse_run_id=quiz.source_parse_run_id,
+                scope_type="lesson",
+                lesson_id=quiz.lesson_id,
+            )
+        return False
 
     def _supersede_pending_review_tasks_before(self, *, run_id: int, course_id: int) -> None:
         previous_tasks = self.session.scalars(
@@ -3823,8 +3900,11 @@ class SqlAlchemyRuntimeRepository:
             previous_task.status = "superseded"
 
     def _review_run_can_publish(self, run: ReviewTaskRun) -> bool:
-        latest_run_id = self.session.scalar(
-            select(func.max(ReviewTaskRun.id))
+        course = self._get_course_model(run.course_id)
+        if course is None:
+            return False
+        rows = self.session.execute(
+            select(ReviewTaskRun, Quiz)
             .join(Course, Course.id == ReviewTaskRun.course_id)
             .join(QuizAttempt, QuizAttempt.id == ReviewTaskRun.source_quiz_attempt_id)
             .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
@@ -3833,11 +3913,13 @@ class SqlAlchemyRuntimeRepository:
                 ReviewTaskRun.course_id == run.course_id,
                 ReviewTaskRun.id >= run.id,
                 Course.user_id == self.user_id,
-                Course.active_parse_run_id == Quiz.source_parse_run_id,
-                Course.active_handout_version_id == Quiz.handout_version_id,
             )
-        )
-        return latest_run_id == run.id
+            .order_by(ReviewTaskRun.id.desc())
+        ).all()
+        for candidate, quiz in rows:
+            if self._quiz_matches_review_refresh_context(quiz, course):
+                return candidate.id == run.id
+        return False
 
     def _list_mastery_record_dicts(self, *, course_id: int) -> list[dict[str, Any]]:
         rows = self.session.scalars(
@@ -3918,10 +4000,33 @@ class SqlAlchemyRuntimeRepository:
         version = self._get_latest_handout_version_model(course_id)
         if version is None:
             return []
+        return self._ready_handout_blocks_for_version(version.id)
+
+    def _active_handout_blocks_for_review_run(self, run: ReviewTaskRun) -> list[HandoutBlock]:
+        if run.source_quiz_attempt_id is None:
+            return self._active_handout_blocks_for_course(run.course_id)
+        attempt = self.session.get(QuizAttempt, run.source_quiz_attempt_id)
+        if attempt is None:
+            return self._active_handout_blocks_for_course(run.course_id)
+        quiz = self.session.get(Quiz, attempt.quiz_id)
+        if quiz is None:
+            return self._active_handout_blocks_for_course(run.course_id)
+        if quiz.handout_version_id is not None:
+            return self._ready_handout_blocks_for_version(quiz.handout_version_id)
+        blocks: list[HandoutBlock] = []
+        if quiz.scope_type == "course":
+            for version in self._latest_lesson_handout_versions_for_quiz(
+                course_id=run.course_id,
+                parse_run_id=quiz.source_parse_run_id,
+            ):
+                blocks.extend(self._ready_handout_blocks_for_version(version.id))
+        return blocks
+
+    def _ready_handout_blocks_for_version(self, handout_version_id: int) -> list[HandoutBlock]:
         return list(
             self.session.scalars(
                 select(HandoutBlock)
-                .where(HandoutBlock.handout_version_id == version.id, HandoutBlock.status == "ready")
+                .where(HandoutBlock.handout_version_id == handout_version_id, HandoutBlock.status == "ready")
                 .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
             ).all()
         )

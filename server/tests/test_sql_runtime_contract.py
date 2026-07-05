@@ -26,6 +26,7 @@ from server.domain.services.reviews import ReviewService
 from server.infra.db.base import Base
 from server.infra.db.models import AsyncTask, IdempotencyRecord, Quiz, QuizAttempt, ReviewTaskRun
 from server.schemas.requests import CreateCourseRequest, SubmitQuizRequest
+from server.tasks.reviews import run_review_refresh
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1639,6 +1640,222 @@ def test_sql_review_regenerate_uses_latest_attempt_with_active_course_context():
     assert task.target_type == "review_task_run"
     assert task.target_id == run.id
     assert task.payload_json == {"courseId": course_id, "reviewTaskRunId": run.id}
+
+    session.close()
+    engine.dispose()
+
+
+def test_sql_review_regenerate_accepts_course_attempt_backed_by_lesson_handout():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite review regenerate lesson handout fallback",
+        entry_type="manual_import",
+        goal_text="verify course quiz review from lesson handout",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    lesson = repo.create_lesson(course_id=course_id, title="Lesson handout source")
+    lesson_id = lesson["lessonId"]
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "scopeType": "lesson",
+            "lessonId": lesson_id,
+            "usageRole": "lesson_material",
+            "objectKey": f"raw/1/{course_id}/lesson-review.pdf",
+            "originalName": "lesson-review.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:lesson-review",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Lesson review source",
+                "textContent": "Lesson handout evidence supports review generation.",
+                "plainText": "Lesson handout evidence supports review generation.",
+                "pageNo": 1,
+                "orderNo": 1,
+                "tokenCount": 12,
+            }
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    _handout, _trigger, blocks = repo.create_handout(
+        course_id,
+        scope_type="lesson",
+        lesson_id=lesson_id,
+        artifact_kind="lesson_handout",
+        outline={
+            "title": "Lesson review handout",
+            "summary": "Lesson review handout.",
+            "items": [
+                {
+                    "outlineKey": "lesson-review-section",
+                    "title": "Lesson review section",
+                    "summary": "Lesson review section.",
+                    "startSec": 0,
+                    "endSec": 60,
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "lesson-review-block",
+                            "title": "Lesson review block",
+                            "summary": "Lesson review block.",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    block_id = blocks[0]["blockId"]
+    repo.save_handout_block_result(
+        block_id,
+        {
+            "title": "Lesson review block",
+            "summary": "Lesson review block.",
+            "contentMd": "Lesson handout evidence supports review generation.",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-lesson-review",
+                    "displayName": "Lesson review",
+                    "description": "Lesson handout review evidence.",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [{"resourceId": resource["resourceId"], "segmentKey": segment_key, "pageNo": 1}],
+        },
+    )
+    quiz, _ = repo.create_quiz(course_id)
+    assert quiz["scopeType"] == "course"
+    assert session.get(Quiz, quiz["quizId"]).handout_version_id is None
+    repo.save_quiz_generation_result(
+        quiz["quizId"],
+        {
+            "quizType": "chapter_review",
+            "questions": [
+                {
+                    "questionKey": "q-lesson-review",
+                    "questionType": "single_choice",
+                    "stemMd": "What supports review generation?",
+                    "options": ["A. Lesson handout", "B. Nothing"],
+                    "correctAnswer": "A",
+                    "explanationMd": "The lesson handout provides the evidence.",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-lesson-review",
+                    "knowledgePointName": "Lesson review",
+                    "sourceBlockKey": str(block_id),
+                    "sourceSegmentKeys": [segment_key],
+                }
+            ],
+        },
+        refs=[
+            {
+                "questionKey": "q-lesson-review",
+                "resourceId": resource["resourceId"],
+                "segmentId": segments[0]["segmentId"],
+                "segmentKey": segment_key,
+                "refType": "citation",
+                "pageNo": 1,
+                "sortNo": 1,
+            }
+        ],
+    )
+    result = repo.save_quiz_attempt_result(
+        quiz["quizId"],
+        quiz_attempt_result={
+            "score": 0,
+            "totalScore": 1,
+            "accuracy": 0.0,
+            "items": [
+                {
+                    "questionKey": "q-lesson-review",
+                    "selectedOption": "B",
+                    "correctAnswer": "A",
+                    "isCorrect": False,
+                    "obtainedScore": 0,
+                    "explanationMd": "The lesson handout provides the evidence.",
+                    "knowledgePointKey": "kp-lesson-review",
+                    "sourceBlockKey": str(block_id),
+                }
+            ],
+            "masteryDelta": [
+                {
+                    "knowledgePointKey": "kp-lesson-review",
+                    "knowledgePoint": "Lesson review",
+                    "delta": -0.2,
+                    "correctCount": 0,
+                    "wrongCount": 1,
+                    "sourceQuestionKeys": ["q-lesson-review"],
+                }
+            ],
+        },
+        mastery_updates=[
+            {
+                "knowledgePointKey": "kp-lesson-review",
+                "knowledgePoint": "Lesson review",
+                "masteryScoreDelta": -0.2,
+                "confidenceDelta": -0.04,
+                "nextMasteryScore": 0.3,
+                "nextConfidenceScore": 0.26,
+                "correctCountDelta": 0,
+                "wrongCountDelta": 1,
+                "reviewPriority": 90,
+                "sourceQuestionKeys": ["q-lesson-review"],
+                "status": "needs_review",
+            }
+        ],
+    )
+    assert result["reviewTaskRunId"] is not None
+
+    dispatcher = _RecordingDispatcher()
+    service = ReviewService(
+        courses=repo,
+        reviews=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+        async_tasks=repo,
+    )
+
+    regenerated = service.regenerate_review_tasks(course_id=course_id, idempotency_key=None)
+
+    regenerated_run = session.get(ReviewTaskRun, regenerated["entity"]["id"])
+    task = session.get(AsyncTask, regenerated["taskId"])
+    assert regenerated["status"] == "queued"
+    assert regenerated_run is not None
+    assert regenerated_run.source_quiz_attempt_id == result["attemptId"]
+    assert regenerated_run.scope_type == "course"
+    assert task is not None
+    assert task.parse_run_id == parse_run_id
+    assert dispatcher.calls == [{"taskId": task.id, "payload": {"courseId": course_id, "reviewTaskRunId": regenerated_run.id}}]
+
+    worker_result = run_review_refresh(
+        {"taskId": task.id, "courseId": course_id, "reviewTaskRunId": regenerated_run.id},
+        session_factory=lambda: session,
+    )
+    task_views = service.list_review_tasks(course_id=course_id)["items"]
+
+    assert worker_result["status"] == "ready"
+    assert len(task_views) == 1
+    assert task_views[0]["linkedHandoutBlockId"] == block_id
+    assert task_views[0]["jumpRoute"] == f"/courses/{course_id}/review"
 
     session.close()
     engine.dispose()
