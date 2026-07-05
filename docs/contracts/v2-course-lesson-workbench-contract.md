@@ -35,7 +35,7 @@ In scope:
 
 - 完整课程库：搜索、筛选、排序、归档、恢复、删除前影响范围预览。
 - Lesson 作为一级领域对象：顺序、主视频、节课资料、学习状态、掌握度和下一步动作。
-- 课程工作台 read model：课程信息、整体进度、节课列表、课程级资料、全课程 QA、图谱、综合测验、总复习、报告、导出和设置入口。
+- 课程工作台 read model：课程信息、整体进度、节课列表、课程级资料、全课程 QA、图谱、课程测试、总复习、报告、导出和设置入口。
 - 节课详情 read model：主视频、本节资料、本节讲义、本节 QA、本节测验、本节复习、本节图谱、进度、引用、薄弱点和下一步动作。
 - 资料必须显式带 `scopeType`、`lessonId` 和 `usageRole`，区分课程级共享资料与单节课独享资料。
 - 讲义、QA、测验、复习、掌握度、进度、图谱、报告、导出和推荐入口必须带 scope。
@@ -112,7 +112,7 @@ GET    /api/v1/courses/{courseId}/workbench
 - `nextActions`
 - `placeholderStates`
 
-Quick entries include primary keys `lesson_study`, `course_qa`, `comprehensive_quiz`, and `course_review`.
+Quick entries include primary keys `lesson_study`, `course_qa`, `course_quiz`, and `course_review`.
 Reserved entries may include `course_graph`, `report`, `export`, and `settings`.
 
 Each quick entry returns:
@@ -294,7 +294,7 @@ GET  /api/v1/courses/{courseId}/resources?scopeType=&lessonId=
 - MP4 默认 `lessonPlacement=auto_create`，创建 lesson 并设置 `usageRole=primary_video`；也可以 `bind_existing` 绑定已有 lesson。
 - `upload-init` 返回的 `headers` 必须包含 `x-amz-meta-scope-type`；当请求已确定 `lessonId` 时，还必须包含 `x-amz-meta-lesson-id`。
 - `upload-complete` 返回资源行必须携带 `scopeType`、`lessonId`、`usageRole`、`sourceType`、`sourcePartId`、`visibleToCourseQa`、`durationSec`。
-- 课程级资料可被全课程 QA、课程总讲义、综合测验、总复习和课程图谱读取，也可作为节课产物的辅助证据。
+- 课程级资料可被全课程 QA、课程总讲义、课程测试、总复习和课程图谱读取，也可作为节课产物的辅助证据。
 - 节课独享资料默认只被本节讲义、本节 QA、本节测验、本节复习读取。
 
 Bilibili import fields:
@@ -406,19 +406,17 @@ Frozen route tokens:
 ## 7. Quiz Scope And Subjective Grading Placeholder
 
 ```text
+POST /api/v1/courses/{courseId}/quizzes/generate
 POST /api/v1/courses/{courseId}/lessons/{lessonId}/quizzes/generate
 GET  /api/v1/courses/{courseId}/lessons/{lessonId}/quizzes/current
-POST /api/v1/courses/{courseId}/quizzes/stage/generate
-POST /api/v1/courses/{courseId}/quizzes/comprehensive/generate
 GET  /api/v1/quizzes/{quizId}
 POST /api/v1/quizzes/{quizId}/submit
-GET  /api/v1/courses/{courseId}/subjective-grading/placeholder
 ```
 
 `quizzes` scope fields:
 
-- `scopeType`: `lesson|lesson_range|course`
-- allowed values include `lesson`、`lesson_range`、`course`
+- current generation `scopeType`: `course|lesson`
+- legacy quiz detail reads may preserve historical `lesson_range`, but `lesson_range` is no longer an exposed product entry and must not be accepted for new quiz generation.
 - `lessonId`
 - `startLessonId`
 - `endLessonId`
@@ -455,7 +453,7 @@ Subjective grading placeholder:
 
 正式 LLM judge 和人审队列不在本轮实现。
 
-Frozen route token:
+Deprecated route token:
 
 - POST /api/v1/courses/{courseId}/quizzes/stage/generate
 
