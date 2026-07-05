@@ -163,26 +163,97 @@ class QuizService:
         course_id: int,
         lesson_id: int,
         question_count_level: str = "medium",
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
-        lesson = self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
-        try:
-            quiz_payload = _build_scoped_objective_quiz_payload(
-                course_id=course_id,
-                scope_type="lesson",
-                lesson=lesson,
-                sources=self._lesson_quiz_sources(course_id=course_id, lesson=lesson),
-                question_count_level=question_count_level,
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        enqueue_request: tuple[int, dict[str, object]] | None = None
+        created_response: dict[str, object] | None = None
+
+        def factory() -> dict[str, object]:
+            nonlocal enqueue_request, created_response
+            try:
+                _, trigger = self.quizzes.create_quiz(
+                    course_id,
+                    question_count_level=question_count_level,
+                    scope_type="lesson",
+                    lesson_id=lesson_id,
+                    start_lesson_id=None,
+                    end_lesson_id=None,
+                )
+            except ValueError as exc:
+                raise ServiceError(
+                    message=str(exc),
+                    error_code="quiz.not_ready",
+                    status_code=409,
+                ) from exc
+            if _should_enqueue_trigger(trigger):
+                task_id = _int_value(trigger.get("taskId"))
+                if task_id is None:
+                    raise_async_task_binding_failed(
+                        self.async_tasks,
+                        task_id=None,
+                        message="Async task trigger did not include a task id.",
+                    )
+                quiz_id = _entity_id(trigger)
+                if quiz_id is None:
+                    raise_async_task_binding_failed(
+                        self.async_tasks,
+                        task_id=task_id,
+                        message="Async task trigger did not include a quiz id.",
+                    )
+                payload = {
+                    "courseId": course_id,
+                    "quizId": quiz_id,
+                    "questionCountLevel": question_count_level,
+                    "scopeType": "lesson",
+                    "lessonId": lesson_id,
+                    "startLessonId": None,
+                    "endLessonId": None,
+                }
+                trigger, task_id = ensure_async_task_for_trigger(
+                    self.async_tasks,
+                    trigger,
+                    course_id=course_id,
+                    task_type="quiz_generate",
+                    payload=payload,
+                    target_type="quiz",
+                    target_id=quiz_id,
+                    allow_create=True,
+                )
+                if task_id is None:
+                    raise_async_task_binding_failed(
+                        self.async_tasks,
+                        task_id=None,
+                        message="Async task trigger could not be bound.",
+                    )
+                enqueue_request = (task_id, payload)
+            created_response = trigger
+            return trigger
+
+        result = run_fingerprinted_idempotent(
+            self.idempotency,
+            scope=f"quizzes.generate:{course_id}:lesson:{lesson_id}",
+            key=idempotency_key,
+            request_payload={
+                "courseId": course_id,
+                "lessonId": lesson_id,
+                "questionCountLevel": question_count_level,
+                "scopeType": "lesson",
+            },
+            factory=factory,
+            legacy_action=None,
+        )
+        if enqueue_request is not None and result is created_response:
+            task_id, payload = enqueue_request
+            enqueue_or_fail_if_missing_dispatcher(
+                self.async_tasks,
+                task_id=task_id,
+                dispatcher=self.task_dispatcher,
+                enqueue=lambda: self.task_dispatcher.enqueue_quiz_generate(task_id=task_id, payload=payload),
             )
-            quiz = self.quizzes.create_scoped_quiz(
-                course_id=course_id,
-                scope_type="lesson",
-                lesson_id=lesson_id,
-                question_count_level=question_count_level,
-                quiz_payload=quiz_payload,
-            )
-        except ValueError as exc:
-            raise self._service_error_from_value_error(exc) from exc
-        return self._scoped_quiz_response(quiz)
+        if isinstance(result, dict) and self.async_tasks is not None:
+            return refresh_enqueue_failure_status(self.async_tasks, result)
+        return result
 
     def get_current_lesson_quiz(self, *, course_id: int, lesson_id: int) -> dict[str, object]:
         self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)

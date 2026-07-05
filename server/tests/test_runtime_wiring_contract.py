@@ -1548,6 +1548,636 @@ finally:
     assert "scope" in payload["error_message"]
 
 
+def test_course_quiz_generate_uses_lesson_handout_blocks_when_course_handout_missing(tmp_path):
+    script = """
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.models import Quiz
+from server.infra.db.session import create_session, get_engine
+from server.domain.services.quizzes import QuizService
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.quizzes import run_quiz_generate
+
+Base.metadata.create_all(get_engine())
+
+class Dispatcher:
+    def enqueue_quiz_generate(self, *, task_id, payload):
+        return None
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL course quiz from lessons",
+        entry_type="manual_import",
+        goal_text="verify course quiz aggregates lesson handouts",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    lesson_a = repo.create_lesson(course_id=course_id, title="Limits")
+    lesson_b = repo.create_lesson(course_id=course_id, title="Derivatives")
+    resource_a = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/limits.pdf",
+            "originalName": "limits.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:limits",
+            "scopeType": "lesson",
+            "lessonId": lesson_a["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+    resource_b = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/derivatives.pdf",
+            "originalName": "derivatives.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:derivatives",
+            "scopeType": "lesson",
+            "lessonId": lesson_b["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = parse_run["parseRunId"]
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segment_a = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource_a["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 1,
+                "textContent": "Limits describe function values as inputs approach a point.",
+                "plainText": "Limits describe function values as inputs approach a point.",
+                "pageNo": 1,
+            }
+        ],
+    )[0]
+    segment_b = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource_b["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "orderNo": 2,
+                "textContent": "Derivatives measure instantaneous rate of change.",
+                "plainText": "Derivatives measure instantaneous rate of change.",
+                "pageNo": 2,
+            }
+        ],
+    )[0]
+
+    for lesson, resource, segment, key, title, content in [
+        (lesson_a, resource_a, segment_a, "limits-block", "Limit definition", "Limits describe function values."),
+        (lesson_b, resource_b, segment_b, "derivatives-block", "Derivative meaning", "Derivatives measure change."),
+    ]:
+        _, _, blocks = repo.create_handout(
+            course_id,
+            scope_type="lesson",
+            lesson_id=lesson["lessonId"],
+            artifact_kind="lesson_handout",
+            outline={
+                "title": f"{title} outline",
+                "summary": title,
+                "items": [
+                    {
+                        "outlineKey": f"{key}-section",
+                        "title": title,
+                        "summary": title,
+                        "startSec": 0,
+                        "endSec": 60,
+                        "sortNo": 1,
+                        "children": [
+                            {
+                                "outlineKey": key,
+                                "title": title,
+                                "summary": title,
+                                "startSec": 0,
+                                "endSec": 60,
+                                "sortNo": 1,
+                                "generationStatus": "pending",
+                                "sourceSegmentKeys": [segment["segmentKey"]],
+                                "topicTags": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        repo.save_handout_block_result(
+            blocks[0]["blockId"],
+            {
+                "title": title,
+                "summary": title,
+                "contentMd": content,
+                "knowledgePoints": [{"knowledgePointKey": f"kp-{key}", "displayName": title}],
+                "citations": [
+                    {
+                        "resourceId": resource["resourceId"],
+                        "segmentKey": segment["segmentKey"],
+                        "pageNo": segment["pageNo"],
+                        "refLabel": f"{resource['originalName']} page {segment['pageNo']}",
+                    }
+                ],
+            },
+        )
+
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=Dispatcher(),
+        async_tasks=repo,
+    )
+    trigger = service.generate_quiz(course_id=course_id, question_count_level="small", idempotency_key=None)
+    task_id = trigger["taskId"]
+    quiz_id = trigger["entity"]["id"]
+finally:
+    session.close()
+
+observed = {}
+
+def fake_generate_quiz(block_payloads, *, segments, course_context, preferences, question_count_level):
+    observed["titles"] = [block["title"] for block in block_payloads]
+    observed["segment_count"] = len(segments)
+    return {
+        "quizType": "chapter_review",
+        "questions": [
+            {
+                "questionKey": "q1-course-from-lessons",
+                "questionType": "single_choice",
+                "stemMd": "Which statement is supported by the lesson handouts?",
+                "options": ["A. Limits describe values.", "B. No lesson evidence.", "C. Scope mismatch.", "D. Subjective."],
+                "correctAnswer": "A",
+                "explanationMd": "Uses aggregated lesson handout evidence.",
+                "difficultyLevel": "medium",
+                "knowledgePointKey": "kp-course-lessons",
+                "knowledgePointName": "Course lesson evidence",
+                "sourceBlockKey": str(block_payloads[0]["blockId"]),
+                "sourceSegmentKeys": [block_payloads[0]["sourceSegmentKeys"][0]],
+            }
+        ],
+    }
+
+result = run_quiz_generate(
+    {
+        "taskId": task_id,
+        "courseId": course_id,
+        "quizId": quiz_id,
+        "questionCountLevel": "small",
+        "scopeType": "course",
+        "lessonId": None,
+        "startLessonId": None,
+        "endLessonId": None,
+    },
+    generate_quiz_func=fake_generate_quiz,
+)
+
+session = create_session()
+try:
+    quiz_row = session.get(Quiz, quiz_id)
+    print(json.dumps({
+        "trigger_status": trigger["status"],
+        "result_status": result["status"],
+        "result_error": result.get("errorMessage"),
+        "quiz_status": quiz_row.status,
+        "question_count": quiz_row.question_count,
+        "observed_titles": observed.get("titles", []),
+        "observed_segment_count": observed.get("segment_count", 0),
+    }))
+finally:
+    session.close()
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'course-quiz-from-lessons.sqlite3'}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["trigger_status"] == "queued"
+    assert payload["result_status"] == "ready", json.dumps(payload, sort_keys=True)
+    assert payload["result_error"] is None
+    assert payload["quiz_status"] == "ready"
+    assert payload["question_count"] == 1
+    assert payload["observed_titles"] == ["Limit definition", "Derivative meaning"]
+    assert payload["observed_segment_count"] == 2
+
+
+def test_lesson_quiz_generate_uses_only_current_lesson_resource_segments_when_handout_missing(tmp_path):
+    script = """
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.models import Quiz
+from server.infra.db.session import create_session, get_engine
+from server.domain.services.quizzes import QuizService
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.quizzes import run_quiz_generate
+
+Base.metadata.create_all(get_engine())
+
+class Dispatcher:
+    def enqueue_quiz_generate(self, *, task_id, payload):
+        return None
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL lesson quiz from lesson resource",
+        entry_type="manual_import",
+        goal_text="verify lesson quiz resource scope isolation",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    lesson = repo.create_lesson(course_id=course_id, title="B+ Tree")
+    other_lesson = repo.create_lesson(course_id=course_id, title="Hash Index")
+    course_resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/course.pdf",
+            "originalName": "course.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:course-scope",
+            "scopeType": "course",
+            "usageRole": "course_material",
+        },
+    )
+    lesson_resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/lesson.pdf",
+            "originalName": "lesson.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:lesson-scope",
+            "scopeType": "lesson",
+            "lessonId": lesson["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+    other_lesson_resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/other-lesson.pdf",
+            "originalName": "other-lesson.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:other-lesson-scope",
+            "scopeType": "lesson",
+            "lessonId": other_lesson["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = parse_run["parseRunId"]
+    repo.mark_parse_run_succeeded(parse_run_id)
+    repo.create_course_segments(
+        course_id=course_id,
+        resource_id=course_resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Course-only overview",
+                "orderNo": 1,
+                "textContent": "This is a course-level resource and must not feed lesson quiz fallback.",
+                "plainText": "This is a course-level resource and must not feed lesson quiz fallback.",
+                "pageNo": 1,
+            }
+        ],
+    )
+    lesson_segment = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=lesson_resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Lesson-scoped B+ Tree fanout",
+                "orderNo": 2,
+                "textContent": "A B+ tree uses high fanout to reduce lookup depth.",
+                "plainText": "A B+ tree uses high fanout to reduce lookup depth.",
+                "pageNo": 4,
+            }
+        ],
+    )[0]
+    repo.create_course_segments(
+        course_id=course_id,
+        resource_id=other_lesson_resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Other lesson hash index",
+                "orderNo": 3,
+                "textContent": "This belongs to another lesson and must not feed current lesson quiz.",
+                "plainText": "This belongs to another lesson and must not feed current lesson quiz.",
+                "pageNo": 8,
+            }
+        ],
+    )
+
+    service = QuizService(
+        courses=repo,
+        lessons=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=Dispatcher(),
+        async_tasks=repo,
+    )
+    trigger = service.generate_lesson_quiz(
+        course_id=course_id,
+        lesson_id=lesson["lessonId"],
+        question_count_level="small",
+    )
+    task_id = trigger["taskId"]
+    quiz_id = trigger["entity"]["id"]
+finally:
+    session.close()
+
+observed = {}
+
+def fake_generate_quiz(block_payloads, *, segments, course_context, preferences, question_count_level):
+    observed["block_titles"] = [block["title"] for block in block_payloads]
+    observed["segment_titles"] = [segment["title"] for segment in segments]
+    block = block_payloads[0]
+    kp = block["knowledgePoints"][0]
+    return {
+        "quizType": "chapter_review",
+        "questions": [
+            {
+                "questionKey": "q1-lesson-resource",
+                "questionType": "single_choice",
+                "stemMd": "What does the lesson-scoped evidence say?",
+                "options": ["A. B+ tree fanout reduces lookup depth.", "B. It is course-only.", "C. It is another lesson.", "D. It is unrelated."],
+                "correctAnswer": "A",
+                "explanationMd": "Uses only current lesson resource fallback evidence.",
+                "difficultyLevel": "medium",
+                "knowledgePointKey": kp["knowledgePointKey"],
+                "knowledgePointName": kp["displayName"],
+                "sourceBlockKey": str(block["blockId"]),
+                "sourceSegmentKeys": [block["sourceSegmentKeys"][0]],
+            }
+        ],
+    }
+
+result = run_quiz_generate(
+    {
+        "taskId": task_id,
+        "courseId": course_id,
+        "quizId": quiz_id,
+        "questionCountLevel": "small",
+        "scopeType": "lesson",
+        "lessonId": lesson["lessonId"],
+        "startLessonId": None,
+        "endLessonId": None,
+    },
+    generate_quiz_func=fake_generate_quiz,
+)
+
+session = create_session()
+try:
+    quiz_row = session.get(Quiz, quiz_id)
+    print(json.dumps({
+        "trigger_status": trigger["status"],
+        "result_status": result["status"],
+        "result_error": result.get("errorMessage"),
+        "quiz_status": quiz_row.status,
+        "question_count": quiz_row.question_count,
+        "observed_block_titles": observed.get("block_titles", []),
+        "observed_segment_titles": observed.get("segment_titles", []),
+        "lesson_segment_key": lesson_segment["segmentKey"],
+    }))
+finally:
+    session.close()
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'lesson-quiz-resource-scope.sqlite3'}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["trigger_status"] == "queued"
+    assert payload["result_status"] == "ready", json.dumps(payload, sort_keys=True)
+    assert payload["result_error"] is None
+    assert payload["quiz_status"] == "ready"
+    assert payload["question_count"] == 1
+    assert payload["observed_block_titles"] == ["Lesson-scoped B+ Tree fanout"]
+    assert payload["observed_segment_titles"] == ["Lesson-scoped B+ Tree fanout"]
+
+
+def test_course_quiz_generate_uses_only_course_resource_segments_when_handout_missing(tmp_path):
+    script = """
+import json
+
+import server.infra.db.models
+from server.infra.db.base import Base
+from server.infra.db.models import Quiz
+from server.infra.db.session import create_session, get_engine
+from server.domain.services.quizzes import QuizService
+from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+from server.tasks.quizzes import run_quiz_generate
+
+Base.metadata.create_all(get_engine())
+
+class Dispatcher:
+    def enqueue_quiz_generate(self, *, task_id, payload):
+        return None
+
+session = create_session()
+try:
+    repo = SqlAlchemyRuntimeRepository(session)
+    course = repo.create_course(
+        title="SQL course quiz from course resource",
+        entry_type="manual_import",
+        goal_text="verify course quiz resource scope isolation",
+        preferred_style="balanced",
+    )
+    course_id = course["courseId"]
+    lesson = repo.create_lesson(course_id=course_id, title="Lesson material")
+    course_resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/course-scope.pdf",
+            "originalName": "course-scope.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:course-resource-scope",
+            "scopeType": "course",
+            "usageRole": "course_material",
+        },
+    )
+    lesson_resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/lesson-scope.pdf",
+            "originalName": "lesson-scope.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:lesson-resource-scope",
+            "scopeType": "lesson",
+            "lessonId": lesson["lessonId"],
+            "usageRole": "lesson_material",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = parse_run["parseRunId"]
+    repo.mark_parse_run_succeeded(parse_run_id)
+    course_segment = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=course_resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Course-scoped overview",
+                "orderNo": 1,
+                "textContent": "This course-level resource is valid evidence for a course quiz.",
+                "plainText": "This course-level resource is valid evidence for a course quiz.",
+                "pageNo": 1,
+            }
+        ],
+    )[0]
+    repo.create_course_segments(
+        course_id=course_id,
+        resource_id=lesson_resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Lesson-only details",
+                "orderNo": 2,
+                "textContent": "This lesson resource must not feed direct course quiz fallback.",
+                "plainText": "This lesson resource must not feed direct course quiz fallback.",
+                "pageNo": 2,
+            }
+        ],
+    )
+
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=Dispatcher(),
+        async_tasks=repo,
+    )
+    trigger = service.generate_quiz(course_id=course_id, question_count_level="small", idempotency_key=None)
+    task_id = trigger["taskId"]
+    quiz_id = trigger["entity"]["id"]
+finally:
+    session.close()
+
+observed = {}
+
+def fake_generate_quiz(block_payloads, *, segments, course_context, preferences, question_count_level):
+    observed["block_titles"] = [block["title"] for block in block_payloads]
+    observed["segment_titles"] = [segment["title"] for segment in segments]
+    block = block_payloads[0]
+    kp = block["knowledgePoints"][0]
+    return {
+        "quizType": "chapter_review",
+        "questions": [
+            {
+                "questionKey": "q1-course-resource",
+                "questionType": "single_choice",
+                "stemMd": "What does the course-scoped evidence say?",
+                "options": ["A. Course-level resource is valid.", "B. Lesson-only details.", "C. Other lesson.", "D. No evidence."],
+                "correctAnswer": "A",
+                "explanationMd": "Uses only course resource fallback evidence.",
+                "difficultyLevel": "medium",
+                "knowledgePointKey": kp["knowledgePointKey"],
+                "knowledgePointName": kp["displayName"],
+                "sourceBlockKey": str(block["blockId"]),
+                "sourceSegmentKeys": [block["sourceSegmentKeys"][0]],
+            }
+        ],
+    }
+
+result = run_quiz_generate(
+    {
+        "taskId": task_id,
+        "courseId": course_id,
+        "quizId": quiz_id,
+        "questionCountLevel": "small",
+        "scopeType": "course",
+        "lessonId": None,
+        "startLessonId": None,
+        "endLessonId": None,
+    },
+    generate_quiz_func=fake_generate_quiz,
+)
+
+session = create_session()
+try:
+    quiz_row = session.get(Quiz, quiz_id)
+    print(json.dumps({
+        "trigger_status": trigger["status"],
+        "result_status": result["status"],
+        "result_error": result.get("errorMessage"),
+        "quiz_status": quiz_row.status,
+        "question_count": quiz_row.question_count,
+        "observed_block_titles": observed.get("block_titles", []),
+        "observed_segment_titles": observed.get("segment_titles", []),
+        "course_segment_key": course_segment["segmentKey"],
+    }))
+finally:
+    session.close()
+"""
+    env = os.environ.copy()
+    env["KNOWLINK_RUNTIME_REPOSITORY_BACKEND"] = "sql"
+    env["KNOWLINK_DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_path / 'course-quiz-resource-scope.sqlite3'}"
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["trigger_status"] == "queued"
+    assert payload["result_status"] == "ready", json.dumps(payload, sort_keys=True)
+    assert payload["result_error"] is None
+    assert payload["quiz_status"] == "ready"
+    assert payload["question_count"] == 1
+    assert payload["observed_block_titles"] == ["Course-scoped overview"]
+    assert payload["observed_segment_titles"] == ["Course-scoped overview"]
+
+
 def test_quiz_generate_worker_marks_failed_without_saving_questions_on_deepseek_error(tmp_path):
     script = """
 import json

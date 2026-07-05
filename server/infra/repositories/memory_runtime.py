@@ -2049,19 +2049,33 @@ class RuntimeStore:
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         quiz_id = self.next_id("quiz")
         task_id = self.next_id("task")
         course = self.courses.get(course_id, {})
         handout_version_id = course.get("activeHandoutVersionId")
         source_parse_run_id = course.get("activeParseRunId")
+        if scope_type == "lesson":
+            latest_handout = self.get_latest_handout(course_id, scope_type="lesson", lesson_id=lesson_id)
+            handout_version_id = latest_handout.get("handoutVersionId") if latest_handout else None
+            source_parse_run_id = latest_handout.get("sourceParseRunId") if latest_handout else source_parse_run_id
+            if latest_handout is None and not self._has_quiz_resource_segment_evidence(
+                course_id=course_id,
+                scope_type="lesson",
+                lesson_id=lesson_id,
+            ):
+                raise ValueError("Lesson has no ready handout blocks or parsed lesson resources for quiz generation.")
         quiz = {
             "quizId": quiz_id,
             "courseId": course_id,
-            "scopeType": "course",
-            "lessonId": None,
-            "startLessonId": None,
-            "endLessonId": None,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "startLessonId": start_lesson_id,
+            "endLessonId": end_lesson_id,
             "quizMode": "objective",
             "handoutVersionId": handout_version_id,
             "sourceParseRunId": source_parse_run_id,
@@ -2080,10 +2094,10 @@ class RuntimeStore:
                 "courseId": course_id,
                 "quizId": quiz_id,
                 "questionCountLevel": question_count_level,
-                "scopeType": "course",
-                "lessonId": None,
-                "startLessonId": None,
-                "endLessonId": None,
+                "scopeType": scope_type,
+                "lessonId": lesson_id if scope_type == "lesson" else None,
+                "startLessonId": start_lesson_id,
+                "endLessonId": end_lesson_id,
             },
             target_type="quiz",
             target_id=quiz_id,
@@ -2095,12 +2109,34 @@ class RuntimeStore:
             "entity": {"type": "quiz", "id": quiz_id},
             "payload": {
                 "questionCountLevel": question_count_level,
-                "scopeType": "course",
-                "lessonId": None,
-                "startLessonId": None,
-                "endLessonId": None,
+                "scopeType": scope_type,
+                "lessonId": lesson_id if scope_type == "lesson" else None,
+                "startLessonId": start_lesson_id,
+                "endLessonId": end_lesson_id,
             },
         }
+
+    def _has_quiz_resource_segment_evidence(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+    ) -> bool:
+        for resource in self.resources.get(course_id, []):
+            if resource.get("scopeType") != scope_type:
+                continue
+            if scope_type == "lesson" and resource.get("lessonId") != lesson_id:
+                continue
+            if scope_type == "course" and resource.get("lessonId") is not None:
+                continue
+            for segment in resource.get("segments") or []:
+                if not isinstance(segment, dict):
+                    continue
+                text = segment.get("textContent") or segment.get("plainText") or segment.get("contentMd")
+                if str(text or "").strip():
+                    return True
+        return False
 
     def create_scoped_quiz(
         self,

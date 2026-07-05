@@ -136,11 +136,13 @@ def test_v2_course_lesson_contract_freezes_scope_and_no_resource_qa() -> None:
         "`sourceSegmentKeys`",
         "`correctAnswer`",
         "`recommendedReviewActions`",
-        "`qa.block_not_found`",
-        "embedded lesson-study QA",
-        "latest lesson-scoped handout blocks first",
-        "falls back to lesson-scoped resources",
-    ):
+            "`qa.block_not_found`",
+            "embedded lesson-study QA",
+            "latest current lesson handout blocks first",
+            "falls back only to parsed `scopeType=lesson` resources",
+            "falls back only to parsed `scopeType=course` resources",
+            "must not mix course materials and lesson materials",
+        ):
         assert token in contract
 
     assert "不做单资料 QA" in contract

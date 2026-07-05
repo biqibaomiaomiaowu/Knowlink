@@ -1140,11 +1140,10 @@ void main() {
       onFetch: (options, _) async {
         final data = switch (options.path) {
           '/api/v1/courses/101/lessons/42/quizzes/generate' => {
-              'quiz': _quizJson(
-                quizId: 7001,
-                scopeType: 'lesson',
-                lessonId: 42,
-              ),
+              'taskId': 9002,
+              'status': 'queued',
+              'nextAction': 'poll',
+              'entity': {'type': 'quiz', 'id': 7001},
             },
           '/api/v1/courses/101/lessons/42/quizzes/current' => _quizJson(
               quizId: 7001,
@@ -1183,6 +1182,7 @@ void main() {
     final lessonGenerated = await client.generateLessonQuiz(
       courseId: '101',
       lessonId: '42',
+      idempotencyKey: 'lesson-quiz-key',
       questionCountLevel: QuizQuestionCountLevel.small,
     );
     final currentLessonQuiz = await client.fetchCurrentLessonQuiz(
@@ -1203,8 +1203,8 @@ void main() {
       lessonId: '42',
     );
 
-    expect(lessonGenerated.quizId, 7001);
-    expect(lessonGenerated.scopeType, 'lesson');
+    expect(lessonGenerated.entity.type, 'quiz');
+    expect(lessonGenerated.entity.id, 7001);
     expect(currentLessonQuiz.scopeType, 'lesson');
     expect(submitted.attemptId, 7401);
     expect(courseReview.todayTaskCount, 2);
@@ -1224,6 +1224,7 @@ void main() {
       '/api/v1/courses/101/lessons/42/review',
     ]);
     expect(adapter.requests[0].data, {'questionCountLevel': 'small'});
+    expect(adapter.requests[0].headers['Idempotency-Key'], 'lesson-quiz-key');
     expect(adapter.requests[2].data, {
       'answers': [
         {'questionId': 7101, 'selectedOption': 'A'},

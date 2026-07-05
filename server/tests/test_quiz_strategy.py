@@ -48,6 +48,14 @@ class FakeAIService:
         return AIModelResult(text=json.dumps(self.payload, ensure_ascii=False), parsed_json=self.payload)
 
 
+class RecordingDispatcher:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, dict]] = []
+
+    def enqueue_quiz_generate(self, *, task_id: int, payload: dict) -> None:
+        self.calls.append(("quiz_generate", task_id, payload))
+
+
 def _generate_quiz_payload() -> dict:
     return generate_quiz_payload(
         _handout_blocks(),
@@ -439,6 +447,7 @@ def test_grade_quiz_attempt_accepts_api_question_id_answers_without_dto_change()
 def test_lesson_quiz_generate_submit_scores_objective_questions():
     store = RuntimeStore()
     repository = MemoryScaffoldRepository(store)
+    dispatcher = RecordingDispatcher()
     service = QuizService(
         courses=repository,
         quizzes=repository,
@@ -447,6 +456,7 @@ def test_lesson_quiz_generate_submit_scores_objective_questions():
         scoped_artifacts=repository,
         handouts=repository,
         resources=repository,
+        task_dispatcher=dispatcher,
     )
     course = store.create_course(
         title="Database Systems",
@@ -482,44 +492,26 @@ def test_lesson_quiz_generate_submit_scores_objective_questions():
         lesson_id=lesson["lessonId"],
         question_count_level="medium",
     )
-    quiz = service.get_quiz(quiz_id=generated["quizId"])
 
+    assert generated["status"] == "queued"
+    assert generated["entity"]["type"] == "quiz"
+    quiz = service.get_quiz(quiz_id=generated["entity"]["id"])
     assert quiz["scopeType"] == "lesson"
     assert quiz["lessonId"] == lesson["lessonId"]
-    assert quiz["status"] == "ready"
-    assert quiz["questionCount"] > 0
-    assert {question["questionType"] for question in quiz["questions"]}.issubset(
-        {"single_choice", "multiple_choice", "true_false"}
-    )
-
-    assert all("correctAnswer" not in question for question in quiz["questions"])
-
-    context = repository.get_quiz_submission_context(quiz["quizId"])
-    assert context is not None
-    private_answers = [question["correctAnswer"] for question in context["quizPayload"]["questions"]]
-    assert set(private_answers) - {"A"}
-    for private_question in context["quizPayload"]["questions"]:
-        assert not any("Ignore this lesson" in option for option in private_question["options"])
-        assert not any("subjective free-form grading" in option for option in private_question["options"])
-        assert not any("unrelated to the current scope" in option for option in private_question["options"])
-    answers = [
-        {
-            "questionId": public_question["questionId"],
-            "selectedOption": private_question["correctAnswer"],
-        }
-        for public_question, private_question in zip(quiz["questions"], context["quizPayload"]["questions"])
-    ]
-    result = service.submit_quiz(
-        quiz_id=quiz["quizId"],
-        payload=SubmitQuizRequest.model_validate({"answers": answers}),
-    )
-
-    assert result["score"] == quiz["questionCount"]
-    assert result["totalScore"] == quiz["questionCount"]
-    assert result["accuracy"] == 1.0
-    assert result["reviewTaskRunId"] is None
-    assert result["recommendedReviewActions"]
-    assert store.review_runs == {}
+    assert quiz["status"] == "queued"
+    assert quiz["questionCount"] == 0
+    assert quiz["questions"] == []
+    task = repository.get_async_task(generated["taskId"])
+    assert task["payloadJson"] == {
+        "courseId": course["courseId"],
+        "quizId": generated["entity"]["id"],
+        "questionCountLevel": "medium",
+        "scopeType": "lesson",
+        "lessonId": lesson["lessonId"],
+        "startLessonId": None,
+        "endLessonId": None,
+    }
+    assert dispatcher.calls == [("quiz_generate", generated["taskId"], task["payloadJson"])]
 
 
 def test_course_quiz_submit_without_review_context_does_not_create_review_run():
@@ -656,9 +648,10 @@ def test_lesson_quiz_generation_fails_without_lesson_handout_or_resources():
     assert exc_info.value.status_code == 409
 
 
-def test_lesson_quiz_generation_fails_when_lesson_handout_blocks_are_pending():
+def test_lesson_quiz_generation_queues_when_lesson_handout_blocks_are_pending():
     store = RuntimeStore()
     repository = MemoryScaffoldRepository(store)
+    dispatcher = RecordingDispatcher()
     service = QuizService(
         courses=repository,
         quizzes=repository,
@@ -667,6 +660,7 @@ def test_lesson_quiz_generation_fails_when_lesson_handout_blocks_are_pending():
         scoped_artifacts=repository,
         handouts=repository,
         resources=repository,
+        task_dispatcher=dispatcher,
     )
     course = store.create_course(
         title="Database Systems",
@@ -694,20 +688,23 @@ def test_lesson_quiz_generation_fails_when_lesson_handout_blocks_are_pending():
         }
     )
 
-    with pytest.raises(ServiceError) as exc_info:
-        service.generate_lesson_quiz(
-            course_id=course["courseId"],
-            lesson_id=lesson["lessonId"],
-            question_count_level="small",
-        )
+    generated = service.generate_lesson_quiz(
+        course_id=course["courseId"],
+        lesson_id=lesson["lessonId"],
+        question_count_level="small",
+    )
 
-    assert exc_info.value.error_code == "quiz.not_ready"
-    assert exc_info.value.status_code == 409
+    task = repository.get_async_task(generated["taskId"])
+    assert generated["status"] == "queued"
+    assert task["payloadJson"]["scopeType"] == "lesson"
+    assert task["payloadJson"]["lessonId"] == lesson["lessonId"]
+    assert dispatcher.calls == [("quiz_generate", generated["taskId"], task["payloadJson"])]
 
 
-def test_lesson_quiz_generation_fails_when_ready_handout_has_only_summary_citation_or_knowledge_points():
+def test_lesson_quiz_generation_queues_when_ready_handout_has_only_summary_citation_or_knowledge_points():
     store = RuntimeStore()
     repository = MemoryScaffoldRepository(store)
+    dispatcher = RecordingDispatcher()
     service = QuizService(
         courses=repository,
         quizzes=repository,
@@ -716,6 +713,7 @@ def test_lesson_quiz_generation_fails_when_ready_handout_has_only_summary_citati
         scoped_artifacts=repository,
         handouts=repository,
         resources=repository,
+        task_dispatcher=dispatcher,
     )
     course = store.create_course(
         title="Database Systems",
@@ -745,20 +743,23 @@ def test_lesson_quiz_generation_fails_when_ready_handout_has_only_summary_citati
     handout["readyBlocks"] = 1
     handout["pendingBlocks"] = max(0, handout["pendingBlocks"] - 1)
 
-    with pytest.raises(ServiceError) as exc_info:
-        service.generate_lesson_quiz(
-            course_id=course["courseId"],
-            lesson_id=lesson["lessonId"],
-            question_count_level="small",
-        )
+    generated = service.generate_lesson_quiz(
+        course_id=course["courseId"],
+        lesson_id=lesson["lessonId"],
+        question_count_level="small",
+    )
 
-    assert exc_info.value.error_code == "quiz.not_ready"
-    assert exc_info.value.status_code == 409
+    task = repository.get_async_task(generated["taskId"])
+    assert generated["status"] == "queued"
+    assert task["payloadJson"]["scopeType"] == "lesson"
+    assert task["payloadJson"]["lessonId"] == lesson["lessonId"]
+    assert dispatcher.calls == [("quiz_generate", generated["taskId"], task["payloadJson"])]
 
 
 def test_lesson_quiz_uses_latest_lesson_handout_block_evidence_before_resources():
     store = RuntimeStore()
     repository = MemoryScaffoldRepository(store)
+    dispatcher = RecordingDispatcher()
     service = QuizService(
         courses=repository,
         quizzes=repository,
@@ -767,6 +768,7 @@ def test_lesson_quiz_uses_latest_lesson_handout_block_evidence_before_resources(
         scoped_artifacts=repository,
         handouts=repository,
         resources=repository,
+        task_dispatcher=dispatcher,
     )
     course = store.create_course(
         title="Database Systems",
@@ -825,13 +827,12 @@ def test_lesson_quiz_uses_latest_lesson_handout_block_evidence_before_resources(
         question_count_level="small",
     )
 
-    question = generated["questions"][0]
-    assert question["questionType"] in {"single_choice", "multiple_choice", "true_false"}
-    assert question["sourceBlockKey"] == str(block["blockId"])
-    assert question["sourceSegmentKeys"] == ["seg-btree-fanout"]
-    assert question["knowledgePointKey"] == "kp-btree-fanout"
-    assert question["knowledgePointName"] == "B+ tree fanout"
-    assert "correctAnswer" not in question
+    task = repository.get_async_task(generated["taskId"])
+    assert generated["status"] == "queued"
+    assert task["payloadJson"]["scopeType"] == "lesson"
+    assert task["payloadJson"]["lessonId"] == lesson["lessonId"]
+    assert task["payloadJson"]["questionCountLevel"] == "small"
+    assert dispatcher.calls == [("quiz_generate", generated["taskId"], task["payloadJson"])]
 
 
 def test_lesson_quiz_generation_fails_with_unparsed_lesson_resource_metadata_only():

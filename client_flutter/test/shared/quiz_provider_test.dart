@@ -179,6 +179,7 @@ void main() {
     expect(fakeApiClient.generatedLessonQuizRequests, ['101/42']);
     expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.small]);
     expect(fakeApiClient.generatedCourseIds, isEmpty);
+    expect(fakeApiClient.fetchedQuizIds, [8402]);
     expect(state.quizValue?.quizId, 8402);
     expect(state.quizValue?.scopeType, 'lesson');
     expect(container.read(courseFlowProvider).quizId, 8402);
@@ -312,19 +313,29 @@ class _FakeQuizApiClient extends ApiClient {
   }
 
   @override
-  Future<QuizModel> generateLessonQuiz({
+  Future<QuizGenerateResultModel> generateLessonQuiz({
     required String courseId,
     required String lessonId,
+    required String idempotencyKey,
     required QuizQuestionCountLevel questionCountLevel,
   }) async {
+    expect(idempotencyKey, startsWith('quiz-generate-lesson-$courseId-$lessonId-'));
     generatedLessonQuizRequests.add('$courseId/$lessonId');
     generatedLevels.add(questionCountLevel);
-    return _lessonQuiz(8402, courseId, lessonId);
+    return QuizGenerateResultModel.fromJson({
+      'taskId': 9402,
+      'status': 'queued',
+      'nextAction': 'poll',
+      'entity': {'type': 'quiz', 'id': 8402},
+    });
   }
 
   @override
   Future<QuizModel> fetchQuiz(int quizId) async {
     fetchedQuizIds.add(quizId);
+    if (quizId >= 8400) {
+      return _lessonQuiz(quizId, '101', '42');
+    }
     return QuizModel.fromJson({
       'quizId': quizId,
       'courseId': 101,

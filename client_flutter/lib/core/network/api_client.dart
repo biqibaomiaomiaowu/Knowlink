@@ -547,9 +547,10 @@ class ApiClient {
     return QuizGenerateResultModel.fromJson(data);
   }
 
-  Future<QuizModel> generateLessonQuiz({
+  Future<QuizGenerateResultModel> generateLessonQuiz({
     required String courseId,
     required String lessonId,
+    required String idempotencyKey,
     required QuizQuestionCountLevel questionCountLevel,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
@@ -557,10 +558,15 @@ class ApiClient {
       data: {
         'questionCountLevel': questionCountLevel.apiValue,
       },
+      options: Options(
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      ),
     );
 
     final data = response.data?['data'] as Map<String, dynamic>;
-    return QuizModel.fromJson(_firstPayload(data, 'quiz'));
+    return QuizGenerateResultModel.fromJson(data);
   }
 
   Future<QuizModel> fetchCurrentLessonQuiz({

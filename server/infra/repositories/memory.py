@@ -569,8 +569,19 @@ class MemoryScaffoldRepository:
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        return self.store.create_quiz(course_id, question_count_level=question_count_level)
+        return self.store.create_quiz(
+            course_id,
+            question_count_level=question_count_level,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+        )
 
     def create_scoped_quiz(
         self,

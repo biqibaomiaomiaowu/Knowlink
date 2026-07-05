@@ -256,6 +256,10 @@ class _QuizRepo:
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         self.next_quiz_id += 1
         self.next_task_id += 1
@@ -263,6 +267,10 @@ class _QuizRepo:
             "courseId": course_id,
             "quizId": self.next_quiz_id,
             "questionCountLevel": question_count_level,
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "startLessonId": start_lesson_id,
+            "endLessonId": end_lesson_id,
         }
         self.tasks[self.next_task_id] = {
             "taskId": self.next_task_id,
@@ -326,6 +334,10 @@ class _RunningQuizRepo(_QuizRepo):
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         self.next_quiz_id += 1
         self.next_task_id += 1
@@ -333,6 +345,10 @@ class _RunningQuizRepo(_QuizRepo):
             "courseId": course_id,
             "quizId": self.next_quiz_id,
             "questionCountLevel": question_count_level,
+            "scopeType": scope_type,
+            "lessonId": lesson_id,
+            "startLessonId": start_lesson_id,
+            "endLessonId": end_lesson_id,
         }
         self.tasks[self.next_task_id] = {
             "taskId": self.next_task_id,
@@ -358,6 +374,10 @@ class _MissingQuizTaskIdRepo(_QuizRepo):
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         self.next_quiz_id += 1
         return {}, {
@@ -365,6 +385,28 @@ class _MissingQuizTaskIdRepo(_QuizRepo):
             "nextAction": "poll",
             "entity": {"type": "quiz", "id": self.next_quiz_id},
         }
+
+
+class _LessonQuizRepo(_QuizRepo):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lesson = {
+            "lessonId": 42,
+            "courseId": 301,
+            "title": "Indexes",
+        }
+
+    def get_lesson(
+        self,
+        *,
+        course_id: int,
+        lesson_id: int,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        _ = include_deleted
+        if course_id == self.course["courseId"] and lesson_id == self.lesson["lessonId"]:
+            return self.lesson
+        return None
 
 
 class _QuizSubmitRepo:
@@ -391,6 +433,10 @@ class _QuizSubmitRepo:
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         raise AssertionError("not used")
 
@@ -2126,6 +2172,40 @@ def test_quiz_generate_async_payload_includes_explicit_course_scope():
         "questionCountLevel": "medium",
         "scopeType": "course",
         "lessonId": None,
+        "startLessonId": None,
+        "endLessonId": None,
+    }
+    assert dispatcher.calls == [("quiz_generate", result["taskId"], task["payloadJson"])]
+
+
+def test_lesson_quiz_generate_async_payload_includes_lesson_scope():
+    repo = _LessonQuizRepo()
+    dispatcher = _RecordingDispatcher()
+    service = QuizService(
+        courses=repo,
+        lessons=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+    )
+
+    result = service.generate_lesson_quiz(
+        course_id=301,
+        lesson_id=42,
+        question_count_level="small",
+        idempotency_key="quiz-lesson-scope-payload",
+    )
+
+    task = repo.get_async_task(result["taskId"])
+    assert task is not None
+    assert result["status"] == "queued"
+    assert result["entity"] == {"type": "quiz", "id": result["entity"]["id"]}
+    assert task["payloadJson"] == {
+        "courseId": 301,
+        "quizId": result["entity"]["id"],
+        "questionCountLevel": "small",
+        "scopeType": "lesson",
+        "lessonId": 42,
         "startLessonId": None,
         "endLessonId": None,
     }

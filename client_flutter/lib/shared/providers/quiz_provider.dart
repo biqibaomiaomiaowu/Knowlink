@@ -197,6 +197,8 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
   Future<void> generateLessonAndPoll({
     required String courseId,
     required String lessonId,
+    Duration interval = const Duration(seconds: 2),
+    int maxAttempts = 30,
   }) async {
     if (state.isGenerating) {
       return;
@@ -219,9 +221,11 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
     );
 
     try {
-      final quiz = await ref.read(apiClientProvider).generateLessonQuiz(
+      final result = await ref.read(apiClientProvider).generateLessonQuiz(
             courseId: courseId,
             lessonId: lessonId,
+            idempotencyKey:
+                'quiz-generate-lesson-$courseId-$lessonId-${DateTime.now().microsecondsSinceEpoch}',
             questionCountLevel: state.questionCountLevel,
           );
       if (!_shouldApply(
@@ -231,12 +235,47 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
       )) {
         return;
       }
-      ref.read(courseFlowProvider.notifier).setQuiz(quiz.quizId);
-      state = state.copyWith(
-        quiz: AsyncData(quiz),
-        generation: const AsyncData<QuizGenerateResultModel?>(null),
-        status: AsyncData(QuizStatusModel.fromQuiz(quiz)),
-      );
+      ref.read(courseFlowProvider.notifier).setQuiz(
+            result.entity.type == 'quiz' ? result.entity.id : null,
+          );
+      state = state.copyWith(generation: AsyncData(result));
+
+      if (result.entity.type != 'quiz') {
+        return;
+      }
+
+      final quizId = result.entity.id;
+      QuizModel? latestQuiz;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        if (!_shouldApply(
+          requestId,
+          courseId: courseId,
+          lessonId: lessonId,
+        )) {
+          return;
+        }
+        latestQuiz = await ref.read(apiClientProvider).fetchQuiz(quizId);
+        if (!_shouldApply(
+          requestId,
+          courseId: courseId,
+          lessonId: lessonId,
+        )) {
+          return;
+        }
+        state = state.copyWith(
+          status: AsyncData(QuizStatusModel.fromQuiz(latestQuiz)),
+        );
+        if (latestQuiz.isReady || latestQuiz.status == 'failed') {
+          break;
+        }
+        await Future<void>.delayed(interval);
+      }
+
+      if (latestQuiz?.isReady ?? false) {
+        state = state.copyWith(
+          quiz: AsyncData(latestQuiz),
+        );
+      }
     } catch (error, stackTrace) {
       if (!_shouldApply(
         requestId,
@@ -245,7 +284,9 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
       )) {
         return;
       }
-      state = state.copyWith(generation: AsyncError(error, stackTrace));
+      state = state.copyWith(
+        generation: AsyncError(error, stackTrace),
+      );
     } finally {
       if (_shouldApply(
         requestId,

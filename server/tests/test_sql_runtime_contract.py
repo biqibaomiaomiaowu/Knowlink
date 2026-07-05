@@ -30,6 +30,15 @@ from server.schemas.requests import CreateCourseRequest, SubmitQuizRequest
 
 ROOT = Path(__file__).resolve().parents[2]
 
+
+class RecordingDispatcher:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, dict[str, Any]]] = []
+
+    def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        self.calls.append(("quiz_generate", task_id, payload))
+
+
 EXPECTED_RUNTIME_TABLE_COLUMNS = {
     "parse_runs": {
         "course_id",
@@ -1783,6 +1792,7 @@ def test_sql_lesson_quiz_fallback_uses_lesson_scoped_parsed_resource_segments():
         )
         segment_key = segments[0]["segmentKey"]
         repo.mark_parse_run_succeeded(parse_run_id)
+        dispatcher = RecordingDispatcher()
         service = QuizService(
             courses=repo,
             lessons=repo,
@@ -1790,19 +1800,39 @@ def test_sql_lesson_quiz_fallback_uses_lesson_scoped_parsed_resource_segments():
             idempotency=repo,
             resources=repo,
             scoped_artifacts=repo,
+            task_dispatcher=dispatcher,
+            async_tasks=repo,
         )
 
-        generated = service.generate_lesson_quiz(
+        trigger = service.generate_lesson_quiz(
             course_id=course_id,
             lesson_id=lesson_id,
             question_count_level="small",
         )
 
-        assert generated["questionCount"] == 1
-        question = generated["questions"][0]
-        assert question["sourceBlockKey"] == f"resource-{resource['resourceId']}"
-        assert question["sourceSegmentKeys"] == [segment_key]
-        assert "correctAnswer" not in question
+        quiz_id = trigger["entity"]["id"]
+        queued = repo.get_quiz(quiz_id)
+        assert trigger["status"] == "queued"
+        assert queued is not None
+        assert queued["status"] == "queued"
+        assert queued["scopeType"] == "lesson"
+        assert queued["lessonId"] == lesson_id
+        assert dispatcher.calls == [
+            (
+                "quiz_generate",
+                trigger["taskId"],
+                {
+                    "courseId": course_id,
+                    "quizId": quiz_id,
+                    "questionCountLevel": "small",
+                    "scopeType": "lesson",
+                    "lessonId": lesson_id,
+                    "startLessonId": None,
+                    "endLessonId": None,
+                },
+            )
+        ]
+        assert segment_key == f"segment-{segments[0]['segmentId']}"
     finally:
         session.close()
         engine.dispose()
@@ -1852,6 +1882,147 @@ def test_sql_lesson_quiz_fallback_rejects_lesson_metadata_only_resource():
 
         assert exc_info.value.status_code == 409
         assert exc_info.value.error_code == "quiz.not_ready"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sql_lesson_handout_block_refs_reject_course_scoped_citations():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+    try:
+        course = repo.create_course(
+            title="SQLite handout citation scope",
+            entry_type="manual_import",
+            goal_text="验证课时讲义引用不串课程资料",
+            preferred_style="balanced",
+        )
+        course_id = _value(course, "courseId", "course_id", "id")
+        lesson = repo.create_lesson(course_id=course_id, title="Scoped lesson")
+        lesson_id = lesson["lessonId"]
+        course_resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pdf",
+                "objectKey": f"raw/1/{course_id}/course-ref.pdf",
+                "originalName": "course-ref.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 1024,
+                "checksum": "sha256:course-ref",
+                "scopeType": "course",
+                "usageRole": "course_material",
+            },
+        )
+        lesson_resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pdf",
+                "objectKey": f"raw/1/{course_id}/lesson-ref.pdf",
+                "originalName": "lesson-ref.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 1024,
+                "checksum": "sha256:lesson-ref",
+                "scopeType": "lesson",
+                "lessonId": lesson_id,
+                "usageRole": "lesson_material",
+            },
+        )
+        parse_run, _ = repo.create_parse_run(course_id)
+        parse_run_id = parse_run["parseRunId"]
+        repo.mark_parse_run_succeeded(parse_run_id)
+        course_segment = repo.create_course_segments(
+            course_id=course_id,
+            resource_id=course_resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "pdf_page_text",
+                    "title": "Course scope duplicate topic",
+                    "textContent": "Shared B tree scope concept from course material.",
+                    "plainText": "Shared B tree scope concept from course material.",
+                    "pageNo": 1,
+                    "orderNo": 1,
+                    "tokenCount": 8,
+                }
+            ],
+        )[0]
+        lesson_segment = repo.create_course_segments(
+            course_id=course_id,
+            resource_id=lesson_resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "pdf_page_text",
+                    "title": "Lesson scope source",
+                    "textContent": "Shared B tree scope concept from lesson material.",
+                    "plainText": "Shared B tree scope concept from lesson material.",
+                    "pageNo": 2,
+                    "orderNo": 2,
+                    "tokenCount": 8,
+                }
+            ],
+        )[0]
+        _, _, blocks = repo.create_handout(
+            course_id,
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            artifact_kind="lesson_handout",
+            outline={
+                "title": "Scoped lesson handout",
+                "summary": "Scoped lesson handout",
+                "items": [
+                        {
+                            "outlineKey": "scope-section",
+                            "title": "Scope section",
+                            "summary": "Scope section",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "children": [
+                                {
+                                    "outlineKey": "scope-block",
+                                    "title": "Scope block",
+                                    "summary": "Scope block",
+                                    "startSec": 0,
+                                    "endSec": 60,
+                                    "sortNo": 1,
+                                "generationStatus": "pending",
+                                "sourceSegmentKeys": [lesson_segment["segmentKey"]],
+                                "topicTags": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        saved = repo.save_handout_block_result(
+            blocks[0]["blockId"],
+            {
+                "title": "Scope block",
+                "summary": "Scope block",
+                "contentMd": "Lesson scoped content.",
+                "knowledgePoints": [{"knowledgePointKey": "kp-scope", "displayName": "Scope"}],
+                "citations": [
+                    {
+                        "resourceId": lesson_resource["resourceId"],
+                        "segmentKey": lesson_segment["segmentKey"],
+                        "pageNo": lesson_segment["pageNo"],
+                        "refLabel": "lesson source",
+                    },
+                    {
+                        "resourceId": course_resource["resourceId"],
+                        "segmentKey": course_segment["segmentKey"],
+                        "pageNo": course_segment["pageNo"],
+                        "refLabel": "course source",
+                    },
+                ],
+            },
+        )
+
+        assert saved is not None
+        assert [citation["resourceId"] for citation in saved["citations"]] == [lesson_resource["resourceId"]]
+        assert [citation["pageNo"] for citation in saved["citations"]] == [lesson_segment["pageNo"]]
     finally:
         session.close()
         engine.dispose()

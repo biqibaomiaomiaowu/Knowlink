@@ -209,14 +209,18 @@ def test_scoped_quiz_generation_and_subjective_grading_placeholder() -> None:
     )
 
     assert lesson_status == 200
-    assert lesson_body["data"]["scopeType"] == "lesson"
-    assert lesson_body["data"]["lessonId"] == first["lessonId"]
-    assert current_status == 200
-    assert current_body["data"]["quizId"] == lesson_body["data"]["quizId"]
+    assert lesson_body["data"]["status"] == "queued"
+    assert lesson_body["data"]["entity"]["type"] == "quiz"
+    assert lesson_body["data"]["payload"]["scopeType"] == "lesson"
+    assert lesson_body["data"]["payload"]["lessonId"] == first["lessonId"]
+    assert current_status == 404
     assert stage_status == 404
     assert comprehensive_status == 404
     assert course_status == 200
+    assert course_body["data"]["status"] == "queued"
     assert course_body["data"]["entity"]["type"] == "quiz"
+    assert course_body["data"]["payload"]["scopeType"] == "course"
+    assert course_body["data"]["payload"]["lessonId"] is None
     assert grading_status == 200
     assert grading_body["data"]["gradingStatus"] == "placeholder"
     assert grading_body["data"]["totalScore"] is None

@@ -434,7 +434,9 @@ Public `questions[]` fields:
 - `sourceSegmentKeys`
 - Public quiz responses must not expose `correctAnswer`; submission grading uses repository submission context.
 - Submit quiz responses include public `items[]` per-question grading results (`questionId`, `questionKey`, `selectedOption`, `isCorrect`, `obtainedScore`, `explanationMd`, `knowledgePointKey`, `sourceBlockKey`) and must not expose `correctAnswer`.
-- Lesson-scope quiz generation uses the latest lesson-scoped handout blocks first, then falls back to lesson-scoped resources, and remains objective scoring only.
+- Course-scope quiz generation uses the latest course-scoped handout first; if absent, it may aggregate ready lesson handout blocks under the same course; if no handout evidence exists, it falls back only to parsed `scopeType=course` resources with `lessonId=null`.
+- Lesson-scope quiz generation uses the latest current lesson handout blocks first, then falls back only to parsed `scopeType=lesson` resources whose `lessonId` equals the current lesson id.
+- Quiz direct resource fallback must not mix course materials and lesson materials. Course resources belong to course scope; lesson resources belong only to their owning lesson scope.
 - Async quiz task payloads include `scopeType`, `lessonId`, `startLessonId`, and `endLessonId`; workers must validate payload scope against the target quiz before saving generated questions.
 
 Submit response includes both `recommendedReviewAction` and `recommendedReviewActions`; the list form is the prototype-friendly field and may contain the single legacy action. Scoped quizzes without course parse / handout context return `reviewTaskRunId=null` and must not enqueue `review_refresh`.

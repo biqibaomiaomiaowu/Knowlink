@@ -435,6 +435,10 @@ class QuizRepository(Protocol):
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
     def create_scoped_quiz(

@@ -2404,18 +2404,69 @@ class SqlAlchemyRuntimeRepository:
         course_id: int,
         *,
         question_count_level: str = "medium",
+        scope_type: str = "course",
+        lesson_id: int | None = None,
+        start_lesson_id: int | None = None,
+        end_lesson_id: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         course = self._get_course_model(course_id)
-        version = self._get_latest_handout_version_model(course_id)
         if course is None:
             raise ValueError(f"Course {course_id} was not found.")
-        if version is None:
-            raise ValueError("Course has no active handout version for quiz generation.")
+        scope_type = str(scope_type or "course")
+        self._validate_artifact_type_scope(artifact_type="quiz", scope_type=scope_type)
+        lesson_id, start_lesson_id, end_lesson_id = self._validate_artifact_scope(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+        )
+
+        version: HandoutVersion | None
+        if scope_type == "course":
+            version = self._get_latest_handout_version_model(course_id)
+            source_parse_run_id = version.source_parse_run_id if version is not None else course.active_parse_run_id
+            if version is None:
+                has_lesson_handouts = self._course_has_ready_lesson_handout_blocks(
+                    course_id=course_id,
+                    parse_run_id=source_parse_run_id,
+                )
+                has_course_resources = self._has_quiz_resource_segments(
+                    course_id=course_id,
+                    parse_run_id=source_parse_run_id,
+                    scope_type="course",
+                    lesson_id=None,
+                )
+                if not has_lesson_handouts and not has_course_resources:
+                    raise ValueError("Course has no ready handout blocks or parsed course resources for quiz generation.")
+        elif scope_type == "lesson":
+            version = self._get_latest_handout_version_model(
+                course_id,
+                scope_type="lesson",
+                lesson_id=lesson_id,
+            )
+            source_parse_run_id = version.source_parse_run_id if version is not None else course.active_parse_run_id
+            if version is None:
+                has_lesson_resources = self._has_quiz_resource_segments(
+                    course_id=course_id,
+                    parse_run_id=source_parse_run_id,
+                    scope_type="lesson",
+                    lesson_id=lesson_id,
+                )
+                if not has_lesson_resources:
+                    raise ValueError("Lesson has no ready handout blocks or parsed lesson resources for quiz generation.")
+        else:
+            raise ValueError("quiz.scope_invalid")
 
         quiz = Quiz(
             course_id=course_id,
-            handout_version_id=version.id,
-            source_parse_run_id=version.source_parse_run_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id if scope_type == "lesson" else None,
+            start_lesson_id=start_lesson_id,
+            end_lesson_id=end_lesson_id,
+            quiz_mode="objective",
+            handout_version_id=version.id if version is not None else None,
+            source_parse_run_id=source_parse_run_id,
             quiz_type="chapter_review",
             status="queued",
             question_count=0,
@@ -2427,17 +2478,17 @@ class SqlAlchemyRuntimeRepository:
         payload = {
             "courseId": course_id,
             "quizId": quiz.id,
-            "handoutVersionId": version.id,
-            "sourceParseRunId": version.source_parse_run_id,
+            "handoutVersionId": version.id if version is not None else None,
+            "sourceParseRunId": source_parse_run_id,
             "questionCountLevel": question_count_level,
-            "scopeType": "course",
-            "lessonId": None,
-            "startLessonId": None,
-            "endLessonId": None,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "startLessonId": start_lesson_id,
+            "endLessonId": end_lesson_id,
         }
         task = AsyncTask(
             course_id=course_id,
-            parse_run_id=version.source_parse_run_id,
+            parse_run_id=source_parse_run_id,
             task_type="quiz_generate",
             status="queued",
             target_type="quiz",
@@ -3711,14 +3762,21 @@ class SqlAlchemyRuntimeRepository:
             and quiz.source_parse_run_id is None
         ):
             return quiz
-        if quiz.handout_version_id is None or quiz.source_parse_run_id is None:
-            return None
         course = self.session.get(Course, quiz.course_id)
-        if (
-            course is None
-            or course.active_handout_version_id != quiz.handout_version_id
-            or course.active_parse_run_id != quiz.source_parse_run_id
-        ):
+        if course is None:
+            return None
+        if quiz.handout_version_id is None:
+            if quiz.source_parse_run_id != course.active_parse_run_id:
+                return None
+            if quiz.scope_type == "course":
+                return quiz
+            if quiz.scope_type == "lesson" and quiz.lesson_id is not None:
+                return quiz
+            return None
+        if quiz.source_parse_run_id is None or quiz.source_parse_run_id != course.active_parse_run_id:
+            return None
+        version = self.session.get(HandoutVersion, quiz.handout_version_id)
+        if version is None or not self._handout_version_is_active(version, course):
             return None
         return quiz
 
@@ -4008,6 +4066,92 @@ class SqlAlchemyRuntimeRepository:
             ).first()
         return None
 
+    def _latest_lesson_handout_versions_for_quiz(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None,
+    ) -> list[HandoutVersion]:
+        stmt = select(HandoutVersion).where(
+            HandoutVersion.course_id == course_id,
+            HandoutVersion.scope_type == "lesson",
+            HandoutVersion.lesson_id.is_not(None),
+        )
+        if parse_run_id is None:
+            stmt = stmt.where(HandoutVersion.source_parse_run_id.is_(None))
+        else:
+            stmt = stmt.where(HandoutVersion.source_parse_run_id == parse_run_id)
+        rows = self.session.scalars(
+            stmt.order_by(
+                HandoutVersion.lesson_id.asc(),
+                HandoutVersion.created_at.desc(),
+                HandoutVersion.id.desc(),
+            )
+        ).all()
+        latest_by_lesson: dict[int, HandoutVersion] = {}
+        for version in rows:
+            if version.lesson_id is None:
+                continue
+            latest_by_lesson.setdefault(version.lesson_id, version)
+        return list(latest_by_lesson.values())
+
+    def _course_has_ready_lesson_handout_blocks(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None,
+    ) -> bool:
+        versions = self._latest_lesson_handout_versions_for_quiz(
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+        )
+        if not versions:
+            return False
+        version_ids = [version.id for version in versions]
+        return (
+            self.session.scalar(
+                select(func.count())
+                .select_from(HandoutBlock)
+                .where(
+                    HandoutBlock.handout_version_id.in_(version_ids),
+                    HandoutBlock.status == "ready",
+                )
+            )
+            or 0
+        ) > 0
+
+    def _has_quiz_resource_segments(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None,
+        scope_type: str,
+        lesson_id: int | None,
+    ) -> bool:
+        if parse_run_id is None:
+            return False
+        stmt = (
+            select(func.count())
+            .select_from(CourseSegment)
+            .join(CourseResource, CourseResource.id == CourseSegment.resource_id)
+            .where(
+                CourseSegment.course_id == course_id,
+                CourseSegment.parse_run_id == parse_run_id,
+                CourseSegment.is_active.is_(True),
+                CourseResource.course_id == course_id,
+                CourseResource.scope_type == scope_type,
+            )
+        )
+        if scope_type == "course":
+            stmt = stmt.where(CourseResource.lesson_id.is_(None))
+        elif scope_type == "lesson":
+            if lesson_id is None:
+                return False
+            stmt = stmt.where(CourseResource.lesson_id == lesson_id)
+        else:
+            return False
+        return (self.session.scalar(stmt) or 0) > 0
+
     def _handout_version_is_active(self, version: HandoutVersion, course: Course) -> bool:
         if version.course_id != course.id or version.source_parse_run_id != course.active_parse_run_id:
             return False
@@ -4093,6 +4237,8 @@ class SqlAlchemyRuntimeRepository:
             )
             if segment is None:
                 continue
+            if not self._handout_segment_matches_scope(segment=segment, version=version):
+                continue
             if segment.id not in candidate_segment_ids:
                 continue
             locator = _locator_for_handout_ref(raw_item, segment, block=block)
@@ -4146,6 +4292,7 @@ class SqlAlchemyRuntimeRepository:
             and segment.course_id == version.course_id
             and segment.parse_run_id == version.source_parse_run_id
             and segment.is_active
+            and self._handout_segment_matches_scope(segment=segment, version=version)
         ]
         candidate_ids = {segment.id for segment in source_segments}
         if not source_segments:
@@ -4171,6 +4318,8 @@ class SqlAlchemyRuntimeRepository:
             .order_by(CourseSegment.order_no.asc(), CourseSegment.id.asc())
         ).all():
             if segment.id in candidate_ids:
+                continue
+            if not self._handout_segment_matches_scope(segment=segment, version=version):
                 continue
             if segment.segment_type == "video_caption":
                 if _video_segment_near_range(segment, min_start=min_start, max_end=max_end):
@@ -4212,6 +4361,21 @@ class SqlAlchemyRuntimeRepository:
             if _locator_tuple(_segment_locator(segment)) == _locator_tuple(locator):
                 return segment
         return None
+
+    def _handout_segment_matches_scope(
+        self,
+        *,
+        segment: CourseSegment,
+        version: HandoutVersion,
+    ) -> bool:
+        resource = self.session.get(CourseResource, segment.resource_id)
+        if resource is None or resource.course_id != version.course_id:
+            return False
+        if version.scope_type == "course":
+            return resource.scope_type == "course" and resource.lesson_id is None
+        if version.scope_type == "lesson":
+            return resource.scope_type == "lesson" and resource.lesson_id == version.lesson_id
+        return False
 
     def _refresh_handout_version_status(self, version: HandoutVersion) -> None:
         blocks = self.session.scalars(

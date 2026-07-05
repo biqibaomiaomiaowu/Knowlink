@@ -37,6 +37,7 @@ async def generate_lesson_quiz(
             course_id=courseId,
             lesson_id=lessonId,
             question_count_level=payload.question_count_level if payload is not None else "medium",
+            idempotency_key=request.headers.get("Idempotency-Key"),
         ),
     )
 
