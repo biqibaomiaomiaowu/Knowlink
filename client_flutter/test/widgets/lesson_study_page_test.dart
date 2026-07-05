@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -322,11 +324,39 @@ void main() {
 
     expect(find.text('lesson quiz 101/42'), findsOneWidget);
   });
+
+  testWidgets('generate handout button shows generating while request is pending',
+      (tester) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _DelayedGenerateBlockLessonStudyPageFakeApiClient();
+    await _pumpLessonStudy(tester, apiClient: fakeApiClient);
+
+    await tester.tap(find.text('生成讲义').last);
+    await fakeApiClient.generateRequested.future;
+    await tester.pump();
+
+    expect(find.text('正在生成'), findsOneWidget);
+
+    fakeApiClient.generateResponse.complete(
+      handouts.HandoutBlockGenerateResultModel.fromJson({
+        'blockId': 4201,
+        'outlineKey': 'section-1-1',
+        'status': 'ready',
+        'generationStatus': 'ready',
+        'startSec': 0,
+        'endSec': 90,
+      }),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('生成讲义'), findsWidgets);
+  });
 }
 
 Future<void> _pumpLessonStudy(
   WidgetTester tester, {
   String? firstBlockContentMd,
+  ApiClient? apiClient,
   HandoutVideoControllerFactory? videoControllerFactory,
 }) async {
   final router = GoRouter(
@@ -353,9 +383,10 @@ Future<void> _pumpLessonStudy(
     ProviderScope(
       overrides: [
         apiClientProvider.overrideWithValue(
-          _LessonStudyPageFakeApiClient(
-            firstBlockContentMd: firstBlockContentMd,
-          ),
+          apiClient ??
+              _LessonStudyPageFakeApiClient(
+                firstBlockContentMd: firstBlockContentMd,
+              ),
         ),
         if (videoControllerFactory != null)
           handoutVideoControllerFactoryProvider.overrideWithValue(
@@ -633,6 +664,24 @@ class _LessonStudyPageFakeApiClient extends ApiClient {
       'expiresAt': '2026-07-05T12:00:00Z',
       'durationSec': 2700,
     });
+  }
+}
+
+class _DelayedGenerateBlockLessonStudyPageFakeApiClient
+    extends _LessonStudyPageFakeApiClient {
+  final generateRequested = Completer<void>();
+  final generateResponse =
+      Completer<handouts.HandoutBlockGenerateResultModel>();
+
+  @override
+  Future<handouts.HandoutBlockGenerateResultModel> generateHandoutBlock({
+    required int blockId,
+    required String idempotencyKey,
+  }) {
+    if (!generateRequested.isCompleted) {
+      generateRequested.complete();
+    }
+    return generateResponse.future;
   }
 }
 

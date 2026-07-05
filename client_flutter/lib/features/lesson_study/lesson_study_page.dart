@@ -755,7 +755,7 @@ class _BlockPanel extends ConsumerWidget {
                 ),
               ),
               _SoftActionButton(
-                label: '生成讲义',
+                label: state.isGeneratingSelectedBlock ? '正在生成' : '生成讲义',
                 icon: Icons.auto_awesome_outlined,
                 onPressed: state.isGeneratingSelectedBlock || block == null
                     ? null
