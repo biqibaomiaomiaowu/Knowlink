@@ -366,8 +366,8 @@ class _LessonWorkspace extends ConsumerWidget {
           children: [
             lessonGrid,
             Positioned(
-              left: -8,
-              top: 8,
+              left: 16,
+              top: -4,
               child: _OutlineTrigger(
                 key: const Key('lesson_outline_trigger'),
                 onPressed: () =>
@@ -402,11 +402,17 @@ class _VideoPanel extends ConsumerStatefulWidget {
 }
 
 class _VideoPanelState extends ConsumerState<_VideoPanel> {
+  static const _playControlAutoHideDelay = Duration(milliseconds: 2400);
+  static const _playControlFadeDuration = Duration(milliseconds: 180);
+
   HandoutVideoController? _controller;
   String? _playbackUrl;
   bool _isInitializing = false;
+  bool _showPlayControl = true;
+  bool _lastControllerPlaying = false;
   Object? _initializationError;
   int? _pendingSeekTargetSec;
+  Timer? _playControlHideTimer;
 
   @override
   void initState() {
@@ -425,6 +431,7 @@ class _VideoPanelState extends ConsumerState<_VideoPanel> {
 
   @override
   void dispose() {
+    _playControlHideTimer?.cancel();
     _disposeController();
     super.dispose();
   }
@@ -438,6 +445,9 @@ class _VideoPanelState extends ConsumerState<_VideoPanel> {
     _playbackUrl = nextUrl;
     _controller = null;
     _isInitializing = false;
+    _showPlayControl = true;
+    _lastControllerPlaying = false;
+    _playControlHideTimer?.cancel();
     _initializationError = null;
     _pendingSeekTargetSec = null;
 
@@ -490,6 +500,14 @@ class _VideoPanelState extends ConsumerState<_VideoPanel> {
     if (controller != null && controller.isInitialized) {
       final positionSec = controller.position.inSeconds;
       final isPlaying = controller.isPlaying;
+      if (isPlaying != _lastControllerPlaying) {
+        _lastControllerPlaying = isPlaying;
+        _showPlayControl = true;
+        _playControlHideTimer?.cancel();
+        if (isPlaying) {
+          _schedulePlayControlHide();
+        }
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _controller != controller) {
           return;
@@ -503,6 +521,18 @@ class _VideoPanelState extends ConsumerState<_VideoPanel> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _schedulePlayControlHide() {
+    _playControlHideTimer = Timer(_playControlAutoHideDelay, () {
+      final controller = _controller;
+      if (!mounted || controller == null || !controller.isPlaying) {
+        return;
+      }
+      setState(() {
+        _showPlayControl = false;
+      });
+    });
   }
 
   void _requestSeekTo(int positionSec) {
@@ -628,28 +658,38 @@ class _VideoPanelState extends ConsumerState<_VideoPanel> {
                     ),
                   ),
                   Center(
-                    child: Material(
-                      color: Colors.transparent,
-                      shape: const CircleBorder(),
-                      child: InkWell(
-                        onTap: controller?.isInitialized == true
-                            ? _togglePlay
-                            : null,
-                        customBorder: const CircleBorder(),
-                        child: Container(
-                          width: 78,
-                          height: 78,
-                          decoration: const BoxDecoration(
-                            color: AppTheme.surface,
-                            shape: BoxShape.circle,
-                            boxShadow: AppTheme.shadowRaised,
-                          ),
-                          child: Icon(
-                            controller?.isPlaying == true
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            color: AppTheme.brandBlue,
-                            size: 42,
+                    child: AnimatedOpacity(
+                      key: const Key('lesson_video_play_control'),
+                      opacity: _showPlayControl ? 1 : 0,
+                      duration: _playControlFadeDuration,
+                      curve: Curves.easeOut,
+                      child: IgnorePointer(
+                        ignoring: !_showPlayControl,
+                        child: Material(
+                          color: Colors.transparent,
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            key: const Key('lesson_video_play_toggle'),
+                            onTap: controller?.isInitialized == true
+                                ? _togglePlay
+                                : null,
+                            customBorder: const CircleBorder(),
+                            child: Container(
+                              width: 78,
+                              height: 78,
+                              decoration: const BoxDecoration(
+                                color: AppTheme.surface,
+                                shape: BoxShape.circle,
+                                boxShadow: AppTheme.shadowRaised,
+                              ),
+                              child: Icon(
+                                controller?.isPlaying == true
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                                color: AppTheme.brandBlue,
+                                size: 42,
+                              ),
+                            ),
                           ),
                         ),
                       ),

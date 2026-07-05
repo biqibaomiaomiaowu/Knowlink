@@ -63,8 +63,42 @@ void main() {
     final triggerRect =
         tester.getRect(find.byKey(const Key('lesson_outline_trigger')));
 
-    expect(triggerRect.left, greaterThanOrEqualTo(videoRect.left - 12));
-    expect(triggerRect.top, lessThan(videoRect.top + 12));
+    expect(triggerRect.left, greaterThanOrEqualTo(videoRect.left + 12));
+    expect(triggerRect.top, lessThan(videoRect.top));
+  });
+
+  testWidgets('lesson video play button fades out after playback starts', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final videoControllers = <_FakeLessonStudyVideoController>[];
+
+    await _pumpLessonStudy(
+      tester,
+      videoControllerFactory: (uri) {
+        final controller = _FakeLessonStudyVideoController(uri);
+        videoControllers.add(controller);
+        return controller;
+      },
+    );
+
+    final playControlFinder =
+        find.byKey(const Key('lesson_video_play_control'));
+    expect(playControlFinder, findsOneWidget);
+    expect(
+      tester.widget<AnimatedOpacity>(playControlFinder).opacity,
+      1,
+    );
+
+    await tester.tap(find.byKey(const Key('lesson_video_play_toggle')));
+    await tester.pump();
+    expect(videoControllers.single.isPlaying, isTrue);
+
+    await tester.pump(const Duration(milliseconds: 2600));
+    expect(
+      tester.widget<AnimatedOpacity>(playControlFinder).opacity,
+      0,
+    );
   });
 
   testWidgets('lesson soft-ui surfaces use prototype tokens', (tester) async {
