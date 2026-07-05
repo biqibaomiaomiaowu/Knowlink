@@ -9,6 +9,7 @@ import '../models/course_import_state.dart';
 import '../models/recommendation_enums.dart';
 import '../models/resource_upload_models.dart';
 import 'course_flow_providers.dart';
+import 'course_library_provider.dart';
 import 'course_recommend_provider.dart';
 
 class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
@@ -40,7 +41,9 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
     final draft = state.draft;
     final request = CourseCreateRequestModel(
       title: draft.title.trim(),
-      goalText: draft.goalText.trim(),
+      goalText: draft.goalText.trim().isEmpty
+          ? CourseImportDraftModel.defaultGoalText
+          : draft.goalText.trim(),
       examAt: draft.parsedExamAt,
       preferredStyle: draft.preferredStyle,
     );
@@ -58,6 +61,7 @@ class CourseImportController extends AutoDisposeNotifier<CourseImportState> {
             pipelineStage: course.pipelineStage,
             pipelineStatus: course.pipelineStatus,
           );
+      ref.invalidate(courseLibraryProvider);
       state = state.copyWith(createdCourse: AsyncData(course));
       await fetchResources(course.courseId.toString());
     } catch (error, stackTrace) {

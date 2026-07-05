@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:knowlink_client/app/theme/app_theme.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/course_library/course_library_page.dart';
 import 'package:knowlink_client/shared/models/course_lesson_models.dart';
@@ -9,12 +10,14 @@ import 'package:knowlink_client/shared/providers/course_flow_providers.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
 void main() {
-  testWidgets('course library displays V2 course metadata', (tester) async {
+  testWidgets('course library follows the Soft UI library layout',
+      (tester) async {
     _useTestSurface(tester);
+    final api = _CourseLibraryFakeApiClient();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          apiClientProvider.overrideWithValue(_CourseLibraryFakeApiClient()),
+          apiClientProvider.overrideWithValue(api),
         ],
         child: const MaterialApp(home: CourseLibraryPage()),
       ),
@@ -22,21 +25,29 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('课程库'), findsWidgets);
-    expect(find.text('数据库系统'), findsOneWidget);
+    expect(find.text('搜索：数据结构'), findsOneWidget);
+    expect(find.text('状态：全部课程'), findsOneWidget);
+    expect(find.text('排序：最近学习优先'), findsOneWidget);
+    expect(find.text('数据结构期末复习'), findsOneWidget);
     expect(find.text('当前课程'), findsOneWidget);
-    expect(find.textContaining('学习状态：learning_ready'), findsOneWidget);
-    expect(find.textContaining('最近活动：2026-06-01'), findsOneWidget);
-    expect(find.textContaining('课时 6'), findsOneWidget);
-    expect(find.textContaining('课程资料 3'), findsOneWidget);
-    expect(find.textContaining('当前课时：关系模型'), findsOneWidget);
-    expect(find.textContaining('掌握度 72%'), findsOneWidget);
-    expect(find.textContaining('待复习 4'), findsOneWidget);
-    expect(find.textContaining('生成进度：handout / running'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, '继续学习'), findsOneWidget);
-    expect(find.widgetWithText(OutlinedButton, '进入工作台'), findsOneWidget);
+    expect(find.text('6 课时'), findsOneWidget);
+    expect(find.textContaining('学习状态：learning_ready'), findsNothing);
+    expect(find.textContaining('课程资料 3'), findsNothing);
+    expect(find.textContaining('生成进度：handout / running'), findsNothing);
+    expect(find.text('继续学习'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '进入工作台'), findsNothing);
+    expect(find.byKey(const Key('course_tile_surface_101')), findsOneWidget);
+
+    final tile = tester.widget<AnimatedContainer>(
+      find.byKey(const Key('course_tile_surface_101')),
+    );
+    final decoration = tile.decoration! as BoxDecoration;
+    expect(decoration.color, AppTheme.surface);
+    expect(decoration.borderRadius, BorderRadius.circular(28));
   });
 
-  testWidgets('course library continues current lesson and keeps workbench entry',
+  testWidgets(
+      'course library continues current lesson and keeps workbench entry',
       (tester) async {
     _useTestSurface(tester);
     final container = ProviderContainer(
@@ -75,7 +86,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final continueButton = find.widgetWithText(FilledButton, '继续学习');
+    final continueButton = find.text('继续学习');
     await tester.ensureVisible(continueButton);
     await tester.tap(continueButton);
     await tester.pumpAndSettle();
@@ -86,12 +97,46 @@ void main() {
 
     router.go('/courses');
     await tester.pumpAndSettle();
-    final workbenchButton = find.widgetWithText(OutlinedButton, '进入工作台');
-    await tester.ensureVisible(workbenchButton);
-    await tester.tap(workbenchButton);
+    final courseTitle = find.text('数据结构期末复习');
+    await tester.ensureVisible(courseTitle);
+    await tester.tap(courseTitle);
     await tester.pumpAndSettle();
 
     expect(find.text('workbench-101'), findsOneWidget);
+  });
+
+  testWidgets('course library supports selecting and deleting courses',
+      (tester) async {
+    _useTestSurface(tester);
+    final api = _CourseLibraryFakeApiClient();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(api),
+        ],
+        child: const MaterialApp(home: CourseLibraryPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('删除课程'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已选 0 / 1'), findsOneWidget);
+    expect(find.text('删除所选'), findsOneWidget);
+
+    await tester.tap(find.text('选择课程'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已选 1 / 1'), findsOneWidget);
+    await tester.tap(find.text('删除所选'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('删除课程'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await tester.pumpAndSettle();
+
+    expect(api.deletedCourseIds, ['101']);
   });
 }
 
@@ -103,6 +148,8 @@ void _useTestSurface(WidgetTester tester) {
 }
 
 class _CourseLibraryFakeApiClient extends ApiClient {
+  final List<String> deletedCourseIds = [];
+
   @override
   Future<List<CourseLibraryItemModel>> fetchCourseLibrary({
     String? query,
@@ -114,7 +161,7 @@ class _CourseLibraryFakeApiClient extends ApiClient {
     return [
       CourseLibraryItemModel.fromJson({
         'courseId': 101,
-        'title': '数据库系统',
+        'title': '数据结构期末复习',
         'isCurrent': true,
         'entryType': 'bilibili',
         'learningStatus': 'learning_ready',
@@ -131,5 +178,10 @@ class _CourseLibraryFakeApiClient extends ApiClient {
         'archivedAt': null,
       }),
     ];
+  }
+
+  @override
+  Future<void> deleteCourse(String courseId) async {
+    deletedCourseIds.add(courseId);
   }
 }

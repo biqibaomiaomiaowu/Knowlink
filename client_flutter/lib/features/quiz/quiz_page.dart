@@ -101,7 +101,7 @@ class _QuizPageState extends ConsumerState<QuizPage> {
               title: '测试中心',
               subtitle: '按课程、课时、阶段或综合范围生成客观题测验，提交后查看得分、掌握度变化和下一步复习建议。',
             ),
-            _QuizStatusBar(
+            _QuizLayout(
               quiz: quiz,
               state: state,
               courseId: courseId,
@@ -116,11 +116,6 @@ class _QuizPageState extends ConsumerState<QuizPage> {
                   ref.read(quizProvider.notifier).setQuestionCountLevel,
               onScopeInputChanged: (_) => setState(() {}),
               onGenerate: onGenerate,
-            ),
-            const SizedBox(height: 16),
-            _QuizBody(
-              state: state,
-              courseId: courseId,
               onRetryLoad: quizId == null ? null : () => _loadQuiz(quizId),
               onSelectAnswer: (questionId, option) {
                 ref.read(quizProvider.notifier).selectAnswer(
@@ -283,6 +278,79 @@ class _QuizPageState extends ConsumerState<QuizPage> {
     if (_stageEndLessonIdController.text.isEmpty) {
       _stageEndLessonIdController.text = lessonId;
     }
+  }
+}
+
+class _QuizLayout extends StatelessWidget {
+  const _QuizLayout({
+    required this.quiz,
+    required this.state,
+    required this.courseId,
+    required this.lessonId,
+    required this.selectedScope,
+    required this.questionCountLevel,
+    required this.lessonIdController,
+    required this.stageStartLessonIdController,
+    required this.stageEndLessonIdController,
+    required this.onScopeChanged,
+    required this.onLevelChanged,
+    required this.onScopeInputChanged,
+    required this.onGenerate,
+    required this.onRetryLoad,
+    required this.onSelectAnswer,
+    required this.onSubmit,
+    required this.onReview,
+  });
+
+  final QuizModel? quiz;
+  final QuizState state;
+  final String? courseId;
+  final String? lessonId;
+  final _QuizTestScope selectedScope;
+  final QuizQuestionCountLevel questionCountLevel;
+  final TextEditingController lessonIdController;
+  final TextEditingController stageStartLessonIdController;
+  final TextEditingController stageEndLessonIdController;
+  final ValueChanged<_QuizTestScope> onScopeChanged;
+  final ValueChanged<QuizQuestionCountLevel> onLevelChanged;
+  final ValueChanged<String> onScopeInputChanged;
+  final VoidCallback? onGenerate;
+  final VoidCallback? onRetryLoad;
+  final void Function(int questionId, String option) onSelectAnswer;
+  final VoidCallback? onSubmit;
+  final VoidCallback? onReview;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _QuizStatusBar(
+          quiz: quiz,
+          state: state,
+          courseId: courseId,
+          lessonId: lessonId,
+          selectedScope: selectedScope,
+          questionCountLevel: questionCountLevel,
+          lessonIdController: lessonIdController,
+          stageStartLessonIdController: stageStartLessonIdController,
+          stageEndLessonIdController: stageEndLessonIdController,
+          onScopeChanged: onScopeChanged,
+          onLevelChanged: onLevelChanged,
+          onScopeInputChanged: onScopeInputChanged,
+          onGenerate: onGenerate,
+        ),
+        const SizedBox(height: 16),
+        _QuizBody(
+          state: state,
+          courseId: courseId,
+          onRetryLoad: onRetryLoad,
+          onSelectAnswer: onSelectAnswer,
+          onSubmit: onSubmit,
+          onReview: onReview,
+        ),
+      ],
+    );
   }
 }
 

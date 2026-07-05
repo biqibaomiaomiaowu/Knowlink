@@ -275,21 +275,28 @@ def test_archive_and_restore_change_library_visibility_without_dropping_data() -
     assert workbench["data"]["progress"]["courseResourceCount"] == 1
 
 
-def test_delete_impact_and_delete_blockers_then_soft_delete_safe_course() -> None:
+def test_delete_impact_and_soft_delete_keeps_dependents_hidden_from_library() -> None:
     blocked = _create_course("有依赖课程")
     runtime_store.create_lesson(course_id=blocked["courseId"], title="阻塞节课")
     runtime_store.create_resource(blocked["courseId"], _resource_payload(name="blocking-resource"))
 
     impact_status, impact = _api("GET", f"/api/v1/courses/{blocked['courseId']}/delete-impact")
     delete_blocked_status, delete_blocked = _api("DELETE", f"/api/v1/courses/{blocked['courseId']}")
+    blocked_list_status, blocked_list_body = _api("GET", "/api/v1/courses?archived=include")
+    blocked_get_status, blocked_get = _api("GET", f"/api/v1/courses/{blocked['courseId']}")
 
     assert impact_status == 200
     assert impact["data"]["canDelete"] is False
     assert impact["data"]["blockers"]["lessons"] == 1
     assert impact["data"]["blockers"]["resources"] == 1
-    assert delete_blocked_status == 409
-    assert delete_blocked["errorCode"] == "course.delete_blocked"
-    assert delete_blocked["data"] is None
+    assert delete_blocked_status == 200
+    assert delete_blocked["data"]["deleted"] is True
+    assert delete_blocked["data"]["impact"]["blockers"]["lessons"] == 1
+    assert delete_blocked["data"]["impact"]["blockers"]["resources"] == 1
+    assert blocked_list_status == 200
+    assert blocked["courseId"] not in {item["courseId"] for item in _items(blocked_list_body)}
+    assert blocked_get_status == 404
+    assert blocked_get["errorCode"] == "course.not_found"
 
     safe = _create_course("可删除空课程")
     delete_safe_status, delete_safe = _api("DELETE", f"/api/v1/courses/{safe['courseId']}")

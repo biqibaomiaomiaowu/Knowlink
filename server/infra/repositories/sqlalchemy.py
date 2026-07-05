@@ -396,8 +396,6 @@ class SqlAlchemyRuntimeRepository:
         if course is None:
             return None
         impact = self.get_course_delete_impact(course_id)
-        if impact is not None and not impact["canDelete"]:
-            raise ValueError("course.delete_blocked")
         now = utcnow()
         course.deleted_at = now
         course.archived_at = None
@@ -405,7 +403,12 @@ class SqlAlchemyRuntimeRepository:
         course.is_current = False
         course.updated_at = now
         self._commit_or_flush()
-        return {"courseId": course_id, "deleted": True, "deletedAt": _normalize_utc_datetime(now)}
+        return {
+            "courseId": course_id,
+            "deleted": True,
+            "deletedAt": _normalize_utc_datetime(now),
+            "impact": impact,
+        }
 
     def set_current_course(self, course_id: int) -> dict[str, Any] | None:
         course = self._get_course_model(course_id)

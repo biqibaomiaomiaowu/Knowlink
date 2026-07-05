@@ -99,7 +99,7 @@ GET    /api/v1/courses/{courseId}/workbench
 - `examAt`
 - `preferredStyle`
 
-`GET /api/v1/courses/{courseId}/delete-impact` returns blocker counts before deletion. `DELETE /api/v1/courses/{courseId}` either soft deletes a safe course or returns `409 course.delete_blocked` with blockers.
+`GET /api/v1/courses/{courseId}/delete-impact` returns dependent data counts before deletion. `DELETE /api/v1/courses/{courseId}` soft deletes the course from the active course library even when dependent lessons, resources, or generated artifacts exist; the response includes the same impact summary so the UI can explain what was hidden. Physical deletion is not part of the V2 course library flow.
 
 `CourseWorkbenchData`:
 

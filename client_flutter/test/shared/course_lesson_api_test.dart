@@ -81,6 +81,7 @@ void main() {
           'GET /api/v1/courses' => {
               'items': [_courseLibraryItem()],
             },
+          'DELETE /api/v1/courses/101' => {},
           'GET /api/v1/courses/101/workbench' => _workbenchData(),
           'GET /api/v1/courses/101/lessons' => {
               'items': [_lessonSummary()],
@@ -154,6 +155,7 @@ void main() {
     final api = CourseLessonApi(client);
 
     final courses = await api.fetchCourseLibrary();
+    await api.deleteCourse('101');
     final workbench = await api.fetchCourseWorkbench('101');
     final lessons = await api.fetchLessons('101');
     final created = await api.createLesson(
@@ -231,6 +233,7 @@ void main() {
         adapter.requests.map((request) => '${request.method} ${request.path}'),
         [
           'GET /api/v1/courses',
+          'DELETE /api/v1/courses/101',
           'GET /api/v1/courses/101/workbench',
           'GET /api/v1/courses/101/lessons',
           'POST /api/v1/courses/101/lessons',

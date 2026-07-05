@@ -680,6 +680,50 @@ def test_sql_repository_current_course_uses_recent_then_explicit_switch():
     engine.dispose()
 
 
+def test_sql_repository_soft_deletes_course_with_dependents():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite deletable library course",
+        entry_type="manual_import",
+        goal_text="verify course library soft delete",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    repo.create_lesson(course_id=course_id, title="Dependent lesson")
+    repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/dependent.pdf",
+            "originalName": "dependent.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:dependent",
+        },
+    )
+
+    impact = repo.get_course_delete_impact(course_id)
+    deleted = repo.delete_course(course_id)
+
+    assert impact is not None
+    assert impact["canDelete"] is False
+    assert impact["blockers"]["lessons"] == 1
+    assert impact["blockers"]["resources"] == 1
+    assert deleted is not None
+    assert deleted["deleted"] is True
+    assert deleted["impact"]["blockers"]["lessons"] == 1
+    assert repo.get_course(course_id) is None
+    assert course_id not in {
+        _value(item, "courseId", "course_id", "id")
+        for item in repo.list_courses({"archived": "include"})
+    }
+
+    session.close()
+    engine.dispose()
+
+
 def test_sql_repository_current_library_lesson_skips_overread_handout():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)

@@ -20,7 +20,7 @@
 ## Course And Resource
 
 - `course.not_found`: 课程不存在
-- `course.delete_blocked`: 删除课程前发现资源、节课、学习产物、进度或引用 blocker，不能安全删除
+- `course.delete_blocked`: 保留给未来物理删除；V2 课程库删除采用软删除，不因资源、课时、学习产物、进度或引用而阻塞
 - `resource.not_found`: 资源不存在
 - `resource.has_dependents`: 资源已被后端解析产物、引用或学习进度依赖，当前不能安全删除
 - `resource.invalid_payload`: 上传完成回调字段不完整

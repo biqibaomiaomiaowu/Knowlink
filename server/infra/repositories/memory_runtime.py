@@ -325,8 +325,6 @@ class RuntimeStore:
         if course is None:
             return None
         impact = self.get_course_delete_impact(course_id)
-        if impact is not None and not impact["canDelete"]:
-            raise ValueError("course.delete_blocked")
         now = utcnow()
         self.courses[course_id]["deletedAt"] = now
         self.courses[course_id]["archivedAt"] = None
@@ -334,7 +332,12 @@ class RuntimeStore:
         self.courses[course_id]["updatedAt"] = now
         if self.current_course_id == course_id:
             self.current_course_id = None
-        return {"courseId": course_id, "deleted": True, "deletedAt": now}
+        return {
+            "courseId": course_id,
+            "deleted": True,
+            "deletedAt": now,
+            "impact": impact,
+        }
 
     def _course_delete_blockers(self, course_id: int) -> dict[str, int]:
         return {

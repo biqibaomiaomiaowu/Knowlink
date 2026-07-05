@@ -22,17 +22,24 @@ class PageTitle extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (icon != null) ...[
-                Icon(icon, color: AppTheme.brandBlue, size: 32),
-                const SizedBox(width: 12),
+                SoftIcon(icon: icon!, size: 46),
+                const SizedBox(width: 14),
               ],
               Expanded(
                 child: Text(
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.displaySmall,
+                  style: const TextStyle(
+                    color: AppTheme.ink,
+                    fontSize: 42,
+                    fontWeight: FontWeight.w800,
+                    height: 1.02,
+                    letterSpacing: 0,
+                  ),
                 ),
               ),
             ],
@@ -45,9 +52,9 @@ class PageTitle extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: AppTheme.muted,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                height: 1.35,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                height: 1.6,
               ),
             ),
           ],
@@ -69,12 +76,18 @@ class SectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: padding,
-        child: child,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: AppTheme.shadowRaised,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: Padding(
+          padding: padding,
+          child: child,
+        ),
       ),
     );
   }
@@ -99,17 +112,14 @@ class StepLabel extends StatelessWidget {
           height: 32,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF60A5FA), AppTheme.brandBlueDark],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(7),
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: AppTheme.shadowSmall,
           ),
           child: Text(
             '$number',
             style: const TextStyle(
-              color: Colors.white,
+              color: AppTheme.brandBlue,
               fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
@@ -133,7 +143,7 @@ class SoftIcon extends StatelessWidget {
   const SoftIcon({
     required this.icon,
     this.color = AppTheme.brandBlue,
-    this.size = 58,
+    this.size = 44,
     super.key,
   });
 
@@ -148,8 +158,9 @@ class SoftIcon extends StatelessWidget {
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppTheme.shadowRaised,
       ),
       child: Icon(icon, color: color, size: size * 0.48),
     );
@@ -173,32 +184,58 @@ class StatusPill extends StatelessWidget {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 240),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        constraints: const BoxConstraints(minHeight: 30),
+        padding: const EdgeInsets.symmetric(horizontal: 13),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8),
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: AppTheme.shadowInsetLook,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (icon != null) ...[
-              Icon(icon, color: color, size: 16),
-              const SizedBox(width: 5),
-            ],
+            _PillDot(color: color),
+            const SizedBox(width: 8),
             Flexible(
               child: Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
+                style: const TextStyle(
+                  color: AppTheme.ink,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  height: 1.2,
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PillDot extends StatelessWidget {
+  const _PillDot({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.14),
+            blurRadius: 0,
+            spreadRadius: 5,
+          ),
+        ],
       ),
     );
   }
@@ -223,11 +260,12 @@ class MetricBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      constraints: const BoxConstraints(minHeight: 104),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppTheme.panel,
-        border: Border.all(color: AppTheme.line),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(26),
+        boxShadow: AppTheme.shadowInsetLook,
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -251,8 +289,9 @@ class MetricBox extends StatelessWidget {
                 textAlign: dense ? TextAlign.center : TextAlign.start,
                 style: const TextStyle(
                   color: AppTheme.ink,
-                  fontSize: 24,
+                  fontSize: 34,
                   fontWeight: FontWeight.w800,
+                  height: 1,
                 ),
               ),
               if (detail != null) ...[
@@ -315,30 +354,27 @@ class GradientButton extends StatelessWidget {
       opacity: enabled ? 1 : 0.55,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF3B82F6), AppTheme.brandBlueDark],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
-          borderRadius: BorderRadius.circular(8),
+          color: AppTheme.brandBlue,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: AppTheme.shadowAccent,
         ),
         child: Material(
           color: Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(16),
           child: InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(16),
             onTap: onPressed,
             child: Container(
-              height: 58,
+              constraints: const BoxConstraints(minHeight: 46),
               alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, color: Colors.white),
-                    const SizedBox(width: 10),
+                    Icon(icon, color: Colors.white, size: 20),
+                    const SizedBox(width: 8),
                   ],
                   Flexible(
                     child: Text(
@@ -346,8 +382,8 @@ class GradientButton extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
@@ -388,7 +424,7 @@ class SourceChip extends StatelessWidget {
       side: const BorderSide(color: AppTheme.line),
       backgroundColor: AppTheme.panel,
       labelStyle: const TextStyle(fontWeight: FontWeight.w700),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     );
   }
 }
@@ -405,13 +441,40 @@ class ProgressRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: LinearProgressIndicator(
-        value: value.clamp(0, 1),
-        minHeight: 10,
-        backgroundColor: const Color(0xFFEFF2F7),
-        color: color,
+    final clamped = value.clamp(0, 1).toDouble();
+    return Container(
+      width: double.infinity,
+      height: 12,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: clamped,
+          heightFactor: 1,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(999),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x3D544CD2),
+                  blurRadius: 6,
+                  offset: Offset(2, 2),
+                ),
+                BoxShadow(
+                  color: Color(0x52FFFFFF),
+                  blurRadius: 6,
+                  offset: Offset(-2, -2),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

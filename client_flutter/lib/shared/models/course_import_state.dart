@@ -7,9 +7,12 @@ import 'recommendation_enums.dart';
 import 'resource_upload_models.dart';
 
 class CourseImportDraftModel {
+  static const defaultTitle = 'KnowLink 固定联调课';
+  static const defaultGoalText = '期末复习';
+
   const CourseImportDraftModel({
-    this.title = 'KnowLink 固定联调课',
-    this.goalText = '期末复习',
+    this.title = defaultTitle,
+    this.goalText = defaultGoalText,
     this.examAtText = '',
     this.preferredStyle = PreferredStyle.balanced,
   });
@@ -29,9 +32,7 @@ class CourseImportDraftModel {
   }
 
   bool get canSubmit {
-    return title.trim().isNotEmpty &&
-        goalText.trim().isNotEmpty &&
-        !hasInvalidExamAt;
+    return title.trim().isNotEmpty;
   }
 
   CourseImportDraftModel copyWith({

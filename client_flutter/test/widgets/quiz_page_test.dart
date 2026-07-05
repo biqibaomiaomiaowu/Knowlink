@@ -234,7 +234,7 @@ void main() {
 }
 
 void _useTestSurface(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1200, 900);
+  tester.view.physicalSize = const Size(1200, 1200);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);

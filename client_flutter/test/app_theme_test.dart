@@ -14,8 +14,10 @@ void main() {
       isA<RoundedRectangleBorder>().having(
         (shape) => shape.borderRadius,
         'borderRadius',
-        BorderRadius.circular(8),
+        BorderRadius.circular(32),
       ),
     );
+    expect(theme.filledButtonTheme.style?.minimumSize?.resolve({}), const Size(52, 46));
+    expect(theme.outlinedButtonTheme.style?.minimumSize?.resolve({}), const Size(52, 46));
   });
 }

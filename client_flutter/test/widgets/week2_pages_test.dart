@@ -29,6 +29,11 @@ void main() {
       ),
     );
 
+    expect(find.text('课程名称'), findsOneWidget);
+    expect(find.text('学习目标'), findsNothing);
+    expect(find.text('考试时间（可选 ISO）'), findsNothing);
+    expect(find.text('讲义风格偏好'), findsNothing);
+
     await tester.tap(find.widgetWithText(FilledButton, '创建课程'));
     await tester.pumpAndSettle();
 

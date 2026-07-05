@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_theme.dart';
@@ -94,7 +95,6 @@ class _LessonStudyBody extends ConsumerWidget {
   final LessonStudyState state;
   final TextEditingController questionController;
   final VoidCallback onRetry;
-  static const double _closedOutlineIconLeft = -30;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -111,48 +111,20 @@ class _LessonStudyBody extends ConsumerWidget {
     }
 
     final detail = state.lessonDetail.valueOrNull;
-    return Stack(
-      clipBehavior: Clip.none,
+    return ListView(
+      padding: EdgeInsets.zero,
       children: [
-        ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            _LessonStudyHeader(
-              detail: detail,
-              courseId: courseId,
-              lessonId: lessonId,
-              onOpenMaterials: () => _openMaterials(context, ref),
-            ),
-            const SizedBox(height: 16),
-            _LessonWorkspace(
-              state: state,
-              questionController: questionController,
-            ),
-          ],
+        _LessonStudyHeader(
+          detail: detail,
+          courseId: courseId,
+          lessonId: lessonId,
+          onOpenMaterials: () => _openMaterials(context, ref),
         ),
-        Positioned(
-          left: _closedOutlineIconLeft,
-          top: 96,
-          child: SizedBox(
-            width: 78,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: _OutlineTrigger(
-                onPressed: () =>
-                    ref.read(lessonStudyProvider.notifier).openOutline(),
-              ),
-            ),
-          ),
+        const SizedBox(height: 22),
+        _LessonWorkspace(
+          state: state,
+          questionController: questionController,
         ),
-        if (state.isOutlineOpen)
-          Positioned(
-            key: const Key('lesson_outline_drawer'),
-            left: 0,
-            top: 150,
-            bottom: 16,
-            width: 336,
-            child: _OutlineDrawer(state: state),
-          ),
       ],
     );
   }
@@ -189,42 +161,179 @@ class _LessonStudyHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lesson = detail?.lesson;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: PageTitle(
-            title: lesson?.title ?? '课时学习',
-            subtitle: '课程 $courseId · 课时 $lessonId',
-            icon: Icons.play_circle_outline,
-          ),
-        ),
-        const SizedBox(width: 16),
-        Wrap(
-          spacing: 10,
-          runSpacing: 8,
-          alignment: WrapAlignment.end,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        final title = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            OutlinedButton.icon(
-              onPressed: onOpenMaterials,
-              icon: const Icon(Icons.folder_open_outlined),
-              label: const Text('本节资料'),
+            const _TitleIcon(icon: Icons.play_circle_outline),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                lesson?.title ?? '课时学习',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      fontSize: compact ? 30 : 42,
+                      height: 1.02,
+                    ),
+              ),
             ),
-            FilledButton.icon(
+          ],
+        );
+        final actions = Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          alignment: compact ? WrapAlignment.start : WrapAlignment.end,
+          children: [
+            _SoftActionButton(
+              label: '本节资料',
+              icon: Icons.folder_open_outlined,
+              onPressed: onOpenMaterials,
+            ),
+            _SoftActionButton(
+              label: '进入测试',
+              icon: Icons.check_box_outlined,
+              primary: true,
               onPressed: () => context.go(
                 '/courses/$courseId/lessons/$lessonId/quiz',
               ),
-              icon: const Icon(Icons.check_box_outlined),
-              label: const Text('进入测试'),
             ),
           ],
-        ),
-      ],
+        );
+
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              title,
+              const SizedBox(height: 16),
+              actions,
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: title),
+            const SizedBox(width: 24),
+            actions,
+          ],
+        );
+      },
     );
   }
 }
 
-class _LessonWorkspace extends StatelessWidget {
+class _TitleIcon extends StatelessWidget {
+  const _TitleIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 46,
+      height: 46,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      child: Icon(icon, color: AppTheme.brandBlue, size: 24),
+    );
+  }
+}
+
+class _SoftActionButton extends StatelessWidget {
+  const _SoftActionButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.primary = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    final foreground = primary ? Colors.white : AppTheme.ink;
+    return Opacity(
+      opacity: enabled ? 1 : 0.52,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: primary ? AppTheme.brandBlue : AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: primary ? AppTheme.shadowAccent : AppTheme.shadowRaised,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, color: foreground, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: foreground,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LessonCard extends StatelessWidget {
+  const _LessonCard({
+    required this.surfaceKey,
+    required this.child,
+    super.key,
+  });
+
+  final Key surfaceKey;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: surfaceKey,
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.all(Radius.circular(32)),
+        boxShadow: AppTheme.shadowRaised,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _LessonWorkspace extends ConsumerWidget {
   const _LessonWorkspace({
     required this.state,
     required this.questionController,
@@ -234,38 +343,65 @@ class _LessonWorkspace extends StatelessWidget {
   final TextEditingController questionController;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 980;
-        final videoAndAi = Column(
-          children: [
-            _VideoPanel(state: state),
-            const SizedBox(height: 16),
-            _AiPanel(
-              state: state,
-              questionController: questionController,
-            ),
-          ],
-        );
+        final videoPanel = _VideoPanel(state: state);
         final blockPanel = _BlockPanel(state: state);
+        final aiPanel = _AiPanel(
+          state: state,
+          questionController: questionController,
+        );
+        final lessonGrid = wide
+            ? Column(
+                children: [
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(flex: 105, child: videoPanel),
+                        const SizedBox(width: 16),
+                        Expanded(flex: 95, child: blockPanel),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  aiPanel,
+                ],
+              )
+            : Column(
+                children: [
+                  videoPanel,
+                  const SizedBox(height: 16),
+                  blockPanel,
+                  const SizedBox(height: 16),
+                  aiPanel,
+                ],
+              );
 
-        if (!wide) {
-          return Column(
-            children: [
-              videoAndAi,
-              const SizedBox(height: 16),
-              blockPanel,
-            ],
-          );
-        }
-
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        return Stack(
+          clipBehavior: Clip.none,
           children: [
-            Expanded(child: videoAndAi),
-            const SizedBox(width: 16),
-            SizedBox(width: 396, child: blockPanel),
+            lessonGrid,
+            Positioned(
+              left: -30,
+              top: 16,
+              child: _OutlineTrigger(
+                onPressed: () =>
+                    ref.read(lessonStudyProvider.notifier).openOutline(),
+              ),
+            ),
+            if (state.isOutlineOpen)
+              Positioned(
+                key: const Key('lesson_outline_drawer'),
+                left: 0,
+                top: 116,
+                bottom: 16,
+                width:
+                    (constraints.maxWidth - 32).clamp(280.0, 340.0).toDouble(),
+                child: _OutlineDrawer(state: state),
+              ),
           ],
         );
       },
@@ -287,9 +423,12 @@ class _VideoPanel extends StatelessWidget {
         '暂无主视频';
     final position = detail?.positionSec ?? 0;
     final duration = playback?.durationSec ?? detail?.primaryVideo?.durationSec;
+    final videoHeight =
+        (MediaQuery.sizeOf(context).width * 0.36).clamp(320.0, 460.0);
 
-    return SectionCard(
+    return _LessonCard(
       key: const Key('lesson_study_video_panel'),
+      surfaceKey: const Key('lesson_video_card_surface'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -298,83 +437,121 @@ class _VideoPanel extends StatelessWidget {
             title: '主视频',
           ),
           const SizedBox(height: 14),
-          Container(
-            height: 340,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x221E293B),
-                  blurRadius: 24,
-                  offset: Offset(0, 12),
-                ),
-              ],
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF111827), Color(0xFF1D4ED8)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+          Semantics(
+            label: videoName.toString(),
+            child: Container(
+              key: const Key('lesson_video_surface'),
+              height: videoHeight,
+              width: double.infinity,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(32),
+                boxShadow: AppTheme.shadowInsetLook,
+              ),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(32),
+                        gradient: const LinearGradient(
+                          colors: [
+                            Color(0xFFE9EEF5),
+                            Color(0xFFD5DCE7),
+                            Color(0xFFB9C5D7),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.play_arrow_rounded,
-                        color: Colors.white,
-                        size: 72,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        videoName,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.ink.withValues(alpha: 0.10),
+                            Colors.transparent,
+                            AppTheme.ink.withValues(alpha: 0.30),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0, 0.34, 1],
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-                Positioned(
-                  left: 24,
-                  right: 24,
-                  bottom: 22,
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(_formatSeconds(position)),
-                          Text(duration == null
-                              ? '--:--'
-                              : _formatSeconds(duration)),
-                        ],
+                  const Positioned(
+                    left: 24,
+                    top: 20,
+                    child: Text(
+                      'LECTURE',
+                      style: TextStyle(
+                        color: AppTheme.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.54,
                       ),
-                      const SizedBox(height: 8),
-                      LinearProgressIndicator(
-                        value: duration == null || duration <= 0
-                            ? 0
-                            : (position / duration).clamp(0, 1),
-                        minHeight: 8,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                  Center(
+                    child: Container(
+                      width: 78,
+                      height: 78,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.surface,
+                        shape: BoxShape.circle,
+                        boxShadow: AppTheme.shadowRaised,
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: AppTheme.brandBlue,
+                        size: 42,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 22,
+                    right: 22,
+                    bottom: 24,
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _formatSeconds(position),
+                              style: const TextStyle(
+                                color: AppTheme.muted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              duration == null
+                                  ? '--:--'
+                                  : _formatSeconds(duration),
+                              style: const TextStyle(
+                                color: AppTheme.muted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _SoftProgressBar(
+                          value: duration == null || duration <= 0
+                              ? 0
+                              : (position / duration).clamp(0, 1),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -391,8 +568,9 @@ class _BlockPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final block = state.selectedBlock;
-    return SectionCard(
+    return _LessonCard(
       key: const Key('lesson_study_block_panel'),
+      surfaceKey: const Key('lesson_handout_card_surface'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -405,13 +583,14 @@ class _BlockPanel extends ConsumerWidget {
                   title: '讲义块',
                 ),
               ),
-              FilledButton(
+              _SoftActionButton(
+                label: '生成讲义',
+                icon: Icons.auto_awesome_outlined,
                 onPressed: state.isGeneratingSelectedBlock || block == null
                     ? null
                     : () => ref
                         .read(lessonStudyProvider.notifier)
                         .generateSelectedBlock(),
-                child: const Text('生成讲义'),
               ),
             ],
           ),
@@ -427,7 +606,8 @@ class _BlockPanel extends ConsumerWidget {
                 : '当前讲义基于 ${state.materials.length} 份资料生成。',
             style: const TextStyle(
               color: AppTheme.muted,
-              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -443,36 +623,93 @@ class _HandoutBlockView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          block.title,
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 12),
-        Text(
-          block.contentMd?.replaceAll('### ', '') ?? block.summary,
-          style: const TextStyle(height: 1.55),
-        ),
-        if (block.citations.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: block.citations
-                .map(
-                  (citation) => StatusPill(
-                    label: '${citation.refLabel} · ${citation.locatorText}',
-                    color: const Color(0xFF64748B),
-                  ),
-                )
-                .toList(),
+    final content = block.contentMd;
+    return Container(
+      key: const Key('lesson_handout_surface'),
+      constraints: const BoxConstraints(minHeight: 360),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            block.title,
+            style: Theme.of(context).textTheme.titleLarge,
           ),
+          const SizedBox(height: 12),
+          if (content == null || content.trim().isEmpty)
+            Text(
+              block.summary.isEmpty ? '该讲义块暂无正文。' : block.summary,
+              style: const TextStyle(height: 1.55),
+            )
+          else
+            MarkdownBody(
+              data: content,
+              selectable: true,
+              styleSheet: _lessonHandoutMarkdownStyleSheet(context),
+            ),
+          if (block.citations.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: block.citations
+                  .map(
+                    (citation) => StatusPill(
+                      label: '${citation.refLabel} · ${citation.locatorText}',
+                      color: const Color(0xFF64748B),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
+}
+
+MarkdownStyleSheet _lessonHandoutMarkdownStyleSheet(BuildContext context) {
+  final theme = Theme.of(context);
+  return MarkdownStyleSheet.fromTheme(theme).copyWith(
+    p: const TextStyle(
+      color: AppTheme.ink,
+      height: 1.55,
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+    ),
+    h1: theme.textTheme.titleLarge?.copyWith(
+      color: AppTheme.ink,
+      fontWeight: FontWeight.w900,
+    ),
+    h2: theme.textTheme.titleMedium?.copyWith(
+      color: AppTheme.ink,
+      fontWeight: FontWeight.w900,
+    ),
+    h3: theme.textTheme.titleSmall?.copyWith(
+      color: AppTheme.ink,
+      fontWeight: FontWeight.w900,
+    ),
+    listBullet: const TextStyle(
+      color: AppTheme.ink,
+      height: 1.45,
+      fontWeight: FontWeight.w700,
+    ),
+    code: const TextStyle(
+      color: AppTheme.ink,
+      backgroundColor: Color(0xFFEFF3F8),
+      fontSize: 13,
+      height: 1.45,
+    ),
+    codeblockDecoration: BoxDecoration(
+      color: const Color(0xFFEFF3F8),
+      borderRadius: BorderRadius.circular(14),
+    ),
+  );
 }
 
 class _AiPanel extends ConsumerWidget {
@@ -487,59 +724,85 @@ class _AiPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final messages = state.selectedBlockQaMessages;
-    return SectionCard(
+    return _LessonCard(
       key: const Key('lesson_study_ai_panel'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _PanelTitle(
-            icon: Icons.forum_outlined,
-            title: 'AI 问答',
-          ),
-          const SizedBox(height: 12),
-          if (messages.isEmpty)
-            const _ChatBubble(
-              text: '我会基于当前视频、课件和字幕回答。你可以问“循环队列为什么要空一个位置？”',
-              isUser: false,
-            )
-          else
-            ...messages.map(
-              (message) => _ChatBubble(
-                text: message.answerMd,
-                isUser: false,
-              ),
+      surfaceKey: const Key('lesson_ai_card_surface'),
+      child: Container(
+        key: const Key('lesson_ai_panel_surface'),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: AppTheme.shadowInsetLook,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _PanelTitle(
+              icon: Icons.forum_outlined,
+              title: 'AI 问答',
             ),
-          const SizedBox(height: 14),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: questionController,
-                  minLines: 1,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    hintText: '问本节 AI：例如 循环队列判满公式怎么记？',
-                  ),
+            const SizedBox(height: 12),
+            if (messages.isEmpty)
+              const _ChatBubble(
+                surfaceKey: Key('lesson_ai_bubble_ai_surface'),
+                text: '我会基于当前视频、课件和字幕回答。你可以问“循环队列为什么要空一个位置？”',
+                isUser: false,
+              )
+            else
+              ...messages.map(
+                (message) => _ChatBubble(
+                  text: message.answerMd,
+                  isUser: false,
                 ),
               ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: state.isSubmittingQuestion
-                    ? null
-                    : () {
-                        final question = questionController.text;
-                        questionController.clear();
-                        ref
-                            .read(lessonStudyProvider.notifier)
-                            .askQuestion(question);
-                      },
-                icon: const Icon(Icons.send_outlined),
-                label: const Text('发送'),
-              ),
-            ],
-          ),
-        ],
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Container(
+                    key: const Key('lesson_ai_input_surface'),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: AppTheme.shadowInsetLook,
+                    ),
+                    child: TextField(
+                      controller: questionController,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        hintText: '问本节 AI：例如 循环队列判满公式怎么记？',
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        contentPadding: EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _SoftActionButton(
+                  label: '发送',
+                  icon: Icons.send_outlined,
+                  primary: true,
+                  onPressed: state.isSubmittingQuestion
+                      ? null
+                      : () {
+                          final question = questionController.text;
+                          questionController.clear();
+                          ref
+                              .read(lessonStudyProvider.notifier)
+                              .askQuestion(question);
+                        },
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -552,15 +815,12 @@ class _OutlineTrigger extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      elevation: 8,
-      borderRadius: BorderRadius.circular(8),
-      color: Colors.white,
-      child: IconButton(
-        tooltip: '讲义目录',
-        onPressed: onPressed,
-        icon: const Icon(Icons.format_list_bulleted, color: AppTheme.brandBlue),
-      ),
+    return _SoftIconButton(
+      tooltip: '讲义目录',
+      icon: Icons.format_list_bulleted,
+      onPressed: onPressed,
+      size: 46,
+      radius: 18,
     );
   }
 }
@@ -573,41 +833,52 @@ class _OutlineDrawer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final outline = state.outline.valueOrNull;
-    return Material(
-      elevation: 18,
-      borderRadius: BorderRadius.circular(8),
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    return Container(
+      key: const Key('lesson_outline_drawer_surface'),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: AppTheme.shadowRaised,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: Material(
+          color: Colors.transparent,
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Expanded(
-                  child: _PanelTitle(
-                    icon: Icons.schema_outlined,
-                    title: '讲义目录',
-                  ),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: _PanelTitle(
+                        icon: Icons.schema_outlined,
+                        title: '讲义目录',
+                      ),
+                    ),
+                    _SoftIconButton(
+                      tooltip: '关闭讲义目录',
+                      icon: Icons.close,
+                      onPressed: () =>
+                          ref.read(lessonStudyProvider.notifier).closeOutline(),
+                      size: 42,
+                      radius: 16,
+                    ),
+                  ],
                 ),
-                IconButton(
-                  tooltip: '关闭讲义目录',
-                  onPressed: () =>
-                      ref.read(lessonStudyProvider.notifier).closeOutline(),
-                  icon: const Icon(Icons.close),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final section in outline?.items ?? const [])
+                        _OutlineSection(section: section),
+                    ],
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: ListView(
-                children: [
-                  for (final section in outline?.items ?? const [])
-                    _OutlineSection(section: section),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -621,37 +892,172 @@ class _OutlineSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+    final children = section.children;
+    final selectedBlockId = ref.watch(lessonStudyProvider).selectedBlockId;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            section.title,
-            style: const TextStyle(
-              color: AppTheme.ink,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
+          _OutlineParentTitle(title: section.title),
+          Padding(
+            padding: const EdgeInsets.only(left: 24),
+            child: Column(
+              children: [
+                for (final child in children)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: child == children.first ? 0 : 8,
+                    ),
+                    child: _OutlineChildButton(
+                      child: child,
+                      isActive: child.blockId == selectedBlockId ||
+                          (selectedBlockId == null && child == children.first),
+                      onTap: () {
+                        final block = ref
+                            .read(lessonStudyProvider)
+                            .blockForId(child.blockId);
+                        if (block != null) {
+                          ref
+                              .read(lessonStudyProvider.notifier)
+                              .selectBlock(block);
+                        }
+                        ref.read(lessonStudyProvider.notifier).closeOutline();
+                      },
+                    ),
+                  ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          for (final child in section.children)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: Text(child.title),
-              subtitle: Text(_rangeText(child.startSec, child.endSec)),
-              onTap: () {
-                final block = ref
-                    .read(lessonStudyProvider)
-                    .blockForId(child.blockId);
-                if (block != null) {
-                  ref.read(lessonStudyProvider.notifier).selectBlock(block);
-                }
-                ref.read(lessonStudyProvider.notifier).closeOutline();
-              },
-            ),
         ],
+      ),
+    );
+  }
+}
+
+class _OutlineParentTitle extends StatelessWidget {
+  const _OutlineParentTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = _splitOutlineTitle(title);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          if (parts.prefix.isNotEmpty) ...[
+            Text(
+              parts.prefix,
+              style: const TextStyle(
+                color: AppTheme.brandBlue,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Text(
+              parts.text,
+              style: const TextStyle(
+                color: AppTheme.ink,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OutlineChildButton extends StatelessWidget {
+  const _OutlineChildButton({
+    required this.child,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  final HandoutOutlineChildModel child;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = _splitOutlineTitle(child.title);
+    final foreground = isActive ? Colors.white : AppTheme.ink;
+    final subtle =
+        isActive ? Colors.white.withValues(alpha: 0.86) : AppTheme.muted;
+    return Container(
+      key: Key('lesson_outline_child_${child.blockId}'),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: isActive ? AppTheme.brandBlue : AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: isActive ? AppTheme.shadowAccent : AppTheme.shadowSmall,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  parts.prefix.isEmpty ? '-' : parts.prefix,
+                  style: TextStyle(
+                    color: subtle,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        parts.text,
+                        overflow: TextOverflow.visible,
+                        style: TextStyle(
+                          color: foreground,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _rangeText(child.startSec, child.endSec),
+                        style: TextStyle(
+                          color: subtle,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -666,57 +1072,171 @@ class _MaterialsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return Dialog(
       key: const Key('lesson_materials_dialog'),
+      elevation: 0,
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
       insetPadding: const EdgeInsets.all(24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 620),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: _PanelTitle(
-                      icon: Icons.folder_open_outlined,
-                      title: '本节资料',
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '关闭',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (materials.isEmpty)
-                const Text('暂无本节资料。')
-              else
-                Flexible(
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: materials.length,
-                    separatorBuilder: (_, __) => const Divider(height: 20),
-                    itemBuilder: (context, index) {
-                      final material = materials[index];
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: SoftIcon(
-                          icon: _resourceIcon(material.resourceType),
-                          size: 44,
-                        ),
-                        title: Text(material.originalName),
-                        subtitle: Text(
-                          '${material.resourceType} · ${material.usageRole}',
-                        ),
-                      );
-                    },
-                  ),
-                ),
-            ],
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Container(
+          key: const Key('lesson_materials_dialog_surface'),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(32),
+            boxShadow: AppTheme.shadowRaised,
           ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(32),
+            child: Material(
+              color: Colors.transparent,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: _PanelTitle(
+                            icon: Icons.folder_open_outlined,
+                            title: '本节资料',
+                          ),
+                        ),
+                        _SoftIconButton(
+                          tooltip: '关闭',
+                          icon: Icons.close,
+                          onPressed: () => Navigator.of(context).pop(),
+                          size: 42,
+                          radius: 16,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (materials.isEmpty)
+                      const Text('暂无本节资料。')
+                    else
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: materials.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            final material = materials[index];
+                            return Container(
+                              key: Key(
+                                  'lesson_material_row_${material.resourceId}'),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 11,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.surface,
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: AppTheme.shadowInsetLook,
+                              ),
+                              child: _MaterialRowContent(
+                                contentPadding: EdgeInsets.zero,
+                                leading: _FileBadge(
+                                  resourceType: material.resourceType,
+                                ),
+                                title: Text(material.originalName),
+                                subtitle: Text(
+                                  '${material.resourceType} · ${material.usageRole}',
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MaterialRowContent extends StatelessWidget {
+  const _MaterialRowContent({
+    required this.contentPadding,
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final EdgeInsetsGeometry contentPadding;
+  final Widget leading;
+  final Widget title;
+  final Widget subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: contentPadding,
+      child: Row(
+        children: [
+          leading,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DefaultTextStyle.merge(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.ink,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  child: title,
+                ),
+                const SizedBox(height: 4),
+                DefaultTextStyle.merge(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  child: subtitle,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FileBadge extends StatelessWidget {
+  const _FileBadge({required this.resourceType});
+
+  final String resourceType;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 44,
+      height: 44,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppTheme.shadowRaised,
+      ),
+      child: Text(
+        _fileBadgeLabel(resourceType),
+        style: TextStyle(
+          color: _fileBadgeColor(resourceType),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
@@ -736,12 +1256,30 @@ class _PanelTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: AppTheme.brandBlue),
-        const SizedBox(width: 8),
+        Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: AppTheme.shadowInsetLook,
+          ),
+          child: Icon(icon, color: AppTheme.brandBlue, size: 20),
+        ),
+        const SizedBox(width: 12),
         Expanded(
           child: Text(
             title,
-            style: Theme.of(context).textTheme.titleMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppTheme.ink,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              height: 1.1,
+              letterSpacing: 0,
+            ),
           ),
         ),
       ],
@@ -753,27 +1291,38 @@ class _ChatBubble extends StatelessWidget {
   const _ChatBubble({
     required this.text,
     required this.isUser,
+    this.surfaceKey,
   });
 
   final String text;
   final bool isUser;
+  final Key? surfaceKey;
 
   @override
   Widget build(BuildContext context) {
+    final bubbleRadius = BorderRadius.only(
+      topLeft: Radius.circular(isUser ? 20 : 8),
+      topRight: Radius.circular(isUser ? 8 : 20),
+      bottomLeft: const Radius.circular(20),
+      bottomRight: const Radius.circular(20),
+    );
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
+        key: surfaceKey,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         constraints: const BoxConstraints(maxWidth: 620),
         decoration: BoxDecoration(
-          color: isUser ? AppTheme.brandBlue : const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(8),
+          color: isUser ? AppTheme.brandBlue : AppTheme.surface,
+          borderRadius: bubbleRadius,
+          boxShadow: isUser ? AppTheme.shadowAccent : AppTheme.shadowSmall,
         ),
         child: Text(
           text,
           style: TextStyle(
             color: isUser ? Colors.white : AppTheme.ink,
+            fontSize: 13,
             height: 1.45,
             fontWeight: FontWeight.w600,
           ),
@@ -783,14 +1332,127 @@ class _ChatBubble extends StatelessWidget {
   }
 }
 
-IconData _resourceIcon(String resourceType) {
-  return switch (resourceType) {
-    'mp4' || 'video' => Icons.movie_outlined,
-    'pdf' => Icons.picture_as_pdf_outlined,
-    'ppt' || 'pptx' => Icons.slideshow_outlined,
-    'srt' => Icons.closed_caption_outlined,
-    _ => Icons.insert_drive_file_outlined,
+class _SoftIconButton extends StatelessWidget {
+  const _SoftIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.size = 46,
+    this.radius = 16,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final double size;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return Opacity(
+      opacity: enabled ? 1 : 0.52,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(radius),
+          boxShadow: AppTheme.shadowRaised,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(radius),
+          child: Tooltip(
+            message: tooltip,
+            child: InkWell(
+              onTap: onPressed,
+              borderRadius: BorderRadius.circular(radius),
+              child: SizedBox(
+                width: size,
+                height: size,
+                child: Icon(
+                  icon,
+                  color: AppTheme.brandBlue,
+                  size: size * 0.45,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SoftProgressBar extends StatelessWidget {
+  const _SoftProgressBar({required this.value});
+
+  final num value;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = value.clamp(0, 1).toDouble();
+    return Container(
+      key: const Key('lesson_video_progress_bar'),
+      height: 12,
+      padding: const EdgeInsets.all(3),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: progress,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              gradient: const LinearGradient(
+                colors: [AppTheme.brandBlue, AppTheme.success],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _fileBadgeLabel(String resourceType) {
+  final normalized = resourceType.trim().toUpperCase();
+  if (normalized.isEmpty) {
+    return 'FILE';
+  }
+  if (normalized == 'VIDEO') {
+    return 'MP4';
+  }
+  return normalized.length <= 4 ? normalized : normalized.substring(0, 4);
+}
+
+Color _fileBadgeColor(String resourceType) {
+  return switch (resourceType.toLowerCase()) {
+    'pdf' => AppTheme.danger,
+    'srt' || 'doc' || 'docx' => AppTheme.success,
+    'mp4' || 'video' || 'ppt' || 'pptx' => AppTheme.brandBlue,
+    _ => AppTheme.brandBlue,
   };
+}
+
+class _OutlineTitleParts {
+  const _OutlineTitleParts(this.prefix, this.text);
+
+  final String prefix;
+  final String text;
+}
+
+_OutlineTitleParts _splitOutlineTitle(String title) {
+  final trimmed = title.trim();
+  final match = RegExp(r'^(\d+(?:\.\d+)*)(?:\s+(.+))?$').firstMatch(trimmed);
+  if (match == null) {
+    return _OutlineTitleParts('', trimmed);
+  }
+  return _OutlineTitleParts(match.group(1) ?? '', match.group(2) ?? trimmed);
 }
 
 String _formatSeconds(int seconds) {

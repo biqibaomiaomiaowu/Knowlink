@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +15,9 @@ import '../../shared/models/home_dashboard_models.dart';
 import '../../shared/models/home_state.dart';
 import '../../shared/providers/course_flow_providers.dart';
 import '../../shared/providers/home_provider.dart';
+import '../course_import/course_create_dialog.dart';
+
+const _newCourseModalRoute = '__new_course_modal__';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -125,7 +130,8 @@ class _HomePageState extends ConsumerState<HomePage> {
             courseId: course.courseId.toString(),
             blockId: blockId,
           );
-    final positionSec = progress?.lastPositionSec ?? course.lastPositionSec ?? 0;
+    final positionSec =
+        progress?.lastPositionSec ?? course.lastPositionSec ?? 0;
     ref.read(playerStateProvider.notifier).state = PlayerState(
       positionSec: positionSec,
     );
@@ -166,7 +172,19 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (route == null || route.isEmpty) {
       return;
     }
+    if (route == _newCourseModalRoute) {
+      unawaited(_openCourseCreateDialog());
+      return;
+    }
     context.go(route);
+  }
+
+  Future<void> _openCourseCreateDialog() async {
+    final course = await showCourseCreateDialog(context);
+    if (!mounted || course == null) {
+      return;
+    }
+    context.go('/courses/${course.courseId}');
   }
 }
 
@@ -205,6 +223,7 @@ class _HomeBody extends StatelessWidget {
         final isWide = constraints.maxWidth >= 920;
         final content = isWide
             ? _HomeWideLayout(
+                availableHeight: constraints.maxHeight,
                 dashboard: dashboard,
                 progressByCourseId: state.progressByCourseId,
                 isSwitchingCourse: state.currentCourseSwitch.isLoading,
@@ -222,6 +241,12 @@ class _HomeBody extends StatelessWidget {
                 onSwitchCourse: onSwitchCourse,
                 onOpenRoute: onOpenRoute,
               );
+        if (isWide) {
+          return SizedBox(
+            height: constraints.maxHeight,
+            child: content,
+          );
+        }
         return RefreshIndicator(
           onRefresh: () async => onRetry(),
           child: SingleChildScrollView(
@@ -234,8 +259,498 @@ class _HomeBody extends StatelessWidget {
   }
 }
 
+class _HomePrototypeTitle extends StatelessWidget {
+  const _HomePrototypeTitle({
+    required this.onOpenRoute,
+    this.dense = false,
+  });
+
+  final void Function(String? route) onOpenRoute;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 640;
+        final title = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SoftIcon(icon: Icons.home_outlined, size: dense ? 42 : 46),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _HomePrototypeTitleText(dense: dense),
+            ),
+          ],
+        );
+        final actions = Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          alignment: compact ? WrapAlignment.start : WrapAlignment.end,
+          children: [
+            OutlinedButton(
+              onPressed: () => onOpenRoute('/courses'),
+              child: const Text('查看课程库'),
+            ),
+            FilledButton(
+              onPressed: () => onOpenRoute(_newCourseModalRoute),
+              child: const Text('新建课程'),
+            ),
+          ],
+        );
+
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              title,
+              const SizedBox(height: 14),
+              actions,
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: title),
+            const SizedBox(width: 16),
+            actions,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _HomePrototypeTitleText extends StatelessWidget {
+  const _HomePrototypeTitleText({required this.dense});
+
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'KnowLink / Study Center',
+          style: TextStyle(
+            color: AppTheme.muted,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '学习总览',
+                style: TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: dense ? 38 : 42,
+                  fontWeight: FontWeight.w800,
+                  height: 1.02,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeHeroDashboard extends StatelessWidget {
+  const _HomeHeroDashboard({
+    required this.dashboard,
+    required this.onContinueLearning,
+    this.dense = false,
+  });
+
+  final HomeDashboardModel? dashboard;
+  final Future<void> Function(HomeDashboardModel dashboard) onContinueLearning;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = dashboard;
+    final course = value?.currentCourse;
+    final lesson = value?.currentLesson;
+    final percent = ((lesson?.handoutReadPercent ?? 0).clamp(0, 100)) / 100;
+    final canContinue = value != null &&
+        course != null &&
+        (value.continueLearning != null || value.nextStep != null);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        final heroHeight = dense ? 188.0 : 250.0;
+        final heroPadding = dense ? 20.0 : 28.0;
+        final heroContent = Stack(
+          clipBehavior: Clip.none,
+          children: [
+            const Positioned(
+              right: -52,
+              top: -72,
+              child: _HeroSoftOrb(size: 220, inset: true),
+            ),
+            const Positioned(
+              right: 128,
+              bottom: -70,
+              child: _HeroSoftOrb(size: 150, inset: false),
+            ),
+            Padding(
+              padding: EdgeInsets.all(heroPadding),
+              child: compact
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _HeroCopy(
+                          course: course,
+                          lesson: lesson,
+                          canContinue: canContinue,
+                          dense: dense,
+                          onContinue: value == null
+                              ? null
+                              : () => onContinueLearning(value),
+                        ),
+                        const SizedBox(height: 14),
+                        _HeroProgressCard(
+                          percent: percent,
+                          completed: lesson?.orderIndex ?? 0,
+                          dense: dense,
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          flex: 6,
+                          child: _HeroCopy(
+                            course: course,
+                            lesson: lesson,
+                            canContinue: canContinue,
+                            dense: dense,
+                            onContinue: value == null
+                                ? null
+                                : () => onContinueLearning(value),
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          flex: 4,
+                          child: _HeroProgressCard(
+                            percent: percent,
+                            completed: lesson?.orderIndex ?? 0,
+                            dense: dense,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        );
+        final card = DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(32),
+            boxShadow: AppTheme.shadowRaised,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(32),
+            child: ColoredBox(
+              color: AppTheme.surface,
+              child: heroContent,
+            ),
+          ),
+        );
+        return compact ? card : SizedBox(height: heroHeight, child: card);
+      },
+    );
+  }
+}
+
+class _HeroCopy extends StatelessWidget {
+  const _HeroCopy({
+    required this.course,
+    required this.lesson,
+    required this.canContinue,
+    required this.dense,
+    required this.onContinue,
+  });
+
+  final CourseSummaryModel? course;
+  final HomeLessonModel? lesson;
+  final bool canContinue;
+  final bool dense;
+  final VoidCallback? onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const _PrototypePill(label: '今日学习计划'),
+        SizedBox(height: dense ? 8 : 14),
+        Text(
+          lesson == null
+              ? '准备开始你的第一节课'
+              : '继续学习「${course?.title ?? '当前课程'}」：${lesson!.title}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: AppTheme.ink,
+            fontSize: dense ? 24 : 34,
+            fontWeight: FontWeight.w800,
+            height: 1.08,
+          ),
+        ),
+        SizedBox(height: dense ? 4 : 12),
+        Text(
+          lesson == null
+              ? '系统会根据你的课程、资料和薄弱点组织讲义、测试与复习。'
+              : '系统已根据上次进度、薄弱点和当前课时安排讲义学习、测试和错题复盘。',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: AppTheme.muted,
+            fontSize: dense ? 14 : 15,
+            fontWeight: FontWeight.w500,
+            height: dense ? 1.45 : 1.7,
+          ),
+        ),
+        SizedBox(height: dense ? 8 : 22),
+        FilledButton(
+          onPressed: canContinue ? onContinue : null,
+          child: const Text('进入当前课时'),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeroSoftOrb extends StatelessWidget {
+  const _HeroSoftOrb({
+    required this.size,
+    required this.inset,
+  });
+
+  final double size;
+  final bool inset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(size / 2),
+        boxShadow: inset ? AppTheme.shadowInsetLook : AppTheme.shadowSmall,
+      ),
+    );
+  }
+}
+
+class _PrototypePill extends StatelessWidget {
+  const _PrototypePill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    const color = AppTheme.brandBlue;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 30),
+        padding: const EdgeInsets.symmetric(horizontal: 13),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: AppTheme.shadowInsetLook,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.14),
+                    blurRadius: 0,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  height: 1.2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrototypeProgressRail extends StatelessWidget {
+  const _PrototypeProgressRail({required this.value});
+
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 12,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      child: FractionallySizedBox(
+        widthFactor: value.clamp(0, 1),
+        alignment: Alignment.centerLeft,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.brandBlue,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x3D544CD2),
+                blurRadius: 6,
+                offset: Offset(2, 2),
+              ),
+              BoxShadow(
+                color: Color(0x52FFFFFF),
+                blurRadius: 6,
+                offset: Offset(-2, -2),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroProgressCard extends StatelessWidget {
+  const _HeroProgressCard({
+    required this.percent,
+    required this.completed,
+    required this.dense,
+  });
+
+  final double percent;
+  final int completed;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayPercent = (percent * 100).round();
+    return Container(
+      constraints: BoxConstraints(minHeight: dense ? 120 : 150),
+      padding: EdgeInsets.all(dense ? 14 : 22),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            right: 0,
+            top: -4,
+            child: Container(
+              width: dense ? 56 : 82,
+              height: dense ? 56 : 82,
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: AppTheme.shadowRaised,
+              ),
+            ),
+          ),
+          Positioned(
+            right: dense ? 18 : 27,
+            top: dense ? 14 : 23,
+            child: Container(
+              width: dense ? 18 : 28,
+              height: dense ? 18 : 28,
+              decoration: BoxDecoration(
+                color: AppTheme.success,
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: AppTheme.shadowSmall,
+              ),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '$displayPercent%',
+                style: TextStyle(
+                  color: AppTheme.brandBlue,
+                  fontSize: dense ? 38 : 48,
+                  fontWeight: FontWeight.w800,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                '课程整体进度',
+                style: TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(height: dense ? 6 : 16),
+              Text(
+                '已完成 $completed 个课时',
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              SizedBox(height: dense ? 6 : 8),
+              _PrototypeProgressRail(value: percent),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HomeWideLayout extends StatelessWidget {
   const _HomeWideLayout({
+    required this.availableHeight,
     required this.dashboard,
     required this.progressByCourseId,
     required this.isSwitchingCourse,
@@ -245,6 +760,7 @@ class _HomeWideLayout extends StatelessWidget {
     required this.onOpenRoute,
   });
 
+  final double availableHeight;
   final HomeDashboardModel? dashboard;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
   final bool isSwitchingCourse;
@@ -255,51 +771,51 @@ class _HomeWideLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final dense = availableHeight.isFinite && availableHeight < 680;
+    final content = Column(
       children: [
-        _CurrentLearningCard(
-          dashboard: dashboard,
-          onContinueLearning: onContinueLearning,
+        _HomePrototypeTitle(
           onOpenRoute: onOpenRoute,
+          dense: dense,
         ),
-        const SizedBox(height: 24),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: _StatsCard(dashboard: dashboard)),
-            const SizedBox(width: 24),
-            Expanded(
-              child: _NextStepCard(
-                dashboard: dashboard,
-                onOpenRoute: onOpenRoute,
-              ),
-            ),
-          ],
+        SizedBox(height: dense ? 12 : 22),
+        _HomeHeroDashboard(
+          dashboard: dashboard,
+          dense: dense,
+          onContinueLearning: onContinueLearning,
         ),
-        const SizedBox(height: 24),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _TodayReviewCard(
-                tasks: dashboard?.todayReviewTasks ?? const [],
-                onOpenRoute: onOpenRoute,
+        SizedBox(height: dense ? 12 : 16),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _TodayReviewCard(
+                  tasks: dashboard?.todayReviewTasks ?? const [],
+                  dense: dense,
+                  onOpenRoute: onOpenRoute,
+                ),
               ),
-            ),
-            const SizedBox(width: 24),
-            Expanded(
-              child: _RecentCoursesCard(
-                recentCourses: dashboard?.recentCourses ?? const [],
-                progressByCourseId: progressByCourseId,
-                isSwitchingCourse: isSwitchingCourse,
-                onResumeCourse: onResumeCourse,
-                onSwitchCourse: onSwitchCourse,
+              const SizedBox(width: 16),
+              Expanded(
+                child: _RecentCoursesCard(
+                  recentCourses: dashboard?.recentCourses ?? const [],
+                  progressByCourseId: progressByCourseId,
+                  isSwitchingCourse: isSwitchingCourse,
+                  dense: dense,
+                  onResumeCourse: onResumeCourse,
+                  onSwitchCourse: onSwitchCourse,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
+    if (!availableHeight.isFinite) {
+      return content;
+    }
+    return SizedBox(height: availableHeight, child: content);
   }
 }
 
@@ -326,21 +842,16 @@ class _HomeNarrowLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _CurrentLearningCard(
+        _HomePrototypeTitle(onOpenRoute: onOpenRoute),
+        const SizedBox(height: 16),
+        _HomeHeroDashboard(
           dashboard: dashboard,
           onContinueLearning: onContinueLearning,
-          onOpenRoute: onOpenRoute,
-        ),
-        const SizedBox(height: 16),
-        _StatsCard(dashboard: dashboard),
-        const SizedBox(height: 16),
-        _NextStepCard(
-          dashboard: dashboard,
-          onOpenRoute: onOpenRoute,
         ),
         const SizedBox(height: 16),
         _TodayReviewCard(
           tasks: dashboard?.todayReviewTasks ?? const [],
+          dense: false,
           onOpenRoute: onOpenRoute,
         ),
         const SizedBox(height: 16),
@@ -348,6 +859,7 @@ class _HomeNarrowLayout extends StatelessWidget {
           recentCourses: dashboard?.recentCourses ?? const [],
           progressByCourseId: progressByCourseId,
           isSwitchingCourse: isSwitchingCourse,
+          dense: false,
           onResumeCourse: onResumeCourse,
           onSwitchCourse: onSwitchCourse,
         ),
@@ -356,6 +868,7 @@ class _HomeNarrowLayout extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _CurrentLearningCard extends StatelessWidget {
   const _CurrentLearningCard({
     required this.dashboard,
@@ -459,6 +972,7 @@ class _CurrentLearningCard extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _StatsCard extends StatelessWidget {
   const _StatsCard({
     required this.dashboard,
@@ -518,6 +1032,7 @@ class _StatsCard extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _NextStepCard extends StatelessWidget {
   const _NextStepCard({
     required this.dashboard,
@@ -561,30 +1076,37 @@ class _NextStepCard extends StatelessWidget {
 class _TodayReviewCard extends StatelessWidget {
   const _TodayReviewCard({
     required this.tasks,
+    required this.dense,
     required this.onOpenRoute,
   });
 
   final List<HomeReviewTaskModel> tasks;
+  final bool dense;
   final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
     final visibleTasks = tasks.take(3).toList();
-    return SectionCard(
+    return _PrototypeSectionCard(
+      markColor: AppTheme.success,
+      padding: EdgeInsets.all(dense ? 14 : 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionHeader(title: '今日复习任务'),
-          const SizedBox(height: 12),
+          const _SectionHeader(title: '推荐复习'),
+          SizedBox(height: dense ? 8 : 14),
           if (visibleTasks.isEmpty)
             const _EmptyText('今天没有到期复习任务')
           else
-            for (final task in visibleTasks) ...[
+            for (var index = 0; index < visibleTasks.length; index++) ...[
               _ReviewTaskRow(
-                task: task,
+                index: index + 1,
+                task: visibleTasks[index],
+                dense: dense,
                 onOpenRoute: onOpenRoute,
               ),
-              if (task != visibleTasks.last) const Divider(height: 20),
+              if (index != visibleTasks.length - 1)
+                SizedBox(height: dense ? 8 : 12),
             ],
         ],
       ),
@@ -597,6 +1119,7 @@ class _RecentCoursesCard extends StatelessWidget {
     required this.recentCourses,
     required this.progressByCourseId,
     required this.isSwitchingCourse,
+    required this.dense,
     required this.onResumeCourse,
     required this.onSwitchCourse,
   });
@@ -604,33 +1127,85 @@ class _RecentCoursesCard extends StatelessWidget {
   final List<CourseSummaryModel> recentCourses;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
   final bool isSwitchingCourse;
+  final bool dense;
   final Future<void> Function(CourseSummaryModel course) onResumeCourse;
   final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
 
   @override
   Widget build(BuildContext context) {
-    final visibleCourses = recentCourses.take(3).toList();
-    return SectionCard(
+    final visibleCourses = recentCourses.take(2).toList();
+    return _PrototypeSectionCard(
+      markColor: AppTheme.accentLight,
+      padding: EdgeInsets.all(dense ? 14 : 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const _SectionHeader(title: '最近课程'),
-          const SizedBox(height: 18),
+          SizedBox(height: dense ? 8 : 14),
           if (visibleCourses.isEmpty)
             const _EmptyText('暂无最近课程')
           else
             for (final course in visibleCourses) ...[
-              _RecentCourseDetails(
+              _RecentCourseTile(
                 course: course,
                 progress: progressByCourseId[course.courseId]?.valueOrNull,
                 progressState: progressByCourseId[course.courseId],
                 isSwitching: isSwitchingCourse,
+                dense: dense,
                 onResume: () => onResumeCourse(course),
                 onSwitch: () => onSwitchCourse(course),
               ),
-              if (course != visibleCourses.last) const Divider(height: 28),
+              if (course != visibleCourses.last)
+                SizedBox(height: dense ? 8 : 12),
             ],
         ],
+      ),
+    );
+  }
+}
+
+class _PrototypeSectionCard extends StatelessWidget {
+  const _PrototypeSectionCard({
+    required this.child,
+    required this.markColor,
+    required this.padding,
+  });
+
+  final Widget child;
+  final Color markColor;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: AppTheme.shadowRaised,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: Stack(
+          children: [
+            Padding(
+              padding: padding,
+              child: child,
+            ),
+            Positioned(
+              right: 22,
+              top: 22,
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: markColor,
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: AppTheme.shadowInsetLook,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -759,67 +1334,115 @@ class _RouteTargetRow extends StatelessWidget {
 
 class _ReviewTaskRow extends StatelessWidget {
   const _ReviewTaskRow({
+    required this.index,
     required this.task,
+    required this.dense,
     required this.onOpenRoute,
   });
 
+  final int index;
   final HomeReviewTaskModel task;
+  final bool dense;
   final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          StatusPill(
-            label: '${task.priorityScore}',
-            color: const Color(0xFFF97316),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  task.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppTheme.ink,
+    return Container(
+      padding: EdgeInsets.all(dense ? 10 : 14),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 430;
+          final main = Row(
+            children: [
+              Container(
+                width: dense ? 36 : 42,
+                height: dense ? 36 : 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: AppTheme.shadowRaised,
+                ),
+                child: Text(
+                  '$index',
+                  style: TextStyle(
+                    color: index == 2 ? AppTheme.success : AppTheme.brandBlue,
+                    fontSize: 13,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  task.reasonText,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppTheme.muted,
-                    fontWeight: FontWeight.w600,
-                  ),
+              ),
+              SizedBox(width: dense ? 10 : 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      task.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppTheme.ink,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      task.reasonText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppTheme.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed:
-                task.nextRoute == null ? null : () => onOpenRoute(task.nextRoute),
+              ),
+            ],
+          );
+          final action = OutlinedButton(
+            onPressed: task.nextRoute == null
+                ? null
+                : () => onOpenRoute(task.nextRoute),
             child: const Text('复习'),
-          ),
-        ],
+          );
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                main,
+                SizedBox(height: dense ? 8 : 10),
+                action,
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: main),
+              SizedBox(width: dense ? 10 : 12),
+              action,
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class _RecentCourseDetails extends StatelessWidget {
-  const _RecentCourseDetails({
+class _RecentCourseTile extends StatelessWidget {
+  const _RecentCourseTile({
     required this.course,
     required this.progress,
     required this.progressState,
     required this.isSwitching,
+    required this.dense,
     required this.onResume,
     required this.onSwitch,
   });
@@ -828,78 +1451,154 @@ class _RecentCourseDetails extends StatelessWidget {
   final CourseProgressModel? progress;
   final AsyncValue<CourseProgressModel>? progressState;
   final bool isSwitching;
+  final bool dense;
+  final VoidCallback onResume;
+  final VoidCallback onSwitch;
+
+  @override
+  Widget build(BuildContext context) {
+    final progressValue = (progressState?.isLoading ?? false)
+        ? 0.0
+        : _courseProgressValue(progress, course);
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        onTap: isSwitching ? null : onResume,
+        onLongPress: isSwitching ? null : onSwitch,
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          key: Key('home_recent_course_tile_${course.courseId}'),
+          width: double.infinity,
+          padding: EdgeInsets.all(dense ? 12 : 18),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: AppTheme.shadowInsetLook,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                course.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: dense ? 16 : 20,
+                  fontWeight: FontWeight.w800,
+                  height: 1.15,
+                ),
+              ),
+              SizedBox(height: dense ? 8 : 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  StatusPill(label: _pipelineLabel(course.pipelineStatus)),
+                  StatusPill(
+                    label: _lifecycleLabel(course.lifecycleStatus),
+                    color: AppTheme.accentLight,
+                  ),
+                ],
+              ),
+              SizedBox(height: dense ? 8 : 14),
+              _PrototypeProgressRail(value: progressValue),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ignore: unused_element
+class _RecentCourseDetails extends StatelessWidget {
+  const _RecentCourseDetails({
+    required this.course,
+    required this.progress,
+    required this.progressState,
+    required this.isSwitching,
+    required this.dense,
+    required this.onResume,
+    required this.onSwitch,
+  });
+
+  final CourseSummaryModel course;
+  final CourseProgressModel? progress;
+  final AsyncValue<CourseProgressModel>? progressState;
+  final bool isSwitching;
+  final bool dense;
   final VoidCallback onResume;
   final VoidCallback onSwitch;
 
   @override
   Widget build(BuildContext context) {
     final resumeText = _resumeText(progress, course);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          course.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: AppTheme.ink,
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
+    final progressValue = (progressState?.isLoading ?? false)
+        ? 0.0
+        : _courseProgressValue(progress, course);
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(28),
+      child: InkWell(
+        onTap: onResume,
+        onLongPress: isSwitching ? null : onSwitch,
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          padding: EdgeInsets.all(dense ? 12 : 18),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: AppTheme.shadowInsetLook,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                course.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: dense ? 16 : 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              SizedBox(height: dense ? 8 : 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  StatusPill(label: _pipelineLabel(course.pipelineStatus)),
+                  StatusPill(
+                    label: _lifecycleLabel(course.lifecycleStatus),
+                    color: AppTheme.accentLight,
+                  ),
+                ],
+              ),
+              if (!dense) ...[
+                const SizedBox(height: 14),
+                Text(
+                  (progressState?.isLoading ?? false)
+                      ? '正在读取最近学习位置...'
+                      : resumeText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+              SizedBox(height: dense ? 8 : 10),
+              _PrototypeProgressRail(value: progressValue),
+            ],
           ),
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 10,
-          runSpacing: 8,
-          children: [
-            StatusPill(label: _pipelineLabel(course.pipelineStatus)),
-            StatusPill(
-              label: _lifecycleLabel(course.lifecycleStatus),
-              color: const Color(0xFF64748B),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (progressState?.isLoading ?? false)
-          const Text(
-            '正在读取最近学习位置...',
-            style:
-                TextStyle(color: AppTheme.muted, fontWeight: FontWeight.w600),
-          )
-        else
-          Text(
-            resumeText,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: AppTheme.muted,
-              fontWeight: FontWeight.w700,
-              height: 1.5,
-            ),
-          ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            OutlinedButton.icon(
-              onPressed: onResume,
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('继续'),
-            ),
-            OutlinedButton.icon(
-              onPressed: isSwitching ? null : onSwitch,
-              icon: const Icon(Icons.check_circle_outline),
-              label: Text(isSwitching ? '正在切换' : '设为当前'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => context.go('/courses/${course.courseId}'),
-              icon: const Icon(Icons.info_outline),
-              label: const Text('课程详情'),
-            ),
-          ],
-        ),
-      ],
+      ),
     );
   }
 }
@@ -913,13 +1612,31 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: const TextStyle(
-        color: AppTheme.ink,
-        fontSize: 22,
-        fontWeight: FontWeight.w800,
-      ),
+    return Row(
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: AppTheme.shadowInsetLook,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppTheme.ink,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1004,6 +1721,25 @@ String _resumeText(CourseProgressModel? progress, CourseSummaryModel course) {
     parts.add(progress.lastAnchorKey!);
   }
   return '上次学习：${parts.join(' · ')}';
+}
+
+double _courseProgressValue(
+  CourseProgressModel? progress,
+  CourseSummaryModel course,
+) {
+  if (course.pipelineStatus == 'succeeded') {
+    return 1;
+  }
+  if (progress?.lastPositionSec != null && progress!.lastPositionSec! > 0) {
+    return 0.45;
+  }
+  if (progress?.hasResumeTarget ?? false) {
+    return 0.32;
+  }
+  if (course.currentLessonId != null) {
+    return 0.18;
+  }
+  return 0;
 }
 
 String _pipelineLabel(String status) {

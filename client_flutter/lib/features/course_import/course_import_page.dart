@@ -11,7 +11,6 @@ import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/bilibili_import_models.dart';
 import '../../shared/models/bilibili_import_state.dart';
 import '../../shared/models/course_import_state.dart';
-import '../../shared/models/recommendation_enums.dart';
 import '../../shared/models/resource_upload_models.dart';
 import '../../shared/providers/bilibili_import_provider.dart';
 import '../../shared/providers/course_import_provider.dart';
@@ -30,8 +29,6 @@ class CourseImportPage extends ConsumerStatefulWidget {
 
 class _CourseImportPageState extends ConsumerState<CourseImportPage> {
   late final TextEditingController _titleController;
-  late final TextEditingController _goalController;
-  late final TextEditingController _examAtController;
   late final TextEditingController _bilibiliUrlController;
   String? _lastResourceCourseId;
 
@@ -40,8 +37,6 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
     super.initState();
     final draft = ref.read(courseImportProvider).draft;
     _titleController = TextEditingController(text: draft.title);
-    _goalController = TextEditingController(text: draft.goalText);
-    _examAtController = TextEditingController(text: draft.examAtText);
     _bilibiliUrlController = TextEditingController();
     _scheduleResourceFetch(widget.courseId);
   }
@@ -57,8 +52,6 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
   @override
   void dispose() {
     _titleController.dispose();
-    _goalController.dispose();
-    _examAtController.dispose();
     _bilibiliUrlController.dispose();
     super.dispose();
   }
@@ -93,21 +86,9 @@ class _CourseImportPageState extends ConsumerState<CourseImportPage> {
           final isWide = constraints.maxWidth >= 980;
           final createSection = _CourseCreateSection(
             titleController: _titleController,
-            goalController: _goalController,
-            examAtController: _examAtController,
-            preferredStyle: state.draft.preferredStyle,
-            examAtErrorText:
-                state.draft.hasInvalidExamAt ? '请输入合法的 ISO 时间' : null,
             isCreating: state.isCreating,
             canSubmit: state.draft.canSubmit && !state.isCreating,
             onTitleChanged: (value) => notifier.updateDraft(title: value),
-            onGoalChanged: (value) => notifier.updateDraft(goalText: value),
-            onExamAtChanged: (value) => notifier.updateDraft(examAtText: value),
-            onPreferredStyleChanged: (value) {
-              if (value != null) {
-                notifier.updateDraft(preferredStyle: value);
-              }
-            },
             onSubmit: notifier.createCourse,
           );
           final uploadSection = _UploadSection(
@@ -409,106 +390,112 @@ class _ImportHero extends StatelessWidget {
 class _CourseCreateSection extends StatelessWidget {
   const _CourseCreateSection({
     required this.titleController,
-    required this.goalController,
-    required this.examAtController,
-    required this.preferredStyle,
-    required this.examAtErrorText,
     required this.isCreating,
     required this.canSubmit,
     required this.onTitleChanged,
-    required this.onGoalChanged,
-    required this.onExamAtChanged,
-    required this.onPreferredStyleChanged,
     required this.onSubmit,
   });
 
   final TextEditingController titleController;
-  final TextEditingController goalController;
-  final TextEditingController examAtController;
-  final PreferredStyle preferredStyle;
-  final String? examAtErrorText;
   final bool isCreating;
   final bool canSubmit;
   final ValueChanged<String> onTitleChanged;
-  final ValueChanged<String> onGoalChanged;
-  final ValueChanged<String> onExamAtChanged;
-  final ValueChanged<PreferredStyle?> onPreferredStyleChanged;
   final VoidCallback onSubmit;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: AppTheme.shadowRaised,
+      ),
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('课程信息',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const Text(
+              '新建课程',
+              style: TextStyle(
+                color: AppTheme.ink,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                height: 1,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '填写课程基础信息后，可继续补充资料并生成学习计划。',
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                height: 1.45,
+              ),
+            ),
             const SizedBox(height: 22),
-            TextField(
-              controller: titleController,
-              enabled: !isCreating,
-              decoration: const InputDecoration(
-                labelText: '课程名称',
-                hintText: '如：数据结构（C语言版）',
-                border: OutlineInputBorder(),
+            const Text(
+              '课程名称',
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.96,
               ),
-              onChanged: onTitleChanged,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: goalController,
-              enabled: !isCreating,
-              decoration: const InputDecoration(
-                labelText: '学习目标',
-                border: OutlineInputBorder(),
+            const SizedBox(height: 8),
+            Container(
+              height: 50,
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: AppTheme.shadowInsetLook,
               ),
-              onChanged: onGoalChanged,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: examAtController,
-              enabled: !isCreating,
-              decoration: InputDecoration(
-                labelText: '考试时间（可选 ISO）',
-                errorText: examAtErrorText,
-                border: const OutlineInputBorder(),
+              alignment: Alignment.center,
+              child: TextField(
+                controller: titleController,
+                enabled: !isCreating,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) {
+                  if (canSubmit) {
+                    onSubmit();
+                  }
+                },
+                style: const TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0,
+                ),
+                decoration: const InputDecoration(
+                  hintText: '例如：操作系统期末复习',
+                  hintStyle: TextStyle(color: Color(0xFF9AA3AF)),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                ),
+                onChanged: onTitleChanged,
               ),
-              onChanged: onExamAtChanged,
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<PreferredStyle>(
-              initialValue: preferredStyle,
-              decoration: const InputDecoration(
-                labelText: '讲义风格偏好',
-                border: OutlineInputBorder(),
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: PreferredStyle.balanced,
-                  child: Text('平衡讲解'),
-                ),
-                DropdownMenuItem(
-                  value: PreferredStyle.exam,
-                  child: Text('考试冲刺'),
-                ),
-                DropdownMenuItem(
-                  value: PreferredStyle.detailed,
-                  child: Text('详细解释'),
-                ),
-                DropdownMenuItem(
-                  value: PreferredStyle.quick,
-                  child: Text('只看重点'),
-                ),
-              ],
-              onChanged: isCreating ? null : onPreferredStyleChanged,
             ),
             const SizedBox(height: 18),
-            FilledButton.icon(
-              onPressed: canSubmit ? onSubmit : null,
-              icon: const Icon(Icons.add_circle_outline),
-              label: Text(isCreating ? '正在创建课程' : '创建课程'),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: canSubmit ? onSubmit : null,
+                child: isCreating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('创建课程'),
+              ),
             ),
           ],
         ),

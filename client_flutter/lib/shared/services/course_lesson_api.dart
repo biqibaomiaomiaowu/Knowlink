@@ -33,6 +33,10 @@ class CourseLessonApi {
     return _client.fetchCourseWorkbench(courseId);
   }
 
+  Future<void> deleteCourse(String courseId) {
+    return _client.deleteCourse(courseId);
+  }
+
   Future<List<LessonSummaryModel>> fetchLessons(String courseId) {
     return _client.fetchLessons(courseId);
   }

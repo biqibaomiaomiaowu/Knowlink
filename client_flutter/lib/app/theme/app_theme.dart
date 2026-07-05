@@ -1,14 +1,70 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const Color brandBlue = Color(0xFF2563EB);
-  static const Color brandBlueDark = Color(0xFF1D4ED8);
-  static const Color ink = Color(0xFF0F172A);
-  static const Color muted = Color(0xFF64748B);
-  static const Color subtle = Color(0xFF94A3B8);
-  static const Color line = Color(0xFFE2E8F0);
-  static const Color panel = Color(0xFFFFFFFF);
-  static const Color page = Color(0xFFF8FBFF);
+  static const Color surface = Color(0xFFE0E5EC);
+  static const Color brandBlue = Color(0xFF6C63FF);
+  static const Color brandBlueDark = Color(0xFF544CD2);
+  static const Color accentLight = Color(0xFF8B84FF);
+  static const Color success = Color(0xFF38B2AC);
+  static const Color danger = Color(0xFFC45163);
+  static const Color ink = Color(0xFF3D4852);
+  static const Color muted = Color(0xFF6B7280);
+  static const Color subtle = Color(0xFF7E8997);
+  static const Color line = Color(0x00000000);
+  static const Color panel = surface;
+  static const Color page = surface;
+
+  static const List<BoxShadow> shadowRaised = [
+    BoxShadow(
+      color: Color(0x9EA3B1C6),
+      blurRadius: 16,
+      offset: Offset(9, 9),
+    ),
+    BoxShadow(
+      color: Color(0x8AFFFFFF),
+      blurRadius: 16,
+      offset: Offset(-9, -9),
+    ),
+  ];
+
+  static const List<BoxShadow> shadowSmall = [
+    BoxShadow(
+      color: Color(0x99A3B1C6),
+      blurRadius: 10,
+      offset: Offset(5, 5),
+    ),
+    BoxShadow(
+      color: Color(0x85FFFFFF),
+      blurRadius: 10,
+      offset: Offset(-5, -5),
+    ),
+  ];
+
+  static const List<BoxShadow> shadowInsetLook = [
+    BoxShadow(
+      color: Color(0x85FFFFFF),
+      blurRadius: 6,
+      offset: Offset(-3, -3),
+    ),
+    BoxShadow(
+      color: Color(0x99A3B1C6),
+      blurRadius: 6,
+      offset: Offset(3, 3),
+    ),
+  ];
+
+  static const List<BoxShadow> shadowAccent = [
+    BoxShadow(
+      color: Color(0x47544CD2),
+      blurRadius: 16,
+      offset: Offset(8, 8),
+    ),
+    BoxShadow(
+      color: Color(0x6BFFFFFF),
+      blurRadius: 16,
+      offset: Offset(-7, -7),
+    ),
+  ];
 
   static ThemeData light() {
     const seed = brandBlue;
@@ -16,36 +72,35 @@ class AppTheme {
       colorScheme: ColorScheme.fromSeed(seedColor: seed),
       useMaterial3: true,
       splashFactory: InkSparkle.splashFactory,
+      canvasColor: surface,
       scaffoldBackgroundColor: page,
       appBarTheme: const AppBarTheme(centerTitle: false),
       cardTheme: CardThemeData(
         color: panel,
-        elevation: 0.5,
-        shadowColor: const Color(0x140F172A),
+        elevation: 0,
         surfaceTintColor: panel,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: line),
+          borderRadius: BorderRadius.circular(32),
         ),
       ),
       dividerColor: line,
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: panel,
+        fillColor: surface,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
           vertical: 14,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: line),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: line),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: brandBlue, width: 1.4),
         ),
       ),
@@ -54,19 +109,24 @@ class AppTheme {
           backgroundColor: brandBlue,
           foregroundColor: Colors.white,
           minimumSize: const Size(52, 46),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          elevation: 10,
+          shadowColor: const Color(0x47544CD2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: brandBlue,
-          side: const BorderSide(color: Color(0xFF93C5FD)),
-          minimumSize: const Size(52, 44),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          backgroundColor: surface,
+          foregroundColor: ink,
+          shadowColor: const Color(0x99A3B1C6),
+          side: BorderSide.none,
+          minimumSize: const Size(52, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          elevation: 8,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
       ),
       textTheme: const TextTheme(
@@ -101,7 +161,7 @@ class AppTheme {
           letterSpacing: 0,
         ),
         bodyMedium: TextStyle(
-          color: Color(0xFF334155),
+          color: ink,
           fontSize: 14,
           height: 1.45,
           letterSpacing: 0,

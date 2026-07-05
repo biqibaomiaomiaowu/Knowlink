@@ -887,6 +887,10 @@ class ApiClient {
         .toList();
   }
 
+  Future<void> deleteCourse(String courseId) async {
+    await _dio.delete<Map<String, dynamic>>('/api/v1/courses/$courseId');
+  }
+
   Future<CourseWorkbenchModel> fetchCourseWorkbench(String courseId) async {
     final response = await _dio.get<Map<String, dynamic>>(
       '/api/v1/courses/$courseId/workbench',

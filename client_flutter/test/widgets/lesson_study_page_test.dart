@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:knowlink_client/app/theme/app_theme.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/lesson_study/lesson_study_page.dart';
 import 'package:knowlink_client/shared/models/course_lesson_models.dart';
@@ -25,6 +27,136 @@ void main() {
     expect(find.byKey(const Key('lesson_study_block_panel')), findsOneWidget);
   });
 
+  testWidgets('wide lesson room uses prototype two-row grid', (tester) async {
+    _useTestSurface(tester);
+    await _pumpLessonStudy(tester);
+
+    final videoRect =
+        tester.getRect(find.byKey(const Key('lesson_study_video_panel')));
+    final blockRect =
+        tester.getRect(find.byKey(const Key('lesson_study_block_panel')));
+    final aiRect =
+        tester.getRect(find.byKey(const Key('lesson_study_ai_panel')));
+
+    expect(videoRect.top, moreOrLessEquals(blockRect.top, epsilon: 1));
+    expect(aiRect.top, greaterThan(videoRect.bottom));
+    expect(aiRect.left, moreOrLessEquals(videoRect.left, epsilon: 1));
+    expect(aiRect.right, moreOrLessEquals(blockRect.right, epsilon: 1));
+  });
+
+  testWidgets('lesson soft-ui surfaces use prototype tokens', (tester) async {
+    _useTestSurface(tester);
+    await _pumpLessonStudy(tester);
+
+    final videoCardSurface = tester.widget<Container>(
+      find.byKey(const Key('lesson_video_card_surface')),
+    );
+    final videoCardDecoration = videoCardSurface.decoration! as BoxDecoration;
+    expect(videoCardDecoration.color, AppTheme.surface);
+    expect(videoCardDecoration.borderRadius, BorderRadius.circular(32));
+    expect(videoCardDecoration.boxShadow, AppTheme.shadowRaised);
+
+    final videoSurface = tester.widget<Container>(
+      find.byKey(const Key('lesson_video_surface')),
+    );
+    final videoDecoration = videoSurface.decoration! as BoxDecoration;
+    expect(videoDecoration.color, AppTheme.surface);
+    expect(videoDecoration.borderRadius, BorderRadius.circular(32));
+    expect(videoDecoration.boxShadow, AppTheme.shadowInsetLook);
+
+    final progressBar = tester.widget<Container>(
+      find.byKey(const Key('lesson_video_progress_bar')),
+    );
+    expect(progressBar.padding, const EdgeInsets.all(3));
+
+    final handoutSurface = tester.widget<Container>(
+      find.byKey(const Key('lesson_handout_surface')),
+    );
+    final handoutDecoration = handoutSurface.decoration! as BoxDecoration;
+    expect(handoutDecoration.color, AppTheme.surface);
+    expect(handoutDecoration.borderRadius, BorderRadius.circular(24));
+    expect(handoutDecoration.boxShadow, AppTheme.shadowInsetLook);
+
+    final aiPanelSurface = tester.widget<Container>(
+      find.byKey(const Key('lesson_ai_panel_surface')),
+    );
+    final aiPanelDecoration = aiPanelSurface.decoration! as BoxDecoration;
+    expect(aiPanelDecoration.color, AppTheme.surface);
+    expect(aiPanelDecoration.borderRadius, BorderRadius.circular(24));
+    expect(aiPanelDecoration.boxShadow, AppTheme.shadowInsetLook);
+
+    final aiBubble = tester.widget<Container>(
+      find.byKey(const Key('lesson_ai_bubble_ai_surface')),
+    );
+    final aiBubbleDecoration = aiBubble.decoration! as BoxDecoration;
+    expect(
+      aiBubbleDecoration.borderRadius,
+      const BorderRadius.only(
+        topLeft: Radius.circular(8),
+        topRight: Radius.circular(20),
+        bottomLeft: Radius.circular(20),
+        bottomRight: Radius.circular(20),
+      ),
+    );
+    expect(aiBubbleDecoration.boxShadow, AppTheme.shadowSmall);
+
+    final aiInputSurface = tester.widget<Container>(
+      find.byKey(const Key('lesson_ai_input_surface')),
+    );
+    final inputDecoration = aiInputSurface.decoration! as BoxDecoration;
+    expect(inputDecoration.color, AppTheme.surface);
+    expect(inputDecoration.borderRadius, BorderRadius.circular(16));
+    expect(inputDecoration.boxShadow, AppTheme.shadowInsetLook);
+
+    await tester.tap(find.byTooltip('讲义目录'));
+    await tester.pumpAndSettle();
+
+    final drawerSurface = tester.widget<Container>(
+      find.byKey(const Key('lesson_outline_drawer_surface')),
+    );
+    final drawerDecoration = drawerSurface.decoration! as BoxDecoration;
+    expect(drawerDecoration.color, AppTheme.surface);
+    expect(
+      drawerDecoration.borderRadius,
+      const BorderRadius.only(
+        topRight: Radius.circular(32),
+        bottomRight: Radius.circular(32),
+      ),
+    );
+    expect(drawerDecoration.boxShadow, AppTheme.shadowRaised);
+  });
+
+  testWidgets('lesson handout block renders markdown structure', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    await _pumpLessonStudy(
+      tester,
+      firstBlockContentMd: '''
+### 栈定义
+
+- 只允许在一端插入和删除
+- **队列** 从队尾入队、队头出队
+
+代码/公式文本：`top = n - 1`
+''',
+    );
+
+    final markdown = find.descendant(
+      of: find.byKey(const Key('lesson_handout_surface')),
+      matching: find.byType(MarkdownBody),
+    );
+
+    expect(markdown, findsOneWidget);
+    final markdownBody = tester.widget<MarkdownBody>(markdown);
+    expect(markdownBody.data, contains('### 栈定义'));
+    expect(markdownBody.data, contains('- 只允许在一端插入和删除'));
+    expect(markdownBody.data, contains('**队列**'));
+    expect(markdownBody.data, contains('`top = n - 1`'));
+    expect(find.textContaining('### 栈定义'), findsNothing);
+    expect(find.textContaining('- 只允许在一端插入和删除'), findsNothing);
+  });
+
   testWidgets('lesson outline drawer opens from left trigger', (tester) async {
     _useTestSurface(tester);
     await _pumpLessonStudy(tester);
@@ -35,6 +167,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('lesson_outline_drawer')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('lesson_outline_drawer')),
+        matching: find.byType(ListTile),
+      ),
+      findsNothing,
+    );
+    final outlineChild = tester.widget<Container>(
+      find.byKey(const Key('lesson_outline_child_4201')),
+    );
+    final outlineChildDecoration = outlineChild.decoration! as BoxDecoration;
+    expect(outlineChildDecoration.color, AppTheme.brandBlue);
+    expect(outlineChildDecoration.borderRadius, BorderRadius.circular(16));
+    expect(outlineChildDecoration.boxShadow, AppTheme.shadowAccent);
     expect(find.text('第一章'), findsOneWidget);
     expect(
       find.descendant(
@@ -54,6 +200,27 @@ void main() {
 
     expect(find.byKey(const Key('lesson_materials_dialog')), findsOneWidget);
     expect(find.byType(BackdropFilter), findsWidgets);
+    final dialogSurface = tester.widget<Container>(
+      find.byKey(const Key('lesson_materials_dialog_surface')),
+    );
+    final dialogDecoration = dialogSurface.decoration! as BoxDecoration;
+    expect(dialogDecoration.color, AppTheme.surface);
+    expect(dialogDecoration.borderRadius, BorderRadius.circular(32));
+    expect(dialogDecoration.boxShadow, AppTheme.shadowRaised);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('lesson_materials_dialog')),
+        matching: find.byType(ListTile),
+      ),
+      findsNothing,
+    );
+    final materialRow = tester.widget<Container>(
+      find.byKey(const Key('lesson_material_row_501')),
+    );
+    final materialRowDecoration = materialRow.decoration! as BoxDecoration;
+    expect(materialRowDecoration.color, AppTheme.surface);
+    expect(materialRowDecoration.borderRadius, BorderRadius.circular(18));
+    expect(materialRowDecoration.boxShadow, AppTheme.shadowInsetLook);
     expect(find.text('本节资料'), findsWidgets);
     expect(
       find.descendant(
@@ -64,7 +231,8 @@ void main() {
     );
   });
 
-  testWidgets('enter test action routes to lesson quiz context', (tester) async {
+  testWidgets('enter test action routes to lesson quiz context',
+      (tester) async {
     _useTestSurface(tester);
     await _pumpLessonStudy(tester);
 
@@ -75,7 +243,10 @@ void main() {
   });
 }
 
-Future<void> _pumpLessonStudy(WidgetTester tester) async {
+Future<void> _pumpLessonStudy(
+  WidgetTester tester, {
+  String? firstBlockContentMd,
+}) async {
   final router = GoRouter(
     initialLocation: '/',
     routes: [
@@ -99,7 +270,11 @@ Future<void> _pumpLessonStudy(WidgetTester tester) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        apiClientProvider.overrideWithValue(_LessonStudyPageFakeApiClient()),
+        apiClientProvider.overrideWithValue(
+          _LessonStudyPageFakeApiClient(
+            firstBlockContentMd: firstBlockContentMd,
+          ),
+        ),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
@@ -115,6 +290,10 @@ void _useTestSurface(WidgetTester tester) {
 }
 
 class _LessonStudyPageFakeApiClient extends ApiClient {
+  _LessonStudyPageFakeApiClient({this.firstBlockContentMd});
+
+  final String? firstBlockContentMd;
+
   @override
   Future<LessonDetailModel> fetchLessonDetail({
     required String courseId,
@@ -244,7 +423,7 @@ class _LessonStudyPageFakeApiClient extends ApiClient {
           blockId: 4201,
           outlineKey: 'section-1-1',
           title: '1.1 极限定义',
-          contentMd: '栈只允许在一端插入和删除，队列从队尾入队、队头出队。',
+          contentMd: firstBlockContentMd ?? '栈只允许在一端插入和删除，队列从队尾入队、队头出队。',
         ),
         _block(
           blockId: 4202,

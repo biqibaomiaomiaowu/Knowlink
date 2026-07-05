@@ -116,6 +116,24 @@ class AppRouter {
           },
         ),
         GoRoute(
+          path: '/courses/:courseId/lessons/:lessonId/preparing',
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            final lessonId = state.pathParameters['lessonId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              lessonId: lessonId,
+              child: LessonPreparationPage(
+                courseId: courseId,
+                lessonId: lessonId,
+                payload: state.extra is LessonPreparationPayload
+                    ? state.extra! as LessonPreparationPayload
+                    : null,
+              ),
+            );
+          },
+        ),
+        GoRoute(
           path: '/courses/:courseId/lessons/:lessonId',
           builder: (context, state) {
             final courseId = state.pathParameters['courseId']!;
