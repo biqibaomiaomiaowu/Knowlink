@@ -222,11 +222,11 @@ class HandoutLatestModel {
 
   factory HandoutLatestModel.fromJson(Map<String, dynamic> json) {
     return HandoutLatestModel(
-      handoutVersionId: json['handoutVersionId'] as int,
-      title: json['title'] as String,
+      handoutVersionId: json['handoutVersionId'] as int? ?? 0,
+      title: json['title'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
       totalBlocks: json['totalBlocks'] as int? ?? 0,
-      status: json['status'] as String,
+      status: json['status'] as String? ?? 'placeholder',
     );
   }
 }
@@ -575,6 +575,32 @@ class QaMessageRequestModel {
       'courseId': courseId,
       'handoutBlockId': handoutBlockId,
       'question': question,
+    };
+  }
+}
+
+class ScopedQaMessageRequestModel {
+  const ScopedQaMessageRequestModel({
+    required this.question,
+    this.sessionId,
+    this.handoutBlockId,
+    this.scopeType,
+    this.courseId,
+    this.lessonId,
+  });
+
+  final String question;
+  final int? sessionId;
+  final int? handoutBlockId;
+  final String? scopeType;
+  final String? courseId;
+  final String? lessonId;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'question': question,
+      if (sessionId != null) 'sessionId': sessionId,
+      if (handoutBlockId != null) 'handoutBlockId': handoutBlockId,
     };
   }
 }

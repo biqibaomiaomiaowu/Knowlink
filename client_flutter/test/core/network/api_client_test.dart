@@ -926,6 +926,347 @@ void main() {
     );
   });
 
+  test('lesson handout methods use V2 lesson-scoped paths', () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        final data = switch (options.path) {
+          '/api/v1/courses/101/lessons/42/handout' => {
+              'scopeType': 'lesson',
+              'lessonId': 42,
+              'artifactKind': 'lesson_handout',
+              'status': 'placeholder',
+              'canGenerate': true,
+              'requiredSources': ['primary_video', 'lesson_resources'],
+              'message': 'Lesson handout has not been generated yet.',
+              'availableActions': ['generate'],
+              'citations': [],
+            },
+          '/api/v1/courses/101/lessons/42/handout/generate' => {
+              'taskId': 7103,
+              'status': 'queued',
+              'nextAction': 'poll',
+              'entity': {'type': 'handout_version', 'id': 3002},
+            },
+          '/api/v1/courses/101/lessons/42/handout/outline' => {
+              'handoutVersionId': 3002,
+              'title': 'Lesson 42 outline',
+              'summary': 'Lesson scoped outline',
+              'items': [
+                {
+                  'outlineKey': 'section-42',
+                  'title': 'Limits',
+                  'summary': '',
+                  'startSec': 0,
+                  'endSec': 240,
+                  'sortNo': 1,
+                  'children': [
+                    {
+                      'outlineKey': 'block-42-a',
+                      'blockId': 4201,
+                      'title': 'Definition',
+                      'summary': '',
+                      'startSec': 0,
+                      'endSec': 120,
+                      'sortNo': 1,
+                      'generationStatus': 'ready',
+                    },
+                  ],
+                },
+              ],
+            },
+          '/api/v1/courses/101/lessons/42/handout/blocks' => {
+              'items': [
+                {
+                  'blockId': 4201,
+                  'outlineKey': 'block-42-a',
+                  'title': 'Definition',
+                  'summary': '',
+                  'status': 'ready',
+                  'contentMd': 'Lesson scoped content',
+                  'startSec': 0,
+                  'endSec': 120,
+                },
+              ],
+            },
+          '/api/v1/courses/101/lessons/42/handout/current-block' => {
+              'blockId': 4202,
+              'outlineKey': 'block-42-b',
+              'startSec': 120,
+              'endSec': 240,
+              'generationStatus': 'pending',
+            },
+          _ => throw StateError('Unexpected ${options.method} ${options.path}'),
+        };
+        return ResponseBody.fromString(
+          jsonEncode({'data': data}),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'v2-lesson-token',
+    );
+
+    final handout = await client.fetchLessonHandout(
+      courseId: '101',
+      lessonId: '42',
+    );
+    final generated = await client.generateLessonHandout(
+      courseId: '101',
+      lessonId: '42',
+      idempotencyKey: 'lesson-handout-generate-1',
+    );
+    final outline = await client.fetchLessonHandoutOutline(
+      courseId: '101',
+      lessonId: '42',
+    );
+    final blocks = await client.fetchLessonHandoutBlocks(
+      courseId: '101',
+      lessonId: '42',
+    );
+    final currentBlock = await client.fetchLessonCurrentHandoutBlock(
+      courseId: '101',
+      lessonId: '42',
+      currentSec: 120,
+    );
+
+    expect(handout.handoutVersionId, 0);
+    expect(handout.title, '');
+    expect(handout.totalBlocks, 0);
+    expect(handout.status, 'placeholder');
+    expect(generated.entity.id, 3002);
+    expect(outline.children.single.blockId, 4201);
+    expect(blocks.items.single.blockId, 4201);
+    expect(currentBlock.blockId, 4202);
+    expect(adapter.requests.map((request) => request.method), [
+      'GET',
+      'POST',
+      'GET',
+      'GET',
+      'GET',
+    ]);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/courses/101/lessons/42/handout',
+      '/api/v1/courses/101/lessons/42/handout/generate',
+      '/api/v1/courses/101/lessons/42/handout/outline',
+      '/api/v1/courses/101/lessons/42/handout/blocks',
+      '/api/v1/courses/101/lessons/42/handout/current-block',
+    ]);
+    expect(
+      _headerValue(adapter.requests[1].headers, 'idempotency-key'),
+      'lesson-handout-generate-1',
+    );
+    expect(adapter.requests.last.queryParameters, {'currentSec': 120});
+  });
+
+  test('scoped QA methods use course and lesson routes', () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        return ResponseBody.fromString(
+          jsonEncode({
+            'data': {
+              'courseId': 101,
+              'scopeType':
+                  options.path.contains('/lessons/') ? 'lesson' : 'course',
+              'lessonId': options.path.contains('/lessons/') ? 42 : null,
+              'handoutBlockId':
+                  options.path.contains('/lessons/') ? 4201 : null,
+              'sessionId': options.path.contains('/lessons/') ? 6201 : 6101,
+              'messageId': options.path.contains('/lessons/') ? 6202 : 6102,
+              'answerMd': 'Scoped answer',
+              'answerType': 'text',
+              'citations': [],
+            },
+          }),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'v2-qa-token',
+    );
+
+    final courseAnswer = await client.createCourseQaMessage(
+      courseId: '101',
+      request: const ScopedQaMessageRequestModel(
+        question: 'How should I review this course?',
+        sessionId: 6101,
+        scopeType: 'course',
+        courseId: '101',
+      ),
+    );
+    final lessonAnswer = await client.createLessonQaMessage(
+      courseId: '101',
+      lessonId: '42',
+      request: const ScopedQaMessageRequestModel(
+        question: 'Explain this block',
+        sessionId: 6201,
+        handoutBlockId: 4201,
+        scopeType: 'lesson',
+        courseId: '101',
+        lessonId: '42',
+      ),
+    );
+
+    expect(courseAnswer.sessionId, 6101);
+    expect(lessonAnswer.sessionId, 6201);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/courses/101/qa/messages',
+      '/api/v1/courses/101/lessons/42/qa/messages',
+    ]);
+    expect(adapter.requests.first.data, {
+      'question': 'How should I review this course?',
+      'sessionId': 6101,
+    });
+    expect(adapter.requests.last.data, {
+      'question': 'Explain this block',
+      'sessionId': 6201,
+      'handoutBlockId': 4201,
+    });
+  });
+
+  test('scoped quiz and review methods use V2 routes', () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        final data = switch (options.path) {
+          '/api/v1/courses/101/lessons/42/quizzes/generate' => {
+              'quiz': _quizJson(
+                quizId: 7001,
+                scopeType: 'lesson',
+                lessonId: 42,
+              ),
+            },
+          '/api/v1/courses/101/lessons/42/quizzes/current' => _quizJson(
+              quizId: 7001,
+              scopeType: 'lesson',
+              lessonId: 42,
+            ),
+          '/api/v1/courses/101/quizzes/stage/generate' => {
+              'quiz': _quizJson(
+                quizId: 7002,
+                scopeType: 'lesson_range',
+                lessonId: null,
+              ),
+            },
+          '/api/v1/courses/101/quizzes/comprehensive/generate' => {
+              'quiz': _quizJson(
+                quizId: 7003,
+                scopeType: 'course',
+                lessonId: null,
+              ),
+            },
+          '/api/v1/quizzes/7001/submit' => {
+              'attemptId': 7401,
+              'score': 1,
+              'totalScore': 1,
+              'accuracy': 1.0,
+              'reviewTaskRunId': null,
+              'masteryDelta': [],
+              'items': [],
+              'recommendedReviewActions': [],
+            },
+          '/api/v1/courses/101/review' => _courseReviewJson(),
+          '/api/v1/courses/101/lessons/42/review' => _lessonReviewJson(),
+          _ => throw StateError('Unexpected ${options.method} ${options.path}'),
+        };
+        return ResponseBody.fromString(
+          jsonEncode({'data': data}),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'v2-quiz-review-token',
+    );
+
+    final lessonGenerated = await client.generateLessonQuiz(
+      courseId: '101',
+      lessonId: '42',
+      questionCountLevel: QuizQuestionCountLevel.small,
+    );
+    final currentLessonQuiz = await client.fetchCurrentLessonQuiz(
+      courseId: '101',
+      lessonId: '42',
+    );
+    final stageGenerated = await client.generateStageQuiz(
+      courseId: '101',
+      startLessonId: '41',
+      endLessonId: '42',
+      questionCountLevel: QuizQuestionCountLevel.medium,
+    );
+    final comprehensiveGenerated = await client.generateComprehensiveQuiz(
+      courseId: '101',
+      questionCountLevel: QuizQuestionCountLevel.large,
+    );
+    final submitted = await client.submitQuiz(
+      quizId: 7001,
+      request: const SubmitQuizRequestModel(
+        answers: [
+          QuizAnswerModel(questionId: 7101, selectedOption: 'A'),
+        ],
+      ),
+    );
+    final courseReview = await client.fetchCourseReview(courseId: '101');
+    final lessonReview = await client.fetchLessonReview(
+      courseId: '101',
+      lessonId: '42',
+    );
+
+    expect(lessonGenerated.quizId, 7001);
+    expect(lessonGenerated.scopeType, 'lesson');
+    expect(currentLessonQuiz.scopeType, 'lesson');
+    expect(stageGenerated.quizId, 7002);
+    expect(stageGenerated.scopeType, 'lesson_range');
+    expect(comprehensiveGenerated.quizId, 7003);
+    expect(comprehensiveGenerated.scopeType, 'course');
+    expect(submitted.attemptId, 7401);
+    expect(courseReview.todayTaskCount, 2);
+    expect(courseReview.topTasks.single.sourceLesson?.lessonId, 42);
+    expect(courseReview.topTasks.single.linkedHandoutBlockId, 4201);
+    expect(
+        courseReview.topTasks.single.recommendedAction?.type, 'revisit_block');
+    expect(courseReview.topTasks.single.jumpRoute,
+        '/courses/101/lessons/42/handout');
+    expect(lessonReview.lessonId, 42);
+    expect(lessonReview.items.single.completionSupported, isFalse);
+    expect(adapter.requests.map((request) => request.path), [
+      '/api/v1/courses/101/lessons/42/quizzes/generate',
+      '/api/v1/courses/101/lessons/42/quizzes/current',
+      '/api/v1/courses/101/quizzes/stage/generate',
+      '/api/v1/courses/101/quizzes/comprehensive/generate',
+      '/api/v1/quizzes/7001/submit',
+      '/api/v1/courses/101/review',
+      '/api/v1/courses/101/lessons/42/review',
+    ]);
+    expect(adapter.requests[0].data, {'questionCountLevel': 'small'});
+    expect(adapter.requests[2].data, {
+      'startLessonId': '41',
+      'endLessonId': '42',
+      'questionCountLevel': 'medium',
+    });
+    expect(adapter.requests[3].data, {'questionCountLevel': 'large'});
+    expect(adapter.requests[4].data, {
+      'answers': [
+        {'questionId': 7101, 'selectedOption': 'A'},
+      ],
+    });
+  });
+
   test('week 4 methods use frozen quiz, review, dashboard, and progress paths',
       () async {
     final adapter = _RecordingHttpClientAdapter(
@@ -1360,6 +1701,97 @@ void main() {
       'bili-import-1',
     );
   });
+}
+
+Map<String, dynamic> _quizJson({
+  required int quizId,
+  required String scopeType,
+  int? lessonId,
+}) {
+  return {
+    'quizId': quizId,
+    'courseId': 101,
+    'status': 'ready',
+    'questionCount': 1,
+    'scopeType': scopeType,
+    'lessonId': lessonId,
+    'quizMode': 'objective',
+    'questions': [
+      {
+        'questionId': 7101,
+        'stemMd': 'What is the limit definition?',
+        'options': ['A', 'B', 'C', 'D'],
+        'questionType': 'single_choice',
+      },
+    ],
+  };
+}
+
+Map<String, dynamic> _courseReviewJson() {
+  final task = _reviewTaskJson(
+    reviewTaskId: 8401,
+    taskId: 9401,
+    sourceLesson: {
+      'lessonId': 42,
+      'title': 'Lesson 42',
+      'orderIndex': 1,
+    },
+    completionSupported: true,
+  );
+  return {
+    'courseId': 101,
+    'scopeType': 'course',
+    'todayTaskCount': 2,
+    'weakPointCount': 3,
+    'mistakeCount': 4,
+    'masteryScore': 78,
+    'topTasks': [task],
+    'items': [task],
+  };
+}
+
+Map<String, dynamic> _lessonReviewJson() {
+  final task = _reviewTaskJson(
+    reviewTaskId: -42,
+    taskId: null,
+    sourceLesson: {
+      'lessonId': 42,
+      'title': 'Lesson 42',
+      'orderIndex': 1,
+    },
+    completionSupported: false,
+  );
+  return {
+    'courseId': 101,
+    'scopeType': 'lesson',
+    'lessonId': 42,
+    'items': [task],
+  };
+}
+
+Map<String, dynamic> _reviewTaskJson({
+  required int reviewTaskId,
+  required int? taskId,
+  required Map<String, dynamic>? sourceLesson,
+  required bool completionSupported,
+}) {
+  return {
+    'reviewTaskId': reviewTaskId,
+    'taskId': taskId,
+    'taskType': 'revisit_block',
+    'priorityScore': 95,
+    'reasonText': 'Weak lesson block',
+    'recommendedMinutes': 15,
+    'sourceLesson': sourceLesson,
+    'linkedHandoutBlockId': 4201,
+    'recommendedAction': {
+      'type': 'revisit_block',
+      'label': 'Review block',
+      'targetBlockId': 4201,
+    },
+    'jumpRoute': '/courses/101/lessons/42/handout',
+    'completionSupported': completionSupported,
+  };
 }
 
 Map<String, dynamic> _courseJson() {
