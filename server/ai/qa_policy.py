@@ -456,7 +456,7 @@ def normalize_qa_answer_with_refs(
     *,
     active_course_id: int,
     active_parse_run_id: int,
-    active_handout_version_id: int,
+    active_handout_version_id: int | None,
 ) -> QaAnswerWithRefs:
     scoped_candidates = [
         candidate
@@ -489,7 +489,7 @@ def build_qa_message_refs(
     *,
     active_course_id: int,
     active_parse_run_id: int,
-    active_handout_version_id: int,
+    active_handout_version_id: int | None,
 ) -> list[dict[str, Any]]:
     if (response.get("answerType") or response.get("answer_type")) == "insufficient_evidence":
         return []
@@ -890,13 +890,13 @@ def _candidate_matches_scope(
     *,
     active_course_id: int,
     active_parse_run_id: int,
-    active_handout_version_id: int,
+    active_handout_version_id: int | None,
 ) -> bool:
-    return (
-        candidate.course_id == active_course_id
-        and candidate.parse_run_id == active_parse_run_id
-        and candidate.handout_version_id == active_handout_version_id
-    )
+    if candidate.course_id != active_course_id or candidate.parse_run_id != active_parse_run_id:
+        return False
+    if active_handout_version_id is None:
+        return candidate.handout_version_id is None
+    return candidate.handout_version_id == active_handout_version_id
 
 
 def _block_matches_active_scope(

@@ -191,6 +191,61 @@ def test_course_qa_without_handout_block_uses_real_qa_generation():
         engine.dispose()
 
 
+def test_course_qa_without_course_handout_uses_active_parse_run_original_evidence():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_active_video_segments(repo)
+        course = repo.get_course(course_id)
+        assert course["activeParseRunId"] is not None
+        assert course["activeHandoutVersionId"] is None
+
+        service = QaService(
+            courses=repo,
+            qa=repo,
+            qa_answer_client=_DeterministicQaAnswerClient(),
+        )
+
+        result = service.create_course_message(
+            course_id=course_id,
+            payload=_ScopedQaPayload(
+                question="集合的基本概念是什么？",
+                session_id=None,
+                handout_block_id=None,
+            ),
+        )
+        course_segments = Base.metadata.tables["course_segments"]
+        segment_row = session.execute(
+            sa.select(course_segments).where(
+                course_segments.c.id == int(segment_keys[0].removeprefix("segment-"))
+            )
+        ).mappings().one()
+
+        assert result["scopeType"] == "course"
+        assert result["lessonId"] is None
+        assert result["handoutBlockId"] is None
+        assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert result["generationMetadata"]["reason"] == "model_response"
+        assert result["citations"] == [
+            {
+                "resourceId": segment_row["resource_id"],
+                "refLabel": segment_keys[0],
+                "startSec": 0.0,
+                "endSec": 60.0,
+            }
+        ]
+
+        qa_message_refs = Base.metadata.tables["qa_message_refs"]
+        ref_rows = session.execute(sa.select(qa_message_refs)).mappings().all()
+        assert len(ref_rows) == 1
+        assert ref_rows[0]["segment_id"] == segment_row["id"]
+        assert ref_rows[0]["start_sec"] == 0
+        assert ref_rows[0]["end_sec"] == 60
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_memory_lesson_qa_unknown_handout_block_raises_block_not_found():
     repo = RuntimeStore()
     course = repo.create_course(
@@ -1146,3 +1201,33 @@ class _ScopedQaPayload:
         self.question = question
         self.session_id = session_id
         self.handout_block_id = handout_block_id
+
+
+class _DeterministicQaAnswerClient:
+    def generate_answer(self, question: str, candidates: list[Any]) -> dict[str, Any]:
+        candidate = candidates[0]
+        citation = {
+            "resourceId": candidate.resource_id,
+            "refLabel": candidate.ref_label,
+        }
+        for key, value in candidate.locator.items():
+            citation[key] = value
+        return {
+            "answerMd": f"基于原始证据回答：{question}",
+            "answerType": "direct_answer",
+            "citations": [citation],
+        }
+
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: str,
+        course_scope: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "answerMd": context_text or question,
+            "answerType": "direct_answer",
+            "citations": [],
+        }

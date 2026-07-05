@@ -137,7 +137,7 @@ class QaOrchestrator:
                     candidates,
                     active_course_id=active_ints(scope)[0],
                     active_parse_run_id=active_ints(scope)[1],
-                    active_handout_version_id=active_ints(scope)[2],
+                    active_handout_version_id=scope.active_handout_version_id,
                 )
                 return QaGenerationResult(
                     response=answer.response,
@@ -155,7 +155,7 @@ class QaOrchestrator:
             candidates,
             active_course_id=active_ints(scope)[0],
             active_parse_run_id=active_ints(scope)[1],
-            active_handout_version_id=active_ints(scope)[2],
+            active_handout_version_id=scope.active_handout_version_id,
         )
         return QaGenerationResult(
             response=response,
