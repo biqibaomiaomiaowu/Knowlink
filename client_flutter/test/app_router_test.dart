@@ -383,10 +383,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    await tester.tap(find.text('自主导入'));
+    await tester.tap(find.widgetWithText(FilledButton, '继续学习'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(CourseImportPage), findsOneWidget);
+    expect(find.byType(LessonStudyPage), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '101');
+    expect(container.read(activeLessonProvider)?.lessonId, '42');
 
     router.go('/');
     await tester.pumpAndSettle();
@@ -647,11 +649,81 @@ class _RouterFakeApiClient extends ApiClient {
   @override
   Future<HomeDashboardModel> fetchHomeDashboard() async {
     return HomeDashboardModel.fromJson({
-      'recentCourses': [],
+      'recentCourses': [
+        {
+          'courseId': 101,
+          'title': '路由课程 101',
+          'entryType': 'recommendation',
+          'catalogId': 'math-final-01',
+          'lifecycleStatus': 'learning_ready',
+          'pipelineStage': 'handout',
+          'pipelineStatus': 'succeeded',
+          'updatedAt': '2026-05-25T10:00:00+08:00',
+          'currentLessonId': '42',
+          'currentLessonTitle': '路由课时',
+          'lastPositionSec': 180,
+        },
+      ],
       'topReviewTasks': [],
       'recommendationEntryEnabled': true,
       'dailyRecommendedKnowledgePoints': [],
       'learningStats': {},
+      'currentCourse': {
+        'courseId': 101,
+        'title': '路由课程 101',
+        'entryType': 'recommendation',
+        'catalogId': 'math-final-01',
+        'lifecycleStatus': 'learning_ready',
+        'pipelineStage': 'handout',
+        'pipelineStatus': 'succeeded',
+        'updatedAt': '2026-05-25T10:00:00+08:00',
+        'currentLessonId': '42',
+        'currentLessonTitle': '路由课时',
+        'lastPositionSec': 180,
+      },
+      'currentLesson': {
+        'lessonId': 42,
+        'title': '路由课时',
+        'orderIndex': 1,
+        'handoutReadPercent': 30,
+        'lastPositionSec': 180,
+        'lastHandoutBlockId': 4001,
+      },
+      'continueLearning': {
+        'courseId': 101,
+        'lessonId': 42,
+        'lastPositionSec': 180,
+        'lastHandoutBlockId': 4001,
+        'nextRoute': '/courses/101/lessons/42/handout',
+        'nextAction': {
+          'type': 'continue_video',
+          'label': '继续学习 路由课时',
+          'positionSec': 180,
+          'action': 'open_lesson_study',
+        },
+      },
+      'nextStep': {
+        'type': 'continue_lesson',
+        'courseId': 101,
+        'lessonId': 42,
+        'title': '路由课时',
+        'nextRoute': '/courses/101/lessons/42/handout',
+        'action': 'open_lesson_study',
+      },
+      'todayReviewTasks': [],
+      'recommendedNextLesson': null,
+      'recommendedStageQuiz': null,
+      'courseQuickEntries': [
+        {
+          'key': 'recommendation',
+          'title': '智能课程推荐',
+          'status': 'ready',
+          'enabled': true,
+          'target': '/recommend',
+          'route': '/recommend',
+          'action': 'open_recommendation',
+        },
+      ],
     });
   }
 

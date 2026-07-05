@@ -285,12 +285,17 @@ class _QaLayout extends StatelessWidget {
             ],
           );
         }
-        return Column(
-          children: [
-            SizedBox(height: 154, child: sidePanel),
-            const SizedBox(height: 12),
-            Expanded(child: chatPanel),
-          ],
+        final chatHeight = constraints.maxHeight > 760
+            ? constraints.maxHeight - 324
+            : 430.0;
+        return SingleChildScrollView(
+          child: Column(
+            children: [
+              SizedBox(height: 304, child: sidePanel),
+              const SizedBox(height: 12),
+              SizedBox(height: chatHeight, child: chatPanel),
+            ],
+          ),
         );
       },
     );
