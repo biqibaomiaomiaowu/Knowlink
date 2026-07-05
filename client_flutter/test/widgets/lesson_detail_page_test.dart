@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/lesson_detail/lesson_detail_page.dart';
 import 'package:knowlink_client/shared/models/course_lesson_models.dart';
@@ -34,6 +35,42 @@ void main() {
     expect(find.text('PDF 第 12 页'), findsOneWidget);
     expect(find.text('知识与薄弱点'), findsOneWidget);
     expect(find.text('继续看视频'), findsOneWidget);
+  });
+
+  testWidgets('primary study action opens lesson study handout route',
+      (tester) async {
+    _useTestSurface(tester, const Size(1200, 1700));
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) =>
+              const LessonDetailPage(courseId: '101', lessonId: 'l-2'),
+        ),
+        GoRoute(
+          path: '/courses/:courseId/lessons/:lessonId/handout',
+          builder: (context, state) => Text(
+            'lesson handout ${state.pathParameters['courseId']}/'
+            '${state.pathParameters['lessonId']}',
+          ),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(_LessonDetailFakeApiClient()),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('继续看视频'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('lesson handout 101/l-2'), findsOneWidget);
   });
 }
 

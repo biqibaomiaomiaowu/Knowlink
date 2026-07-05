@@ -155,6 +155,21 @@ class AppRouter {
           },
         ),
         GoRoute(
+          path: '/courses/:courseId/lessons/:lessonId/quiz',
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            final lessonId = state.pathParameters['lessonId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              lessonId: lessonId,
+              child: QuizPage(
+                courseId: courseId,
+                lessonId: lessonId,
+              ),
+            );
+          },
+        ),
+        GoRoute(
           path: '/courses/:courseId/lessons/:lessonId/review',
           builder: (context, state) {
             final courseId = state.pathParameters['courseId']!;

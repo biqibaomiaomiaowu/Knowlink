@@ -16,11 +16,13 @@ class QuizPage extends ConsumerStatefulWidget {
   const QuizPage({
     this.quizId,
     this.courseId,
+    this.lessonId,
     super.key,
   });
 
   final String? quizId;
   final String? courseId;
+  final String? lessonId;
 
   @override
   ConsumerState<QuizPage> createState() => _QuizPageState();
@@ -28,7 +30,7 @@ class QuizPage extends ConsumerStatefulWidget {
 
 class _QuizPageState extends ConsumerState<QuizPage> {
   String? _loadedQuizId;
-  String? _preparedCourseId;
+  String? _preparedEntryKey;
 
   @override
   void initState() {
@@ -40,7 +42,8 @@ class _QuizPageState extends ConsumerState<QuizPage> {
   void didUpdateWidget(covariant QuizPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.quizId != widget.quizId ||
-        oldWidget.courseId != widget.courseId) {
+        oldWidget.courseId != widget.courseId ||
+        oldWidget.lessonId != widget.lessonId) {
       _scheduleEntrySync();
     }
   }
@@ -69,14 +72,25 @@ class _QuizPageState extends ConsumerState<QuizPage> {
               quiz: quiz,
               state: state,
               courseId: courseId,
+              lessonId: widget.lessonId,
               questionCountLevel: state.questionCountLevel,
               onLevelChanged:
                   ref.read(quizProvider.notifier).setQuestionCountLevel,
               onGenerate: courseId == null
                   ? null
-                  : () => ref.read(quizProvider.notifier).generateAndPoll(
-                        courseId,
-                      ),
+                  : () {
+                      final lessonId = widget.lessonId;
+                      if (lessonId == null) {
+                        ref.read(quizProvider.notifier).generateAndPoll(
+                              courseId,
+                            );
+                        return;
+                      }
+                      ref.read(quizProvider.notifier).generateLessonAndPoll(
+                            courseId: courseId,
+                            lessonId: lessonId,
+                          );
+                    },
             ),
             const SizedBox(height: 16),
             _QuizBody(
@@ -119,15 +133,24 @@ class _QuizPageState extends ConsumerState<QuizPage> {
     }
 
     final courseId = widget.courseId;
-    if (courseId == null || courseId == _preparedCourseId) {
+    final lessonId = widget.lessonId;
+    final entryKey = lessonId == null ? courseId : '$courseId/$lessonId';
+    if (courseId == null || entryKey == _preparedEntryKey) {
       return;
     }
-    _preparedCourseId = courseId;
+    _preparedEntryKey = entryKey;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
-      ref.read(quizProvider.notifier).prepareCourse(courseId);
+      if (lessonId == null) {
+        ref.read(quizProvider.notifier).prepareCourse(courseId);
+        return;
+      }
+      ref.read(quizProvider.notifier).prepareLesson(
+            courseId: courseId,
+            lessonId: lessonId,
+          );
     });
   }
 
@@ -145,6 +168,7 @@ class _QuizStatusBar extends StatelessWidget {
     required this.quiz,
     required this.state,
     required this.courseId,
+    required this.lessonId,
     required this.questionCountLevel,
     required this.onLevelChanged,
     required this.onGenerate,
@@ -153,6 +177,7 @@ class _QuizStatusBar extends StatelessWidget {
   final QuizModel? quiz;
   final QuizState state;
   final String? courseId;
+  final String? lessonId;
   final QuizQuestionCountLevel questionCountLevel;
   final ValueChanged<QuizQuestionCountLevel> onLevelChanged;
   final VoidCallback? onGenerate;
@@ -173,6 +198,11 @@ class _QuizStatusBar extends StatelessWidget {
           if (courseId != null)
             StatusPill(
               label: '课程编号：$courseId',
+              color: const Color(0xFF64748B),
+            ),
+          if (lessonId != null)
+            StatusPill(
+              label: '课时编号：$lessonId',
               color: const Color(0xFF64748B),
             ),
           if (quiz != null)

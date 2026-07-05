@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dio/dio.dart';
 
 import '../models/quiz_models.dart';
 import '../models/quiz_state.dart';
@@ -9,6 +10,7 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
   var _isDisposed = false;
   var _latestRequestId = 0;
   String? _activeCourseId;
+  String? _activeLessonId;
 
   @override
   QuizState build() {
@@ -21,14 +23,71 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
 
   void prepareCourse(String courseId) {
     if (_activeCourseId == courseId &&
+        _activeLessonId == null &&
         state.quizValue == null &&
         !state.isGenerating) {
       return;
     }
     _activeCourseId = courseId;
+    _activeLessonId = null;
     _latestRequestId++;
     ref.read(courseFlowProvider.notifier).startCourse(courseId);
     state = QuizState.initial();
+  }
+
+  Future<void> prepareLesson({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    final requestId = ++_latestRequestId;
+    _activeCourseId = courseId;
+    _activeLessonId = lessonId;
+    ref.read(courseFlowProvider.notifier).startCourse(courseId);
+    ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+      courseId: courseId,
+      lessonId: lessonId,
+    );
+    state = state.copyWith(
+      quiz: const AsyncLoading(),
+      generation: const AsyncData<QuizGenerateResultModel?>(null),
+      status: const AsyncData<QuizStatusModel?>(null),
+      submission: const AsyncData<SubmitQuizResultModel?>(null),
+      selectedAnswers: const <int, String>{},
+      isPolling: false,
+    );
+
+    try {
+      final quiz = await ref.read(apiClientProvider).fetchCurrentLessonQuiz(
+            courseId: courseId,
+            lessonId: lessonId,
+          );
+      if (!_shouldApply(
+        requestId,
+        courseId: courseId,
+        lessonId: lessonId,
+      )) {
+        return;
+      }
+      ref.read(courseFlowProvider.notifier).setQuiz(quiz.quizId);
+      state = state.copyWith(
+        quiz: AsyncData(quiz),
+        status: AsyncData(QuizStatusModel.fromQuiz(quiz)),
+      );
+    } catch (error, stackTrace) {
+      if (!_shouldApply(
+        requestId,
+        courseId: courseId,
+        lessonId: lessonId,
+      )) {
+        return;
+      }
+      if (_isMissingCurrentLessonQuiz(error)) {
+        ref.read(courseFlowProvider.notifier).setQuiz(null);
+        state = state.copyWith(quiz: const AsyncData<QuizModel?>(null));
+        return;
+      }
+      state = state.copyWith(quiz: AsyncError(error, stackTrace));
+    }
   }
 
   void setQuestionCountLevel(QuizQuestionCountLevel level) {
@@ -139,6 +198,69 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
     }
   }
 
+  Future<void> generateLessonAndPoll({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    if (state.isGenerating) {
+      return;
+    }
+    final requestId = ++_latestRequestId;
+    _activeCourseId = courseId;
+    _activeLessonId = lessonId;
+    ref.read(courseFlowProvider.notifier).startCourse(courseId);
+    ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+      courseId: courseId,
+      lessonId: lessonId,
+    );
+    state = state.copyWith(
+      quiz: const AsyncData<QuizModel?>(null),
+      generation: const AsyncLoading(),
+      status: const AsyncData<QuizStatusModel?>(null),
+      submission: const AsyncData<SubmitQuizResultModel?>(null),
+      selectedAnswers: const <int, String>{},
+      isPolling: true,
+    );
+
+    try {
+      final quiz = await ref.read(apiClientProvider).generateLessonQuiz(
+            courseId: courseId,
+            lessonId: lessonId,
+            questionCountLevel: state.questionCountLevel,
+          );
+      if (!_shouldApply(
+        requestId,
+        courseId: courseId,
+        lessonId: lessonId,
+      )) {
+        return;
+      }
+      ref.read(courseFlowProvider.notifier).setQuiz(quiz.quizId);
+      state = state.copyWith(
+        quiz: AsyncData(quiz),
+        generation: const AsyncData<QuizGenerateResultModel?>(null),
+        status: AsyncData(QuizStatusModel.fromQuiz(quiz)),
+      );
+    } catch (error, stackTrace) {
+      if (!_shouldApply(
+        requestId,
+        courseId: courseId,
+        lessonId: lessonId,
+      )) {
+        return;
+      }
+      state = state.copyWith(generation: AsyncError(error, stackTrace));
+    } finally {
+      if (_shouldApply(
+        requestId,
+        courseId: courseId,
+        lessonId: lessonId,
+      )) {
+        state = state.copyWith(isPolling: false);
+      }
+    }
+  }
+
   void selectAnswer({
     required int questionId,
     required String selectedOption,
@@ -191,10 +313,22 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
     }
   }
 
-  bool _shouldApply(int requestId, {String? courseId}) {
+  bool _shouldApply(int requestId, {String? courseId, String? lessonId}) {
     return !_isDisposed &&
         requestId == _latestRequestId &&
-        (courseId == null || _activeCourseId == courseId);
+        (courseId == null || _activeCourseId == courseId) &&
+        (lessonId == null || _activeLessonId == lessonId);
+  }
+
+  bool _isMissingCurrentLessonQuiz(Object error) {
+    if (error is! DioException) {
+      return false;
+    }
+    final data = error.response?.data;
+    if (data is Map && data['errorCode'] == 'quiz.not_found') {
+      return true;
+    }
+    return error.response?.statusCode == 404;
   }
 }
 

@@ -24,6 +24,7 @@ import 'package:knowlink_client/shared/models/bilibili_import_models.dart';
 import 'package:knowlink_client/shared/models/course_lesson_models.dart';
 import 'package:knowlink_client/shared/models/course_progress_models.dart';
 import 'package:knowlink_client/shared/models/course_summary.dart';
+import 'package:knowlink_client/shared/models/handout_models.dart' as handouts;
 import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
 import 'package:knowlink_client/shared/models/inquiry_models.dart';
 import 'package:knowlink_client/shared/models/pipeline_status.dart';
@@ -69,6 +70,7 @@ void main() {
       '/courses/101/lessons/l-2': find.byType(LessonDetailPage),
       '/courses/101/lessons/l-2/qa': find.byType(CourseQaPage),
       '/courses/101/lessons/l-2/handout': find.byType(LessonStudyPage),
+      '/courses/101/lessons/l-2/quiz': find.byType(QuizPage),
       '/courses/101/lessons/l-2/review': find.byType(CourseReviewPage),
       '/courses/101/lessons/l-2/graph': find.byType(CourseGraphPage),
       '/courses/101/progress': find.byType(ParseProgressPage),
@@ -308,6 +310,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(QaPage), findsOneWidget);
     expect(container.read(courseFlowProvider).courseId, '306');
+
+    router.go('/courses/306/lessons/l-2/quiz');
+    await tester.pumpAndSettle();
+    expect(find.byType(QuizPage), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '306');
+    expect(container.read(activeLessonProvider)?.lessonId, 'l-2');
   });
 
   testWidgets('home bottom nav does not invent course or quiz ids', (
@@ -478,6 +486,38 @@ class _RouterFakeApiClient extends ApiClient {
       'knowledgePointPlaceholders': [],
       'weaknessPlaceholders': [],
       'nextAction': null,
+    });
+  }
+
+  @override
+  Future<handouts.HandoutLatestModel> fetchLessonHandout({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    return handouts.HandoutLatestModel.fromJson({
+      'handoutVersionId': 0,
+      'title': '路由课时讲义',
+      'summary': '',
+      'totalBlocks': 0,
+      'status': 'placeholder',
+    });
+  }
+
+  @override
+  Future<QuizModel> fetchCurrentLessonQuiz({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    final numericLessonId = int.tryParse(lessonId) ??
+        int.tryParse(lessonId.replaceAll(RegExp('[^0-9]'), ''));
+    return QuizModel.fromJson({
+      'quizId': 8102,
+      'courseId': int.parse(courseId),
+      'scopeType': 'lesson',
+      'lessonId': numericLessonId,
+      'status': 'ready',
+      'questionCount': 0,
+      'questions': [],
     });
   }
 

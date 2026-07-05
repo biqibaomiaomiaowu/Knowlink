@@ -137,9 +137,10 @@ class _PrimaryVideoCard extends StatelessWidget {
           if (model.nextAction != null) ...[
             const SizedBox(height: 14),
             FilledButton.icon(
-              onPressed: model.nextAction?.route == null
-                  ? null
-                  : () => context.go(model.nextAction!.route!),
+              onPressed: () => context.go(
+                '/courses/${model.lesson.courseId}/lessons/'
+                '${model.lesson.lessonId}/handout',
+              ),
               icon: const Icon(Icons.play_arrow_rounded),
               label: Text(model.nextAction!.label),
             ),

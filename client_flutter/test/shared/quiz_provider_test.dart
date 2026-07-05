@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
@@ -104,6 +105,86 @@ void main() {
     expect(container.read(courseFlowProvider).quizId, isNull);
   });
 
+  test('prepareLesson fetches current lesson quiz and syncs active lesson',
+      () async {
+    final fakeApiClient = _FakeQuizApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    final subscription = container.listen(quizProvider, (_, __) {});
+    addTearDown(subscription.close);
+    addTearDown(container.dispose);
+
+    await container.read(quizProvider.notifier).prepareLesson(
+          courseId: '101',
+          lessonId: '42',
+        );
+
+    final state = container.read(quizProvider);
+    expect(fakeApiClient.currentLessonQuizRequests, ['101/42']);
+    expect(state.quizValue?.scopeType, 'lesson');
+    expect(state.quizValue?.lessonId, 42);
+    expect(container.read(courseFlowProvider).courseId, '101');
+    expect(container.read(activeLessonProvider)?.lessonId, '42');
+    expect(container.read(courseFlowProvider).quizId, 8401);
+  });
+
+  test('prepareLesson treats missing current lesson quiz as empty state',
+      () async {
+    final fakeApiClient = _FakeQuizApiClient()
+      ..missingCurrentLessonQuiz = true;
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    final subscription = container.listen(quizProvider, (_, __) {});
+    addTearDown(subscription.close);
+    addTearDown(container.dispose);
+
+    await container.read(quizProvider.notifier).prepareLesson(
+          courseId: '101',
+          lessonId: '42',
+        );
+
+    final state = container.read(quizProvider);
+    expect(fakeApiClient.currentLessonQuizRequests, ['101/42']);
+    expect(state.quizValue, isNull);
+    expect(state.quiz.hasError, isFalse);
+    expect(container.read(courseFlowProvider).quizId, isNull);
+    expect(container.read(activeLessonProvider)?.lessonId, '42');
+  });
+
+  test('generateLessonAndPoll uses lesson scoped quiz endpoint', () async {
+    final fakeApiClient = _FakeQuizApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    final subscription = container.listen(quizProvider, (_, __) {});
+    addTearDown(subscription.close);
+    addTearDown(container.dispose);
+
+    container
+        .read(quizProvider.notifier)
+        .setQuestionCountLevel(QuizQuestionCountLevel.small);
+    await container.read(quizProvider.notifier).generateLessonAndPoll(
+          courseId: '101',
+          lessonId: '42',
+        );
+
+    final state = container.read(quizProvider);
+    expect(fakeApiClient.generatedLessonQuizRequests, ['101/42']);
+    expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.small]);
+    expect(fakeApiClient.generatedCourseIds, isEmpty);
+    expect(state.quizValue?.quizId, 8402);
+    expect(state.quizValue?.scopeType, 'lesson');
+    expect(container.read(courseFlowProvider).quizId, 8402);
+  });
+
   test('generateAndPoll clears old quiz while new generation is pending',
       () async {
     final fakeApiClient = _SlowGenerateQuizApiClient();
@@ -188,10 +269,13 @@ void main() {
 
 class _FakeQuizApiClient extends ApiClient {
   final generatedCourseIds = <String>[];
+  final generatedLessonQuizRequests = <String>[];
+  final currentLessonQuizRequests = <String>[];
   final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
   final submittedAnswers = <SubmitQuizRequestModel>[];
   int? reviewTaskRunId = 8301;
+  bool missingCurrentLessonQuiz = false;
 
   @override
   Future<QuizGenerateResultModel> generateQuiz({
@@ -207,6 +291,36 @@ class _FakeQuizApiClient extends ApiClient {
       'nextAction': 'poll',
       'entity': {'type': 'quiz', 'id': 8001},
     });
+  }
+
+  @override
+  Future<QuizModel> fetchCurrentLessonQuiz({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    currentLessonQuizRequests.add('$courseId/$lessonId');
+    if (missingCurrentLessonQuiz) {
+      throw DioException(
+        requestOptions: RequestOptions(path: '/lesson-quiz-current'),
+        response: Response<Map<String, dynamic>>(
+          requestOptions: RequestOptions(path: '/lesson-quiz-current'),
+          statusCode: 404,
+          data: {'errorCode': 'quiz.not_found'},
+        ),
+      );
+    }
+    return _lessonQuiz(8401, courseId, lessonId);
+  }
+
+  @override
+  Future<QuizModel> generateLessonQuiz({
+    required String courseId,
+    required String lessonId,
+    required QuizQuestionCountLevel questionCountLevel,
+  }) async {
+    generatedLessonQuizRequests.add('$courseId/$lessonId');
+    generatedLevels.add(questionCountLevel);
+    return _lessonQuiz(8402, courseId, lessonId);
   }
 
   @override
@@ -226,6 +340,24 @@ class _FakeQuizApiClient extends ApiClient {
         {
           'questionId': 8102,
           'stemMd': '导数的几何意义是？',
+          'options': ['A', 'B'],
+        },
+      ],
+    });
+  }
+
+  QuizModel _lessonQuiz(int quizId, String courseId, String lessonId) {
+    return QuizModel.fromJson({
+      'quizId': quizId,
+      'courseId': int.parse(courseId),
+      'scopeType': 'lesson',
+      'lessonId': int.parse(lessonId),
+      'status': 'ready',
+      'questionCount': 1,
+      'questions': [
+        {
+          'questionId': 84010,
+          'stemMd': '课时测验题',
           'options': ['A', 'B'],
         },
       ],
