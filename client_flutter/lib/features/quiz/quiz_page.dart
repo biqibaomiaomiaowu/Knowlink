@@ -12,18 +12,32 @@ import '../../shared/models/quiz_models.dart';
 import '../../shared/models/quiz_state.dart';
 import '../../shared/providers/quiz_provider.dart';
 
-enum _QuizTestScope {
+enum _QuizPageMode {
   course,
   lesson,
-  stage,
-  comprehensive;
+  detail;
 
   String get label {
     return switch (this) {
-      _QuizTestScope.course => '课程测试',
-      _QuizTestScope.lesson => '课时测试',
-      _QuizTestScope.stage => '阶段测试',
-      _QuizTestScope.comprehensive => '综合测试',
+      _QuizPageMode.course => '课程测试',
+      _QuizPageMode.lesson => '课时测试',
+      _QuizPageMode.detail => '测验详情',
+    };
+  }
+
+  String get subtitle {
+    return switch (this) {
+      _QuizPageMode.course => '生成课程范围的客观题测验，提交后查看得分、掌握度变化和下一步复习建议。',
+      _QuizPageMode.lesson => '生成当前课时的客观题测验，提交后查看得分、掌握度变化和下一步复习建议。',
+      _QuizPageMode.detail => '查看已生成测验的题目、提交结果和复习建议。',
+    };
+  }
+
+  String? get generateLabel {
+    return switch (this) {
+      _QuizPageMode.course => '生成课程测试',
+      _QuizPageMode.lesson => '生成课时测试',
+      _QuizPageMode.detail => null,
     };
   }
 }
@@ -47,17 +61,10 @@ class QuizPage extends ConsumerStatefulWidget {
 class _QuizPageState extends ConsumerState<QuizPage> {
   String? _loadedQuizId;
   String? _preparedEntryKey;
-  late _QuizTestScope _selectedScope;
-  final _lessonIdController = TextEditingController();
-  final _stageStartLessonIdController = TextEditingController();
-  final _stageEndLessonIdController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _selectedScope =
-        widget.lessonId == null ? _QuizTestScope.course : _QuizTestScope.lesson;
-    _applyLessonRouteDefaults();
     _scheduleEntrySync();
   }
 
@@ -67,17 +74,8 @@ class _QuizPageState extends ConsumerState<QuizPage> {
     if (oldWidget.quizId != widget.quizId ||
         oldWidget.courseId != widget.courseId ||
         oldWidget.lessonId != widget.lessonId) {
-      _syncScopeForRouteChange(oldWidget.lessonId);
       _scheduleEntrySync();
     }
-  }
-
-  @override
-  void dispose() {
-    _lessonIdController.dispose();
-    _stageStartLessonIdController.dispose();
-    _stageEndLessonIdController.dispose();
-    super.dispose();
   }
 
   @override
@@ -86,10 +84,11 @@ class _QuizPageState extends ConsumerState<QuizPage> {
     final quiz = state.quizValue;
     final courseId = widget.courseId ?? quiz?.courseId.toString();
     final quizId = widget.quizId ?? quiz?.quizId.toString();
-    final onGenerate = _buildGenerateAction(courseId);
+    final mode = _modeForRoute();
+    final onGenerate = _buildGenerateAction(mode, courseId);
 
     return AppScaffold(
-      title: '测试中心',
+      title: mode.label,
       activeTab: KnowLinkTab.quiz,
       courseId: courseId,
       quizId: quizId,
@@ -97,24 +96,19 @@ class _QuizPageState extends ConsumerState<QuizPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const PageTitle(
-              title: '测试中心',
-              subtitle: '按课程、课时、阶段或综合范围生成客观题测验，提交后查看得分、掌握度变化和下一步复习建议。',
+            PageTitle(
+              title: mode.label,
+              subtitle: mode.subtitle,
             ),
             _QuizLayout(
               quiz: quiz,
               state: state,
+              mode: mode,
               courseId: courseId,
               lessonId: widget.lessonId,
-              selectedScope: _selectedScope,
               questionCountLevel: state.questionCountLevel,
-              lessonIdController: _lessonIdController,
-              stageStartLessonIdController: _stageStartLessonIdController,
-              stageEndLessonIdController: _stageEndLessonIdController,
-              onScopeChanged: _setSelectedScope,
               onLevelChanged:
                   ref.read(quizProvider.notifier).setQuestionCountLevel,
-              onScopeInputChanged: (_) => setState(() {}),
               onGenerate: onGenerate,
               onRetryLoad: quizId == null ? null : () => _loadQuiz(quizId),
               onSelectAnswer: (questionId, option) {
@@ -139,6 +133,7 @@ class _QuizPageState extends ConsumerState<QuizPage> {
   void _scheduleEntrySync() {
     final quizId = widget.quizId;
     if (quizId != null) {
+      _preparedEntryKey = null;
       if (quizId == _loadedQuizId) {
         return;
       }
@@ -151,6 +146,7 @@ class _QuizPageState extends ConsumerState<QuizPage> {
       });
       return;
     }
+    _loadedQuizId = null;
 
     final courseId = widget.courseId;
     final lessonId = widget.lessonId;
@@ -182,101 +178,38 @@ class _QuizPageState extends ConsumerState<QuizPage> {
     ref.read(quizProvider.notifier).loadQuiz(parsed);
   }
 
-  VoidCallback? _buildGenerateAction(String? courseId) {
+  _QuizPageMode _modeForRoute() {
+    if (widget.quizId != null) {
+      return _QuizPageMode.detail;
+    }
+    if (widget.lessonId != null) {
+      return _QuizPageMode.lesson;
+    }
+    return _QuizPageMode.course;
+  }
+
+  VoidCallback? _buildGenerateAction(_QuizPageMode mode, String? courseId) {
     if (courseId == null) {
       return null;
     }
-    return switch (_selectedScope) {
-      _QuizTestScope.course => () {
+    switch (mode) {
+      case _QuizPageMode.course:
+        return () {
           ref.read(quizProvider.notifier).generateAndPoll(courseId);
-        },
-      _QuizTestScope.lesson => _buildLessonGenerateAction(courseId),
-      _QuizTestScope.stage => _buildStageGenerateAction(courseId),
-      _QuizTestScope.comprehensive => () {
-          ref.read(quizProvider.notifier).generateComprehensiveAndPoll(
-                courseId: courseId,
-              );
-        },
-    };
-  }
-
-  VoidCallback? _buildLessonGenerateAction(String courseId) {
-    final lessonId = _trimmedOrNull(_lessonIdController.text);
-    if (lessonId == null) {
-      return null;
-    }
-    return () {
-      ref.read(quizProvider.notifier).generateLessonAndPoll(
-            courseId: courseId,
-            lessonId: lessonId,
-          );
-    };
-  }
-
-  VoidCallback? _buildStageGenerateAction(String courseId) {
-    final startLessonId = _trimmedOrNull(_stageStartLessonIdController.text);
-    final endLessonId = _trimmedOrNull(_stageEndLessonIdController.text);
-    if (startLessonId == null || endLessonId == null) {
-      return null;
-    }
-    return () {
-      ref.read(quizProvider.notifier).generateStageAndPoll(
-            courseId: courseId,
-            startLessonId: startLessonId,
-            endLessonId: endLessonId,
-          );
-    };
-  }
-
-  void _setSelectedScope(_QuizTestScope scope) {
-    setState(() {
-      _selectedScope = scope;
-      if (scope == _QuizTestScope.lesson) {
-        _applyLessonInputDefault();
-      } else if (scope == _QuizTestScope.stage) {
-        _applyStageInputDefaults();
-      }
-    });
-  }
-
-  void _syncScopeForRouteChange(String? oldLessonId) {
-    if (oldLessonId == widget.lessonId) {
-      return;
-    }
-    setState(() {
-      if (widget.lessonId == null) {
-        if (_selectedScope == _QuizTestScope.lesson) {
-          _selectedScope = _QuizTestScope.course;
+        };
+      case _QuizPageMode.lesson:
+        final lessonId = widget.lessonId;
+        if (lessonId == null) {
+          return null;
         }
-        return;
-      }
-      _selectedScope = _QuizTestScope.lesson;
-      _applyLessonRouteDefaults();
-    });
-  }
-
-  void _applyLessonRouteDefaults() {
-    _applyLessonInputDefault();
-    _applyStageInputDefaults();
-  }
-
-  void _applyLessonInputDefault() {
-    final lessonId = widget.lessonId;
-    if (lessonId != null && _lessonIdController.text != lessonId) {
-      _lessonIdController.text = lessonId;
-    }
-  }
-
-  void _applyStageInputDefaults() {
-    final lessonId = widget.lessonId;
-    if (lessonId == null) {
-      return;
-    }
-    if (_stageStartLessonIdController.text.isEmpty) {
-      _stageStartLessonIdController.text = lessonId;
-    }
-    if (_stageEndLessonIdController.text.isEmpty) {
-      _stageEndLessonIdController.text = lessonId;
+        return () {
+          ref.read(quizProvider.notifier).generateLessonAndPoll(
+                courseId: courseId,
+                lessonId: lessonId,
+              );
+        };
+      case _QuizPageMode.detail:
+        return null;
     }
   }
 }
@@ -285,16 +218,11 @@ class _QuizLayout extends StatelessWidget {
   const _QuizLayout({
     required this.quiz,
     required this.state,
+    required this.mode,
     required this.courseId,
     required this.lessonId,
-    required this.selectedScope,
     required this.questionCountLevel,
-    required this.lessonIdController,
-    required this.stageStartLessonIdController,
-    required this.stageEndLessonIdController,
-    required this.onScopeChanged,
     required this.onLevelChanged,
-    required this.onScopeInputChanged,
     required this.onGenerate,
     required this.onRetryLoad,
     required this.onSelectAnswer,
@@ -304,16 +232,11 @@ class _QuizLayout extends StatelessWidget {
 
   final QuizModel? quiz;
   final QuizState state;
+  final _QuizPageMode mode;
   final String? courseId;
   final String? lessonId;
-  final _QuizTestScope selectedScope;
   final QuizQuestionCountLevel questionCountLevel;
-  final TextEditingController lessonIdController;
-  final TextEditingController stageStartLessonIdController;
-  final TextEditingController stageEndLessonIdController;
-  final ValueChanged<_QuizTestScope> onScopeChanged;
   final ValueChanged<QuizQuestionCountLevel> onLevelChanged;
-  final ValueChanged<String> onScopeInputChanged;
   final VoidCallback? onGenerate;
   final VoidCallback? onRetryLoad;
   final void Function(int questionId, String option) onSelectAnswer;
@@ -328,16 +251,11 @@ class _QuizLayout extends StatelessWidget {
         _QuizStatusBar(
           quiz: quiz,
           state: state,
+          mode: mode,
           courseId: courseId,
           lessonId: lessonId,
-          selectedScope: selectedScope,
           questionCountLevel: questionCountLevel,
-          lessonIdController: lessonIdController,
-          stageStartLessonIdController: stageStartLessonIdController,
-          stageEndLessonIdController: stageEndLessonIdController,
-          onScopeChanged: onScopeChanged,
           onLevelChanged: onLevelChanged,
-          onScopeInputChanged: onScopeInputChanged,
           onGenerate: onGenerate,
         ),
         const SizedBox(height: 16),
@@ -358,31 +276,21 @@ class _QuizStatusBar extends StatelessWidget {
   const _QuizStatusBar({
     required this.quiz,
     required this.state,
+    required this.mode,
     required this.courseId,
     required this.lessonId,
-    required this.selectedScope,
     required this.questionCountLevel,
-    required this.lessonIdController,
-    required this.stageStartLessonIdController,
-    required this.stageEndLessonIdController,
-    required this.onScopeChanged,
     required this.onLevelChanged,
-    required this.onScopeInputChanged,
     required this.onGenerate,
   });
 
   final QuizModel? quiz;
   final QuizState state;
+  final _QuizPageMode mode;
   final String? courseId;
   final String? lessonId;
-  final _QuizTestScope selectedScope;
   final QuizQuestionCountLevel questionCountLevel;
-  final TextEditingController lessonIdController;
-  final TextEditingController stageStartLessonIdController;
-  final TextEditingController stageEndLessonIdController;
-  final ValueChanged<_QuizTestScope> onScopeChanged;
   final ValueChanged<QuizQuestionCountLevel> onLevelChanged;
-  final ValueChanged<String> onScopeInputChanged;
   final VoidCallback? onGenerate;
 
   @override
@@ -394,13 +302,8 @@ class _QuizStatusBar extends StatelessWidget {
         runSpacing: 12,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          _QuizScopeSelector(
-            selected: selectedScope,
-            enabled: !state.isGenerating,
-            onChanged: onScopeChanged,
-          ),
           StatusPill(
-            label: '当前范围：${selectedScope.label}',
+            label: '当前入口：${mode.label}',
             color: const Color(0xFF2563EB),
           ),
           StatusPill(
@@ -417,30 +320,6 @@ class _QuizStatusBar extends StatelessWidget {
               label: '课时编号：$lessonId',
               color: const Color(0xFF64748B),
             ),
-          if (selectedScope == _QuizTestScope.lesson)
-            _ScopeTextInput(
-              inputKey: const Key('quiz-lesson-id'),
-              controller: lessonIdController,
-              label: '课时 ID',
-              enabled: !state.isGenerating,
-              onChanged: onScopeInputChanged,
-            ),
-          if (selectedScope == _QuizTestScope.stage) ...[
-            _ScopeTextInput(
-              inputKey: const Key('quiz-stage-start'),
-              controller: stageStartLessonIdController,
-              label: '起始课时',
-              enabled: !state.isGenerating,
-              onChanged: onScopeInputChanged,
-            ),
-            _ScopeTextInput(
-              inputKey: const Key('quiz-stage-end'),
-              controller: stageEndLessonIdController,
-              label: '结束课时',
-              enabled: !state.isGenerating,
-              onChanged: onScopeInputChanged,
-            ),
-          ],
           if (quiz != null)
             StatusPill(
               label: _statusLabel(quiz!.status),
@@ -452,21 +331,23 @@ class _QuizStatusBar extends StatelessWidget {
                   '题目 ${state.status.valueOrNull!.questionCount} · ${_statusLabel(state.status.valueOrNull!.status)}',
               color: _statusColor(state.status.valueOrNull!.status),
             ),
-          _QuestionCountLevelSelector(
-            selected: questionCountLevel,
-            enabled: !state.isGenerating,
-            onChanged: onLevelChanged,
-          ),
-          FilledButton.icon(
-            onPressed: state.isGenerating ? null : onGenerate,
-            icon: state.isGenerating
-                ? const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.auto_awesome),
-            label: Text(state.isGenerating ? '生成中' : '生成测验'),
-          ),
+          if (mode.generateLabel != null) ...[
+            _QuestionCountLevelSelector(
+              selected: questionCountLevel,
+              enabled: !state.isGenerating,
+              onChanged: onLevelChanged,
+            ),
+            FilledButton.icon(
+              onPressed: state.isGenerating ? null : onGenerate,
+              icon: state.isGenerating
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_awesome),
+              label: Text(state.isGenerating ? '生成中' : mode.generateLabel!),
+            ),
+          ],
         ],
       ),
     );
@@ -514,102 +395,6 @@ class _QuestionCountLevelSelector extends StatelessWidget {
           icon: Icon(Icons.add_task),
         ),
       ],
-    );
-  }
-}
-
-class _QuizScopeSelector extends StatelessWidget {
-  const _QuizScopeSelector({
-    required this.selected,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  final _QuizTestScope selected;
-  final bool enabled;
-  final ValueChanged<_QuizTestScope> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final maxWidth = MediaQuery.sizeOf(context).width - 72;
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth < 280 ? 280 : maxWidth),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SegmentedButton<_QuizTestScope>(
-          showSelectedIcon: false,
-          selected: {selected},
-          onSelectionChanged: enabled
-              ? (selection) {
-                  final next = selection.firstOrNull;
-                  if (next != null) {
-                    onChanged(next);
-                  }
-                }
-              : null,
-          segments: const [
-            ButtonSegment(
-              value: _QuizTestScope.course,
-              label: Text('课程测试'),
-              icon: Icon(Icons.school_outlined),
-            ),
-            ButtonSegment(
-              value: _QuizTestScope.lesson,
-              label: Text('课时测试'),
-              icon: Icon(Icons.play_lesson_outlined),
-            ),
-            ButtonSegment(
-              value: _QuizTestScope.stage,
-              label: Text('阶段测试'),
-              icon: Icon(Icons.view_timeline_outlined),
-            ),
-            ButtonSegment(
-              value: _QuizTestScope.comprehensive,
-              label: Text('综合测试'),
-              icon: Icon(Icons.all_inclusive),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ScopeTextInput extends StatelessWidget {
-  const _ScopeTextInput({
-    required this.inputKey,
-    required this.controller,
-    required this.label,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  final Key inputKey;
-  final TextEditingController controller;
-  final String label;
-  final bool enabled;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 136,
-      child: TextField(
-        key: inputKey,
-        controller: controller,
-        enabled: enabled,
-        onChanged: onChanged,
-        textInputAction: TextInputAction.done,
-        decoration: InputDecoration(
-          isDense: true,
-          labelText: label,
-          border: const OutlineInputBorder(
-            borderRadius: BorderRadius.all(Radius.circular(8)),
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        ),
-      ),
     );
   }
 }
@@ -1220,9 +1005,4 @@ Color _statusColor(String status) {
 String _optionKeyForIndex(int index) {
   const keys = ['A', 'B', 'C', 'D'];
   return index < keys.length ? keys[index] : '${index + 1}';
-}
-
-String? _trimmedOrNull(String value) {
-  final trimmed = value.trim();
-  return trimmed.isEmpty ? null : trimmed;
 }
