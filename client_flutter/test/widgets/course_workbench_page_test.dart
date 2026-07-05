@@ -1,5 +1,6 @@
 // ignore_for_file: depend_on_referenced_packages
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
@@ -83,6 +84,42 @@ void main() {
     expect(find.text('全课程 QA'), findsNothing);
     expect(find.text('课程总复习'), findsNothing);
     expect(find.text('课程级讲义工作台'), findsNothing);
+  });
+
+  testWidgets('lesson preparation loader omits the center plus marker',
+      (tester) async {
+    _useTestSurface(tester, const Size(1200, 1600));
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(
+            _PausedPreparationFakeApiClient(),
+          ),
+        ],
+        child: const MaterialApp(
+          home: LessonPreparationPage(
+            courseId: '101',
+            lessonId: 'l-new',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final loader = find.byKey(const Key('lesson_preparation_loader'));
+    expect(loader, findsOneWidget);
+    expect(
+      find.descendant(of: loader, matching: find.byType(CustomPaint)),
+      paintsExactlyCountTimes(#drawPath, 0),
+    );
+    expect(
+      find.descendant(of: loader, matching: find.byType(CustomPaint)),
+      paintsExactlyCountTimes(#drawCircle, 0),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('workspace title actions keep routed course behavior',
@@ -756,6 +793,18 @@ GoRouter _workbenchRouter() {
       ),
     ],
   );
+}
+
+class _PausedPreparationFakeApiClient extends _CourseWorkbenchFakeApiClient {
+  final _parseStart = Completer<ParseStartResultModel>();
+
+  @override
+  Future<ParseStartResultModel> startParse({
+    required String courseId,
+    required String idempotencyKey,
+  }) {
+    return _parseStart.future;
+  }
 }
 
 class _CourseWorkbenchFakeApiClient extends ApiClient {

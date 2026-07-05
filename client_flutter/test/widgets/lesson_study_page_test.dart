@@ -400,6 +400,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('正在生成'), findsOneWidget);
+    expect(fakeApiClient.generateRequestCount, 1);
+
+    await tester.tap(find.text('正在生成'));
+    await tester.pump();
+
+    expect(fakeApiClient.generateRequestCount, 1);
 
     fakeApiClient.generateResponse.complete(
       handouts.HandoutBlockGenerateResultModel.fromJson({
@@ -415,6 +421,32 @@ void main() {
 
     expect(find.text('生成讲义'), findsWidgets);
   });
+
+  testWidgets(
+      'generate handout button stays disabled while selected block is generating',
+      (tester) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _GeneratingBlockLessonStudyPageFakeApiClient();
+    await _pumpLessonStudy(tester, apiClient: fakeApiClient);
+
+    await tester.tap(find.text('生成讲义').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('正在生成'), findsOneWidget);
+    final disabledButton = tester.widget<InkWell>(
+      find.ancestor(
+        of: find.text('正在生成'),
+        matching: find.byType(InkWell),
+      ),
+    );
+    expect(disabledButton.onTap, isNull);
+
+    await tester.tap(find.text('正在生成'));
+    await tester.pump();
+
+    expect(fakeApiClient.generateRequestCount, 1);
+  });
+
   testWidgets('embedded lesson QA shows the question and answer as a pair',
       (tester) async {
     _useTestSurface(tester);
@@ -863,16 +895,67 @@ class _DelayedGenerateBlockLessonStudyPageFakeApiClient
   final generateRequested = Completer<void>();
   final generateResponse =
       Completer<handouts.HandoutBlockGenerateResultModel>();
+  var generateRequestCount = 0;
 
   @override
   Future<handouts.HandoutBlockGenerateResultModel> generateHandoutBlock({
     required int blockId,
     required String idempotencyKey,
   }) {
+    generateRequestCount++;
     if (!generateRequested.isCompleted) {
       generateRequested.complete();
     }
     return generateResponse.future;
+  }
+}
+
+class _GeneratingBlockLessonStudyPageFakeApiClient
+    extends _LessonStudyPageFakeApiClient {
+  var generateRequestCount = 0;
+  var _selectedBlockGenerating = false;
+
+  @override
+  Future<handouts.HandoutBlockGenerateResultModel> generateHandoutBlock({
+    required int blockId,
+    required String idempotencyKey,
+  }) async {
+    generateRequestCount++;
+    _selectedBlockGenerating = true;
+    return handouts.HandoutBlockGenerateResultModel.fromJson({
+      'blockId': blockId,
+      'outlineKey': 'section-1-1',
+      'status': 'generating',
+      'generationStatus': 'generating',
+      'startSec': 0,
+      'endSec': 90,
+    });
+  }
+
+  @override
+  Future<handouts.HandoutBlocksModel> fetchLessonHandoutBlocks({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    return handouts.HandoutBlocksModel.fromJson({
+      'items': [
+        _block(
+          blockId: 4201,
+          outlineKey: 'section-1-1',
+          title: '1.1 极限定义',
+          contentMd:
+              _selectedBlockGenerating ? null : '栈只允许在一端插入和删除，队列从队尾入队、队头出队。',
+          status: _selectedBlockGenerating ? 'generating' : 'ready',
+          generationStatus: _selectedBlockGenerating ? 'generating' : 'ready',
+        ),
+        _block(
+          blockId: 4202,
+          outlineKey: 'section-1-2',
+          title: '1.2 栈的操作端',
+          contentMd: '操作端决定了数据结构的访问顺序。',
+        ),
+      ],
+    });
   }
 }
 
@@ -922,14 +1005,17 @@ Map<String, dynamic> _block({
   required int blockId,
   required String outlineKey,
   required String title,
-  required String contentMd,
+  required String? contentMd,
+  String status = 'ready',
+  String? generationStatus,
 }) {
   return {
     'blockId': blockId,
     'outlineKey': outlineKey,
     'title': title,
     'summary': '',
-    'status': 'ready',
+    'status': status,
+    'generationStatus': generationStatus ?? status,
     'contentMd': contentMd,
     'startSec': 0,
     'endSec': 90,

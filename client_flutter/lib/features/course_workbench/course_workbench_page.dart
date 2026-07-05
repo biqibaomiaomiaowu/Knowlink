@@ -1071,41 +1071,6 @@ class _LoaderOfThingsPainter extends CustomPainter {
         frontBoost: 0.32 + _wave(progress, index * 0.13) * 0.26,
       );
     }
-
-    final glow = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          AppTheme.surface.withValues(alpha: 0.96),
-          AppTheme.surface.withValues(alpha: 0.42),
-          AppTheme.surface.withValues(alpha: 0),
-        ],
-      ).createShader(
-        Rect.fromCircle(center: center, radius: 34),
-      );
-    canvas.drawCircle(center, 33, glow);
-
-    final corePaint = Paint()
-      ..color = AppTheme.surface
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, 18, corePaint);
-
-    final coreStroke = Paint()
-      ..color = AppTheme.brandBlue.withValues(alpha: 0.28)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    canvas.drawCircle(center, 18, coreStroke);
-
-    final sparkPaint = Paint()
-      ..color = AppTheme.ink
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
-    final sparkPath = Path()
-      ..moveTo(center.dx, center.dy - 9)
-      ..lineTo(center.dx, center.dy + 9)
-      ..moveTo(center.dx - 9, center.dy)
-      ..lineTo(center.dx + 9, center.dy);
-    canvas.drawPath(sparkPath, sparkPaint);
   }
 
   void _drawRing(

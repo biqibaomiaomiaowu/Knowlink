@@ -133,7 +133,30 @@ class LessonStudyState {
 
   bool get isSubmittingQuestion => qaSubmit.isLoading;
   bool get isSavingProgress => progressSave.isLoading;
-  bool get isGeneratingSelectedBlock => blockGenerateRequest.isLoading;
+  bool get isGeneratingSelectedBlock {
+    if (blockGenerateRequest.isLoading) {
+      return true;
+    }
+    final blockId = selectedBlockId;
+    if (blockId == null) {
+      return false;
+    }
+    final selected = selectedBlock;
+    if (_isActiveBlockGenerationStatus(selected?.generationStatus)) {
+      return true;
+    }
+    final result = blockGenerateRequest.valueOrNull;
+    final blockStatus = result?.blockStatus;
+    if (blockStatus != null && blockStatus.blockId == blockId) {
+      return _isActiveGenerateRequestStatus(blockStatus.generationStatus) ||
+          _isActiveGenerateRequestStatus(blockStatus.status);
+    }
+    final entity = result?.entity;
+    if (entity?.type == 'handout_block' && entity?.id == blockId) {
+      return _isActiveGenerateRequestStatus(result?.status);
+    }
+    return false;
+  }
 
   HandoutBlockModel? blockForId(int blockId) {
     final items = blocks.valueOrNull?.items ?? const [];
@@ -196,4 +219,19 @@ class LessonStudyState {
       isMaterialsOpen: isMaterialsOpen ?? this.isMaterialsOpen,
     );
   }
+}
+
+bool _isActiveBlockGenerationStatus(String? status) {
+  final normalized = status?.toLowerCase();
+  return normalized == 'generating' ||
+      normalized == 'running' ||
+      normalized == 'queued';
+}
+
+bool _isActiveGenerateRequestStatus(String? status) {
+  final normalized = status?.toLowerCase();
+  return normalized == 'generating' ||
+      normalized == 'running' ||
+      normalized == 'queued' ||
+      normalized == 'pending';
 }
