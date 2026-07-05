@@ -1545,9 +1545,9 @@ V2 主观题判卷说明：
 
 ### `POST /api/v1/courses/{courseId}/review-tasks/regenerate`
 
-响应结构与其他异步生成接口一致，`entity.type = review_task_run`。
+有可用 attempt 时，响应结构与其他异步生成接口一致，`entity.type = review_task_run`。
 手动重算只会绑定最近一条与当前 `activeParseRunId` / `activeHandoutVersionId` 匹配的 course-scope quiz attempt。
-若没有可用 attempt，接口返回 `409 review.not_ready`，且不得创建 `review_refresh` 异步任务。
+若没有可用 attempt，接口返回 `200`，`data = {"taskId": 0, "status": "not_ready", "nextAction": "complete_course_quiz", "entity": {"type": "course", "id": courseId}}`，且不得创建 `review_refresh` 异步任务或 `review_task_run`。
 
 ### `GET /api/v1/review-task-runs/{reviewTaskRunId}/status`
 

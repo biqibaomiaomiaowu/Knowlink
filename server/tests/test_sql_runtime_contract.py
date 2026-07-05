@@ -1861,7 +1861,7 @@ def test_sql_review_regenerate_accepts_course_attempt_backed_by_lesson_handout()
     engine.dispose()
 
 
-def test_review_service_sql_regenerate_rejects_without_active_course_attempt():
+def test_review_service_sql_regenerate_returns_not_ready_without_active_course_attempt():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)
 
@@ -1927,11 +1927,14 @@ def test_review_service_sql_regenerate_rejects_without_active_course_attempt():
         async_tasks=repo,
     )
 
-    with pytest.raises(ServiceError) as exc_info:
-        service.regenerate_review_tasks(course_id=course_id, idempotency_key=None)
+    result = service.regenerate_review_tasks(course_id=course_id, idempotency_key=None)
 
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.error_code == "review.not_ready"
+    assert result == {
+        "taskId": 0,
+        "status": "not_ready",
+        "nextAction": "complete_course_quiz",
+        "entity": {"type": "course", "id": course_id},
+    }
     assert dispatcher.calls == []
     assert session.query(ReviewTaskRun).count() == 0
     assert (

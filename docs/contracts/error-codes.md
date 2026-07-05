@@ -104,7 +104,7 @@
 - `qa.scope_invalid`: QA session 或消息请求 scope 与 course / lesson 不匹配
 - `quiz.not_found`: 测验不存在
 - `review.run_not_found`: 复习任务重算记录不存在
-- `review.not_ready`: 当前课程没有可用于复习刷新的 course-scope quiz attempt，或其 parse / handout 上下文不匹配当前 active course context
+- `review.not_ready`: 当前课程没有可用于复习刷新的 course-scope quiz attempt，或其 parse / handout 上下文不匹配当前 active course context；`POST /courses/{courseId}/review-tasks/regenerate` 兼容旧 APK，改为返回 `200 status=not_ready` 而不是该 409 错误
 
 ## Artifact Scope
 

@@ -142,14 +142,12 @@ class ReviewService:
                 run = self.reviews.create_review_run(course_id)
             except ValueError as exc:
                 if str(exc) == "review.not_ready":
-                    raise ServiceError(
-                        message=(
-                            "Course review cannot be regenerated until a course-scope quiz attempt "
-                            "matches the active handout."
-                        ),
-                        error_code="review.not_ready",
-                        status_code=409,
-                    ) from exc
+                    return {
+                        "taskId": 0,
+                        "status": "not_ready",
+                        "nextAction": "complete_course_quiz",
+                        "entity": {"type": "course", "id": course_id},
+                    }
                 raise
             missing_refresh_task = object()
             refresh_task = run.pop("_reviewRefreshTask", missing_refresh_task)
