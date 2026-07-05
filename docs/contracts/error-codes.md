@@ -104,6 +104,7 @@
 - `qa.scope_invalid`: QA session 或消息请求 scope 与 course / lesson 不匹配
 - `quiz.not_found`: 测验不存在
 - `review.run_not_found`: 复习任务重算记录不存在
+- `review.not_ready`: 当前课程没有可用于复习刷新的 course-scope quiz attempt，或其 parse / handout 上下文不匹配当前 active course context
 
 ## Artifact Scope
 

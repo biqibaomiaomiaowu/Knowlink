@@ -138,7 +138,19 @@ class ReviewService:
 
         def factory() -> dict[str, object]:
             nonlocal enqueue_request, created_response
-            run = self.reviews.create_review_run(course_id)
+            try:
+                run = self.reviews.create_review_run(course_id)
+            except ValueError as exc:
+                if str(exc) == "review.not_ready":
+                    raise ServiceError(
+                        message=(
+                            "Course review cannot be regenerated until a course-scope quiz attempt "
+                            "matches the active handout."
+                        ),
+                        error_code="review.not_ready",
+                        status_code=409,
+                    ) from exc
+                raise
             missing_refresh_task = object()
             refresh_task = run.pop("_reviewRefreshTask", missing_refresh_task)
             if refresh_task is missing_refresh_task:

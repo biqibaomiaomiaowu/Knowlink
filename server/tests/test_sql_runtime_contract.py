@@ -24,7 +24,7 @@ from server.domain.services.pipelines import PipelineService
 from server.domain.services.quizzes import QuizService
 from server.domain.services.reviews import ReviewService
 from server.infra.db.base import Base
-from server.infra.db.models import IdempotencyRecord
+from server.infra.db.models import AsyncTask, IdempotencyRecord, Quiz, QuizAttempt, ReviewTaskRun
 from server.schemas.requests import CreateCourseRequest, SubmitQuizRequest
 
 
@@ -1542,6 +1542,187 @@ def test_quiz_service_sql_submit_persists_attempt_and_review_refresh_task():
             "payload": refresh_task["payload_json"],
         }
     ]
+
+    session.close()
+    engine.dispose()
+
+
+def test_sql_review_regenerate_uses_latest_attempt_with_active_course_context():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite review regenerate active attempt",
+        entry_type="manual_import",
+        goal_text="verify manual review regenerate input selection",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    handout, _, _ = repo.create_handout(
+        course_id,
+        outline={
+            "title": "Active handout",
+            "summary": "Used by review regenerate.",
+            "items": [
+                {
+                    "outlineKey": "section-active",
+                    "title": "Active section",
+                    "summary": "Current course context.",
+                    "sortNo": 1,
+                    "children": [],
+                }
+            ],
+        },
+    )
+    handout_version_id = handout["handoutVersionId"]
+
+    valid_quiz = Quiz(
+        course_id=course_id,
+        scope_type="course",
+        quiz_mode="objective",
+        handout_version_id=handout_version_id,
+        source_parse_run_id=parse_run_id,
+        quiz_type="chapter_review",
+        status="ready",
+        question_count=0,
+        payload_json={},
+    )
+    invalid_latest_quiz = Quiz(
+        course_id=course_id,
+        scope_type="course",
+        quiz_mode="objective",
+        handout_version_id=None,
+        source_parse_run_id=None,
+        quiz_type="scoped_objective",
+        status="ready",
+        question_count=0,
+        payload_json={},
+    )
+    session.add_all([valid_quiz, invalid_latest_quiz])
+    session.flush()
+    valid_attempt = QuizAttempt(
+        user_id=repo.user_id,
+        course_id=course_id,
+        quiz_id=valid_quiz.id,
+        review_task_run_id=None,
+        score=1,
+        total_score=1,
+        accuracy=1.0,
+        result_json={"items": []},
+    )
+    invalid_latest_attempt = QuizAttempt(
+        user_id=repo.user_id,
+        course_id=course_id,
+        quiz_id=invalid_latest_quiz.id,
+        review_task_run_id=None,
+        score=1,
+        total_score=1,
+        accuracy=1.0,
+        result_json={"items": []},
+    )
+    session.add_all([valid_attempt, invalid_latest_attempt])
+    session.flush()
+    assert invalid_latest_attempt.id > valid_attempt.id
+
+    result = repo.create_review_run(course_id)
+
+    run = session.get(ReviewTaskRun, result["reviewTaskRunId"])
+    assert run is not None
+    assert run.source_quiz_attempt_id == valid_attempt.id
+    assert run.payload_json == {"quizAttemptId": valid_attempt.id}
+    task = session.get(AsyncTask, result["_reviewRefreshTask"]["taskId"])
+    assert task is not None
+    assert task.parse_run_id == parse_run_id
+    assert task.target_type == "review_task_run"
+    assert task.target_id == run.id
+    assert task.payload_json == {"courseId": course_id, "reviewTaskRunId": run.id}
+
+    session.close()
+    engine.dispose()
+
+
+def test_review_service_sql_regenerate_rejects_without_active_course_attempt():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite review regenerate no active attempt",
+        entry_type="manual_import",
+        goal_text="verify manual review regenerate rejects stale attempt",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    repo.create_handout(
+        course_id,
+        outline={
+            "title": "Active handout",
+            "summary": "No matching quiz attempt exists.",
+            "items": [
+                {
+                    "outlineKey": "section-active",
+                    "title": "Active section",
+                    "summary": "Current course context.",
+                    "sortNo": 1,
+                    "children": [],
+                }
+            ],
+        },
+    )
+    invalid_quiz = Quiz(
+        course_id=course_id,
+        scope_type="course",
+        quiz_mode="objective",
+        handout_version_id=None,
+        source_parse_run_id=None,
+        quiz_type="scoped_objective",
+        status="ready",
+        question_count=0,
+        payload_json={},
+    )
+    session.add(invalid_quiz)
+    session.flush()
+    session.add(
+        QuizAttempt(
+            user_id=repo.user_id,
+            course_id=course_id,
+            quiz_id=invalid_quiz.id,
+            review_task_run_id=None,
+            score=1,
+            total_score=1,
+            accuracy=1.0,
+            result_json={"items": []},
+        )
+    )
+    session.commit()
+
+    dispatcher = _RecordingDispatcher()
+    service = ReviewService(
+        courses=repo,
+        reviews=repo,
+        idempotency=repo,
+        task_dispatcher=dispatcher,
+        async_tasks=repo,
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.regenerate_review_tasks(course_id=course_id, idempotency_key=None)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.error_code == "review.not_ready"
+    assert dispatcher.calls == []
+    assert session.query(ReviewTaskRun).count() == 0
+    assert (
+        session.query(AsyncTask)
+        .filter(AsyncTask.course_id == course_id, AsyncTask.task_type == "review_refresh")
+        .count()
+        == 0
+    )
 
     session.close()
     engine.dispose()

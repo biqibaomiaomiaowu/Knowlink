@@ -463,6 +463,7 @@ Public `questions[]` fields:
 - Async quiz task payloads include `scopeType`, `lessonId`, `startLessonId`, and `endLessonId`; workers must validate payload scope against the target quiz before saving generated questions.
 
 Submit response includes both `recommendedReviewAction` and `recommendedReviewActions`; the list form is the prototype-friendly field and may contain the single legacy action. Scoped quizzes without course parse / handout context return `reviewTaskRunId=null` and must not enqueue `review_refresh`.
+Manual course review regenerate uses only course-scope quiz attempts matching the active parse / handout context; attempts without context or stale scope are ignored. If none exists, the backend returns `review.not_ready` and must not enqueue `review_refresh`.
 
 Subjective grading placeholder:
 

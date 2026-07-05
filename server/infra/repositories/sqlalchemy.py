@@ -2996,22 +2996,18 @@ class SqlAlchemyRuntimeRepository:
         course = self._get_course_model(course_id)
         if course is None:
             raise ValueError(f"Course {course_id} was not found.")
-        latest_attempt = self.session.scalars(
-            select(QuizAttempt)
-            .where(
-                QuizAttempt.user_id == self.user_id,
-                QuizAttempt.course_id == course_id,
-            )
-            .order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc())
-        ).first()
+        source_attempt = self._latest_review_refresh_source(course)
+        if source_attempt is None:
+            raise ValueError("review.not_ready")
+        latest_attempt, source_quiz = source_attempt
         review_run = ReviewTaskRun(
             user_id=self.user_id,
             course_id=course_id,
-            source_quiz_attempt_id=latest_attempt.id if latest_attempt is not None else None,
+            source_quiz_attempt_id=latest_attempt.id,
             status="queued",
             generated_count=0,
             payload_json={
-                "quizAttemptId": latest_attempt.id if latest_attempt is not None else None,
+                "quizAttemptId": latest_attempt.id,
             },
         )
         self.session.add(review_run)
@@ -3023,7 +3019,7 @@ class SqlAlchemyRuntimeRepository:
         }
         task = AsyncTask(
             course_id=course_id,
-            parse_run_id=course.active_parse_run_id,
+            parse_run_id=source_quiz.source_parse_run_id,
             task_type="review_refresh",
             status="queued",
             target_type="review_task_run",
@@ -3039,6 +3035,32 @@ class SqlAlchemyRuntimeRepository:
                 "payload": payload,
             }
         }
+
+    def _latest_review_refresh_source(self, course: Course) -> tuple[QuizAttempt, Quiz] | None:
+        if course.active_parse_run_id is None or course.active_handout_version_id is None:
+            return None
+        row = self.session.execute(
+            select(QuizAttempt, Quiz)
+            .join(Quiz, Quiz.id == QuizAttempt.quiz_id)
+            .join(HandoutVersion, HandoutVersion.id == Quiz.handout_version_id)
+            .where(
+                QuizAttempt.user_id == self.user_id,
+                QuizAttempt.course_id == course.id,
+                Quiz.course_id == course.id,
+                Quiz.scope_type == "course",
+                Quiz.source_parse_run_id == course.active_parse_run_id,
+                Quiz.handout_version_id == course.active_handout_version_id,
+                HandoutVersion.id == course.active_handout_version_id,
+                HandoutVersion.course_id == course.id,
+                HandoutVersion.scope_type == "course",
+                HandoutVersion.lesson_id.is_(None),
+                HandoutVersion.source_parse_run_id == course.active_parse_run_id,
+            )
+            .order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc())
+        ).first()
+        if row is None:
+            return None
+        return row[0], row[1]
 
     def list_review_tasks(self, course_id: int) -> list[dict[str, Any]]:
         latest_run_id = self._latest_active_review_run_id(course_id, statuses=("queued", "running", "ready"))
