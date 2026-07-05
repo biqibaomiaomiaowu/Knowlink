@@ -189,14 +189,19 @@ def test_scoped_quiz_generation_and_subjective_grading_placeholder() -> None:
         "GET",
         f"/api/v1/courses/{course['courseId']}/lessons/{first['lessonId']}/quizzes/current",
     )
-    stage_status, stage_body = _api(
+    stage_status, _stage_body = _api(
         "POST",
         f"/api/v1/courses/{course['courseId']}/quizzes/stage/generate",
         json_body={"startLessonId": first["lessonId"], "endLessonId": second["lessonId"]},
     )
-    comprehensive_status, comprehensive_body = _api(
+    comprehensive_status, _comprehensive_body = _api(
         "POST",
         f"/api/v1/courses/{course['courseId']}/quizzes/comprehensive/generate",
+    )
+    course_status, course_body = _api(
+        "POST",
+        f"/api/v1/courses/{course['courseId']}/quizzes/generate",
+        json_body={"questionCountLevel": "small"},
     )
     grading_status, grading_body = _api(
         "GET",
@@ -208,13 +213,10 @@ def test_scoped_quiz_generation_and_subjective_grading_placeholder() -> None:
     assert lesson_body["data"]["lessonId"] == first["lessonId"]
     assert current_status == 200
     assert current_body["data"]["quizId"] == lesson_body["data"]["quizId"]
-    assert stage_status == 200
-    assert stage_body["data"]["scopeType"] == "lesson_range"
-    assert stage_body["data"]["startLessonId"] == first["lessonId"]
-    assert stage_body["data"]["endLessonId"] == second["lessonId"]
-    assert comprehensive_status == 200
-    assert comprehensive_body["data"]["scopeType"] == "course"
-    assert comprehensive_body["data"]["lessonId"] is None
+    assert stage_status == 404
+    assert comprehensive_status == 404
+    assert course_status == 200
+    assert course_body["data"]["entity"]["type"] == "quiz"
     assert grading_status == 200
     assert grading_body["data"]["gradingStatus"] == "placeholder"
     assert grading_body["data"]["totalScore"] is None

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:knowlink_client/app/theme/app_theme.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
+import 'package:knowlink_client/features/handout/handout_video_controller.dart';
 import 'package:knowlink_client/features/lesson_study/lesson_study_page.dart';
 import 'package:knowlink_client/shared/models/course_lesson_models.dart';
 import 'package:knowlink_client/shared/models/handout_models.dart' as handouts;
@@ -18,13 +19,18 @@ void main() {
     await _pumpLessonStudy(tester);
 
     expect(find.text('本节资料'), findsOneWidget);
-    expect(find.text('进入测试'), findsOneWidget);
+    expect(find.text('课时测试'), findsOneWidget);
     expect(find.text('加入复习'), findsNothing);
     expect(find.text('生成讲义'), findsWidgets);
     expect(find.text('根据资料生成讲义'), findsNothing);
     expect(find.byKey(const Key('lesson_study_video_panel')), findsOneWidget);
     expect(find.byKey(const Key('lesson_study_ai_panel')), findsOneWidget);
     expect(find.byKey(const Key('lesson_study_block_panel')), findsOneWidget);
+
+    final lessonTitleRect = tester.getRect(find.text('第 1 课：栈与队列'));
+    final videoRect =
+        tester.getRect(find.byKey(const Key('lesson_study_video_panel')));
+    expect(lessonTitleRect.left, lessThan(videoRect.left + 12));
   });
 
   testWidgets('wide lesson room uses prototype two-row grid', (tester) async {
@@ -56,6 +62,7 @@ void main() {
         tester.getRect(find.byKey(const Key('lesson_outline_trigger')));
 
     expect(triggerRect.left, greaterThanOrEqualTo(videoRect.left - 12));
+    expect(triggerRect.top, lessThan(videoRect.top + 12));
   });
 
   testWidgets('lesson soft-ui surfaces use prototype tokens', (tester) async {
@@ -140,6 +147,59 @@ void main() {
     expect(drawerDecoration.boxShadow, AppTheme.shadowRaised);
   });
 
+  testWidgets(
+      'lesson video surface renders playback controller when URL exists',
+      (tester) async {
+    _useTestSurface(tester);
+    final videoControllers = <_FakeLessonStudyVideoController>[];
+
+    await _pumpLessonStudy(
+      tester,
+      videoControllerFactory: (uri) {
+        final controller = _FakeLessonStudyVideoController(uri);
+        videoControllers.add(controller);
+        return controller;
+      },
+    );
+
+    expect(videoControllers, hasLength(1));
+    expect(
+      videoControllers.single.uri.toString(),
+      'https://cdn.test/501.mp4',
+    );
+    expect(find.byKey(const Key('lesson_video_player')), findsOneWidget);
+    expect(find.text('https://cdn.test/501.mp4'), findsOneWidget);
+  });
+
+  testWidgets('lesson outline child seeks video to child start time', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final videoControllers = <_FakeLessonStudyVideoController>[];
+
+    await _pumpLessonStudy(
+      tester,
+      videoControllerFactory: (uri) {
+        final controller = _FakeLessonStudyVideoController(uri);
+        videoControllers.add(controller);
+        return controller;
+      },
+    );
+
+    expect(videoControllers, hasLength(1));
+    videoControllers.single.seekPositions.clear();
+
+    await tester.tap(find.byKey(const Key('lesson_outline_trigger')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('lesson_outline_child_4202')));
+    await tester.pumpAndSettle();
+
+    expect(
+      videoControllers.single.seekPositions,
+      contains(const Duration(seconds: 90)),
+    );
+  });
+
   testWidgets('lesson handout block renders markdown structure', (
     tester,
   ) async {
@@ -199,7 +259,14 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const Key('lesson_outline_drawer')),
-        matching: find.text('1.1 极限定义'),
+        matching: find.text('1.1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('lesson_outline_drawer')),
+        matching: find.text('极限定义'),
       ),
       findsOneWidget,
     );
@@ -250,7 +317,7 @@ void main() {
     _useTestSurface(tester);
     await _pumpLessonStudy(tester);
 
-    await tester.tap(find.text('进入测试'));
+    await tester.tap(find.text('课时测试'));
     await tester.pumpAndSettle();
 
     expect(find.text('lesson quiz 101/42'), findsOneWidget);
@@ -260,6 +327,7 @@ void main() {
 Future<void> _pumpLessonStudy(
   WidgetTester tester, {
   String? firstBlockContentMd,
+  HandoutVideoControllerFactory? videoControllerFactory,
 }) async {
   final router = GoRouter(
     initialLocation: '/',
@@ -289,11 +357,100 @@ Future<void> _pumpLessonStudy(
             firstBlockContentMd: firstBlockContentMd,
           ),
         ),
+        if (videoControllerFactory != null)
+          handoutVideoControllerFactoryProvider.overrideWithValue(
+            videoControllerFactory,
+          ),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
   );
   await tester.pumpAndSettle();
+}
+
+class _FakeLessonStudyVideoController implements HandoutVideoController {
+  _FakeLessonStudyVideoController(this.uri);
+
+  final Uri uri;
+  final List<VoidCallback> _listeners = [];
+  final List<Duration> seekPositions = [];
+  bool _isInitialized = false;
+  bool _isPlaying = false;
+  Duration _position = Duration.zero;
+
+  @override
+  Future<void> initialize() async {
+    _isInitialized = true;
+    _notifyListeners();
+  }
+
+  @override
+  Future<void> play() async {
+    _isPlaying = true;
+    _notifyListeners();
+  }
+
+  @override
+  Future<void> pause() async {
+    _isPlaying = false;
+    _notifyListeners();
+  }
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    seekPositions.add(position);
+    _position = position;
+    _notifyListeners();
+  }
+
+  @override
+  Future<void> dispose() async {
+    _listeners.clear();
+  }
+
+  @override
+  void addListener(VoidCallback listener) {
+    _listeners.add(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    _listeners.remove(listener);
+  }
+
+  @override
+  Widget buildPlayer() {
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Text(
+          uri.toString(),
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool get isInitialized => _isInitialized;
+
+  @override
+  bool get isPlaying => _isPlaying;
+
+  @override
+  Duration get position => _position;
+
+  @override
+  Duration get duration => const Duration(minutes: 45);
+
+  @override
+  double get aspectRatio => 16 / 9;
+
+  void _notifyListeners() {
+    for (final listener in List<VoidCallback>.from(_listeners)) {
+      listener();
+    }
+  }
 }
 
 void _useTestSurface(WidgetTester tester) {

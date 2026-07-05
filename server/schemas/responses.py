@@ -551,7 +551,7 @@ class DashboardData(CamelModel):
     next_step: dict[str, object] | None = None
     today_review_tasks: list[dict[str, object]] = Field(default_factory=list)
     recommended_next_lesson: dict[str, object] | None = None
-    recommended_stage_quiz: dict[str, object] | None = None
+    recommended_course_quiz: dict[str, object] | None = None
     course_quick_entries: list[CourseQuickEntry] = Field(default_factory=list)
 
 

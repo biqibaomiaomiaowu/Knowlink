@@ -1151,20 +1151,6 @@ void main() {
               scopeType: 'lesson',
               lessonId: 42,
             ),
-          '/api/v1/courses/101/quizzes/stage/generate' => {
-              'quiz': _quizJson(
-                quizId: 7002,
-                scopeType: 'lesson_range',
-                lessonId: null,
-              ),
-            },
-          '/api/v1/courses/101/quizzes/comprehensive/generate' => {
-              'quiz': _quizJson(
-                quizId: 7003,
-                scopeType: 'course',
-                lessonId: null,
-              ),
-            },
           '/api/v1/quizzes/7001/submit' => {
               'attemptId': 7401,
               'score': 1,
@@ -1203,16 +1189,6 @@ void main() {
       courseId: '101',
       lessonId: '42',
     );
-    final stageGenerated = await client.generateStageQuiz(
-      courseId: '101',
-      startLessonId: '41',
-      endLessonId: '42',
-      questionCountLevel: QuizQuestionCountLevel.medium,
-    );
-    final comprehensiveGenerated = await client.generateComprehensiveQuiz(
-      courseId: '101',
-      questionCountLevel: QuizQuestionCountLevel.large,
-    );
     final submitted = await client.submitQuiz(
       quizId: 7001,
       request: const SubmitQuizRequestModel(
@@ -1230,10 +1206,6 @@ void main() {
     expect(lessonGenerated.quizId, 7001);
     expect(lessonGenerated.scopeType, 'lesson');
     expect(currentLessonQuiz.scopeType, 'lesson');
-    expect(stageGenerated.quizId, 7002);
-    expect(stageGenerated.scopeType, 'lesson_range');
-    expect(comprehensiveGenerated.quizId, 7003);
-    expect(comprehensiveGenerated.scopeType, 'course');
     expect(submitted.attemptId, 7401);
     expect(courseReview.todayTaskCount, 2);
     expect(courseReview.topTasks.single.sourceLesson?.lessonId, 42);
@@ -1247,20 +1219,12 @@ void main() {
     expect(adapter.requests.map((request) => request.path), [
       '/api/v1/courses/101/lessons/42/quizzes/generate',
       '/api/v1/courses/101/lessons/42/quizzes/current',
-      '/api/v1/courses/101/quizzes/stage/generate',
-      '/api/v1/courses/101/quizzes/comprehensive/generate',
       '/api/v1/quizzes/7001/submit',
       '/api/v1/courses/101/review',
       '/api/v1/courses/101/lessons/42/review',
     ]);
     expect(adapter.requests[0].data, {'questionCountLevel': 'small'});
     expect(adapter.requests[2].data, {
-      'startLessonId': '41',
-      'endLessonId': '42',
-      'questionCountLevel': 'medium',
-    });
-    expect(adapter.requests[3].data, {'questionCountLevel': 'large'});
-    expect(adapter.requests[4].data, {
       'answers': [
         {'questionId': 7101, 'selectedOption': 'A'},
       ],

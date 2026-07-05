@@ -1047,7 +1047,7 @@ class _NextStepCard extends StatelessWidget {
     final items = [
       dashboard?.nextStep,
       dashboard?.recommendedNextLesson,
-      dashboard?.recommendedStageQuiz,
+      dashboard?.recommendedCourseQuiz,
     ].whereType<HomeRouteTargetModel>().toList();
 
     return SectionCard(
@@ -1773,7 +1773,7 @@ String _formatSec(int seconds) {
 
 String _targetFallbackTitle(HomeRouteTargetModel target) {
   return switch (target.type) {
-    'stage_quiz' => '生成阶段测验',
+    'course_quiz' => '生成课程测试',
     'next_lesson' => '继续下一课时',
     'continue_lesson' => '继续当前课时',
     _ => '打开下一步',
@@ -1782,7 +1782,7 @@ String _targetFallbackTitle(HomeRouteTargetModel target) {
 
 IconData _targetIcon(HomeRouteTargetModel target) {
   return switch (target.type) {
-    'stage_quiz' => Icons.quiz_outlined,
+    'course_quiz' => Icons.quiz_outlined,
     'next_lesson' => Icons.next_plan_outlined,
     'continue_lesson' => Icons.play_lesson_outlined,
     _ => Icons.arrow_forward_rounded,
@@ -1791,7 +1791,7 @@ IconData _targetIcon(HomeRouteTargetModel target) {
 
 Color _targetColor(HomeRouteTargetModel target) {
   return switch (target.type) {
-    'stage_quiz' => const Color(0xFF8B5CF6),
+    'course_quiz' => const Color(0xFF8B5CF6),
     'next_lesson' => const Color(0xFF16A34A),
     'continue_lesson' => AppTheme.brandBlue,
     _ => const Color(0xFF64748B),

@@ -97,11 +97,6 @@ void main() {
     expect(find.byType(CourseReviewPage), findsOneWidget);
     expect(find.text('学习报告'), findsOneWidget);
 
-    router.go('/courses/101/review?kind=comprehensive_quiz');
-    await tester.pumpAndSettle();
-    expect(find.byType(CourseReviewPage), findsOneWidget);
-    expect(find.text('综合测验'), findsOneWidget);
-
     router.go('/courses/101/review?kind=subjective_grading');
     await tester.pumpAndSettle();
     expect(find.byType(CourseReviewPage), findsOneWidget);
@@ -712,7 +707,7 @@ class _RouterFakeApiClient extends ApiClient {
       },
       'todayReviewTasks': [],
       'recommendedNextLesson': null,
-      'recommendedStageQuiz': null,
+      'recommendedCourseQuiz': null,
       'courseQuickEntries': [
         {
           'key': 'recommendation',

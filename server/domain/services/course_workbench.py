@@ -9,7 +9,7 @@ from server.domain.services.errors import ServiceError
 _QUICK_ENTRIES = (
     ("course_qa", "课程问答", "ready", "基于全课程内容提问", "open_course_qa"),
     ("course_graph", "课程图谱", "placeholder", "课程图谱暂未启用", "open_course_graph"),
-    ("comprehensive_quiz", "综合测验", "ready", "开始全课程综合测验", "start_comprehensive_quiz"),
+    ("course_quiz", "课程测试", "ready", "开始课程测试", "start_course_quiz"),
     ("course_review", "总复习", "ready", "进入课程复习中心", "open_course_review"),
     ("report", "学习报告", "placeholder", "学习报告暂未启用", "open_course_report"),
     ("export", "导出", "placeholder", "课程导出暂未启用", "open_course_export"),
@@ -205,7 +205,7 @@ def _course_quick_entry_route(course_id: int, key: str) -> str:
     routes = {
         "course_qa": f"/courses/{course_id}/qa",
         "course_graph": f"/courses/{course_id}/graph",
-        "comprehensive_quiz": f"/courses/{course_id}/review?kind=comprehensive_quiz",
+        "course_quiz": f"/courses/{course_id}/quiz",
         "course_review": f"/courses/{course_id}/review",
         "report": f"/courses/{course_id}/review?kind=report",
         "export": f"/courses/{course_id}/exports",

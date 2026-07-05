@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:go_router/go_router.dart';
 
+import '../handout/handout_video_controller.dart';
 import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_error_view.dart';
 import '../../core/widgets/app_loading_view.dart';
@@ -13,6 +15,7 @@ import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/course_lesson_models.dart';
 import '../../shared/models/handout_models.dart';
 import '../../shared/models/lesson_study_state.dart';
+import '../../shared/providers/course_flow_providers.dart';
 import '../../shared/providers/lesson_study_provider.dart';
 
 class LessonStudyPage extends ConsumerStatefulWidget {
@@ -167,8 +170,6 @@ class _LessonStudyHeader extends StatelessWidget {
         final title = Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _TitleIcon(icon: Icons.play_circle_outline),
-            const SizedBox(width: 14),
             Expanded(
               child: Text(
                 lesson?.title ?? '课时学习',
@@ -223,27 +224,6 @@ class _LessonStudyHeader extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-}
-
-class _TitleIcon extends StatelessWidget {
-  const _TitleIcon({required this.icon});
-
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 46,
-      height: 46,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: AppTheme.shadowInsetLook,
-      ),
-      child: Icon(icon, color: AppTheme.brandBlue, size: 24),
     );
   }
 }
@@ -347,7 +327,8 @@ class _LessonWorkspace extends ConsumerWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 980;
-        final videoPanel = _VideoPanel(state: state);
+        final player = ref.watch(playerStateProvider);
+        final videoPanel = _VideoPanel(state: state, player: player);
         final blockPanel = _BlockPanel(state: state);
         final aiPanel = _AiPanel(
           state: state,
@@ -386,7 +367,7 @@ class _LessonWorkspace extends ConsumerWidget {
             lessonGrid,
             Positioned(
               left: -8,
-              top: 16,
+              top: 8,
               child: _OutlineTrigger(
                 key: const Key('lesson_outline_trigger'),
                 onPressed: () =>
@@ -410,20 +391,168 @@ class _LessonWorkspace extends ConsumerWidget {
   }
 }
 
-class _VideoPanel extends StatelessWidget {
-  const _VideoPanel({required this.state});
+class _VideoPanel extends ConsumerStatefulWidget {
+  const _VideoPanel({required this.state, required this.player});
 
   final LessonStudyState state;
+  final PlayerState player;
+
+  @override
+  ConsumerState<_VideoPanel> createState() => _VideoPanelState();
+}
+
+class _VideoPanelState extends ConsumerState<_VideoPanel> {
+  HandoutVideoController? _controller;
+  String? _playbackUrl;
+  bool _isInitializing = false;
+  Object? _initializationError;
+  int? _pendingSeekTargetSec;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncControllerWithPlayback();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncControllerWithPlayback();
+    if (oldWidget.player.positionSec != widget.player.positionSec) {
+      _requestSeekTo(widget.player.positionSec);
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposeController();
+    super.dispose();
+  }
+
+  void _syncControllerWithPlayback() {
+    final nextUrl = widget.state.playback.valueOrNull?.playbackUrl;
+    if (nextUrl == _playbackUrl) {
+      return;
+    }
+    _disposeController();
+    _playbackUrl = nextUrl;
+    _controller = null;
+    _isInitializing = false;
+    _initializationError = null;
+    _pendingSeekTargetSec = null;
+
+    if (nextUrl == null || nextUrl.trim().isEmpty) {
+      return;
+    }
+
+    final controller = ref.read(handoutVideoControllerFactoryProvider)(
+      Uri.parse(nextUrl),
+    );
+    _controller = controller;
+    _isInitializing = true;
+    controller.addListener(_handleControllerChanged);
+    unawaited(
+      controller.initialize().then((_) {
+        if (!mounted || _controller != controller) {
+          return;
+        }
+        final positionSec = widget.state.lessonDetail.valueOrNull?.positionSec;
+        if (positionSec != null && positionSec > 0) {
+          unawaited(controller.seekTo(Duration(seconds: positionSec)));
+        }
+        _applyPendingSeek();
+        setState(() {
+          _isInitializing = false;
+        });
+      }).catchError((Object error) {
+        if (!mounted || _controller != controller) {
+          return;
+        }
+        setState(() {
+          _isInitializing = false;
+          _initializationError = error;
+        });
+      }),
+    );
+  }
+
+  void _disposeController() {
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+    controller.removeListener(_handleControllerChanged);
+    unawaited(controller.dispose());
+  }
+
+  void _handleControllerChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _requestSeekTo(int positionSec) {
+    _pendingSeekTargetSec = positionSec < 0 ? 0 : positionSec;
+    _applyPendingSeek();
+  }
+
+  void _applyPendingSeek() {
+    final targetSec = _pendingSeekTargetSec;
+    final controller = _controller;
+    if (targetSec == null || controller == null || !controller.isInitialized) {
+      return;
+    }
+    if ((controller.position.inSeconds - targetSec).abs() <= 1) {
+      _pendingSeekTargetSec = null;
+      return;
+    }
+    unawaited(
+      controller.seekTo(Duration(seconds: targetSec)).then((_) {
+        if (!mounted ||
+            _controller != controller ||
+            _pendingSeekTargetSec != targetSec) {
+          return;
+        }
+        _pendingSeekTargetSec = null;
+        setState(() {});
+      }).catchError((Object error) {
+        if (!mounted || _controller != controller) {
+          return;
+        }
+        setState(() {
+          _pendingSeekTargetSec = null;
+          _initializationError = error;
+        });
+      }),
+    );
+  }
+
+  void _togglePlay() {
+    final controller = _controller;
+    if (controller == null || !controller.isInitialized) {
+      return;
+    }
+    final command =
+        controller.isPlaying ? controller.pause() : controller.play();
+    unawaited(command);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final detail = state.lessonDetail.valueOrNull;
-    final playback = state.playback.valueOrNull;
+    final detail = widget.state.lessonDetail.valueOrNull;
+    final playback = widget.state.playback.valueOrNull;
     final videoName = detail?.primaryVideo?.originalName ??
         detail?.lesson.primaryVideoResourceId ??
         '暂无主视频';
-    final position = detail?.positionSec ?? 0;
-    final duration = playback?.durationSec ?? detail?.primaryVideo?.durationSec;
+    final controller = _controller;
+    final position = controller?.isInitialized == true
+        ? controller!.position.inSeconds
+        : detail?.positionSec ?? 0;
+    final controllerDuration =
+        controller?.isInitialized == true ? controller!.duration.inSeconds : 0;
+    final duration = controllerDuration > 0
+        ? controllerDuration
+        : playback?.durationSec ?? detail?.primaryVideo?.durationSec;
     final videoHeight =
         (MediaQuery.sizeOf(context).width * 0.36).clamp(320.0, 460.0);
 
@@ -453,20 +582,7 @@ class _VideoPanel extends StatelessWidget {
               child: Stack(
                 children: [
                   Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(32),
-                        gradient: const LinearGradient(
-                          colors: [
-                            Color(0xFFE9EEF5),
-                            Color(0xFFD5DCE7),
-                            Color(0xFFB9C5D7),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                      ),
-                    ),
+                    child: _buildVideoSurface(),
                   ),
                   Positioned.fill(
                     child: DecoratedBox(
@@ -498,18 +614,30 @@ class _VideoPanel extends StatelessWidget {
                     ),
                   ),
                   Center(
-                    child: Container(
-                      width: 78,
-                      height: 78,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.surface,
-                        shape: BoxShape.circle,
-                        boxShadow: AppTheme.shadowRaised,
-                      ),
-                      child: const Icon(
-                        Icons.play_arrow_rounded,
-                        color: AppTheme.brandBlue,
-                        size: 42,
+                    child: Material(
+                      color: Colors.transparent,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        onTap: controller?.isInitialized == true
+                            ? _togglePlay
+                            : null,
+                        customBorder: const CircleBorder(),
+                        child: Container(
+                          width: 78,
+                          height: 78,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.surface,
+                            shape: BoxShape.circle,
+                            boxShadow: AppTheme.shadowRaised,
+                          ),
+                          child: Icon(
+                            controller?.isPlaying == true
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            color: AppTheme.brandBlue,
+                            size: 42,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -556,6 +684,48 @@ class _VideoPanel extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildVideoSurface() {
+    final controller = _controller;
+    if (widget.state.playback.hasError || _initializationError != null) {
+      return _buildVideoPlaceholder();
+    }
+    if (widget.state.playback.valueOrNull == null ||
+        _isInitializing ||
+        controller == null ||
+        !controller.isInitialized) {
+      return _buildVideoPlaceholder();
+    }
+    final aspectRatio =
+        controller.aspectRatio <= 0 ? 16 / 9 : controller.aspectRatio;
+    return ColoredBox(
+      key: const Key('lesson_video_player'),
+      color: Colors.black,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: aspectRatio,
+          child: controller.buildPlayer(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoPlaceholder() {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(32),
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFFE9EEF5),
+            Color(0xFFD5DCE7),
+            Color(0xFFB9C5D7),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
       ),
     );
   }
@@ -836,13 +1006,19 @@ class _OutlineDrawer extends ConsumerWidget {
     final outline = state.outline.valueOrNull;
     return Container(
       key: const Key('lesson_outline_drawer_surface'),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(32),
+        borderRadius: BorderRadius.only(
+          topRight: Radius.circular(32),
+          bottomRight: Radius.circular(32),
+        ),
         boxShadow: AppTheme.shadowRaised,
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(32),
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(32),
+          bottomRight: Radius.circular(32),
+        ),
         child: Material(
           color: Colors.transparent,
           child: Padding(
@@ -929,6 +1105,9 @@ class _OutlineSection extends ConsumerWidget {
                               .read(lessonStudyProvider.notifier)
                               .selectBlock(block);
                         }
+                        final player = ref.read(playerStateProvider);
+                        ref.read(playerStateProvider.notifier).state =
+                            player.copyWith(positionSec: child.startSec);
                         ref.read(lessonStudyProvider.notifier).closeOutline();
                       },
                     ),

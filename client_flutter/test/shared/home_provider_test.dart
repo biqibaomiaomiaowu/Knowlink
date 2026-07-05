@@ -112,16 +112,14 @@ void main() {
         'reason': '按进度继续',
         'nextRoute': '/courses/101/lessons/43',
       },
-      'recommendedStageQuiz': {
-        'type': 'stage_quiz',
-        'scopeType': 'lesson_range',
+      'recommendedCourseQuiz': {
+        'type': 'course_quiz',
+        'scopeType': 'course',
         'courseId': 101,
-        'startLessonId': 41,
-        'endLessonId': 42,
         'completedLessonCount': 2,
-        'title': '生成阶段测验',
+        'title': '生成课程测试',
         'reason': '已完成 2 节',
-        'nextRoute': '/courses/101/quizzes/stage',
+        'nextRoute': '/courses/101/quiz',
       },
       'courseQuickEntries': [
         {
@@ -146,7 +144,7 @@ void main() {
     expect(dashboard.todayReviewTasks.single.nextRoute,
         '/courses/101/lessons/42/review');
     expect(dashboard.recommendedNextLesson?.lessonId, '43');
-    expect(dashboard.recommendedStageQuiz?.completedLessonCount, 2);
+    expect(dashboard.recommendedCourseQuiz?.completedLessonCount, 2);
     expect(dashboard.courseQuickEntries.single.key, 'lesson_study');
     expect(dashboard.courseQuickEntries.single.enabled, isTrue);
   });

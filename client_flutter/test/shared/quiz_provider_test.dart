@@ -10,7 +10,7 @@ import 'package:knowlink_client/shared/providers/course_recommend_provider.dart'
 import 'package:knowlink_client/shared/providers/quiz_provider.dart';
 
 void main() {
-  test('loadQuiz fetches quiz and syncs course flow', () async {
+  test('loadQuiz fetches quiz without changing route context', () async {
     final fakeApiClient = _FakeQuizApiClient();
     final container = ProviderContainer(
       overrides: [
@@ -25,8 +25,8 @@ void main() {
 
     final state = container.read(quizProvider);
     expect(state.quizValue?.quizId, 8001);
-    expect(container.read(courseFlowProvider).courseId, '101');
-    expect(container.read(courseFlowProvider).quizId, 8001);
+    expect(container.read(courseFlowProvider).courseId, isNull);
+    expect(container.read(courseFlowProvider).quizId, isNull);
   });
 
   test('generateAndPoll creates quiz and loads ready quiz', () async {
@@ -133,8 +133,7 @@ void main() {
 
   test('prepareLesson treats missing current lesson quiz as empty state',
       () async {
-    final fakeApiClient = _FakeQuizApiClient()
-      ..missingCurrentLessonQuiz = true;
+    final fakeApiClient = _FakeQuizApiClient()..missingCurrentLessonQuiz = true;
     final container = ProviderContainer(
       overrides: [
         apiClientProvider.overrideWithValue(fakeApiClient),
@@ -183,61 +182,6 @@ void main() {
     expect(state.quizValue?.quizId, 8402);
     expect(state.quizValue?.scopeType, 'lesson');
     expect(container.read(courseFlowProvider).quizId, 8402);
-  });
-
-  test('generateStageAndPoll uses stage endpoint with lesson range scope',
-      () async {
-    final fakeApiClient = _FakeQuizApiClient();
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    final subscription = container.listen(quizProvider, (_, __) {});
-    addTearDown(subscription.close);
-    addTearDown(container.dispose);
-
-    container
-        .read(quizProvider.notifier)
-        .setQuestionCountLevel(QuizQuestionCountLevel.large);
-    await container.read(quizProvider.notifier).generateStageAndPoll(
-          courseId: '101',
-          startLessonId: '41',
-          endLessonId: '43',
-        );
-
-    final state = container.read(quizProvider);
-    expect(fakeApiClient.generatedStageQuizRequests, ['101/41/43']);
-    expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.large]);
-    expect(state.quizValue?.quizId, 8501);
-    expect(state.quizValue?.scopeType, 'lesson_range');
-    expect(state.quizValue?.startLessonId, 41);
-    expect(state.quizValue?.endLessonId, 43);
-    expect(container.read(courseFlowProvider).quizId, 8501);
-  });
-
-  test('generateComprehensiveAndPoll uses comprehensive endpoint with course scope',
-      () async {
-    final fakeApiClient = _FakeQuizApiClient();
-    final container = ProviderContainer(
-      overrides: [
-        apiClientProvider.overrideWithValue(fakeApiClient),
-      ],
-    );
-    final subscription = container.listen(quizProvider, (_, __) {});
-    addTearDown(subscription.close);
-    addTearDown(container.dispose);
-
-    await container.read(quizProvider.notifier).generateComprehensiveAndPoll(
-          courseId: '101',
-        );
-
-    final state = container.read(quizProvider);
-    expect(fakeApiClient.generatedComprehensiveCourseIds, ['101']);
-    expect(fakeApiClient.generatedLevels, [QuizQuestionCountLevel.medium]);
-    expect(state.quizValue?.quizId, 8601);
-    expect(state.quizValue?.scopeType, 'course');
-    expect(container.read(courseFlowProvider).quizId, 8601);
   });
 
   test('generateAndPoll clears old quiz while new generation is pending',
@@ -325,8 +269,6 @@ void main() {
 class _FakeQuizApiClient extends ApiClient {
   final generatedCourseIds = <String>[];
   final generatedLessonQuizRequests = <String>[];
-  final generatedStageQuizRequests = <String>[];
-  final generatedComprehensiveCourseIds = <String>[];
   final currentLessonQuizRequests = <String>[];
   final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
@@ -381,41 +323,6 @@ class _FakeQuizApiClient extends ApiClient {
   }
 
   @override
-  Future<QuizModel> generateStageQuiz({
-    required String courseId,
-    required String startLessonId,
-    required String endLessonId,
-    required QuizQuestionCountLevel questionCountLevel,
-  }) async {
-    generatedStageQuizRequests.add('$courseId/$startLessonId/$endLessonId');
-    generatedLevels.add(questionCountLevel);
-    return _stageQuiz(8501, courseId, startLessonId, endLessonId);
-  }
-
-  @override
-  Future<QuizModel> generateComprehensiveQuiz({
-    required String courseId,
-    required QuizQuestionCountLevel questionCountLevel,
-  }) async {
-    generatedComprehensiveCourseIds.add(courseId);
-    generatedLevels.add(questionCountLevel);
-    return QuizModel.fromJson({
-      'quizId': 8601,
-      'courseId': int.parse(courseId),
-      'scopeType': 'course',
-      'status': 'ready',
-      'questionCount': 1,
-      'questions': [
-        {
-          'questionId': 86010,
-          'stemMd': '综合测试题',
-          'options': ['A', 'B'],
-        },
-      ],
-    });
-  }
-
-  @override
   Future<QuizModel> fetchQuiz(int quizId) async {
     fetchedQuizIds.add(quizId);
     return QuizModel.fromJson({
@@ -432,30 +339,6 @@ class _FakeQuizApiClient extends ApiClient {
         {
           'questionId': 8102,
           'stemMd': '导数的几何意义是？',
-          'options': ['A', 'B'],
-        },
-      ],
-    });
-  }
-
-  QuizModel _stageQuiz(
-    int quizId,
-    String courseId,
-    String startLessonId,
-    String endLessonId,
-  ) {
-    return QuizModel.fromJson({
-      'quizId': quizId,
-      'courseId': int.parse(courseId),
-      'scopeType': 'lesson_range',
-      'startLessonId': int.parse(startLessonId),
-      'endLessonId': int.parse(endLessonId),
-      'status': 'ready',
-      'questionCount': 1,
-      'questions': [
-        {
-          'questionId': 85010,
-          'stemMd': '阶段测试题',
           'options': ['A', 'B'],
         },
       ],

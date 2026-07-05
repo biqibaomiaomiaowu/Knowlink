@@ -69,9 +69,9 @@ void main() {
 
     expect(find.text('测试中心'), findsWidgets);
     expect(find.text('课程测试'), findsOneWidget);
-    expect(find.text('课时测试'), findsOneWidget);
-    expect(find.text('阶段测试'), findsOneWidget);
-    expect(find.text('综合测试'), findsOneWidget);
+    expect(find.text('课时测试'), findsNothing);
+    expect(find.text('阶段测试'), findsNothing);
+    expect(find.text('综合测试'), findsNothing);
     expect(find.text('主观题' '判卷'), findsNothing);
   });
 
@@ -94,50 +94,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.currentLessonQuizRequests, ['101/42']);
-    expect(find.text('当前范围：课时测试'), findsOneWidget);
+    expect(find.text('当前入口：课时测试'), findsOneWidget);
     expect(find.text('课时编号：42'), findsOneWidget);
 
-    await tester.tap(find.text('生成测验'));
+    await tester.tap(find.text('生成课时测试'));
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.generatedLessonQuizRequests, ['101/42']);
     expect(fakeApiClient.generatedCourseIds, isEmpty);
-  });
-
-  testWidgets('stage and comprehensive scopes call dedicated quiz generators', (
-    tester,
-  ) async {
-    _useTestSurface(tester);
-    final fakeApiClient = _QuizPageFakeApiClient();
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          apiClientProvider.overrideWithValue(fakeApiClient),
-        ],
-        child: const MaterialApp(home: QuizPage(courseId: '101')),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('阶段测试'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('quiz-stage-start')), '41');
-    await tester.enterText(find.byKey(const Key('quiz-stage-end')), '43');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('生成测验'));
-    await tester.pumpAndSettle();
-
-    expect(fakeApiClient.generatedStageQuizRequests, ['101/41/43']);
-    expect(find.text('阶段测试题'), findsOneWidget);
-
-    await tester.tap(find.text('综合测试'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('生成测验'));
-    await tester.pumpAndSettle();
-
-    expect(fakeApiClient.generatedComprehensiveCourseIds, ['101']);
-    expect(find.text('综合测试题'), findsOneWidget);
   });
 
   testWidgets('course quiz page can generate a quiz', (tester) async {
@@ -157,7 +121,7 @@ void main() {
     expect(find.text('还没有测验'), findsOneWidget);
     expect(find.text('适中 3-5题'), findsOneWidget);
 
-    await tester.tap(find.text('生成测验'));
+    await tester.tap(find.text('生成课程测试'));
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.generatedCourseIds, ['101']);
@@ -182,7 +146,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('生成测验'));
+    await tester.tap(find.text('生成课程测试'));
     await tester.pump();
 
     expect(fakeApiClient.generatedCourseIds, ['101']);
@@ -225,7 +189,7 @@ void main() {
 
     await tester.tap(find.text('多练 5-10题'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('生成测验'));
+    await tester.tap(find.text('生成课程测试'));
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.generatedCourseIds, ['101']);
@@ -243,8 +207,6 @@ void _useTestSurface(WidgetTester tester) {
 class _QuizPageFakeApiClient extends ApiClient {
   final generatedCourseIds = <String>[];
   final generatedLessonQuizRequests = <String>[];
-  final generatedStageQuizRequests = <String>[];
-  final generatedComprehensiveCourseIds = <String>[];
   final currentLessonQuizRequests = <String>[];
   final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
@@ -311,56 +273,6 @@ class _QuizPageFakeApiClient extends ApiClient {
     generatedLessonQuizRequests.add('$courseId/$lessonId');
     generatedLevels.add(questionCountLevel);
     return _lessonQuiz(8402, courseId, lessonId);
-  }
-
-  @override
-  Future<QuizModel> generateStageQuiz({
-    required String courseId,
-    required String startLessonId,
-    required String endLessonId,
-    required QuizQuestionCountLevel questionCountLevel,
-  }) async {
-    generatedStageQuizRequests.add('$courseId/$startLessonId/$endLessonId');
-    generatedLevels.add(questionCountLevel);
-    return QuizModel.fromJson({
-      'quizId': 8501,
-      'courseId': int.parse(courseId),
-      'scopeType': 'lesson_range',
-      'startLessonId': int.parse(startLessonId),
-      'endLessonId': int.parse(endLessonId),
-      'status': 'ready',
-      'questionCount': 1,
-      'questions': [
-        {
-          'questionId': 85010,
-          'stemMd': '阶段测试题',
-          'options': ['A', 'B'],
-        },
-      ],
-    });
-  }
-
-  @override
-  Future<QuizModel> generateComprehensiveQuiz({
-    required String courseId,
-    required QuizQuestionCountLevel questionCountLevel,
-  }) async {
-    generatedComprehensiveCourseIds.add(courseId);
-    generatedLevels.add(questionCountLevel);
-    return QuizModel.fromJson({
-      'quizId': 8601,
-      'courseId': int.parse(courseId),
-      'scopeType': 'course',
-      'status': 'ready',
-      'questionCount': 1,
-      'questions': [
-        {
-          'questionId': 86010,
-          'stemMd': '综合测试题',
-          'options': ['A', 'B'],
-        },
-      ],
-    });
   }
 
   QuizModel _lessonQuiz(int quizId, String courseId, String lessonId) {

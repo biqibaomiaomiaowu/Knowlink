@@ -940,42 +940,6 @@ def test_sql_handout_block_generation_metadata_persists_to_read_models():
     engine.dispose()
 
 
-def test_sql_comprehensive_scoped_quiz_can_be_read_without_handout_or_parse_context():
-    repository_cls = _discover_sql_repository_class()
-    repo, session, engine = _build_sqlite_repository(repository_cls)
-    service = QuizService(
-        courses=repo,
-        quizzes=repo,
-        idempotency=repo,
-        scoped_artifacts=repo,
-    )
-    course = repo.create_course(
-        title="SQLite comprehensive quiz course",
-        entry_type="manual_import",
-        goal_text="Verify scoped comprehensive quiz readback",
-        preferred_style="balanced",
-    )
-    course_id = _value(course, "courseId", "course_id", "id")
-
-    generated = service.generate_comprehensive_quiz(
-        course_id=course_id,
-        question_count_level="small",
-    )
-    quiz = service.get_quiz(quiz_id=generated["quizId"])
-
-    assert generated["scopeType"] == "course"
-    assert generated["lessonId"] is None
-    assert quiz["quizId"] == generated["quizId"]
-    assert quiz["scopeType"] == "course"
-    assert quiz["lessonId"] is None
-    assert quiz["status"] == "placeholder"
-    assert quiz["questionCount"] == 0
-    assert quiz["questions"] == []
-
-    session.close()
-    engine.dispose()
-
-
 def test_sql_legacy_ready_handout_block_without_metadata_returns_fallback_marker():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)
@@ -1117,6 +1081,7 @@ class _RecordingDispatcher:
 
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
         self.calls.append({"taskId": task_id, "payload": payload})
+
 
 
 def test_pipeline_service_sql_parse_start_enqueues_once_and_persists_complete_payload():

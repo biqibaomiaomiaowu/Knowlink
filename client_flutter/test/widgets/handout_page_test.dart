@@ -597,7 +597,7 @@ class _HandoutPageFakeApiClient extends ApiClient {
       'nextStep': null,
       'todayReviewTasks': [],
       'recommendedNextLesson': null,
-      'recommendedStageQuiz': null,
+      'recommendedCourseQuiz': null,
       'courseQuickEntries': [],
     });
   }

@@ -231,13 +231,13 @@ def test_home_dashboard_continues_current_lesson_and_returns_course_next_actions
     assert data["nextStep"]["lessonId"] == second["lessonId"]
     assert data["todayReviewTasks"][0]["lessonId"] == second["lessonId"]
     assert data["recommendedNextLesson"]["lessonId"] == second["lessonId"]
-    assert data["recommendedStageQuiz"]["type"] == "stage_quiz"
-    assert data["recommendedStageQuiz"]["completedLessonCount"] == 1
+    assert data["recommendedCourseQuiz"]["type"] == "course_quiz"
+    assert data["recommendedCourseQuiz"]["completedLessonCount"] == 1
     assert {entry["key"] for entry in data["courseQuickEntries"]} == {
         "lesson_study",
         "course_qa",
         "course_graph",
-        "comprehensive_quiz",
+        "course_quiz",
         "course_review",
         "report",
         "export",
@@ -361,7 +361,7 @@ def test_in_course_recommendations_use_deterministic_lesson_rules() -> None:
     by_type = {action["type"]: action for action in actions}
     assert by_type["next_lesson"]["lessonId"] == weak["lessonId"]
     assert by_type["lesson_review"]["lessonId"] == weak["lessonId"]
-    assert by_type["stage_quiz"]["completedLessonCount"] == 1
+    assert by_type["course_quiz"]["completedLessonCount"] == 1
     material_actions = [action for action in actions if action["type"] == "add_lesson_material"]
     assert {action["lessonId"] for action in material_actions} == {
         missing_video["lessonId"],

@@ -274,7 +274,7 @@ class _HomePageFakeApiClient extends ApiClient {
         'nextStep': null,
         'todayReviewTasks': [],
         'recommendedNextLesson': null,
-        'recommendedStageQuiz': null,
+        'recommendedCourseQuiz': null,
         'courseQuickEntries': [],
       });
     }
@@ -372,16 +372,14 @@ class _HomePageFakeApiClient extends ApiClient {
         'reason': '按进度继续',
         'nextRoute': '/courses/101/lessons/43',
       },
-      'recommendedStageQuiz': {
-        'type': 'stage_quiz',
-        'scopeType': 'lesson_range',
+      'recommendedCourseQuiz': {
+        'type': 'course_quiz',
+        'scopeType': 'course',
         'courseId': 101,
-        'startLessonId': 41,
-        'endLessonId': 42,
         'completedLessonCount': 2,
-        'title': '生成阶段测验',
+        'title': '生成课程测试',
         'reason': '已完成 2 节',
-        'nextRoute': '/courses/101/quizzes/stage',
+        'nextRoute': '/courses/101/quiz',
       },
       'courseQuickEntries': [
         {

@@ -352,7 +352,7 @@ def test_course_workbench_aggregates_course_lessons_resources_and_quick_entries(
         "lesson_study",
         "course_qa",
         "course_graph",
-        "comprehensive_quiz",
+        "course_quiz",
         "course_review",
         "report",
         "export",
@@ -381,7 +381,7 @@ def test_workbench_quick_entries_use_route_action_contract() -> None:
     assert lesson_study["action"] == "open_lesson_study"
     assert lesson_study["message"]
 
-    for key in ("course_qa", "comprehensive_quiz", "course_review"):
+    for key in ("course_qa", "course_quiz", "course_review"):
         assert entries[key]["enabled"] is True
         assert entries[key]["route"].startswith(f"/courses/{course['courseId']}")
         assert entries[key]["action"]

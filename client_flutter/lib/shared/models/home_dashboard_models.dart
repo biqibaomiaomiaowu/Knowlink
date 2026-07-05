@@ -15,7 +15,7 @@ class HomeDashboardModel {
     this.continueLearning,
     this.nextStep,
     this.recommendedNextLesson,
-    this.recommendedStageQuiz,
+    this.recommendedCourseQuiz,
   });
 
   final List<CourseSummaryModel> recentCourses;
@@ -31,7 +31,7 @@ class HomeDashboardModel {
   final HomeRouteTargetModel? continueLearning;
   final HomeRouteTargetModel? nextStep;
   final HomeRouteTargetModel? recommendedNextLesson;
-  final HomeRouteTargetModel? recommendedStageQuiz;
+  final HomeRouteTargetModel? recommendedCourseQuiz;
 
   factory HomeDashboardModel.fromJson(Map<String, dynamic> json) {
     return HomeDashboardModel(
@@ -69,18 +69,15 @@ class HomeDashboardModel {
       currentLesson: _parseLesson(json['currentLesson']),
       continueLearning: _parseRouteTarget(json['continueLearning']),
       nextStep: _parseRouteTarget(json['nextStep']),
-      todayReviewTasks:
-          (json['todayReviewTasks'] as List<dynamic>? ?? const [])
-              .map(
-                (item) => HomeReviewTaskModel.fromJson(
-                  Map<String, dynamic>.from(item as Map),
-                ),
-              )
-              .toList(),
-      recommendedNextLesson:
-          _parseRouteTarget(json['recommendedNextLesson']),
-      recommendedStageQuiz:
-          _parseRouteTarget(json['recommendedStageQuiz']),
+      todayReviewTasks: (json['todayReviewTasks'] as List<dynamic>? ?? const [])
+          .map(
+            (item) => HomeReviewTaskModel.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(),
+      recommendedNextLesson: _parseRouteTarget(json['recommendedNextLesson']),
+      recommendedCourseQuiz: _parseRouteTarget(json['recommendedCourseQuiz']),
       courseQuickEntries:
           (json['courseQuickEntries'] as List<dynamic>? ?? const [])
               .map(

@@ -47,7 +47,7 @@ void main() {
     expect(find.text('课程资料'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, '上传资料'), findsOneWidget);
     expect(find.text('数据库教材.pdf'), findsOneWidget);
-    expect(find.text('综合测验'), findsOneWidget);
+    expect(find.text('课程测试'), findsOneWidget);
     expect(find.text('题目数量'), findsOneWidget);
     expect(find.text('2 / 6'), findsOneWidget);
     expect(find.text('正确率'), findsOneWidget);
@@ -56,15 +56,15 @@ void main() {
         find.byKey(const Key('course_workbench_secondary_entries'));
     expect(quizActions, findsOneWidget);
     expect(
-      find.descendant(of: quizActions, matching: find.text('开始测验')),
+      find.descendant(of: quizActions, matching: find.text('开始课程测试')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: quizActions, matching: find.text('重新生成')),
+      find.descendant(of: quizActions, matching: find.text('重新生成课程测试')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: quizActions, matching: find.text('历史测验')),
+      find.descendant(of: quizActions, matching: find.text('历史课程测试')),
       findsOneWidget,
     );
     expect(find.text('课时'), findsOneWidget);
@@ -350,7 +350,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final quizButton = find.widgetWithText(FilledButton, '开始测验');
+    final quizButton = find.widgetWithText(FilledButton, '开始课程测试');
     expect(quizButton, findsOneWidget);
 
     await tester.tap(quizButton);
@@ -510,10 +510,10 @@ class _CourseWorkbenchFakeApiClient extends ApiClient {
               'message': '图谱生成暂未启用',
             },
             {
-              'key': 'comprehensive_quiz',
-              'title': '综合测验',
+              'key': 'course_quiz',
+              'title': '课程测试',
               'status': 'placeholder',
-              'message': '综合测验等待生成',
+              'message': '课程测试等待生成',
             },
             {
               'key': 'course_review',
