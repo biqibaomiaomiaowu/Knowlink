@@ -7,7 +7,7 @@ from server.domain.services.errors import ServiceError
 
 
 LOW_MASTERY_THRESHOLD = 0.6
-STAGE_QUIZ_COMPLETED_THRESHOLD = 1
+COURSE_QUIZ_COMPLETED_THRESHOLD = 1
 SUPPORTING_MATERIAL_ROLES = {"lesson_material", "transcript", "supplement"}
 
 
@@ -56,10 +56,10 @@ class CourseRecommendationService:
         lessons = self._lesson_summaries(course_id)
         return self._next_lesson_action(course=course, lessons=lessons)
 
-    def recommended_stage_quiz(self, *, course_id: int) -> dict[str, Any] | None:
+    def recommended_course_quiz(self, *, course_id: int) -> dict[str, Any] | None:
         course = self._ensure_course(course_id)
         lessons = self._lesson_summaries(course_id)
-        return self._stage_quiz_action(course=course, lessons=lessons)
+        return self._course_quiz_action(course=course, lessons=lessons)
 
     def _course_actions(
         self,
@@ -80,9 +80,9 @@ class CourseRecommendationService:
             material = self._lesson_material_action(course=course, lesson=lesson, resources=resources)
             if material is not None:
                 actions.append(material)
-        stage_quiz = self._stage_quiz_action(course=course, lessons=lessons)
-        if stage_quiz is not None:
-            actions.append(stage_quiz)
+        course_quiz = self._course_quiz_action(course=course, lessons=lessons)
+        if course_quiz is not None:
+            actions.append(course_quiz)
         return actions
 
     def _next_lesson_action(
@@ -176,27 +176,24 @@ class CourseRecommendationService:
             "nextRoute": f"/courses/{course['courseId']}/lessons/{lesson['lessonId']}/resources",
         }
 
-    def _stage_quiz_action(
+    def _course_quiz_action(
         self,
         *,
         course: dict[str, Any],
         lessons: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         completed = [lesson for lesson in lessons if self._is_lesson_completed(lesson)]
-        if len(completed) < STAGE_QUIZ_COMPLETED_THRESHOLD:
+        if len(completed) < COURSE_QUIZ_COMPLETED_THRESHOLD:
             return None
-        ordered = sorted(completed, key=lambda item: (int(item["orderIndex"]), int(item["lessonId"])))
         return {
-            "type": "stage_quiz",
-            "scopeType": "lesson_range",
+            "type": "course_quiz",
+            "scopeType": "course",
             "courseId": course["courseId"],
-            "startLessonId": ordered[0]["lessonId"],
-            "endLessonId": ordered[-1]["lessonId"],
             "completedLessonCount": len(completed),
-            "title": "生成阶段测验",
+            "title": "生成课程测试",
             "reason": self._reason(course=course, lessons=lessons, weak_lesson=None),
             "reasonPlaceholders": self._reason_placeholders(),
-            "nextRoute": f"/courses/{course['courseId']}/quizzes/stage",
+            "nextRoute": f"/courses/{course['courseId']}/quiz",
         }
 
     def _lesson_summaries(self, course_id: int) -> list[dict[str, Any]]:

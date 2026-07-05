@@ -238,11 +238,6 @@ class QuizGenerateRequest(CamelModel):
     question_count_level: Literal["small", "medium", "large"] = "medium"
 
 
-class StageQuizGenerateRequest(QuizGenerateRequest):
-    start_lesson_id: int
-    end_lesson_id: int
-
-
 class QuizAnswerItem(CamelModel):
     question_id: int
     selected_option: str

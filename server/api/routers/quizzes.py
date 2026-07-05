@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Request
 from server.api.deps import get_quiz_service
 from server.api.response import api_ok
 from server.domain.services import QuizService
-from server.schemas.requests import QuizGenerateRequest, StageQuizGenerateRequest, SubmitQuizRequest
+from server.schemas.requests import QuizGenerateRequest, SubmitQuizRequest
 
 router = APIRouter(tags=["quizzes"])
 
@@ -49,32 +49,6 @@ async def get_current_lesson_quiz(
     service: QuizService = Depends(get_quiz_service),
 ):
     return api_ok(request, service.get_current_lesson_quiz(course_id=courseId, lesson_id=lessonId))
-
-
-@router.post("/courses/{courseId}/quizzes/stage/generate")
-async def generate_stage_quiz(
-    courseId: int,
-    payload: StageQuizGenerateRequest,
-    request: Request,
-    service: QuizService = Depends(get_quiz_service),
-):
-    return api_ok(request, service.generate_stage_quiz(course_id=courseId, payload=payload))
-
-
-@router.post("/courses/{courseId}/quizzes/comprehensive/generate")
-async def generate_comprehensive_quiz(
-    courseId: int,
-    request: Request,
-    payload: QuizGenerateRequest | None = None,
-    service: QuizService = Depends(get_quiz_service),
-):
-    return api_ok(
-        request,
-        service.generate_comprehensive_quiz(
-            course_id=courseId,
-            question_count_level=payload.question_count_level if payload is not None else "medium",
-        ),
-    )
 
 
 @router.get("/courses/{courseId}/subjective-grading/placeholder")

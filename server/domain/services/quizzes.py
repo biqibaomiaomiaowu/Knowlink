@@ -203,31 +203,6 @@ class QuizService:
         quiz = self.quizzes.get_quiz(int(latest["artifactId"]))
         return self._scoped_quiz_response(quiz or latest)
 
-    def generate_stage_quiz(self, *, course_id: int, payload) -> dict[str, object]:
-        self._ensure_course(course_id)
-        self._ensure_lesson(course_id=course_id, lesson_id=payload.start_lesson_id)
-        self._ensure_lesson(course_id=course_id, lesson_id=payload.end_lesson_id)
-        return self._create_scoped_quiz(
-            course_id=course_id,
-            scope_type="lesson_range",
-            start_lesson_id=payload.start_lesson_id,
-            end_lesson_id=payload.end_lesson_id,
-            question_count_level=payload.question_count_level,
-        )
-
-    def generate_comprehensive_quiz(
-        self,
-        *,
-        course_id: int,
-        question_count_level: str = "medium",
-    ) -> dict[str, object]:
-        self._ensure_course(course_id)
-        return self._create_scoped_quiz(
-            course_id=course_id,
-            scope_type="course",
-            question_count_level=question_count_level,
-        )
-
     def subjective_grading_placeholder(self, *, course_id: int) -> dict[str, object]:
         self._ensure_course(course_id)
         return {

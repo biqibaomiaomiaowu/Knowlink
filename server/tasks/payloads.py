@@ -30,7 +30,7 @@ class QuizGeneratePayload(CamelModel):
     handout_version_id: int | None = None
     source_parse_run_id: int | None = None
     question_count_level: Literal["small", "medium", "large"] = "medium"
-    scope_type: Literal["course", "lesson", "lesson_range"] = "course"
+    scope_type: Literal["course", "lesson"] = "course"
     lesson_id: int | None = None
     start_lesson_id: int | None = None
     end_lesson_id: int | None = None

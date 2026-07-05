@@ -30,7 +30,7 @@ def _scoped_idempotency_record_expired(expires_at: object) -> bool:
 _SCOPED_ARTIFACT_ALLOWED_SCOPES = {
     "handout_version": {"course", "lesson"},
     "qa_session": {"course", "lesson"},
-    "quiz": {"course", "lesson", "lesson_range"},
+    "quiz": {"course", "lesson"},
     "review_task_run": {"course", "lesson"},
     "mastery_record": {"course", "lesson"},
     "graph_snapshot": {"course", "lesson"},
