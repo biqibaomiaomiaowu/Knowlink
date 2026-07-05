@@ -294,6 +294,7 @@
 2. `caption_extract` 与 `document_parse` 可并行；课程没有视频时 `caption_extract` 为 `skipped`，没有文档时 `document_parse` 为 `skipped`。
 3. `knowledge_extract` 在视频课程中依赖至少一个 active `video_caption` segment，并优先生成 `handout_outline`；没有视频但文档解析成功时可降级为文档目录，但不能伪造视频时间轴。
 4. `vectorize` 依赖 active segment；block 级 knowledge point 和 handout block 仅在对应 block ready 后增量投影。若 embedding provider 失败但结构化解析和 outline 已完成，可触发 `partial_success`。
+   When the provider returns vectors whose dimension does not match the pgvector column, writers must still keep lexical-only `vector_documents`: store the raw JSON embedding, leave `embedding_vector=null`, set `embedding_status=failed`, fill `embedding_error`, and keep `search_text` available for lexical retrieval.
 
 ## 3. `pipeline-status` 语义
 

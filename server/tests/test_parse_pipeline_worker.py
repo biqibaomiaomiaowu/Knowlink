@@ -118,7 +118,7 @@ def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Pa
     assert _step_statuses(session, message["parseRunId"])["vectorize"] == "succeeded"
 
 
-def test_parse_pipeline_marks_vectorization_failed_on_embedding_dimension_mismatch(tmp_path: Path):
+def test_parse_pipeline_keeps_lexical_vector_documents_on_embedding_dimension_mismatch(tmp_path: Path):
     session_factory = _session_factory()
     session = session_factory()
     message = _seed_parse_run(session, tmp_path / "lecture.pdf", resource_type="pdf")
@@ -150,13 +150,22 @@ def test_parse_pipeline_marks_vectorization_failed_on_embedding_dimension_mismat
     )
 
     assert result["status"] == "partial_success"
-    assert result["vectorDocumentCount"] == 0
+    assert result["vectorDocumentCount"] == 1
     assert {"code": "embedding.dimension_mismatch"} in result["issues"]
-    assert session.scalar(sa.select(sa.func.count()).select_from(VectorDocument)) == 0
+    vector = session.scalar(sa.select(VectorDocument))
+    assert vector is not None
+    assert vector.embedding == [1.0, 2.0]
+    assert vector.embedding_vector is None
+    assert vector.embedding_model == "wrong-dim"
+    assert vector.embedding_dim == 2
+    assert vector.embedding_status == "failed"
+    assert "expected 1536" in vector.embedding_error
+    assert "embedding dimension mismatch" in vector.search_text
+    assert "pdf_page_text" in vector.search_text
     vectorize_task = session.scalar(
         sa.select(AsyncTask).where(AsyncTask.parse_run_id == message["parseRunId"], AsyncTask.step_code == "vectorize")
     )
-    assert vectorize_task.status == "failed"
+    assert vectorize_task.status == "partial_success"
     assert vectorize_task.error_code == "embedding.dimension_mismatch"
 
 

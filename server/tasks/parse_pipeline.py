@@ -462,23 +462,22 @@ def _vectorize_segments(
         return "failed", 0, {"code": "embedding.count_mismatch"}
 
     embedding_model = _embedding_model_name(client)
-    for embedding in embeddings:
-        if len(embedding) != VectorDocument.EMBEDDING_DIM:
-            _finish_step(
-                step_task,
-                status="failed",
-                progress_pct=100,
-                error_code="embedding.dimension_mismatch",
-                error_message=(
-                    f"Embedding provider returned vector dimension {len(embedding)}, "
-                    f"expected {VectorDocument.EMBEDDING_DIM}."
-                ),
-            )
-            session.commit()
-            return "failed", 0, {"code": "embedding.dimension_mismatch"}
-
+    dimension_mismatch_count = 0
+    first_dimension_error: str | None = None
     for item, embedding in zip(inputs, embeddings, strict=True):
         embedding_vector = list(embedding)
+        embedding_status = "ready"
+        embedding_error = None
+        pgvector_embedding: list[float] | None = embedding_vector
+        if len(embedding_vector) != VectorDocument.EMBEDDING_DIM:
+            dimension_mismatch_count += 1
+            embedding_status = "failed"
+            embedding_error = (
+                f"Embedding provider returned vector dimension {len(embedding_vector)}, "
+                f"expected {VectorDocument.EMBEDDING_DIM}."
+            )
+            first_dimension_error = first_dimension_error or embedding_error
+            pgvector_embedding = None
         session.add(
             VectorDocument(
                 course_id=int(item.course_id or 0),
@@ -490,14 +489,28 @@ def _vectorize_segments(
                 content_text=item.content_text,
                 metadata_json=item.metadata_json,
                 embedding=embedding_vector,
-                embedding_vector=embedding_vector,
+                embedding_vector=pgvector_embedding,
                 embedding_model=embedding_model,
-                embedding_dim=VectorDocument.EMBEDDING_DIM,
-                embedding_status="ready",
-                embedding_error=None,
+                embedding_dim=len(embedding_vector),
+                embedding_status=embedding_status,
+                embedding_error=embedding_error,
                 search_text=build_search_text(item.content_text, item.metadata_json),
             )
         )
+    if dimension_mismatch_count:
+        _finish_step(
+            step_task,
+            status="partial_success",
+            progress_pct=100,
+            error_code="embedding.dimension_mismatch",
+            error_message=first_dimension_error,
+            result_json={
+                "vectorDocumentCount": len(inputs),
+                "embeddingDimensionMismatchCount": dimension_mismatch_count,
+            },
+        )
+        session.commit()
+        return "partial_success", len(inputs), {"code": "embedding.dimension_mismatch"}
     _finish_step(
         step_task,
         status="succeeded",
