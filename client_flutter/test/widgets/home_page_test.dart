@@ -58,13 +58,13 @@ void main() {
     expect(find.text('学习总览'), findsWidgets);
     expect(find.text('今日学习计划'), findsOneWidget);
     expect(find.text('KnowLink 固定联调课'), findsWidgets);
-    expect(find.text('关系模型'), findsWidgets);
     expect(find.text('推荐复习'), findsOneWidget);
     expect(find.text('最近课程'), findsOneWidget);
-    expect(find.text('本节复习已到期。'), findsOneWidget);
-    expect(find.text('图谱证据回看'), findsOneWidget);
-    expect(find.text('阶段测验错题'), findsOneWidget);
-    expect(find.text('不会显示的第 4 个复习'), findsNothing);
+    expect(find.text('Top review action 1'), findsOneWidget);
+    expect(find.text('Top review action 2'), findsOneWidget);
+    expect(find.text('Top review action 3'), findsNothing);
+    expect(find.text('Top review action 4'), findsNothing);
+    expect(find.text('Today fallback review'), findsNothing);
     expect(find.text('今天继续什么'), findsNothing);
     expect(find.text('进度摘要'), findsNothing);
     expect(find.text('推荐下一步'), findsNothing);
@@ -212,7 +212,10 @@ void main() {
     expect(find.text('学习总览'), findsWidgets);
     expect(find.text('推荐复习'), findsOneWidget);
     expect(find.text('最近课程'), findsOneWidget);
-    expect(find.text('不会显示的第 4 个复习'), findsNothing);
+    expect(find.text('Top review action 1'), findsOneWidget);
+    expect(find.text('Top review action 2'), findsOneWidget);
+    expect(find.text('Top review action 3'), findsNothing);
+    expect(find.text('Top review action 4'), findsNothing);
     expect(find.text('课程 303'), findsNothing);
   });
 
@@ -284,7 +287,56 @@ class _HomePageFakeApiClient extends ApiClient {
         _courseJson(202, title: '课程 202'),
         _courseJson(303, title: '课程 303'),
       ],
-      'topReviewTasks': [],
+      'topReviewTasks': [
+        {
+          'reviewTaskId': 501,
+          'taskType': 'revisit_block',
+          'priorityScore': 91,
+          'reasonText': 'Top review reason 1',
+          'recommendedMinutes': 15,
+          'recommendedAction': {
+            'type': 'revisit_block',
+            'label': 'Top review action 1',
+          },
+          'jumpRoute': '/courses/101/review',
+        },
+        {
+          'reviewTaskId': 502,
+          'taskType': 'redo_quiz',
+          'priorityScore': 80,
+          'reasonText': 'Top review reason 2',
+          'recommendedMinutes': 10,
+          'recommendedAction': {
+            'type': 'redo_quiz',
+            'label': 'Top review action 2',
+          },
+          'jumpRoute': '/courses/101/review',
+        },
+        {
+          'reviewTaskId': 503,
+          'taskType': 'redo_quiz',
+          'priorityScore': 70,
+          'reasonText': 'Top review reason 3',
+          'recommendedMinutes': 8,
+          'recommendedAction': {
+            'type': 'redo_quiz',
+            'label': 'Top review action 3',
+          },
+          'jumpRoute': '/courses/101/review',
+        },
+        {
+          'reviewTaskId': 504,
+          'taskType': 'revisit_block',
+          'priorityScore': 60,
+          'reasonText': 'Top review reason 4',
+          'recommendedMinutes': 6,
+          'recommendedAction': {
+            'type': 'revisit_block',
+            'label': 'Top review action 4',
+          },
+          'jumpRoute': '/courses/101/review',
+        },
+      ],
       'recommendationEntryEnabled': true,
       'dailyRecommendedKnowledgePoints': [],
       'learningStats': {
@@ -330,7 +382,7 @@ class _HomePageFakeApiClient extends ApiClient {
           'type': 'lesson_review',
           'courseId': 101,
           'lessonId': 42,
-          'title': '关系模型',
+          'title': 'Today fallback review',
           'priorityScore': 80,
           'reasonText': '本节复习已到期。',
           'nextRoute': '/courses/101/lessons/42/review',

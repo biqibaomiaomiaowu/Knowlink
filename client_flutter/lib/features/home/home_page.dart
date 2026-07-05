@@ -13,6 +13,7 @@ import '../../shared/models/course_progress_models.dart';
 import '../../shared/models/course_summary.dart';
 import '../../shared/models/home_dashboard_models.dart';
 import '../../shared/models/home_state.dart';
+import '../../shared/models/review_models.dart';
 import '../../shared/providers/course_flow_providers.dart';
 import '../../shared/providers/home_provider.dart';
 import '../course_import/course_create_dialog.dart';
@@ -771,27 +772,27 @@ class _HomeWideLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dense = availableHeight.isFinite && availableHeight < 680;
+    final dense = availableHeight.isFinite && availableHeight < 760;
     final content = Column(
       children: [
         _HomePrototypeTitle(
           onOpenRoute: onOpenRoute,
           dense: dense,
         ),
-        SizedBox(height: dense ? 12 : 22),
+        SizedBox(height: dense ? 8 : 22),
         _HomeHeroDashboard(
           dashboard: dashboard,
           dense: dense,
           onContinueLearning: onContinueLearning,
         ),
-        SizedBox(height: dense ? 12 : 16),
+        SizedBox(height: dense ? 8 : 16),
         Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
                 child: _TodayReviewCard(
-                  tasks: dashboard?.todayReviewTasks ?? const [],
+                  dashboard: dashboard,
                   dense: dense,
                   onOpenRoute: onOpenRoute,
                 ),
@@ -850,7 +851,7 @@ class _HomeNarrowLayout extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         _TodayReviewCard(
-          tasks: dashboard?.todayReviewTasks ?? const [],
+          dashboard: dashboard,
           dense: false,
           onOpenRoute: onOpenRoute,
         ),
@@ -1073,41 +1074,258 @@ class _NextStepCard extends StatelessWidget {
   }
 }
 
+class _HomeReviewTaskEntry {
+  const _HomeReviewTaskEntry({
+    required this.title,
+    required this.typeLabel,
+    required this.reasonText,
+    required this.priorityScore,
+    this.intensityLabel,
+    this.recommendedMinutes,
+    this.sourceQuestionText,
+    this.actionLabel,
+    this.nextRoute,
+  });
+
+  final String title;
+  final String typeLabel;
+  final String reasonText;
+  final int priorityScore;
+  final String? intensityLabel;
+  final int? recommendedMinutes;
+  final String? sourceQuestionText;
+  final String? actionLabel;
+  final String? nextRoute;
+
+  factory _HomeReviewTaskEntry.fromTopTask(
+    ReviewTaskModel task, {
+    required int index,
+    required int? courseId,
+  }) {
+    final title = _firstNonEmpty([
+      task.recommendedAction?.label,
+      task.recommendedHandoutBlock?.title,
+      task.sourceLesson?.title,
+      _reviewTaskTypeLabel(task.taskType),
+      '复习任务 #$index',
+    ])!;
+    final reasonText = _firstNonEmpty([
+          task.reasonText,
+          task.recommendedSegment?.displayText,
+          task.recommendedMinutes > 0
+              ? '建议 ${task.recommendedMinutes} 分钟'
+              : null,
+        ]) ??
+        '建议复习该知识点。';
+    return _HomeReviewTaskEntry(
+      title: title,
+      typeLabel: _reviewTaskTypeLabel(task.taskType),
+      reasonText: reasonText,
+      priorityScore: task.priorityScore,
+      intensityLabel: task.intensity == null
+          ? null
+          : _reviewTaskIntensityLabel(task.intensity!),
+      recommendedMinutes:
+          task.recommendedMinutes > 0 ? task.recommendedMinutes : null,
+      sourceQuestionText: task.sourceQuestionKeys.isEmpty
+          ? null
+          : '错题 ${task.sourceQuestionKeys.take(2).join('、')}',
+      actionLabel: _reviewTaskActionLabel(task.taskType),
+      nextRoute: _firstNonEmpty([
+        task.jumpRoute,
+        if (courseId != null) '/courses/$courseId/review',
+      ]),
+    );
+  }
+
+  factory _HomeReviewTaskEntry.fromTodayTask(HomeReviewTaskModel task) {
+    return _HomeReviewTaskEntry(
+      title: task.title,
+      typeLabel: task.type == 'lesson_review' ? '课时复习' : '复习任务',
+      reasonText: task.reasonText,
+      priorityScore: task.priorityScore,
+      actionLabel: '去复习',
+      nextRoute: task.nextRoute,
+    );
+  }
+}
+
+List<_HomeReviewTaskEntry> _recommendedReviewTasks(
+  HomeDashboardModel? dashboard,
+) {
+  if (dashboard == null) {
+    return const [];
+  }
+  final topTasks = dashboard.topReviewTasks.take(2).toList();
+  if (topTasks.isNotEmpty) {
+    return [
+      for (var index = 0; index < topTasks.length; index++)
+        _HomeReviewTaskEntry.fromTopTask(
+          topTasks[index],
+          index: index + 1,
+          courseId: dashboard.currentCourse?.courseId,
+        ),
+    ];
+  }
+  return [
+    for (final task in dashboard.todayReviewTasks.take(2))
+      _HomeReviewTaskEntry.fromTodayTask(task),
+  ];
+}
+
+String? _firstNonEmpty(Iterable<String?> values) {
+  for (final value in values) {
+    if (value != null && value.trim().isNotEmpty) {
+      return value;
+    }
+  }
+  return null;
+}
+
+String _reviewTaskTypeLabel(String taskType) {
+  return switch (taskType) {
+    'revisit_block' => '回看讲义块',
+    'redo_quiz' => '再练同类题',
+    'review_mistake' => '复盘错题',
+    _ => '复习任务',
+  };
+}
+
+String _reviewTaskActionLabel(String taskType) {
+  return switch (taskType) {
+    'revisit_block' => '回到讲义',
+    'redo_quiz' => '进入测试',
+    'review_mistake' => '复盘错题',
+    _ => '去复习',
+  };
+}
+
+String _reviewTaskIntensityLabel(String intensity) {
+  return switch (intensity) {
+    'high' => '高强度',
+    'medium' => '中等',
+    'low' => '轻量',
+    _ => intensity,
+  };
+}
+
 class _TodayReviewCard extends StatelessWidget {
   const _TodayReviewCard({
-    required this.tasks,
+    required this.dashboard,
     required this.dense,
     required this.onOpenRoute,
   });
 
-  final List<HomeReviewTaskModel> tasks;
+  final HomeDashboardModel? dashboard;
   final bool dense;
   final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
-    final visibleTasks = tasks.take(3).toList();
+    final visibleTasks = _recommendedReviewTasks(dashboard);
     return _PrototypeSectionCard(
       markColor: AppTheme.success,
-      padding: EdgeInsets.all(dense ? 14 : 22),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionHeader(title: '推荐复习'),
-          SizedBox(height: dense ? 8 : 14),
-          if (visibleTasks.isEmpty)
-            const _EmptyText('今天没有到期复习任务')
-          else
-            for (var index = 0; index < visibleTasks.length; index++) ...[
-              _ReviewTaskRow(
-                index: index + 1,
-                task: visibleTasks[index],
-                dense: dense,
-                onOpenRoute: onOpenRoute,
-              ),
-              if (index != visibleTasks.length - 1)
-                SizedBox(height: dense ? 8 : 12),
+      padding: EdgeInsets.all(dense ? 13 : 18),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final header = Row(
+            children: [
+              const Expanded(child: _SectionHeader(title: '推荐复习')),
+              if (visibleTasks.isNotEmpty)
+                _ReviewCountPill(count: visibleTasks.length),
             ],
+          );
+          final gap = SizedBox(height: dense ? 8 : 10);
+          if (visibleTasks.isEmpty) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                header,
+                gap,
+                const _EmptyText('今天没有到期复习任务'),
+              ],
+            );
+          }
+
+          Widget taskList;
+          if (constraints.maxHeight.isFinite) {
+            taskList = Expanded(
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                itemCount: visibleTasks.length,
+                itemBuilder: (context, index) => _ReviewTaskRow(
+                  index: index + 1,
+                  task: visibleTasks[index],
+                  dense: dense,
+                  onOpenRoute: onOpenRoute,
+                ),
+                separatorBuilder: (context, index) =>
+                    SizedBox(height: dense ? 8 : 10),
+              ),
+            );
+          } else {
+            taskList = Column(
+              children: [
+                for (var index = 0; index < visibleTasks.length; index++) ...[
+                  _ReviewTaskRow(
+                    index: index + 1,
+                    task: visibleTasks[index],
+                    dense: dense,
+                    onOpenRoute: onOpenRoute,
+                  ),
+                  if (index != visibleTasks.length - 1)
+                    SizedBox(height: dense ? 8 : 10),
+                ],
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              header,
+              gap,
+              taskList,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ReviewCountPill extends StatelessWidget {
+  const _ReviewCountPill({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 26),
+      padding: const EdgeInsets.symmetric(horizontal: 11),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: AppTheme.shadowRaised,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.circle,
+            size: 9,
+            color: AppTheme.brandBlue,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$count/$count 条',
+            style: const TextStyle(
+              color: AppTheme.ink,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ],
       ),
     );
@@ -1341,99 +1559,163 @@ class _ReviewTaskRow extends StatelessWidget {
   });
 
   final int index;
-  final HomeReviewTaskModel task;
+  final _HomeReviewTaskEntry task;
   final bool dense;
   final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.all(dense ? 10 : 14),
+      padding: EdgeInsets.all(dense ? 10 : 12),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(8),
         boxShadow: AppTheme.shadowInsetLook,
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxWidth < 430;
-          final main = Row(
-            children: [
-              Container(
-                width: dense ? 36 : 42,
-                height: dense ? 36 : 42,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: AppTheme.shadowRaised,
-                ),
-                child: Text(
-                  '$index',
-                  style: TextStyle(
-                    color: index == 2 ? AppTheme.success : AppTheme.brandBlue,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+          final compact = constraints.maxWidth < 520;
+          final meta = <Widget>[
+            if (task.recommendedMinutes != null)
+              _TaskMetaChip(
+                icon: Icons.schedule_rounded,
+                label: '建议 ${task.recommendedMinutes} 分钟',
               ),
-              SizedBox(width: dense ? 10 : 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      task.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppTheme.ink,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      task.reasonText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppTheme.muted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+            if (task.sourceQuestionText != null)
+              _TaskMetaChip(
+                icon: Icons.fact_check_outlined,
+                label: task.sourceQuestionText!,
+                color: const Color(0xFFEF4444),
               ),
-            ],
-          );
-          final action = OutlinedButton(
+          ];
+          final action = OutlinedButton.icon(
             onPressed: task.nextRoute == null
                 ? null
                 : () => onOpenRoute(task.nextRoute),
-            child: const Text('复习'),
+            icon: const Icon(Icons.menu_book_outlined, size: 16),
+            label: Text(task.actionLabel ?? '去复习'),
           );
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                main,
-                SizedBox(height: dense ? 8 : 10),
-                action,
-              ],
-            );
-          }
-          return Row(
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: main),
-              SizedBox(width: dense ? 10 : 12),
-              action,
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  _TaskBadge(label: '#$index', color: _taskRankColor(index)),
+                  _TaskBadge(label: task.title, color: AppTheme.brandBlue),
+                  _TaskBadge(label: '优先级 ${task.priorityScore}'),
+                  if (task.intensityLabel != null)
+                    _TaskBadge(
+                      label: task.intensityLabel!,
+                      color: const Color(0xFFF97316),
+                    ),
+                ],
+              ),
+              SizedBox(height: dense ? 7 : 9),
+              Text(
+                task.reasonText,
+                maxLines: compact ? 2 : 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.ink,
+                  fontSize: dense ? 14 : 15,
+                  fontWeight: FontWeight.w800,
+                  height: 1.35,
+                ),
+              ),
+              if (meta.isNotEmpty) ...[
+                SizedBox(height: dense ? 7 : 9),
+                Wrap(spacing: 11, runSpacing: 7, children: meta),
+              ],
+              SizedBox(height: dense ? 7 : 9),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: action,
+              ),
             ],
           );
         },
       ),
     );
   }
+}
+
+class _TaskBadge extends StatelessWidget {
+  const _TaskBadge({
+    required this.label,
+    this.color = AppTheme.brandBlue,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 26),
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: AppTheme.shadowRaised,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.circle, size: 8, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppTheme.ink,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TaskMetaChip extends StatelessWidget {
+  const _TaskMetaChip({
+    required this.icon,
+    required this.label,
+    this.color = AppTheme.muted,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: color.withValues(alpha: 0.55)),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppTheme.muted,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Color _taskRankColor(int index) {
+  return switch (index) {
+    1 => const Color(0xFFEF4444),
+    2 => const Color(0xFFF97316),
+    _ => AppTheme.brandBlue,
+  };
 }
 
 class _RecentCourseTile extends StatelessWidget {
