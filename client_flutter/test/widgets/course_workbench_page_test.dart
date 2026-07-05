@@ -8,7 +8,7 @@ import 'package:knowlink_client/shared/models/course_lesson_models.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
 void main() {
-  testWidgets('course workbench shows aggregate read model entries',
+  testWidgets('course workbench groups primary and secondary entries',
       (tester) async {
     _useTestSurface(tester, const Size(1200, 1600));
     await tester.pumpWidget(
@@ -27,17 +27,40 @@ void main() {
     expect(find.textContaining('进度 33%'), findsOneWidget);
     expect(find.textContaining('6 课时'), findsOneWidget);
     expect(find.text('当前课时'), findsOneWidget);
+    expect(find.text('课程资料'), findsOneWidget);
+    expect(find.text('数据库教材.pdf'), findsOneWidget);
     expect(find.text('课时列表'), findsOneWidget);
     expect(find.text('第 2 课'), findsOneWidget);
-    expect(find.text('关系模型'), findsOneWidget);
-    expect(find.text('数据库教材.pdf'), findsOneWidget);
-    expect(find.text('全课程 QA'), findsOneWidget);
+    expect(find.text('正在学习'), findsOneWidget);
+    expect(find.text('关系模型'), findsWidgets);
+    expect(find.text('主要入口'), findsOneWidget);
+    final primaryEntries =
+        find.byKey(const Key('course_workbench_primary_entries'));
+    expect(
+      find.descendant(of: primaryEntries, matching: find.text('课时学习')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: primaryEntries, matching: find.text('AI 问答')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: primaryEntries, matching: find.text('测试中心')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: primaryEntries, matching: find.text('复习中心')),
+      findsOneWidget,
+    );
+    expect(find.text('更多工具'), findsOneWidget);
     expect(find.text('课程图谱'), findsOneWidget);
-    expect(find.text('综合测验'), findsOneWidget);
-    expect(find.text('课程总复习'), findsOneWidget);
     expect(find.text('学习报告'), findsOneWidget);
     expect(find.text('课程导出'), findsOneWidget);
     expect(find.text('课程设置'), findsOneWidget);
+    expect(find.text('全课程 QA'), findsNothing);
+    expect(find.text('综合测验'), findsNothing);
+    expect(find.text('课程总复习'), findsNothing);
+    expect(find.text('课程级讲义工作台'), findsNothing);
     expect(find.text('继续学习关系模型'), findsOneWidget);
   });
 
@@ -75,7 +98,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Lesson study'));
+    await tester.tap(find.widgetWithText(OutlinedButton, '课时学习'));
     await tester.pumpAndSettle();
 
     expect(find.text('lesson-handout-route 101 42'), findsOneWidget);
@@ -140,9 +163,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final button = find.widgetWithText(OutlinedButton, 'Disabled report');
+    final button = find.widgetWithText(TextButton, '学习报告');
     expect(button, findsOneWidget);
-    expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
+    expect(tester.widget<TextButton>(button).onPressed, isNull);
 
     await tester.tap(button);
     await tester.pumpAndSettle();
@@ -267,6 +290,12 @@ class _CourseWorkbenchFakeApiClient extends ApiClient {
               'title': '课程总复习',
               'status': 'generating',
               'message': '复习计划生成中',
+            },
+            {
+              'key': 'course_summary_handout',
+              'title': '课程级讲义工作台',
+              'status': 'ready',
+              'message': '整课讲义入口',
             },
             {
               'key': 'report',

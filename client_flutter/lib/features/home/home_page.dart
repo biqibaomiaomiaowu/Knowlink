@@ -11,7 +11,6 @@ import '../../shared/models/course_progress_models.dart';
 import '../../shared/models/course_summary.dart';
 import '../../shared/models/home_dashboard_models.dart';
 import '../../shared/models/home_state.dart';
-import '../../shared/models/review_models.dart';
 import '../../shared/providers/course_flow_providers.dart';
 import '../../shared/providers/home_provider.dart';
 
@@ -40,8 +39,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: _HomeBody(
         state: state,
         onRetry: () => ref.read(homeProvider.notifier).loadDashboard(),
+        onContinueLearning: _continueLearning,
         onResumeCourse: _resumeCourse,
         onSwitchCourse: _switchCourse,
+        onOpenRoute: _openRoute,
       ),
     );
   }
@@ -59,10 +60,53 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
   }
 
-  Future<void> _resumeCourse(
-    CourseSummaryModel course,
-    String? backendNextRoute,
-  ) async {
+  Future<void> _continueLearning(HomeDashboardModel dashboard) async {
+    final currentCourse = dashboard.currentCourse;
+    final currentLesson = dashboard.currentLesson;
+    final target = dashboard.continueLearning ?? dashboard.nextStep;
+    final courseId = target?.courseId ?? currentCourse?.courseId;
+    final lessonId = target?.lessonId ?? currentLesson?.lessonId;
+    if (courseId == null) {
+      return;
+    }
+
+    ref.read(courseFlowProvider.notifier).startCourse(courseId.toString());
+    ref.read(activeBlockProvider.notifier).state =
+        target?.lastHandoutBlockId ?? currentLesson?.lastHandoutBlockId;
+    ref.read(handoutResumeTargetProvider.notifier).state =
+        _handoutResumeTarget(courseId, target, currentLesson);
+    ref.read(playerStateProvider.notifier).state = PlayerState(
+      positionSec: target?.lastPositionSec ??
+          currentLesson?.lastPositionSec ??
+          currentCourse?.lastPositionSec ??
+          0,
+    );
+
+    if (lessonId != null && lessonId.isNotEmpty) {
+      ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+        courseId: courseId.toString(),
+        lessonId: lessonId,
+        positionSec: target?.lastPositionSec ??
+            currentLesson?.lastPositionSec ??
+            currentCourse?.lastPositionSec ??
+            0,
+      );
+      if (!mounted) {
+        return;
+      }
+      context.go(
+        target?.nextRoute ?? '/courses/$courseId/lessons/$lessonId/handout',
+      );
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    context.go('/courses/$courseId/handout');
+  }
+
+  Future<void> _resumeCourse(CourseSummaryModel course) async {
     final notifier = ref.read(homeProvider.notifier);
     final cached =
         ref.read(homeProvider).progressByCourseId[course.courseId]?.valueOrNull;
@@ -81,20 +125,18 @@ class _HomePageState extends ConsumerState<HomePage> {
             courseId: course.courseId.toString(),
             blockId: blockId,
           );
+    final positionSec = progress?.lastPositionSec ?? course.lastPositionSec ?? 0;
     ref.read(playerStateProvider.notifier).state = PlayerState(
-      positionSec: progress?.lastPositionSec ?? course.lastPositionSec ?? 0,
+      positionSec: positionSec,
     );
     final lessonId = progress?.currentLessonId ?? course.currentLessonId;
     if (lessonId != null && lessonId.isNotEmpty) {
       ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
         courseId: course.courseId.toString(),
         lessonId: lessonId,
-        positionSec: progress?.lastPositionSec ?? course.lastPositionSec ?? 0,
+        positionSec: positionSec,
       );
-      context.go(
-        backendNextRoute ??
-            '/courses/${course.courseId}/lessons/$lessonId/handout',
-      );
+      context.go('/courses/${course.courseId}/lessons/$lessonId/handout');
       return;
     }
     context.go('/courses/${course.courseId}/handout');
@@ -119,23 +161,31 @@ class _HomePageState extends ConsumerState<HomePage> {
       const SnackBar(content: Text('当前课程已切换')),
     );
   }
+
+  void _openRoute(String? route) {
+    if (route == null || route.isEmpty) {
+      return;
+    }
+    context.go(route);
+  }
 }
 
 class _HomeBody extends StatelessWidget {
   const _HomeBody({
     required this.state,
     required this.onRetry,
+    required this.onContinueLearning,
     required this.onResumeCourse,
     required this.onSwitchCourse,
+    required this.onOpenRoute,
   });
 
   final HomeState state;
   final VoidCallback onRetry;
-  final Future<void> Function(
-    CourseSummaryModel course,
-    String? backendNextRoute,
-  ) onResumeCourse;
+  final Future<void> Function(HomeDashboardModel dashboard) onContinueLearning;
+  final Future<void> Function(CourseSummaryModel course) onResumeCourse;
   final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
+  final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -158,15 +208,19 @@ class _HomeBody extends StatelessWidget {
                 dashboard: dashboard,
                 progressByCourseId: state.progressByCourseId,
                 isSwitchingCourse: state.currentCourseSwitch.isLoading,
+                onContinueLearning: onContinueLearning,
                 onResumeCourse: onResumeCourse,
                 onSwitchCourse: onSwitchCourse,
+                onOpenRoute: onOpenRoute,
               )
             : _HomeNarrowLayout(
                 dashboard: dashboard,
                 progressByCourseId: state.progressByCourseId,
                 isSwitchingCourse: state.currentCourseSwitch.isLoading,
+                onContinueLearning: onContinueLearning,
                 onResumeCourse: onResumeCourse,
                 onSwitchCourse: onSwitchCourse,
+                onOpenRoute: onOpenRoute,
               );
         return RefreshIndicator(
           onRefresh: () async => onRetry(),
@@ -185,83 +239,61 @@ class _HomeWideLayout extends StatelessWidget {
     required this.dashboard,
     required this.progressByCourseId,
     required this.isSwitchingCourse,
+    required this.onContinueLearning,
     required this.onResumeCourse,
     required this.onSwitchCourse,
+    required this.onOpenRoute,
   });
 
   final HomeDashboardModel? dashboard;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
   final bool isSwitchingCourse;
-  final Future<void> Function(
-    CourseSummaryModel course,
-    String? backendNextRoute,
-  ) onResumeCourse;
+  final Future<void> Function(HomeDashboardModel dashboard) onContinueLearning;
+  final Future<void> Function(CourseSummaryModel course) onResumeCourse;
   final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
+  final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        _CurrentLearningCard(
+          dashboard: dashboard,
+          onContinueLearning: onContinueLearning,
+          onOpenRoute: onOpenRoute,
+        ),
+        const SizedBox(height: 24),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Expanded(child: _StatsCard(dashboard: dashboard)),
+            const SizedBox(width: 24),
             Expanded(
-              child: _HeroActionCard(
-                icon: Icons.cloud_upload_outlined,
-                title: '自主导入',
-                description: '支持上传课程视频与学习资料，快速构建你的专属学习库。',
-                onTap: () => context.go('/import'),
-              ),
-            ),
-            const SizedBox(width: 32),
-            Expanded(
-              child: _HeroActionCard(
-                icon: Icons.star_border_rounded,
-                title: '智能课程推荐',
-                description: '基于学习目标和学习记录，为你推荐合适的课程内容。',
-                onTap: dashboard?.recommendationEntryEnabled == false
-                    ? null
-                    : () => context.go('/recommend'),
-                tint: const Color(0xFF6366F1),
+              child: _NextStepCard(
+                dashboard: dashboard,
+                onOpenRoute: onOpenRoute,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 30),
+        const SizedBox(height: 24),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: _RecentLearningCard(
+              child: _TodayReviewCard(
+                tasks: dashboard?.todayReviewTasks ?? const [],
+                onOpenRoute: onOpenRoute,
+              ),
+            ),
+            const SizedBox(width: 24),
+            Expanded(
+              child: _RecentCoursesCard(
                 recentCourses: dashboard?.recentCourses ?? const [],
                 progressByCourseId: progressByCourseId,
                 isSwitchingCourse: isSwitchingCourse,
-                onResumeCourse: (course) => onResumeCourse(
-                  course,
-                  _backendResumeRoute(dashboard, course),
-                ),
+                onResumeCourse: onResumeCourse,
                 onSwitchCourse: onSwitchCourse,
-              ),
-            ),
-            const SizedBox(width: 32),
-            Expanded(
-              child: _KnowledgeListCard(
-                items: dashboard?.dailyRecommendedKnowledgePoints ?? const [],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 30),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _StatsCard(stats: dashboard?.learningStats),
-            ),
-            const SizedBox(width: 32),
-            Expanded(
-              child: _ReviewPromptCard(
-                tasks: dashboard?.topReviewTasks ?? const [],
-                courseId: _firstRecentCourseId(dashboard),
               ),
             ),
           ],
@@ -276,143 +308,292 @@ class _HomeNarrowLayout extends StatelessWidget {
     required this.dashboard,
     required this.progressByCourseId,
     required this.isSwitchingCourse,
+    required this.onContinueLearning,
     required this.onResumeCourse,
     required this.onSwitchCourse,
+    required this.onOpenRoute,
   });
 
   final HomeDashboardModel? dashboard;
   final Map<int, AsyncValue<CourseProgressModel>> progressByCourseId;
   final bool isSwitchingCourse;
-  final Future<void> Function(
-    CourseSummaryModel course,
-    String? backendNextRoute,
-  ) onResumeCourse;
+  final Future<void> Function(HomeDashboardModel dashboard) onContinueLearning;
+  final Future<void> Function(CourseSummaryModel course) onResumeCourse;
   final Future<void> Function(CourseSummaryModel course) onSwitchCourse;
+  final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _HeroActionCard(
-          icon: Icons.cloud_upload_outlined,
-          title: '自主导入',
-          description: '支持上传课程视频与学习资料，快速构建你的专属学习库。',
-          onTap: () => context.go('/import'),
+        _CurrentLearningCard(
+          dashboard: dashboard,
+          onContinueLearning: onContinueLearning,
+          onOpenRoute: onOpenRoute,
         ),
         const SizedBox(height: 16),
-        _HeroActionCard(
-          icon: Icons.star_border_rounded,
-          title: '智能课程推荐',
-          description: '基于学习目标和学习记录，为你推荐合适的课程内容。',
-          onTap: dashboard?.recommendationEntryEnabled == false
-              ? null
-              : () => context.go('/recommend'),
-          tint: const Color(0xFF6366F1),
+        _StatsCard(dashboard: dashboard),
+        const SizedBox(height: 16),
+        _NextStepCard(
+          dashboard: dashboard,
+          onOpenRoute: onOpenRoute,
         ),
         const SizedBox(height: 16),
-        _RecentLearningCard(
+        _TodayReviewCard(
+          tasks: dashboard?.todayReviewTasks ?? const [],
+          onOpenRoute: onOpenRoute,
+        ),
+        const SizedBox(height: 16),
+        _RecentCoursesCard(
           recentCourses: dashboard?.recentCourses ?? const [],
           progressByCourseId: progressByCourseId,
           isSwitchingCourse: isSwitchingCourse,
-          onResumeCourse: (course) => onResumeCourse(
-            course,
-            _backendResumeRoute(dashboard, course),
-          ),
+          onResumeCourse: onResumeCourse,
           onSwitchCourse: onSwitchCourse,
-        ),
-        const SizedBox(height: 16),
-        _KnowledgeListCard(
-          items: dashboard?.dailyRecommendedKnowledgePoints ?? const [],
-        ),
-        const SizedBox(height: 16),
-        _StatsCard(stats: dashboard?.learningStats),
-        const SizedBox(height: 16),
-        _ReviewPromptCard(
-          tasks: dashboard?.topReviewTasks ?? const [],
-          courseId: _firstRecentCourseId(dashboard),
         ),
       ],
     );
   }
 }
 
-class _HeroActionCard extends StatelessWidget {
-  const _HeroActionCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-    this.onTap,
-    this.tint = AppTheme.brandBlue,
+class _CurrentLearningCard extends StatelessWidget {
+  const _CurrentLearningCard({
+    required this.dashboard,
+    required this.onContinueLearning,
+    required this.onOpenRoute,
   });
 
-  final IconData icon;
-  final String title;
-  final String description;
-  final VoidCallback? onTap;
-  final Color tint;
+  final HomeDashboardModel? dashboard;
+  final Future<void> Function(HomeDashboardModel dashboard) onContinueLearning;
+  final void Function(String? route) onOpenRoute;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 560;
-        return SectionCard(
-          padding: EdgeInsets.symmetric(
-            horizontal: compact ? 20 : 32,
-            vertical: compact ? 20 : 26,
-          ),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(8),
-            child: Row(
-              children: [
-                SoftIcon(icon: icon, color: tint, size: compact ? 62 : 86),
-                SizedBox(width: compact ? 16 : 24),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: AppTheme.ink,
-                          fontSize: compact ? 22 : 28,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        description,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppTheme.muted,
-                          height: 1.45,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+    final value = dashboard;
+    final course = value?.currentCourse;
+    final lesson = value?.currentLesson;
+    final target = value?.continueLearning ?? value?.nextStep;
+    final canContinue = value != null && course != null && target != null;
+
+    return SectionCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionHeader(title: '今天继续什么'),
+          const SizedBox(height: 18),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 680;
+              final summary = [
+                _SummaryTile(
+                  label: '当前课程',
+                  value: course?.title ?? '还没有当前课程',
+                  icon: Icons.school_outlined,
+                  color: AppTheme.brandBlue,
+                ),
+                _SummaryTile(
+                  label: '当前课时',
+                  value: lesson?.title ?? '还没有当前课时',
+                  icon: Icons.play_lesson_outlined,
+                  color: const Color(0xFF16A34A),
+                ),
+                _SummaryTile(
+                  label: '学习位置',
+                  value: _continueMeta(target, lesson),
+                  icon: Icons.place_outlined,
+                  color: const Color(0xFFF97316),
+                ),
+              ];
+              if (compact) {
+                return Column(
+                  children: [
+                    for (final item in summary) ...[
+                      item,
+                      if (item != summary.last) const SizedBox(height: 12),
                     ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: onTap == null ? AppTheme.line : AppTheme.muted,
-                  size: 34,
-                ),
-              ],
-            ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  for (final item in summary) ...[
+                    Expanded(child: item),
+                    if (item != summary.last) const SizedBox(width: 12),
+                  ],
+                ],
+              );
+            },
           ),
-        );
-      },
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: canContinue ? () => onContinueLearning(value) : null,
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('继续学习'),
+              ),
+              if (target?.nextAction?.label != null)
+                StatusPill(
+                  label: target!.nextAction!.label!,
+                  color: const Color(0xFF16A34A),
+                ),
+              if (value?.courseQuickEntries.isNotEmpty ?? false)
+                for (final entry in value!.courseQuickEntries
+                    .where((item) => item.enabled)
+                    .take(3))
+                  ActionChip(
+                    avatar: const Icon(Icons.open_in_new_rounded, size: 18),
+                    label: Text(entry.title),
+                    onPressed: () => onOpenRoute(entry.route ?? entry.target),
+                    side: const BorderSide(color: AppTheme.line),
+                  ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _RecentLearningCard extends StatelessWidget {
-  const _RecentLearningCard({
+class _StatsCard extends StatelessWidget {
+  const _StatsCard({
+    required this.dashboard,
+  });
+
+  final HomeDashboardModel? dashboard;
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = dashboard?.learningStats ??
+        const LearningStatsModel(
+          streakDays: 0,
+          completedCourses: 0,
+          reviewTasksCompleted: 0,
+          totalLearningMinutes: 0,
+        );
+    final lesson = dashboard?.currentLesson;
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionHeader(title: '进度摘要'),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              MetricBox(
+                icon: Icons.percent_rounded,
+                label: '当前课时讲义',
+                value: lesson?.handoutReadPercent == null
+                    ? '0%'
+                    : '${lesson!.handoutReadPercent}%',
+              ),
+              MetricBox(
+                icon: Icons.schedule_rounded,
+                label: '累计学习',
+                value: '${stats.totalLearningMinutes} 分钟',
+              ),
+              MetricBox(
+                icon: Icons.local_fire_department_outlined,
+                label: '连续学习',
+                value: '${stats.streakDays} 天',
+                color: const Color(0xFFF97316),
+              ),
+              MetricBox(
+                icon: Icons.check_circle_outline,
+                label: '完成复习',
+                value: '${stats.reviewTasksCompleted}',
+                color: const Color(0xFF16A34A),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NextStepCard extends StatelessWidget {
+  const _NextStepCard({
+    required this.dashboard,
+    required this.onOpenRoute,
+  });
+
+  final HomeDashboardModel? dashboard;
+  final void Function(String? route) onOpenRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      dashboard?.nextStep,
+      dashboard?.recommendedNextLesson,
+      dashboard?.recommendedStageQuiz,
+    ].whereType<HomeRouteTargetModel>().toList();
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionHeader(title: '推荐下一步'),
+          const SizedBox(height: 12),
+          if (items.isEmpty)
+            const _EmptyText('暂无推荐下一步')
+          else
+            for (final item in items.take(3)) ...[
+              _RouteTargetRow(
+                target: item,
+                fallbackTitle: _targetFallbackTitle(item),
+                onOpenRoute: onOpenRoute,
+              ),
+              if (item != items.take(3).last) const Divider(height: 20),
+            ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TodayReviewCard extends StatelessWidget {
+  const _TodayReviewCard({
+    required this.tasks,
+    required this.onOpenRoute,
+  });
+
+  final List<HomeReviewTaskModel> tasks;
+  final void Function(String? route) onOpenRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleTasks = tasks.take(3).toList();
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionHeader(title: '今日复习任务'),
+          const SizedBox(height: 12),
+          if (visibleTasks.isEmpty)
+            const _EmptyText('今天没有到期复习任务')
+          else
+            for (final task in visibleTasks) ...[
+              _ReviewTaskRow(
+                task: task,
+                onOpenRoute: onOpenRoute,
+              ),
+              if (task != visibleTasks.last) const Divider(height: 20),
+            ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentCoursesCard extends StatelessWidget {
+  const _RecentCoursesCard({
     required this.recentCourses,
     required this.progressByCourseId,
     required this.isSwitchingCourse,
@@ -433,23 +614,21 @@ class _RecentLearningCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionHeader(title: '最近学习'),
+          const _SectionHeader(title: '最近课程'),
           const SizedBox(height: 18),
           if (visibleCourses.isEmpty)
-            const _EmptyText('暂无最近学习课程。')
+            const _EmptyText('暂无最近课程')
           else
-            for (var index = 0; index < visibleCourses.length; index++) ...[
-              _RecentLearningDetails(
-                course: visibleCourses[index],
-                progress: progressByCourseId[visibleCourses[index].courseId]
-                    ?.valueOrNull,
-                progressState:
-                    progressByCourseId[visibleCourses[index].courseId],
+            for (final course in visibleCourses) ...[
+              _RecentCourseDetails(
+                course: course,
+                progress: progressByCourseId[course.courseId]?.valueOrNull,
+                progressState: progressByCourseId[course.courseId],
                 isSwitching: isSwitchingCourse,
-                onResume: () => onResumeCourse(visibleCourses[index]),
-                onSwitch: () => onSwitchCourse(visibleCourses[index]),
+                onResume: () => onResumeCourse(course),
+                onSwitch: () => onSwitchCourse(course),
               ),
-              if (index < visibleCourses.length - 1) const Divider(height: 28),
+              if (course != visibleCourses.last) const Divider(height: 28),
             ],
         ],
       ),
@@ -457,8 +636,186 @@ class _RecentLearningCard extends StatelessWidget {
   }
 }
 
-class _RecentLearningDetails extends StatelessWidget {
-  const _RecentLearningDetails({
+class _SummaryTile extends StatelessWidget {
+  const _SummaryTile({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.panel,
+        border: Border.all(color: AppTheme.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          SoftIcon(icon: icon, color: color, size: 48),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.ink,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RouteTargetRow extends StatelessWidget {
+  const _RouteTargetRow({
+    required this.target,
+    required this.fallbackTitle,
+    required this.onOpenRoute,
+  });
+
+  final HomeRouteTargetModel target;
+  final String fallbackTitle;
+  final void Function(String? route) onOpenRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          SoftIcon(
+            icon: _targetIcon(target),
+            color: _targetColor(target),
+            size: 48,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  target.title ?? fallbackTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.ink,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (target.reason != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    target.reason!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: '打开',
+            onPressed: target.nextRoute == null
+                ? null
+                : () => onOpenRoute(target.nextRoute),
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewTaskRow extends StatelessWidget {
+  const _ReviewTaskRow({
+    required this.task,
+    required this.onOpenRoute,
+  });
+
+  final HomeReviewTaskModel task;
+  final void Function(String? route) onOpenRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          StatusPill(
+            label: '${task.priorityScore}',
+            color: const Color(0xFFF97316),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  task.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  task.reasonText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed:
+                task.nextRoute == null ? null : () => onOpenRoute(task.nextRoute),
+            child: const Text('复习'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentCourseDetails extends StatelessWidget {
+  const _RecentCourseDetails({
     required this.course,
     required this.progress,
     required this.progressState,
@@ -486,11 +843,11 @@ class _RecentLearningDetails extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
             color: AppTheme.ink,
-            fontSize: 22,
+            fontSize: 20,
             fontWeight: FontWeight.w800,
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Wrap(
           spacing: 10,
           runSpacing: 8,
@@ -502,7 +859,7 @@ class _RecentLearningDetails extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         if (progressState?.isLoading ?? false)
           const Text(
             '正在读取最近学习位置...',
@@ -512,34 +869,28 @@ class _RecentLearningDetails extends StatelessWidget {
         else
           Text(
             resumeText,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: AppTheme.muted,
               fontWeight: FontWeight.w700,
               height: 1.5,
             ),
           ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         Wrap(
-          spacing: 12,
+          spacing: 10,
           runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text(
-              '更新：${_formatDate(course.updatedAt)}',
-              style: const TextStyle(
-                color: AppTheme.muted,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
             OutlinedButton.icon(
               onPressed: onResume,
               icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('继续学习'),
+              label: const Text('继续'),
             ),
             OutlinedButton.icon(
               onPressed: isSwitching ? null : onSwitch,
               icon: const Icon(Icons.check_circle_outline),
-              label: Text(isSwitching ? '正在切换' : '设为当前课程'),
+              label: Text(isSwitching ? '正在切换' : '设为当前'),
             ),
             OutlinedButton.icon(
               onPressed: () => context.go('/courses/${course.courseId}'),
@@ -549,230 +900,6 @@ class _RecentLearningDetails extends StatelessWidget {
           ],
         ),
       ],
-    );
-  }
-}
-
-class _KnowledgeListCard extends StatelessWidget {
-  const _KnowledgeListCard({
-    required this.items,
-  });
-
-  final List<DailyRecommendedKnowledgePointModel> items;
-
-  @override
-  Widget build(BuildContext context) {
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionHeader(title: '今日推荐知识点'),
-          const SizedBox(height: 12),
-          if (items.isEmpty)
-            const _EmptyText('暂无今日推荐知识点。')
-          else
-            for (final item in items.take(3))
-              _KnowledgeRow(
-                title: item.knowledgePoint,
-                meta: item.reason,
-                targetCourseId: item.targetCourseId,
-              ),
-        ],
-      ),
-    );
-  }
-}
-
-class _KnowledgeRow extends StatelessWidget {
-  const _KnowledgeRow({
-    required this.title,
-    required this.meta,
-    required this.targetCourseId,
-  });
-
-  final String title;
-  final String meta;
-  final int? targetCourseId;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          const SoftIcon(icon: Icons.auto_awesome_outlined, size: 54),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppTheme.ink,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  meta,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppTheme.muted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (targetCourseId != null)
-            IconButton(
-              tooltip: '打开课程',
-              onPressed: () => context.go('/courses/$targetCourseId/handout'),
-              icon: const Icon(Icons.chevron_right_rounded),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatsCard extends StatelessWidget {
-  const _StatsCard({
-    required this.stats,
-  });
-
-  final LearningStatsModel? stats;
-
-  @override
-  Widget build(BuildContext context) {
-    final value = stats ??
-        const LearningStatsModel(
-          streakDays: 0,
-          completedCourses: 0,
-          reviewTasksCompleted: 0,
-          totalLearningMinutes: 0,
-        );
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionHeader(title: '学习统计'),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              MetricBox(
-                icon: Icons.local_fire_department_outlined,
-                label: '连续学习',
-                value: '${value.streakDays} 天',
-              ),
-              MetricBox(
-                icon: Icons.schedule_rounded,
-                label: '总学习时长',
-                value: '${value.totalLearningMinutes} 分钟',
-              ),
-              MetricBox(
-                icon: Icons.menu_book_outlined,
-                label: '完成课程',
-                value: '${value.completedCourses}',
-                color: const Color(0xFF22C55E),
-              ),
-              MetricBox(
-                icon: Icons.check_circle_outline,
-                label: '完成复习',
-                value: '${value.reviewTasksCompleted}',
-                color: const Color(0xFF8B5CF6),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReviewPromptCard extends StatelessWidget {
-  const _ReviewPromptCard({
-    required this.tasks,
-    required this.courseId,
-  });
-
-  final List<ReviewTaskModel> tasks;
-  final int? courseId;
-
-  @override
-  Widget build(BuildContext context) {
-    final topTasks = tasks.take(3).toList();
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionHeader(title: 'AI 复习推荐'),
-          const SizedBox(height: 12),
-          if (topTasks.isEmpty)
-            const _EmptyText('完成测验后会在这里展示 Top3 复习任务。')
-          else
-            for (final task in topTasks)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _ReviewTaskRow(task: task),
-              ),
-          const SizedBox(height: 10),
-          GradientButton(
-            label: '去复习',
-            icon: Icons.calendar_today_outlined,
-            onPressed: courseId == null
-                ? null
-                : () => context.go('/courses/$courseId/review'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReviewTaskRow extends StatelessWidget {
-  const _ReviewTaskRow({
-    required this.task,
-  });
-
-  final ReviewTaskModel task;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppTheme.line),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          StatusPill(label: '${task.reviewOrder ?? '-'}'),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              task.reasonText,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: AppTheme.ink,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          StatusPill(
-            label: '${task.priorityScore}',
-            color: const Color(0xFFF97316),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -815,13 +942,47 @@ class _EmptyText extends StatelessWidget {
   }
 }
 
+HandoutResumeTarget? _handoutResumeTarget(
+  int courseId,
+  HomeRouteTargetModel? target,
+  HomeLessonModel? lesson,
+) {
+  final blockId = target?.lastHandoutBlockId ?? lesson?.lastHandoutBlockId;
+  if (blockId == null) {
+    return null;
+  }
+  return HandoutResumeTarget(
+    courseId: courseId.toString(),
+    blockId: blockId,
+  );
+}
+
+String _continueMeta(
+  HomeRouteTargetModel? target,
+  HomeLessonModel? lesson,
+) {
+  final parts = <String>[];
+  final positionSec = target?.lastPositionSec ?? lesson?.lastPositionSec;
+  final blockId = target?.lastHandoutBlockId ?? lesson?.lastHandoutBlockId;
+  if (blockId != null) {
+    parts.add('讲义块 $blockId');
+  }
+  if (positionSec != null && positionSec > 0) {
+    parts.add('视频 ${_formatSec(positionSec)}');
+  }
+  if (parts.isEmpty) {
+    return '准备开始';
+  }
+  return parts.join(' · ');
+}
+
 String _resumeText(CourseProgressModel? progress, CourseSummaryModel course) {
   final lessonTitle = progress?.currentLessonTitle ?? course.currentLessonTitle;
   if (progress == null || !progress.hasResumeTarget) {
     if (lessonTitle != null && lessonTitle.isNotEmpty) {
       return '上次学习：$lessonTitle';
     }
-    return '还没有最近学习位置，点击继续学习会进入讲义页。';
+    return '还没有最近学习位置';
   }
   final parts = <String>[];
   if (lessonTitle != null && lessonTitle.isNotEmpty) {
@@ -868,53 +1029,35 @@ String _lifecycleLabel(String status) {
   };
 }
 
-String _formatDate(DateTime value) {
-  final local = value.toLocal();
-  return '${local.year}-${local.month.toString().padLeft(2, '0')}-'
-      '${local.day.toString().padLeft(2, '0')} '
-      '${local.hour.toString().padLeft(2, '0')}:'
-      '${local.minute.toString().padLeft(2, '0')}';
-}
-
 String _formatSec(int seconds) {
   final minutes = seconds ~/ 60;
   final rest = seconds % 60;
   return '$minutes:${rest.toString().padLeft(2, '0')}';
 }
 
-String? _backendResumeRoute(
-  HomeDashboardModel? dashboard,
-  CourseSummaryModel course,
-) {
-  final currentCourseId = dashboard?.currentCourse?.courseId;
-  return _matchingRoute(
-        dashboard?.continueLearning,
-        course.courseId,
-        currentCourseId,
-      ) ??
-      _matchingRoute(
-        dashboard?.nextStep,
-        course.courseId,
-        currentCourseId,
-      );
+String _targetFallbackTitle(HomeRouteTargetModel target) {
+  return switch (target.type) {
+    'stage_quiz' => '生成阶段测验',
+    'next_lesson' => '继续下一课时',
+    'continue_lesson' => '继续当前课时',
+    _ => '打开下一步',
+  };
 }
 
-String? _matchingRoute(
-  HomeRouteTargetModel? target,
-  int courseId,
-  int? currentCourseId,
-) {
-  if (target == null) {
-    return null;
-  }
-  final targetCourseId = target.courseId ?? currentCourseId;
-  if (targetCourseId != courseId) {
-    return null;
-  }
-  return target.nextRoute;
+IconData _targetIcon(HomeRouteTargetModel target) {
+  return switch (target.type) {
+    'stage_quiz' => Icons.quiz_outlined,
+    'next_lesson' => Icons.next_plan_outlined,
+    'continue_lesson' => Icons.play_lesson_outlined,
+    _ => Icons.arrow_forward_rounded,
+  };
 }
 
-int? _firstRecentCourseId(HomeDashboardModel? dashboard) {
-  final courses = dashboard?.recentCourses ?? const <CourseSummaryModel>[];
-  return courses.isEmpty ? null : courses.first.courseId;
+Color _targetColor(HomeRouteTargetModel target) {
+  return switch (target.type) {
+    'stage_quiz' => const Color(0xFF8B5CF6),
+    'next_lesson' => const Color(0xFF16A34A),
+    'continue_lesson' => AppTheme.brandBlue,
+    _ => const Color(0xFF64748B),
+  };
 }

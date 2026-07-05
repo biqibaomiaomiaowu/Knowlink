@@ -33,6 +33,124 @@ void main() {
         state.progressByCourseId[101]?.valueOrNull?.lastHandoutBlockId, 4001);
   });
 
+  test('home dashboard parses v2 lesson and recommendation fields', () {
+    final dashboard = HomeDashboardModel.fromJson({
+      'recentCourses': [
+        {
+          'courseId': 101,
+          'title': 'KnowLink 固定联调课',
+          'entryType': 'manual_import',
+          'catalogId': null,
+          'lifecycleStatus': 'learning_ready',
+          'pipelineStage': 'handout',
+          'pipelineStatus': 'succeeded',
+          'updatedAt': '2026-05-11T10:00:00+00:00',
+        },
+      ],
+      'topReviewTasks': [],
+      'recommendationEntryEnabled': true,
+      'dailyRecommendedKnowledgePoints': [],
+      'learningStats': {},
+      'currentCourse': {
+        'courseId': 101,
+        'title': 'KnowLink 固定联调课',
+        'entryType': 'manual_import',
+        'catalogId': null,
+        'lifecycleStatus': 'learning_ready',
+        'pipelineStage': 'handout',
+        'pipelineStatus': 'succeeded',
+        'updatedAt': '2026-05-11T10:00:00+00:00',
+      },
+      'currentLesson': {
+        'lessonId': 42,
+        'title': '关系模型',
+        'orderIndex': 2,
+        'handoutReadPercent': 35,
+        'quizStatus': 'not_started',
+        'reviewStatus': 'due',
+        'lastPositionSec': 180,
+        'lastHandoutBlockId': 4001,
+      },
+      'continueLearning': {
+        'courseId': 101,
+        'lessonId': 42,
+        'lastPositionSec': 180,
+        'lastHandoutBlockId': 4001,
+        'nextRoute': '/courses/101/lessons/42/handout',
+        'nextAction': {
+          'type': 'continue_video',
+          'label': '继续学习 关系模型',
+          'positionSec': 180,
+          'action': 'open_lesson_study',
+        },
+      },
+      'nextStep': {
+        'type': 'continue_lesson',
+        'courseId': 101,
+        'lessonId': 42,
+        'title': '关系模型',
+        'nextRoute': '/courses/101/lessons/42/handout',
+        'action': 'open_lesson_study',
+      },
+      'todayReviewTasks': [
+        {
+          'type': 'lesson_review',
+          'courseId': 101,
+          'lessonId': 42,
+          'title': '关系模型',
+          'priorityScore': 80,
+          'reasonText': '本节复习已到期。',
+          'nextRoute': '/courses/101/lessons/42/review',
+        },
+      ],
+      'recommendedNextLesson': {
+        'type': 'next_lesson',
+        'scopeType': 'lesson',
+        'courseId': 101,
+        'lessonId': 43,
+        'title': '继续第 3 节：范式',
+        'reason': '按进度继续',
+        'nextRoute': '/courses/101/lessons/43',
+      },
+      'recommendedStageQuiz': {
+        'type': 'stage_quiz',
+        'scopeType': 'lesson_range',
+        'courseId': 101,
+        'startLessonId': 41,
+        'endLessonId': 42,
+        'completedLessonCount': 2,
+        'title': '生成阶段测验',
+        'reason': '已完成 2 节',
+        'nextRoute': '/courses/101/quizzes/stage',
+      },
+      'courseQuickEntries': [
+        {
+          'key': 'lesson_study',
+          'title': '课时学习',
+          'status': 'ready',
+          'enabled': true,
+          'target': '/courses/101/lessons/42/handout',
+          'message': '继续当前课时讲义学习',
+          'route': '/courses/101/lessons/42/handout',
+          'action': 'open_lesson_study',
+        },
+      ],
+    });
+
+    expect(dashboard.currentLesson?.lessonId, '42');
+    expect(dashboard.currentLesson?.title, '关系模型');
+    expect(dashboard.currentLesson?.handoutReadPercent, 35);
+    expect(dashboard.continueLearning?.lastPositionSec, 180);
+    expect(dashboard.continueLearning?.lastHandoutBlockId, 4001);
+    expect(dashboard.continueLearning?.nextAction?.label, '继续学习 关系模型');
+    expect(dashboard.todayReviewTasks.single.nextRoute,
+        '/courses/101/lessons/42/review');
+    expect(dashboard.recommendedNextLesson?.lessonId, '43');
+    expect(dashboard.recommendedStageQuiz?.completedLessonCount, 2);
+    expect(dashboard.courseQuickEntries.single.key, 'lesson_study');
+    expect(dashboard.courseQuickEntries.single.enabled, isTrue);
+  });
+
   test('saveProgress posts progress update and caches returned progress',
       () async {
     final fakeApiClient = _FakeHomeApiClient();

@@ -8,6 +8,7 @@ import '../../core/widgets/app_loading_view.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/course_lesson_models.dart';
+import '../../shared/providers/course_flow_providers.dart';
 import '../../shared/providers/course_library_provider.dart';
 
 class CourseLibraryPage extends ConsumerWidget {
@@ -57,19 +58,21 @@ class _CourseLibraryBody extends StatelessWidget {
   }
 }
 
-class _CourseTile extends StatelessWidget {
+class _CourseTile extends ConsumerWidget {
   const _CourseTile({required this.item});
 
   final CourseLibraryItemModel item;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final mastery = item.overallMasteryScore == null
         ? '掌握度 --'
         : '掌握度 ${(item.overallMasteryScore! * 100).round()}%';
+    final masteryValue = item.overallMasteryScore?.clamp(0, 1).toDouble();
+    final progressLabel = '生成进度：${item.pipelineStage} / ${item.pipelineStatus}';
     return SectionCard(
       child: InkWell(
-        onTap: () => context.go('/courses/${item.courseId}'),
+        onTap: () => _openWorkbench(context, ref),
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.all(2),
@@ -95,6 +98,7 @@ class _CourseTile extends StatelessWidget {
                     const StatusPill(
                       label: '当前课程',
                       color: Color(0xFF16A34A),
+                      icon: Icons.check_circle_outline,
                     ),
                 ],
               ),
@@ -104,12 +108,62 @@ class _CourseTile extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   StatusPill(label: '学习状态：${item.learningStatus}'),
-                  StatusPill(
-                    label: '${item.pipelineStage} / ${item.pipelineStatus}',
-                    color: const Color(0xFF64748B),
-                  ),
                   StatusPill(label: item.entryType),
                 ],
+              ),
+              const SizedBox(height: 14),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 760;
+                  final metrics = [
+                    _MetricTile(
+                      icon: Icons.video_library_outlined,
+                      label: '课时',
+                      value: '${item.lessonCount}',
+                    ),
+                    _MetricTile(
+                      icon: Icons.folder_outlined,
+                      label: '课程资料',
+                      value: '${item.courseResourceCount}',
+                    ),
+                    _MetricTile(
+                      icon: Icons.event_repeat_outlined,
+                      label: '待复习',
+                      value: '${item.pendingReviewCount}',
+                    ),
+                  ];
+                  if (compact) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: metrics
+                          .map(
+                            (metric) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: metric,
+                            ),
+                          )
+                          .toList(),
+                    );
+                  }
+                  return Row(
+                    children: metrics
+                        .map(
+                          (metric) => Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: metric,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
+              ),
+              const SizedBox(height: 14),
+              _ProgressSummary(
+                progressLabel: progressLabel,
+                masteryLabel: mastery,
+                masteryValue: masteryValue,
               ),
               const SizedBox(height: 14),
               Wrap(
@@ -117,13 +171,26 @@ class _CourseTile extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _InlineMetric('最近活动：${_formatDate(item.lastActivityAt)}'),
-                  _InlineMetric('课时 ${item.lessonCount}'),
-                  _InlineMetric('课程资料 ${item.courseResourceCount}'),
                   _InlineMetric(
                     '当前课时：${item.currentLessonTitle ?? '未选择'}',
                   ),
-                  _InlineMetric(mastery),
-                  _InlineMetric('待复习 ${item.pendingReviewCount}'),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  FilledButton.icon(
+                    onPressed: () => _continueLearning(context, ref),
+                    icon: const Icon(Icons.play_arrow_outlined),
+                    label: const Text('继续学习'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _openWorkbench(context, ref),
+                    icon: const Icon(Icons.dashboard_outlined),
+                    label: const Text('进入工作台'),
+                  ),
                 ],
               ),
             ],
@@ -131,6 +198,33 @@ class _CourseTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  void _continueLearning(BuildContext context, WidgetRef ref) {
+    ref.read(courseFlowProvider.notifier).startCourse(item.courseId);
+    final lessonId = item.currentLessonId;
+    if (lessonId == null) {
+      _go(context, '/courses/${item.courseId}');
+      return;
+    }
+    ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+          courseId: item.courseId,
+          lessonId: lessonId,
+        );
+    _go(context, '/courses/${item.courseId}/lessons/$lessonId/handout');
+  }
+
+  void _openWorkbench(BuildContext context, WidgetRef ref) {
+    ref.read(courseFlowProvider.notifier).startCourse(item.courseId);
+    _go(context, '/courses/${item.courseId}');
+  }
+
+  void _go(BuildContext context, String path) {
+    try {
+      context.go(path);
+    } catch (_) {
+      // Widget tests can mount this page without a router.
+    }
   }
 }
 
@@ -146,6 +240,99 @@ class _InlineMetric extends StatelessWidget {
       style: const TextStyle(
         color: AppTheme.muted,
         fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 76),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.panel,
+        border: Border.all(color: AppTheme.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.brandBlue, size: 24),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '$label $value',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppTheme.ink,
+                fontSize: 18,
+                letterSpacing: 0,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Icon(
+            Icons.chevron_right,
+            color: AppTheme.muted.withValues(alpha: 0.6),
+            size: 18,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProgressSummary extends StatelessWidget {
+  const _ProgressSummary({
+    required this.progressLabel,
+    required this.masteryLabel,
+    required this.masteryValue,
+  });
+
+  final String progressLabel;
+  final String masteryLabel;
+  final double? masteryValue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        border: Border.all(color: AppTheme.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 18,
+            runSpacing: 8,
+            children: [
+              _InlineMetric(progressLabel),
+              _InlineMetric(masteryLabel),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ProgressRail(
+            value: masteryValue ?? 0,
+            color: masteryValue == null
+                ? const Color(0xFF94A3B8)
+                : AppTheme.brandBlue,
+          ),
+        ],
       ),
     );
   }

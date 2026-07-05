@@ -61,9 +61,15 @@ class _WorkbenchBody extends StatelessWidget {
           entries: model.quickEntries,
         ),
         const SizedBox(height: 14),
-        _LessonList(courseId: course.courseId, lessons: model.lessons),
+        _CurrentLessonCard(
+          courseId: course.courseId,
+          currentLesson: model.currentLesson,
+          nextActions: model.nextActions,
+        ),
         const SizedBox(height: 14),
         _ResourceList(resources: model.courseResources),
+        const SizedBox(height: 14),
+        _LessonList(courseId: course.courseId, lessons: model.lessons),
       ],
     );
   }
@@ -122,12 +128,6 @@ class _ProgressCard extends StatelessWidget {
               ),
             ],
           ),
-          if (model.nextActions.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            ...model.nextActions.map(
-              (action) => _NextActionRow(action: action),
-            ),
-          ],
         ],
       ),
     );
@@ -147,17 +147,28 @@ class _QuickEntryGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visible = entries.isEmpty ? _fallbackEntries(courseId) : entries;
+    final byKey = {for (final entry in entries) entry.key: entry};
+    final primaryEntries = _primaryEntryKeys
+        .map((key) => _primaryEntryForKey(byKey, key))
+        .toList();
+    final secondaryEntries = _secondaryEntryKeys
+        .map((key) =>
+            byKey[key] ?? (entries.isEmpty ? _secondaryFallback(key) : null))
+        .whereType<PlaceholderEntryModel>()
+        .map(_secondaryDisplayEntry)
+        .toList();
+
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionLabel('课程入口'),
+          const _SectionLabel('主要入口'),
           const SizedBox(height: 12),
           Wrap(
+            key: const Key('course_workbench_primary_entries'),
             spacing: 10,
             runSpacing: 10,
-            children: visible
+            children: primaryEntries
                 .map(
                   (entry) => _EntryButton(
                     entry: entry,
@@ -168,62 +179,111 @@ class _QuickEntryGrid extends StatelessWidget {
                 )
                 .toList(),
           ),
+          if (secondaryEntries.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+            const Text(
+              '更多工具',
+              style: TextStyle(
+                color: AppTheme.muted,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              key: const Key('course_workbench_secondary_entries'),
+              spacing: 8,
+              runSpacing: 8,
+              children: secondaryEntries
+                  .map(
+                    (entry) => _SecondaryEntryButton(
+                      entry: entry,
+                      onTap: entry.enabled
+                          ? () => _goEntry(context, courseId, entry)
+                          : null,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  List<PlaceholderEntryModel> _fallbackEntries(String courseId) {
-    return [
-      const PlaceholderEntryModel(
-        key: 'course_qa',
-        title: '全课程 QA',
-        status: 'placeholder',
-        enabled: false,
-        message: '基于全部课时提问',
-      ),
-      const PlaceholderEntryModel(
-        key: 'course_graph',
-        title: '课程图谱',
-        status: 'placeholder',
-        enabled: false,
-        message: '图谱生成暂未启用',
-      ),
-      const PlaceholderEntryModel(
-        key: 'comprehensive_quiz',
-        title: '综合测验',
-        status: 'placeholder',
-        enabled: false,
-        message: '综合测验等待生成',
-      ),
-      const PlaceholderEntryModel(
-        key: 'course_review',
-        title: '课程总复习',
-        status: 'placeholder',
-        enabled: false,
-        message: '复习计划等待生成',
-      ),
-      const PlaceholderEntryModel(
-        key: 'report',
-        title: '学习报告',
-        status: 'placeholder',
-        enabled: false,
-        message: '报告暂未启用',
-      ),
-      const PlaceholderEntryModel(
-        key: 'export',
-        title: '课程导出',
-        status: 'placeholder',
-        enabled: false,
-        message: '导出暂未启用',
-      ),
-      const PlaceholderEntryModel(
-        key: 'settings',
-        title: '课程设置',
-        status: 'ready',
-        message: '调整课程信息',
-      ),
-    ];
+  PlaceholderEntryModel _primaryEntryForKey(
+    Map<String, PlaceholderEntryModel> byKey,
+    String key,
+  ) {
+    final source = byKey[key];
+    return PlaceholderEntryModel(
+      key: key,
+      title: _primaryEntryTitle(key),
+      status: source?.status ?? _fallbackPrimaryStatus(key),
+      message: source?.message ?? _primaryEntryMessage(key),
+      enabled: source?.enabled ?? _fallbackPrimaryEnabled(key),
+      target: source?.target,
+      route: source?.route,
+      action: source?.action,
+      targetPath: source?.targetPath,
+    );
+  }
+
+  bool _fallbackPrimaryEnabled(String key) {
+    return key == 'lesson_study' && currentLessonId != null;
+  }
+
+  String _fallbackPrimaryStatus(String key) {
+    return _fallbackPrimaryEnabled(key) ? 'ready' : 'placeholder';
+  }
+
+  PlaceholderEntryModel? _secondaryFallback(String key) {
+    return switch (key) {
+      'course_graph' => const PlaceholderEntryModel(
+          key: 'course_graph',
+          title: '课程图谱',
+          status: 'placeholder',
+          enabled: false,
+          message: '图谱生成暂未启用',
+        ),
+      'report' => const PlaceholderEntryModel(
+          key: 'report',
+          title: '学习报告',
+          status: 'placeholder',
+          enabled: false,
+          message: '报告暂未启用',
+        ),
+      'export' => const PlaceholderEntryModel(
+          key: 'export',
+          title: '课程导出',
+          status: 'placeholder',
+          enabled: false,
+          message: '导出暂未启用',
+        ),
+      'settings' => const PlaceholderEntryModel(
+          key: 'settings',
+          title: '课程设置',
+          status: 'ready',
+          message: '调整课程信息',
+        ),
+      _ => null,
+    };
+  }
+
+  PlaceholderEntryModel _secondaryDisplayEntry(PlaceholderEntryModel source) {
+    return PlaceholderEntryModel(
+      key: source.key,
+      title: _secondaryEntryTitle(source.key),
+      status: source.status,
+      message: source.message,
+      enabled: source.enabled,
+      target: source.target,
+      route: source.route,
+      action: source.action,
+      targetPath: source.targetPath,
+    );
   }
 
   void _goEntry(
@@ -263,6 +323,113 @@ class _QuickEntryGrid extends StatelessWidget {
       'settings' => '/courses/$courseId/settings',
       _ => '/courses/$courseId/review',
     };
+  }
+}
+
+const _primaryEntryKeys = <String>[
+  'lesson_study',
+  'course_qa',
+  'comprehensive_quiz',
+  'course_review',
+];
+
+const _secondaryEntryKeys = <String>[
+  'course_graph',
+  'report',
+  'export',
+  'settings',
+];
+
+String _primaryEntryTitle(String key) {
+  return switch (key) {
+    'lesson_study' => '课时学习',
+    'course_qa' => 'AI 问答',
+    'comprehensive_quiz' => '测试中心',
+    'course_review' => '复习中心',
+    _ => '课程入口',
+  };
+}
+
+String _primaryEntryMessage(String key) {
+  return switch (key) {
+    'lesson_study' => '进入当前课时视频与讲义',
+    'course_qa' => '围绕整门课程提问',
+    'comprehensive_quiz' => '生成或进入综合测验',
+    'course_review' => '查看复习计划与待复习项',
+    _ => '',
+  };
+}
+
+String _secondaryEntryTitle(String key) {
+  return switch (key) {
+    'course_graph' => '课程图谱',
+    'report' => '学习报告',
+    'export' => '课程导出',
+    'settings' => '课程设置',
+    _ => '更多工具',
+  };
+}
+
+class _CurrentLessonCard extends StatelessWidget {
+  const _CurrentLessonCard({
+    required this.courseId,
+    required this.currentLesson,
+    required this.nextActions,
+  });
+
+  final String courseId;
+  final LessonSummaryModel? currentLesson;
+  final List<NextActionModel> nextActions;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionLabel('正在学习'),
+          const SizedBox(height: 12),
+          if (currentLesson == null)
+            const Text('还没有选择当前课时。')
+          else ...[
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(
+                backgroundColor: const Color(0xFFEFF6FF),
+                foregroundColor: AppTheme.brandBlue,
+                child: Text('${currentLesson!.orderIndex}'),
+              ),
+              title: Text(currentLesson!.title),
+              subtitle: Text(
+                '${currentLesson!.lessonStatus} · 讲义 '
+                '${currentLesson!.handoutStatus} · 测验 '
+                '${currentLesson!.quizStatus}',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.go(
+                '/courses/$courseId/lessons/${currentLesson!.lessonId}/handout',
+              ),
+            ),
+            if (currentLesson!.nextAction?.reason != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                currentLesson!.nextAction!.reason!,
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+          if (nextActions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ...nextActions.map(
+              (action) => _NextActionRow(action: action),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -355,9 +522,53 @@ class _EntryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
+    return SizedBox(
+      width: 214,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(_iconFor(entry.key)),
+        label: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              entry.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (entry.message.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                entry.message,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SecondaryEntryButton extends StatelessWidget {
+  const _SecondaryEntryButton({
+    required this.entry,
+    required this.onTap,
+  });
+
+  final PlaceholderEntryModel entry;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
       onPressed: onTap,
-      icon: Icon(_iconFor(entry.key)),
+      icon: Icon(_iconFor(entry.key), size: 18),
       label: Text(entry.title),
     );
   }
