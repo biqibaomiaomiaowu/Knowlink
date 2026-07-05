@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
 
 from server.ai.embedding import get_configured_embedding_client
@@ -20,6 +20,7 @@ from server.infra.db.base import utcnow
 from server.infra.db.models import (
     AsyncTask,
     Course,
+    CourseLesson,
     CourseResource,
     CourseSegment,
     HandoutVersion,
@@ -102,13 +103,7 @@ def _run_with_session(
             course=course,
         )
     _discard_parse_run_artifacts(session=session, parse_run_id=parse_run_id)
-    resources = list(
-        session.scalars(
-            select(CourseResource)
-            .where(CourseResource.course_id == course_id)
-            .order_by(CourseResource.sort_order.asc(), CourseResource.id.asc())
-        )
-    )
+    resources = list(session.scalars(_parse_resources_stmt(course_id=course_id)))
 
     started_at = utcnow()
     _set_task_running(root_task, progress_pct=5, started_at=started_at)
@@ -608,9 +603,7 @@ def _coerce_pipeline_summary(payload: Any) -> dict[str, Any] | None:
 
 
 def _existing_artifact_summary(*, session: Session, course_id: int, parse_run_id: int) -> dict[str, Any]:
-    resource_count = len(
-        session.scalars(select(CourseResource.id).where(CourseResource.course_id == course_id)).all()
-    )
+    resource_count = len(session.scalars(_parse_resources_stmt(course_id=course_id)).all())
     segment_count = len(
         session.scalars(select(CourseSegment.id).where(CourseSegment.parse_run_id == parse_run_id)).all()
     )
@@ -623,6 +616,27 @@ def _existing_artifact_summary(*, session: Session, course_id: int, parse_run_id
         "vectorDocumentCount": vector_count,
         "issues": [],
     }
+
+
+def _parse_resources_stmt(*, course_id: int):
+    return (
+        select(CourseResource)
+        .outerjoin(
+            CourseLesson,
+            and_(
+                CourseLesson.id == CourseResource.lesson_id,
+                CourseLesson.course_id == CourseResource.course_id,
+            ),
+        )
+        .where(
+            CourseResource.course_id == course_id,
+            or_(
+                CourseResource.lesson_id.is_(None),
+                and_(CourseLesson.id.is_not(None), CourseLesson.deleted_at.is_(None)),
+            ),
+        )
+        .order_by(CourseResource.sort_order.asc(), CourseResource.id.asc())
+    )
 
 
 def _discard_parse_run_artifacts(*, session: Session, parse_run_id: int) -> None:

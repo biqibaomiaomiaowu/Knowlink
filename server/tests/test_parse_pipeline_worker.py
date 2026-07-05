@@ -10,8 +10,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import server.infra.db.models
-from server.infra.db.base import Base
-from server.infra.db.models import AsyncTask, Course, CourseResource, CourseSegment, HandoutVersion, ParseRun, VectorDocument
+from server.infra.db.base import Base, utcnow
+from server.infra.db.models import (
+    AsyncTask,
+    Course,
+    CourseLesson,
+    CourseResource,
+    CourseSegment,
+    HandoutVersion,
+    ParseRun,
+    VectorDocument,
+)
 from server.tasks.parse_pipeline import run_parse_pipeline
 
 
@@ -116,6 +125,98 @@ def test_parse_pipeline_runner_writes_segments_and_vector_documents(tmp_path: Pa
     assert session.get(ParseRun, message["parseRunId"]).status == "succeeded"
     assert session.get(AsyncTask, message["taskId"]).status == "succeeded"
     assert _step_statuses(session, message["parseRunId"])["vectorize"] == "succeeded"
+
+
+def test_parse_pipeline_skips_resources_from_deleted_lessons(tmp_path: Path):
+    session_factory = _session_factory()
+    session = session_factory()
+    message = _seed_parse_run(session, tmp_path / "active.pdf", resource_type="pdf")
+
+    active_lesson = CourseLesson(
+        course_id=message["courseId"],
+        title="Active lesson",
+        order_index=1,
+        lesson_status="resource_ready",
+        source_type="manual",
+    )
+    deleted_lesson = CourseLesson(
+        course_id=message["courseId"],
+        title="Deleted lesson",
+        order_index=-2,
+        lesson_status="deleted",
+        source_type="manual",
+        deleted_at=utcnow(),
+    )
+    session.add_all([active_lesson, deleted_lesson])
+    session.flush()
+
+    active_resource = session.scalar(sa.select(CourseResource).where(CourseResource.course_id == message["courseId"]))
+    assert active_resource is not None
+    active_resource.lesson_id = active_lesson.id
+    active_resource.scope_type = "lesson"
+    active_resource.usage_role = "lesson_material"
+
+    deleted_path = tmp_path / "deleted.pdf"
+    deleted_path.write_bytes(b"%PDF-1.4 deleted")
+    deleted_resource = CourseResource(
+        course_id=message["courseId"],
+        lesson_id=deleted_lesson.id,
+        resource_type="pdf",
+        scope_type="lesson",
+        usage_role="lesson_material",
+        object_key=str(deleted_path),
+        original_name=deleted_path.name,
+        mime_type="application/pdf",
+        size_bytes=deleted_path.stat().st_size,
+        checksum="sha256:deleted",
+        ingest_status="ready",
+        validation_status="passed",
+        processing_status="pending",
+        sort_order=1,
+    )
+    session.add(deleted_resource)
+    session.commit()
+
+    parsed_files: list[str] = []
+
+    def fake_parse(resource_type: str, file_path: str | Path):
+        parsed_files.append(Path(file_path).name)
+        segment_key = f"{Path(file_path).stem}-p1"
+        return _FakeParserResult(
+            status="succeeded",
+            normalized_document={
+                "resourceType": resource_type,
+                "segments": [
+                    {
+                        "segmentKey": segment_key,
+                        "segmentType": "pdf_page_text",
+                        "textContent": segment_key,
+                        "pageNo": 1,
+                        "orderNo": 1,
+                    }
+                ],
+            },
+            issues=[],
+        )
+
+    result = run_parse_pipeline(
+        message,
+        session_factory=session_factory,
+        parse_resource_func=fake_parse,
+        embedding_client_factory=lambda: _FakeEmbeddingClient(),
+        base_dir=tmp_path,
+    )
+
+    session.expire_all()
+    segments = session.scalars(sa.select(CourseSegment).order_by(CourseSegment.id.asc())).all()
+
+    assert result["status"] == "succeeded"
+    assert result["resourceCount"] == 1
+    assert result["segmentCount"] == 1
+    assert parsed_files == ["active.pdf"]
+    assert [segment.resource_id for segment in segments] == [active_resource.id]
+    assert session.get(CourseResource, deleted_resource.id).last_parse_run_id is None
+    assert session.get(CourseResource, deleted_resource.id).processing_status == "pending"
 
 
 def test_parse_pipeline_keeps_lexical_vector_documents_on_embedding_dimension_mismatch(tmp_path: Path):
