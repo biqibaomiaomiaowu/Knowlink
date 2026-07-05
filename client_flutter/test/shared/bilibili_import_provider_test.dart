@@ -187,6 +187,36 @@ void main() {
     ]);
   });
 
+  test('createImport can bind import to an existing lesson', () async {
+    final fakeApiClient = FakeBilibiliApiClient(
+      authSession: const BilibiliAuthSessionModel(
+        loginStatus: 'active',
+        userNickname: 'KnowLink Demo',
+        expiresAt: null,
+      ),
+      previewResult: _preview(defaultSelectedPartIds: const ['cid-1002']),
+      createdTask: _task(taskId: 71, importRunId: 9101, status: 'queued'),
+      runStatus: _run(importRunId: 9101, status: 'queued'),
+    );
+    final container = _container(fakeApiClient);
+    final notifier = container.read(bilibiliImportProvider.notifier);
+
+    notifier.updateSourceUrl('https://www.bilibili.com/video/BV1xx411c7mD');
+    await notifier.refreshAuthSession();
+    await notifier.preview('101');
+    await notifier.createImport(
+      '101',
+      lessonMode: 'bind_existing',
+      targetLessonId: 'l-new',
+      createLessonIfMissing: false,
+    );
+
+    final requestJson = fakeApiClient.createCalls.single.request.toJson();
+    expect(requestJson['lessonMode'], 'bind_existing');
+    expect(requestJson['targetLessonId'], 'l-new');
+    expect(requestJson['createLessonIfMissing'], isFalse);
+  });
+
   test('bulk selection can clear and select all preview parts', () async {
     final fakeApiClient = FakeBilibiliApiClient(
       authSession: const BilibiliAuthSessionModel(

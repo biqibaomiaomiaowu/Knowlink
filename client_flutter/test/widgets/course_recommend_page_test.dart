@@ -170,7 +170,7 @@ void main() {
 
   testWidgets('recommend card shows reason materials and next action label',
       (tester) async {
-    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -210,9 +210,11 @@ void main() {
     expect(find.text('课程资料说明'), findsOneWidget);
     expect(find.text('覆盖高频考点'), findsOneWidget);
     expect(find.text('讲义和视频能组成完整复习闭环'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, '确认入课并导入资料'), findsOneWidget);
+    final confirmButton = find.widgetWithText(FilledButton, '确认入课并导入资料');
+    expect(confirmButton, findsOneWidget);
 
-    await tester.tap(find.widgetWithText(FilledButton, '确认入课并导入资料'));
+    await tester.ensureVisible(confirmButton);
+    await tester.tap(confirmButton);
     await tester.pumpAndSettle();
 
     expect(fakeApiClient.confirmationRequests, hasLength(1));

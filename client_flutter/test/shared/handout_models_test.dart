@@ -162,6 +162,81 @@ void main() {
     );
   });
 
+  test('QA session history parses user and assistant rows', () {
+    final session = QaSessionMessagesModel.fromJson({
+      'items': [
+        {
+          'sessionId': 6001,
+          'messageId': 6001,
+          'role': 'user',
+          'contentMd': '这个定义和题型有什么联系？',
+          'question': '这个定义和题型有什么联系？',
+          'answerMd': null,
+          'answerType': null,
+          'citations': [],
+          'createdAt': '2026-04-18T15:00:00Z',
+        },
+        {
+          'sessionId': 6001,
+          'messageId': 6002,
+          'role': 'assistant',
+          'contentMd': '定义控制了题型的判断边界。',
+          'question': '这个定义和题型有什么联系？',
+          'answerMd': '定义控制了题型的判断边界。',
+          'answerType': 'direct_answer',
+          'citations': [],
+          'createdAt': '2026-04-18T15:00:01Z',
+          'generationMetadata': {'source': 'model'},
+        },
+      ],
+    });
+
+    expect(session.items, hasLength(2));
+    expect(session.items.first.role, 'user');
+    expect(session.items.first.answerMd, '');
+    expect(session.items.first.question, '这个定义和题型有什么联系？');
+    expect(session.items.first.createdAt, isNotNull);
+    expect(session.items.last.role, 'assistant');
+    expect(session.items.last.contentMd, '定义控制了题型的判断边界。');
+    expect(session.items.last.answerMd, '定义控制了题型的判断边界。');
+    expect(session.items.last.generationMetadata?['source'], 'model');
+  });
+
+  test('QA session list parses scoped sessions', () {
+    final sessions = QaSessionsModel.fromJson({
+      'items': [
+        {
+          'sessionId': 7001,
+          'courseId': 101,
+          'scopeType': 'course',
+          'lessonId': null,
+          'handoutBlockId': null,
+          'title': 'Course question',
+          'lastMessageAt': '2026-04-18T15:02:00Z',
+        },
+        {
+          'sessionId': 8001,
+          'courseId': 101,
+          'scopeType': 'lesson',
+          'lessonId': 2,
+          'handoutBlockId': 4001,
+          'title': null,
+          'lastMessageAt': null,
+        },
+      ],
+    });
+
+    expect(sessions.items, hasLength(2));
+    expect(sessions.items.first.sessionId, 7001);
+    expect(sessions.items.first.courseId, '101');
+    expect(sessions.items.first.scopeType, 'course');
+    expect(sessions.items.first.lessonId, isNull);
+    expect(sessions.items.first.title, 'Course question');
+    expect(sessions.items.first.lastMessageAt, isNotNull);
+    expect(sessions.items.last.lessonId, '2');
+    expect(sessions.items.last.handoutBlockId, 4001);
+  });
+
   test('citation model covers every frozen locator group', () {
     final citations = [
       CitationModel.fromJson({

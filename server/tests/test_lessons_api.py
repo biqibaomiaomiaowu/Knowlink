@@ -171,6 +171,32 @@ def test_create_lesson_appends_to_end() -> None:
     assert [item["title"] for item in _lesson_items(course["courseId"])] == ["第 1 节", "第 2 节"]
 
 
+def test_create_lesson_persists_optional_metadata() -> None:
+    course = _create_course()
+    metadata = {
+        "learningGoal": "掌握 B+ 树索引",
+        "initialMasteryLevel": "beginner",
+        "timeBudgetMinutes": 45,
+        "bilibiliSourceUrl": "https://www.bilibili.com/video/BVdemo/",
+    }
+
+    status, body = _api(
+        "POST",
+        f"/api/v1/courses/{course['courseId']}/lessons",
+        json_body={
+            "title": "索引结构",
+            "sourceType": "manual",
+            "metaJson": metadata,
+        },
+    )
+
+    assert status == 201
+    created = body["data"]["lesson"]
+    assert created["metaJson"] == metadata
+    stored = runtime_store.get_lesson(course_id=course["courseId"], lesson_id=created["lessonId"])
+    assert stored["metaJson"] == metadata
+
+
 def test_create_lesson_rejects_foreign_lesson_scoped_primary_video() -> None:
     course = _create_course()
     existing = runtime_store.create_lesson(course_id=course["courseId"], title="已有节课")

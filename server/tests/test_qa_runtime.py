@@ -67,6 +67,10 @@ def test_sql_qa_message_persists_session_messages_and_assistant_refs_only():
 
         messages = service.get_session_messages(session_id=result["sessionId"])
         assert [item["role"] for item in messages["items"]] == ["user", "assistant"]
+        assert messages["items"][0]["question"] == "集合的定义是什么？"
+        assert messages["items"][1]["question"] == "集合的定义是什么？"
+        assert messages["items"][0]["createdAt"] is not None
+        assert messages["items"][1]["createdAt"] is not None
         assert messages["items"][1]["generationMetadata"] == result["generationMetadata"]
         assert messages["items"][1]["citations"] == result["citations"]
     finally:

@@ -36,6 +36,26 @@ void main() {
     expect(container.read(courseFlowProvider).reviewTaskRunId, 8301);
   });
 
+  test('pollExistingRunAndLoad polls run id and refreshes course review',
+      () async {
+    final fakeApiClient = _FakeReviewApiClient();
+    final container = _createContainer(fakeApiClient);
+
+    await container.read(reviewProvider.notifier).pollExistingRunAndLoad(
+          '101',
+          8302,
+          interval: Duration.zero,
+          maxAttempts: 1,
+        );
+
+    final state = container.read(reviewProvider);
+    expect(fakeApiClient.regeneratedCourseIds, isEmpty);
+    expect(fakeApiClient.statusRunIds, [8302]);
+    expect(fakeApiClient.courseReviewCourseIds, ['101']);
+    expect(state.runStatusValue?.status, 'ready');
+    expect(container.read(courseFlowProvider).courseId, '101');
+  });
+
   test('completeTask completes selected task and refreshes course review',
       () async {
     final fakeApiClient = _FakeReviewApiClient();

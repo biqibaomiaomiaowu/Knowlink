@@ -25,7 +25,7 @@ class ReviewPage extends ConsumerStatefulWidget {
 }
 
 class _ReviewPageState extends ConsumerState<ReviewPage> {
-  String? _loadedCourseId;
+  String? _loadKey;
 
   @override
   void initState() {
@@ -61,7 +61,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               onRegenerate: () =>
                   ref.read(reviewProvider.notifier).regenerateAndPoll(
                         widget.courseId,
-                        interval: const Duration(milliseconds: 20),
                       ),
             ),
             const SizedBox(height: 16),
@@ -86,12 +85,27 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   }
 
   void _scheduleLoad() {
-    if (_loadedCourseId == widget.courseId) {
+    final courseFlow = ref.read(courseFlowProvider);
+    final reviewTaskRunId = courseFlow.courseId == widget.courseId
+        ? courseFlow.reviewTaskRunId
+        : null;
+    final loadKey = reviewTaskRunId == null
+        ? '${widget.courseId}:load'
+        : '${widget.courseId}:run:$reviewTaskRunId';
+    if (_loadKey == loadKey) {
       return;
     }
-    _loadedCourseId = widget.courseId;
+    _loadKey = loadKey;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
+        return;
+      }
+      if (reviewTaskRunId != null) {
+        ref.read(courseFlowProvider.notifier).setReviewTaskRun(null);
+        ref.read(reviewProvider.notifier).pollExistingRunAndLoad(
+              widget.courseId,
+              reviewTaskRunId,
+            );
         return;
       }
       ref.read(reviewProvider.notifier).load(widget.courseId);

@@ -173,6 +173,34 @@ void main() {
     expect(find.text('https://cdn.test/501.mp4'), findsOneWidget);
   });
 
+  testWidgets('lesson video listener persists playback progress', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final apiClient = _LessonStudyPageFakeApiClient();
+    final videoControllers = <_FakeLessonStudyVideoController>[];
+
+    await _pumpLessonStudy(
+      tester,
+      apiClient: apiClient,
+      videoControllerFactory: (uri) {
+        final controller = _FakeLessonStudyVideoController(uri);
+        videoControllers.add(controller);
+        return controller;
+      },
+    );
+
+    expect(videoControllers, hasLength(1));
+    videoControllers.single.jumpTo(const Duration(seconds: 182));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    expect(apiClient.progressUpdates, isNotEmpty);
+    expect(apiClient.progressUpdates.last['lastPositionSec'], 182);
+    expect(apiClient.progressUpdates.last['lastHandoutBlockId'], '4201');
+  });
+
   testWidgets('lesson outline child seeks video to child start time', (
     tester,
   ) async {
@@ -314,6 +342,41 @@ void main() {
     );
   });
 
+  testWidgets('lesson materials support mp4 preview and delete refresh',
+      (tester) async {
+    _useTestSurface(tester);
+    final apiClient = _LessonStudyPageFakeApiClient();
+    await _pumpLessonStudy(tester, apiClient: apiClient);
+
+    await tester.tap(find.text('本节资料'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('lesson_material_row_501')),
+        matching: find.byIcon(Icons.play_arrow_outlined),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(apiClient.playbackResourceIds, contains(501));
+    expect(
+        find.byKey(const Key('lesson_material_preview_url')), findsOneWidget);
+    expect(find.text('https://cdn.test/501.mp4'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('lesson_material_row_502')),
+        matching: find.byIcon(Icons.delete_outline),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(apiClient.deletedResourceIds, [502]);
+    expect(find.byKey(const Key('lesson_material_row_502')), findsNothing);
+    expect(find.text('栈与队列讲义.pdf'), findsNothing);
+  });
+
   testWidgets('enter test action routes to lesson quiz context',
       (tester) async {
     _useTestSurface(tester);
@@ -325,7 +388,8 @@ void main() {
     expect(find.text('lesson quiz 101/42'), findsOneWidget);
   });
 
-  testWidgets('generate handout button shows generating while request is pending',
+  testWidgets(
+      'generate handout button shows generating while request is pending',
       (tester) async {
     _useTestSurface(tester);
     final fakeApiClient = _DelayedGenerateBlockLessonStudyPageFakeApiClient();
@@ -350,6 +414,51 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('生成讲义'), findsWidgets);
+  });
+  testWidgets('embedded lesson QA shows the question and answer as a pair',
+      (tester) async {
+    _useTestSurface(tester);
+    await _pumpLessonStudy(tester);
+
+    await tester.enterText(
+      find.byType(TextField),
+      'Why keep one queue slot empty?',
+    );
+    await tester.tap(find.byIcon(Icons.send_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('lesson_ai_entry_question_1')), findsOneWidget);
+    expect(find.text('Why keep one queue slot empty?'), findsOneWidget);
+    expect(find.byKey(const Key('lesson_ai_entry_answer_1')), findsOneWidget);
+    expect(
+      find.textContaining('Keep one empty slot to distinguish full and empty'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('embedded lesson QA retry reuses the failed question row',
+      (tester) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _FailThenSucceedQaLessonStudyPageFakeApiClient();
+    await _pumpLessonStudy(tester, apiClient: fakeApiClient);
+
+    await tester.enterText(find.byType(TextField), 'Why did QA fail?');
+    await tester.tap(find.byIcon(Icons.send_outlined));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.qaRequestCount, 1);
+    expect(find.text('Why did QA fail?'), findsOneWidget);
+    expect(find.byKey(const Key('lesson_ai_entry_error_1')), findsOneWidget);
+    expect(find.byKey(const Key('lesson_ai_retry_1')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('lesson_ai_retry_1')));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.qaRequestCount, 2);
+    expect(find.text('Why did QA fail?'), findsOneWidget);
+    expect(find.byKey(const Key('lesson_ai_entry_error_1')), findsNothing);
+    expect(find.byKey(const Key('lesson_ai_entry_answer_1')), findsOneWidget);
+    expect(find.textContaining('Recovered page answer'), findsOneWidget);
   });
 }
 
@@ -434,6 +543,11 @@ class _FakeLessonStudyVideoController implements HandoutVideoController {
     _notifyListeners();
   }
 
+  void jumpTo(Duration position) {
+    _position = position;
+    _notifyListeners();
+  }
+
   @override
   Future<void> dispose() async {
     _listeners.clear();
@@ -495,6 +609,10 @@ class _LessonStudyPageFakeApiClient extends ApiClient {
   _LessonStudyPageFakeApiClient({this.firstBlockContentMd});
 
   final String? firstBlockContentMd;
+  var qaRequestCount = 0;
+  final deletedResourceIds = <int>[];
+  final playbackResourceIds = <int>[];
+  final progressUpdates = <Map<String, dynamic>>[];
 
   @override
   Future<LessonDetailModel> fetchLessonDetail({
@@ -526,30 +644,32 @@ class _LessonStudyPageFakeApiClient extends ApiClient {
         'endSec': 2700,
       },
       'lessonResources': [
-        {
-          'resourceId': 501,
-          'courseId': courseId,
-          'resourceType': 'mp4',
-          'originalName': '01-栈与队列.mp4',
-          'scopeType': 'lesson',
-          'lessonId': lessonId,
-          'usageRole': 'primary_video',
-          'visibleToCourseQa': true,
-          'durationSec': 2700,
-          'sortOrder': 1,
-        },
-        {
-          'resourceId': 502,
-          'courseId': courseId,
-          'resourceType': 'pdf',
-          'originalName': '栈与队列讲义.pdf',
-          'scopeType': 'lesson',
-          'lessonId': lessonId,
-          'usageRole': 'lesson_material',
-          'visibleToCourseQa': true,
-          'durationSec': null,
-          'sortOrder': 2,
-        },
+        if (!deletedResourceIds.contains(501))
+          {
+            'resourceId': 501,
+            'courseId': courseId,
+            'resourceType': 'mp4',
+            'originalName': '01-栈与队列.mp4',
+            'scopeType': 'lesson',
+            'lessonId': lessonId,
+            'usageRole': 'primary_video',
+            'visibleToCourseQa': true,
+            'durationSec': 2700,
+            'sortOrder': 1,
+          },
+        if (!deletedResourceIds.contains(502))
+          {
+            'resourceId': 502,
+            'courseId': courseId,
+            'resourceType': 'pdf',
+            'originalName': '栈与队列讲义.pdf',
+            'scopeType': 'lesson',
+            'lessonId': lessonId,
+            'usageRole': 'lesson_material',
+            'visibleToCourseQa': true,
+            'durationSec': null,
+            'sortOrder': 2,
+          },
       ],
       'artifactSummaries': [],
       'progress': {'lastPositionSec': 128, 'masteryScore': 0.52},
@@ -656,6 +776,7 @@ class _LessonStudyPageFakeApiClient extends ApiClient {
   Future<resources.CourseResourcePlaybackModel> fetchCourseResourcePlayback(
     int resourceId,
   ) async {
+    playbackResourceIds.add(resourceId);
     return resources.CourseResourcePlaybackModel.fromJson({
       'resourceId': resourceId,
       'resourceType': 'mp4',
@@ -663,6 +784,76 @@ class _LessonStudyPageFakeApiClient extends ApiClient {
       'mimeType': 'video/mp4',
       'expiresAt': '2026-07-05T12:00:00Z',
       'durationSec': 2700,
+    });
+  }
+
+  @override
+  Future<resources.DeleteCourseResourceResultModel> deleteCourseResource({
+    required String courseId,
+    required int resourceId,
+  }) async {
+    deletedResourceIds.add(resourceId);
+    return resources.DeleteCourseResourceResultModel.fromJson({
+      'deleted': true,
+      'resourceId': resourceId,
+    });
+  }
+
+  @override
+  Future<LessonProgressModel> fetchLessonProgress({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    return LessonProgressModel.fromJson({
+      'courseId': courseId,
+      'lessonId': lessonId,
+      'lastPositionSec': null,
+      'lastHandoutBlockId': null,
+      'handoutReadPercent': 0,
+      'quizStatus': 'not_generated',
+      'reviewStatus': 'not_due',
+      'lastActivityAt': '2026-07-05T12:00:00Z',
+    });
+  }
+
+  @override
+  Future<LessonProgressModel> updateLessonProgress({
+    required String courseId,
+    required String lessonId,
+    required Map<String, dynamic> request,
+  }) async {
+    progressUpdates.add(Map<String, dynamic>.from(request));
+    return LessonProgressModel.fromJson({
+      'courseId': courseId,
+      'lessonId': lessonId,
+      'lastPositionSec': request['lastPositionSec'],
+      'lastHandoutBlockId': request['lastHandoutBlockId'],
+      'handoutReadPercent': 0,
+      'quizStatus': 'not_generated',
+      'reviewStatus': 'not_due',
+      'lastActivityAt': '2026-07-05T12:00:00Z',
+    });
+  }
+
+  @override
+  Future<handouts.QaMessageModel> createLessonQaMessage({
+    required String courseId,
+    required String lessonId,
+    required handouts.ScopedQaMessageRequestModel request,
+  }) async {
+    qaRequestCount++;
+    return handouts.QaMessageModel.fromJson({
+      'sessionId': 6201,
+      'messageId': 6202,
+      'answerMd': 'Keep one empty slot to distinguish full and empty queues.',
+      'citations': [
+        {
+          'resourceId': 501,
+          'refLabel': 'video',
+          'startSec': 120,
+          'endSec': 135,
+        },
+      ],
     });
   }
 }
@@ -682,6 +873,27 @@ class _DelayedGenerateBlockLessonStudyPageFakeApiClient
       generateRequested.complete();
     }
     return generateResponse.future;
+  }
+}
+
+class _FailThenSucceedQaLessonStudyPageFakeApiClient
+    extends _LessonStudyPageFakeApiClient {
+  @override
+  Future<handouts.QaMessageModel> createLessonQaMessage({
+    required String courseId,
+    required String lessonId,
+    required handouts.ScopedQaMessageRequestModel request,
+  }) async {
+    qaRequestCount++;
+    if (qaRequestCount == 1) {
+      throw StateError('temporary qa failure');
+    }
+    return handouts.QaMessageModel.fromJson({
+      'sessionId': 6201,
+      'messageId': 6203,
+      'answerMd': 'Recovered page answer',
+      'citations': [],
+    });
   }
 }
 

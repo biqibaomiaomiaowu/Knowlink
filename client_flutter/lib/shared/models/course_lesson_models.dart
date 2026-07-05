@@ -80,6 +80,43 @@ class CourseLibraryItemModel {
   }
 }
 
+class CourseDeleteImpactModel {
+  const CourseDeleteImpactModel({
+    required this.courseId,
+    required this.canDelete,
+    required this.blockerCount,
+    required this.blockers,
+  });
+
+  final String courseId;
+  final bool canDelete;
+  final int blockerCount;
+  final Map<String, int> blockers;
+
+  factory CourseDeleteImpactModel.fromJson(Map<String, dynamic> json) {
+    final blockers = Map<String, dynamic>.from(
+      json['blockers'] as Map? ?? const <String, dynamic>{},
+    ).map((key, value) => MapEntry(key, _intValue(value)));
+    return CourseDeleteImpactModel(
+      courseId: _stringId(json['courseId']),
+      canDelete:
+          json['canDelete'] as bool? ?? blockers.values.every((v) => v == 0),
+      blockerCount: _nullableInt(json['blockerCount']) ??
+          blockers.values.fold<int>(0, (total, value) => total + value),
+      blockers: blockers,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'courseId': courseId,
+      'canDelete': canDelete,
+      'blockerCount': blockerCount,
+      'blockers': blockers,
+    };
+  }
+}
+
 class CourseWorkbenchModel {
   const CourseWorkbenchModel({
     required this.course,

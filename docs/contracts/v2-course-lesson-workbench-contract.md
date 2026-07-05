@@ -174,6 +174,12 @@ POST   /api/v1/courses/{courseId}/lessons/{lessonId}/split
 - `primaryVideoResourceId`
 - `primaryVideoStartSec`
 - `primaryVideoEndSec`
+- `metaJson`
+
+Workbench new-lesson dialog sends `metaJson.learningGoal`,
+`metaJson.initialMasteryLevel`, optional `metaJson.timeBudgetMinutes`, and
+optional `metaJson.bilibiliSourceUrl`. Non-positive time budgets are blocked
+client-side before `POST /lessons`.
 
 `primaryVideoStartSec` / `primaryVideoEndSec` 必须随 `primaryVideoResourceId` 一起提交；`end` 必须大于 `start` 且不得超过视频时长。
 
@@ -291,6 +297,10 @@ GET  /api/v1/courses/{courseId}/resources?scopeType=&lessonId=
 - PDF / PPTX / DOCX / SRT 必须传 `scopeType`；缺失返回 `400 resource.scope_required`。
 - `scopeType=lesson` 时 `lessonId` 必须存在且属于当前课程；不匹配返回 `400 resource.lesson_mismatch`。
 - `scopeType=course` 时 `lessonId=null`，默认 `usageRole=course_material`。
+- Course workbench course-level upload sends `scopeType=course`,
+  `lessonId=null`, `usageRole=course_material`,
+  `lessonPlacement=course_material`, and `visibleToCourseQa=true`, then
+  refreshes `GET /courses/{courseId}/workbench`.
 - MP4 默认 `lessonPlacement=auto_create`，创建 lesson 并设置 `usageRole=primary_video`；也可以 `bind_existing` 绑定已有 lesson。
 - `upload-init` 返回的 `headers` 必须包含 `x-amz-meta-scope-type`；当请求已确定 `lessonId` 时，还必须包含 `x-amz-meta-lesson-id`。
 - `upload-complete` 返回资源行必须携带 `scopeType`、`lessonId`、`usageRole`、`sourceType`、`sourcePartId`、`visibleToCourseQa`、`durationSec`。
@@ -310,6 +320,12 @@ Bilibili import fields:
 - import run 的 `selection.partLessonMap` 记录 part-level 映射，键为 `sourcePartId`，值至少包含 `lessonId`，导入完成后包含 `resourceId`。
 
 单视频、多 P、合集、番剧默认一视频一节课。重试不得为同一 import run item 重复创建 lesson。
+
+Workbench new-lesson Bilibili flow checks active auth, previews the source URL,
+creates the lesson once, then creates import with `lessonMode=bind_existing`,
+`targetLessonId=<created lesson>`, and `createLessonIfMissing=false`. Retrying
+after a dialog-level import failure reuses the created lesson instead of
+creating a duplicate lesson.
 
 Frozen route token:
 
@@ -375,7 +391,9 @@ GET  /api/v1/qa/sessions/{sessionId}/messages
 Scoped QA message request / response fields:
 
 - request: `question`, optional `sessionId`, optional `handoutBlockId`
-- response: `courseId`, `scopeType`, `lessonId`, `handoutBlockId`, `sessionId`, `messageId`, `answerMd`, `answerType`, `citations`, `generationMetadata`
+- response: `courseId`, `scopeType`, `lessonId`, `handoutBlockId`, `sessionId`, `messageId`, `question`, `answerMd`, `answerType`, `citations`, `generationMetadata`
+- session history item: `sessionId`, `messageId`, `role`, `contentMd`, `question`, `answerMd`, `answerType`, `citations`, `createdAt`, `generationMetadata`
+- In session history, `role=user` rows expose the user question through both `contentMd` and `question`, with `answerMd = null`; `role=assistant` rows carry the preceding question in `question` and expose the answer through `contentMd` / `answerMd`.
 - `handoutBlockId` is only a block anchor for course QA or lesson QA. It is not single-resource QA and does not create a resource-specific route.
 - For embedded lesson-study QA, `handoutBlockId` must belong to the requested `courseId + scopeType + lessonId` handout version. Unknown blocks return `qa.block_not_found`; cross-course or cross-scope blocks return `qa.scope_invalid`.
 - Responses are non-streaming in this phase.
@@ -409,6 +427,7 @@ Frozen route tokens:
 POST /api/v1/courses/{courseId}/quizzes/generate
 POST /api/v1/courses/{courseId}/lessons/{lessonId}/quizzes/generate
 GET  /api/v1/courses/{courseId}/lessons/{lessonId}/quizzes/current
+GET  /api/v1/courses/{courseId}/quizzes
 GET  /api/v1/quizzes/{quizId}
 POST /api/v1/quizzes/{quizId}/submit
 ```
@@ -434,6 +453,9 @@ Public `questions[]` fields:
 - `sourceSegmentKeys`
 - Public quiz responses must not expose `correctAnswer`; submission grading uses repository submission context.
 - Submit quiz responses include public `items[]` per-question grading results (`questionId`, `questionKey`, `selectedOption`, `isCorrect`, `obtainedScore`, `explanationMd`, `knowledgePointKey`, `sourceBlockKey`) and must not expose `correctAnswer`.
+- Course quiz history uses `GET /api/v1/courses/{courseId}/quizzes` and returns `items[]` with `quizId`, `courseId`, `scopeType`, `lessonId`, `status`, `quizMode`, `questionCount`, `createdAt`, `updatedAt`, and nullable `latestAttempt`.
+- Frontend history route is `/courses/:courseId/quizzes`; selecting an item opens `/quizzes/:quizId`.
+- Course quiz regenerate route is `/courses/:courseId/quiz?regenerate=1`. `QuizPage` may call `generateAndPoll(courseId)` once for that route entry; plain `/courses/:courseId/quiz` must not auto-generate, and rebuilds must not repeat generation.
 - Course-scope quiz generation uses the latest course-scoped handout first; if absent, it may aggregate ready lesson handout blocks under the same course; if no handout evidence exists, it falls back only to parsed `scopeType=course` resources with `lessonId=null`.
 - Lesson-scope quiz generation uses the latest current lesson handout blocks first, then falls back only to parsed `scopeType=lesson` resources whose `lessonId` equals the current lesson id.
 - Quiz direct resource fallback must not mix course materials and lesson materials. Course resources belong to course scope; lesson resources belong only to their owning lesson scope.

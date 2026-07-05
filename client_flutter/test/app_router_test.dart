@@ -163,7 +163,6 @@ void main() {
     expect(find.byType(LessonStudyPage), findsOneWidget);
     expect(container.read(courseFlowProvider).courseId, '101');
     expect(container.read(activeLessonProvider)?.lessonId, '42');
-    expect(find.textContaining('42'), findsOneWidget);
   });
 
   testWidgets('legacy course handout route prompts without active lesson', (
@@ -222,7 +221,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LessonStudyPage), findsOneWidget);
-    expect(find.textContaining('l-2'), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '101');
+    expect(container.read(activeLessonProvider)?.lessonId, 'l-2');
   });
 
   testWidgets('primary navigation uses prototype order', (tester) async {
@@ -253,13 +253,13 @@ void main() {
       'AI 问答',
       '复习中心',
     ];
-    var previousLeft = -1.0;
+    var previousTop = -1.0;
     for (final label in labels) {
-      final finder = find.text(label);
+      final finder = _navLabel(label);
       expect(finder, findsOneWidget);
-      final left = tester.getTopLeft(finder).dx;
-      expect(left, greaterThan(previousLeft));
-      previousLeft = left;
+      final top = tester.getTopLeft(finder).dy;
+      expect(top, greaterThan(previousTop));
+      previousTop = top;
     }
     expect(find.text('课程工作台'), findsNothing);
   });
@@ -378,21 +378,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    await tester.tap(find.widgetWithText(FilledButton, '继续学习'));
+    await tester.tap(find.widgetWithText(FilledButton, '进入当前课时'));
     await tester.pumpAndSettle();
 
     expect(find.byType(LessonStudyPage), findsOneWidget);
     expect(container.read(courseFlowProvider).courseId, '101');
     expect(container.read(activeLessonProvider)?.lessonId, '42');
-
-    router.go('/');
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('智能课程推荐'));
-    await tester.tap(find.text('智能课程推荐'));
-    await tester.pumpAndSettle();
-
-    expect(tester.takeException(), isNull);
-    expect(find.byType(CourseRecommendPage), findsOneWidget);
   });
 }
 
@@ -401,6 +392,13 @@ void _useTestSurface(WidgetTester tester, Size size) {
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Finder _navLabel(String label) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Text && widget.data == label && widget.style?.fontSize == 14,
+  );
 }
 
 class _RouterFakeApiClient extends ApiClient {

@@ -47,12 +47,14 @@ class QuizPage extends ConsumerStatefulWidget {
     this.quizId,
     this.courseId,
     this.lessonId,
+    this.autoRegenerate = false,
     super.key,
   });
 
   final String? quizId;
   final String? courseId;
   final String? lessonId;
+  final bool autoRegenerate;
 
   @override
   ConsumerState<QuizPage> createState() => _QuizPageState();
@@ -61,6 +63,7 @@ class QuizPage extends ConsumerStatefulWidget {
 class _QuizPageState extends ConsumerState<QuizPage> {
   String? _loadedQuizId;
   String? _preparedEntryKey;
+  String? _autoRegeneratedEntryKey;
 
   @override
   void initState() {
@@ -73,7 +76,8 @@ class _QuizPageState extends ConsumerState<QuizPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.quizId != widget.quizId ||
         oldWidget.courseId != widget.courseId ||
-        oldWidget.lessonId != widget.lessonId) {
+        oldWidget.lessonId != widget.lessonId ||
+        oldWidget.autoRegenerate != widget.autoRegenerate) {
       _scheduleEntrySync();
     }
   }
@@ -151,22 +155,38 @@ class _QuizPageState extends ConsumerState<QuizPage> {
     final courseId = widget.courseId;
     final lessonId = widget.lessonId;
     final entryKey = lessonId == null ? courseId : '$courseId/$lessonId';
-    if (courseId == null || entryKey == _preparedEntryKey) {
+    final shouldPrepare = entryKey != _preparedEntryKey;
+    final shouldAutoRegenerate = widget.autoRegenerate &&
+        lessonId == null &&
+        entryKey != _autoRegeneratedEntryKey;
+    if (courseId == null || (!shouldPrepare && !shouldAutoRegenerate)) {
       return;
     }
-    _preparedEntryKey = entryKey;
+    if (shouldPrepare) {
+      _preparedEntryKey = entryKey;
+    }
+    if (shouldAutoRegenerate) {
+      _autoRegeneratedEntryKey = entryKey;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
       if (lessonId == null) {
-        ref.read(quizProvider.notifier).prepareCourse(courseId);
+        if (shouldPrepare) {
+          ref.read(quizProvider.notifier).prepareCourse(courseId);
+        }
+        if (shouldAutoRegenerate) {
+          ref.read(quizProvider.notifier).generateAndPoll(courseId);
+        }
         return;
       }
-      ref.read(quizProvider.notifier).prepareLesson(
-            courseId: courseId,
-            lessonId: lessonId,
-          );
+      if (shouldPrepare) {
+        ref.read(quizProvider.notifier).prepareLesson(
+              courseId: courseId,
+              lessonId: lessonId,
+            );
+      }
     });
   }
 

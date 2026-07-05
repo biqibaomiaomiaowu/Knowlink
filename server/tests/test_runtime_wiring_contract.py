@@ -56,6 +56,9 @@ def _post_parse_start(course_id: int, idempotency_key: str) -> tuple[int, dict[s
 
 
 class _NoopReviewDispatcher:
+    def enqueue_quiz_generate(self, *, task_id: int, payload: dict[str, Any]) -> None:
+        _ = task_id, payload
+
     def enqueue_review_refresh(self, *, task_id: int, payload: dict[str, Any]) -> None:
         _ = task_id, payload
 
@@ -1072,6 +1075,7 @@ def test_lesson_quiz_service_reads_and_scores_sql_scoped_quiz_on_sqlite():
     from server.infra.db.base import Base
     from server.infra.db.models import AsyncTask
     from server.infra.repositories.sqlalchemy import SqlAlchemyRuntimeRepository
+    from server.tasks.quizzes import run_quiz_generate
 
     _ = server.infra.db.models
     engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
@@ -1186,10 +1190,46 @@ def test_lesson_quiz_service_reads_and_scores_sql_scoped_quiz_on_sqlite():
             lesson_id=lesson["lessonId"],
             question_count_level="small",
         )
-        assert generated["questionCount"] == 1
-        assert len(generated["questions"]) == 1
+        assert generated["status"] == "queued"
+        quiz_id = generated["entity"]["id"]
+        task_id = generated["taskId"]
+        task = repo.get_async_task(task_id)
+        assert task is not None
 
-        quiz = service.get_quiz(quiz_id=generated["quizId"])
+        def fake_generate_quiz(block_payloads, *, segments, course_context, preferences, question_count_level):
+            _ = course_context, preferences, question_count_level
+            assert [block["title"] for block in block_payloads] == ["B+ Tree fanout"]
+            assert [segment["segmentKey"] for segment in segments] == [segment_key]
+            block = block_payloads[0]
+            kp = block["knowledgePoints"][0]
+            return {
+                "quizType": "chapter_review",
+                "questions": [
+                    {
+                        "questionKey": "q1-btree-fanout",
+                        "questionType": "single_choice",
+                        "stemMd": "What does B+ tree fanout reduce?",
+                        "options": ["A. Lookup depth", "B. Key order", "C. Page size", "D. Tuple width"],
+                        "correctAnswer": "A",
+                        "explanationMd": "High fanout reduces lookup depth.",
+                        "difficultyLevel": "medium",
+                        "knowledgePointKey": kp["knowledgePointKey"],
+                        "knowledgePointName": kp["displayName"],
+                        "sourceBlockKey": str(block["blockId"]),
+                        "sourceSegmentKeys": [segment_key],
+                    }
+                ],
+            }
+
+        worker_result = run_quiz_generate(
+            {"taskId": task_id, **task["payloadJson"]},
+            session_factory=session_factory,
+            generate_quiz_func=fake_generate_quiz,
+        )
+        assert worker_result["status"] == "ready"
+        assert worker_result["questionCount"] == 1
+
+        quiz = service.get_quiz(quiz_id=quiz_id)
 
         assert quiz["scopeType"] == "lesson"
         assert quiz["lessonId"] == lesson["lessonId"]

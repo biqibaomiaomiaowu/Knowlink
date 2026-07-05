@@ -54,6 +54,25 @@ void main() {
     expect(container.read(courseFlowProvider).quizId, 8001);
   });
 
+  test('courseQuizHistoryProvider fetches course quiz history', () async {
+    final fakeApiClient = _FakeQuizApiClient();
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final history =
+        await container.read(courseQuizHistoryProvider('101').future);
+
+    expect(fakeApiClient.historyCourseIds, ['101']);
+    expect(history, hasLength(2));
+    expect(history.first.quizId, 8001);
+    expect(history.first.latestAttempt?.attemptId, 8201);
+    expect(history.last.latestAttempt, isNull);
+  });
+
   test('generateAndPoll sends selected question count level', () async {
     final fakeApiClient = _FakeQuizApiClient();
     final container = ProviderContainer(
@@ -274,6 +293,7 @@ class _FakeQuizApiClient extends ApiClient {
   final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
   final submittedAnswers = <SubmitQuizRequestModel>[];
+  final historyCourseIds = <String>[];
   int? reviewTaskRunId = 8301;
   bool missingCurrentLessonQuiz = false;
 
@@ -319,7 +339,8 @@ class _FakeQuizApiClient extends ApiClient {
     required String idempotencyKey,
     required QuizQuestionCountLevel questionCountLevel,
   }) async {
-    expect(idempotencyKey, startsWith('quiz-generate-lesson-$courseId-$lessonId-'));
+    expect(idempotencyKey,
+        startsWith('quiz-generate-lesson-$courseId-$lessonId-'));
     generatedLessonQuizRequests.add('$courseId/$lessonId');
     generatedLevels.add(questionCountLevel);
     return QuizGenerateResultModel.fromJson({
@@ -354,6 +375,45 @@ class _FakeQuizApiClient extends ApiClient {
         },
       ],
     });
+  }
+
+  @override
+  Future<List<CourseQuizHistoryItemModel>> fetchCourseQuizHistory(
+    String courseId,
+  ) async {
+    historyCourseIds.add(courseId);
+    return [
+      CourseQuizHistoryItemModel.fromJson({
+        'quizId': 8001,
+        'courseId': int.parse(courseId),
+        'scopeType': 'course',
+        'lessonId': null,
+        'status': 'ready',
+        'quizMode': 'objective',
+        'questionCount': 2,
+        'createdAt': '2026-07-01T10:00:00Z',
+        'updatedAt': '2026-07-01T10:02:00Z',
+        'latestAttempt': {
+          'attemptId': 8201,
+          'score': 80,
+          'totalScore': 100,
+          'accuracy': 0.8,
+          'createdAt': '2026-07-01T10:05:00Z',
+        },
+      }),
+      CourseQuizHistoryItemModel.fromJson({
+        'quizId': 8002,
+        'courseId': int.parse(courseId),
+        'scopeType': 'lesson',
+        'lessonId': 42,
+        'status': 'ready',
+        'quizMode': 'objective',
+        'questionCount': 1,
+        'createdAt': '2026-07-01T11:00:00Z',
+        'updatedAt': '2026-07-01T11:02:00Z',
+        'latestAttempt': null,
+      }),
+    ];
   }
 
   QuizModel _lessonQuiz(int quizId, String courseId, String lessonId) {

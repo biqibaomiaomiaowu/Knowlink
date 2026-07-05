@@ -23,6 +23,15 @@ async def generate_quiz(
     return api_ok(request, data)
 
 
+@router.get("/courses/{courseId}/quizzes")
+async def list_course_quizzes(
+    courseId: int,
+    request: Request,
+    service: QuizService = Depends(get_quiz_service),
+):
+    return api_ok(request, service.list_course_quizzes(course_id=courseId))
+
+
 @router.post("/courses/{courseId}/lessons/{lessonId}/quizzes/generate")
 async def generate_lesson_quiz(
     courseId: int,

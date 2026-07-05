@@ -79,6 +79,68 @@ void main() {
     expect(find.text('生成 已就绪 · 3 条'), findsOneWidget);
   });
 
+  testWidgets('review page consumes existing review run from course flow', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _ReviewPageFakeApiClient(startEmpty: true);
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(fakeApiClient),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.read(courseFlowProvider.notifier)
+      ..startCourse('101')
+      ..setReviewTaskRun(8302);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: ReviewPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.regeneratedCourseIds, isEmpty);
+    expect(fakeApiClient.statusRunIds, [8302]);
+    expect(fakeApiClient.courseReviewCourseIds, ['101']);
+    expect(container.read(courseFlowProvider).reviewTaskRunId, isNull);
+    expect(find.text('第 1 个复习任务'), findsWidgets);
+    expect(find.text('生成 已就绪 · 3 条'), findsOneWidget);
+  });
+
+  testWidgets('manual regenerate uses provider default polling interval', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _ReviewPageFakeApiClient(
+      startEmpty: true,
+      statusSequence: ['running', 'ready'],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: ReviewPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('重新生成复习'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+
+    expect(fakeApiClient.statusRunIds, [8301]);
+
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.statusRunIds, [8301, 8301]);
+  });
+
   testWidgets('review page does not call completion API when unsupported', (
     tester,
   ) async {
@@ -200,10 +262,12 @@ class _ReviewPageFakeApiClient extends ApiClient {
   _ReviewPageFakeApiClient({
     this.startEmpty = false,
     this.unsupportedTaskIds = const {},
+    this.statusSequence = const ['ready'],
   });
 
   final bool startEmpty;
   final Set<int> unsupportedTaskIds;
+  final List<String> statusSequence;
   final courseReviewCourseIds = <String>[];
   final reviewTasksCourseIds = <String>[];
   final regeneratedCourseIds = <String>[];
@@ -260,11 +324,20 @@ class _ReviewPageFakeApiClient extends ApiClient {
     int reviewTaskRunId,
   ) async {
     statusRunIds.add(reviewTaskRunId);
+    final statusIndex = statusRunIds.length - 1;
+    final status = statusIndex < statusSequence.length
+        ? statusSequence[statusIndex]
+        : statusSequence.last;
+    if (status == 'ready' ||
+        status == 'succeeded' ||
+        status == 'partial_success') {
+      _generated = true;
+    }
     return ReviewRunStatusModel.fromJson({
       'reviewTaskRunId': reviewTaskRunId,
       'courseId': 101,
-      'status': 'ready',
-      'generatedCount': 3,
+      'status': status,
+      'generatedCount': status == 'ready' ? 3 : 0,
     });
   }
 

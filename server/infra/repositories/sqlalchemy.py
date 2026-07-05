@@ -121,7 +121,7 @@ _BILIBILI_IMPORT_RUN_CHANGE_FIELDS = {
 _SCOPED_ARTIFACT_ALLOWED_SCOPES = {
     "handout_version": {"course", "lesson"},
     "qa_session": {"course", "lesson"},
-    "quiz": {"course", "lesson"},
+    "quiz": {"course", "lesson", "lesson_range"},
     "review_task_run": {"course", "lesson"},
     "mastery_record": {"course", "lesson"},
     "graph_snapshot": {"course", "lesson"},
@@ -2397,7 +2397,19 @@ class SqlAlchemyRuntimeRepository:
             .order_by(QaMessage.created_at.asc(), QaMessage.id.asc())
         ).all()
         generation_metadata = _generation_metadata_from_response(qa_session.context_snapshot_json or {})
-        return [self._qa_message_dict(message, generation_metadata=generation_metadata) for message in messages]
+        output: list[dict[str, Any]] = []
+        current_question: str | None = None
+        for message in messages:
+            if message.role == "user":
+                current_question = message.content_md
+            output.append(
+                self._qa_message_dict(
+                    message,
+                    generation_metadata=generation_metadata,
+                    question=current_question,
+                )
+            )
+        return output
 
     def create_quiz(
         self,
@@ -2587,6 +2599,27 @@ class SqlAlchemyRuntimeRepository:
             .order_by(QuizQuestion.sort_no.asc(), QuizQuestion.id.asc())
         ).all()
         return _quiz_dict(quiz, questions=[_quiz_question_public_dict(question) for question in questions])
+
+    def list_course_quizzes(self, course_id: int) -> list[dict[str, Any]]:
+        if self._get_course_model(course_id) is None:
+            return []
+        quizzes = self.session.scalars(
+            select(Quiz)
+            .where(Quiz.course_id == course_id)
+            .order_by(Quiz.created_at.desc(), Quiz.id.desc())
+        ).all()
+        items: list[dict[str, Any]] = []
+        for quiz in quizzes:
+            latest_attempt = self.session.scalars(
+                select(QuizAttempt)
+                .where(
+                    QuizAttempt.user_id == self.user_id,
+                    QuizAttempt.quiz_id == quiz.id,
+                )
+                .order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc())
+            ).first()
+            items.append(_quiz_history_dict(quiz, latest_attempt=latest_attempt))
+        return items
 
     def save_quiz_generation_result(
         self,
@@ -3988,7 +4021,13 @@ class SqlAlchemyRuntimeRepository:
             ).all()
         )
 
-    def _qa_message_dict(self, message: QaMessage, *, generation_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _qa_message_dict(
+        self,
+        message: QaMessage,
+        *,
+        generation_metadata: dict[str, Any] | None = None,
+        question: str | None = None,
+    ) -> dict[str, Any]:
         refs = []
         if message.role == "assistant":
             ref_rows = self.session.scalars(
@@ -4002,9 +4041,11 @@ class SqlAlchemyRuntimeRepository:
             "messageId": message.id,
             "role": message.role,
             "contentMd": message.content_md,
+            "question": message.content_md if message.role == "user" else question,
             "answerMd": message.content_md if message.role == "assistant" else None,
             "answerType": message.answer_type,
             "citations": refs,
+            "createdAt": _normalize_utc_datetime(message.created_at),
         }
         if message.role == "assistant" and generation_metadata:
             payload["generationMetadata"] = generation_metadata
@@ -4903,6 +4944,30 @@ def _quiz_dict(quiz: Quiz, *, questions: Sequence[dict[str, Any]]) -> dict[str, 
         "status": quiz.status,
         "questionCount": quiz.question_count,
         "questions": list(questions),
+    }
+
+
+def _quiz_history_dict(quiz: Quiz, *, latest_attempt: QuizAttempt | None) -> dict[str, Any]:
+    return {
+        "quizId": quiz.id,
+        "courseId": quiz.course_id,
+        "scopeType": quiz.scope_type,
+        "lessonId": quiz.lesson_id,
+        "status": quiz.status,
+        "quizMode": quiz.quiz_mode,
+        "questionCount": quiz.question_count,
+        "createdAt": _normalize_utc_datetime(quiz.created_at),
+        "updatedAt": _normalize_utc_datetime(quiz.updated_at),
+        "latestAttempt": None
+        if latest_attempt is None
+        else {
+            "attemptId": latest_attempt.id,
+            "score": latest_attempt.score,
+            "totalScore": latest_attempt.total_score,
+            "accuracy": latest_attempt.accuracy,
+            "reviewTaskRunId": latest_attempt.review_task_run_id,
+            "createdAt": _normalize_utc_datetime(latest_attempt.created_at),
+        },
     }
 
 

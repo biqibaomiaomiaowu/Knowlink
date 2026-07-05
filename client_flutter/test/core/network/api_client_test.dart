@@ -249,6 +249,87 @@ void main() {
     ]);
   });
 
+  test('course library methods send filters and lifecycle action paths',
+      () async {
+    final adapter = _RecordingHttpClientAdapter(
+      onFetch: (options, _) async {
+        final data = switch ('${options.method} ${options.path}') {
+          'GET /api/v1/courses' => {
+              'items': [_courseLibraryJson()],
+            },
+          'GET /api/v1/courses/101/delete-impact' => {
+              'courseId': 101,
+              'canDelete': false,
+              'blockerCount': 3,
+              'blockers': {
+                'lessons': 2,
+                'resources': 1,
+              },
+            },
+          'POST /api/v1/courses/101/archive' => {
+              'course': {
+                ..._courseLibraryJson(),
+                'lifecycleStatus': 'archived',
+                'archivedAt': '2026-06-02T10:00:00+08:00',
+              },
+            },
+          'POST /api/v1/courses/101/restore' => {
+              'course': _courseLibraryJson(),
+            },
+          'DELETE /api/v1/courses/101' => {
+              'deleted': true,
+            },
+          _ => throw StateError('Unexpected ${options.method} ${options.path}'),
+        };
+        return ResponseBody.fromString(
+          jsonEncode({'data': data}),
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['application/json'],
+          },
+        );
+      },
+    );
+    final client = ApiClient(
+      httpClientAdapter: adapter,
+      baseUrl: 'https://example.test',
+      demoToken: 'v2-course-token',
+    );
+
+    final courses = await client.fetchCourseLibrary(
+      query: ' 线代 ',
+      learningStatus: 'learning_ready',
+      source: 'bilibili',
+      archived: 'include',
+      sort: 'title_asc',
+    );
+    final impact = await client.fetchCourseDeleteImpact('101');
+    final archived = await client.archiveCourse('101');
+    final restored = await client.restoreCourse('101');
+    await client.deleteCourse('101');
+
+    expect(courses.single.courseId, '101');
+    expect(impact.blockers['resources'], 1);
+    expect(archived.archivedAt, isNotNull);
+    expect(restored.archivedAt, isNull);
+    expect(
+        adapter.requests.map((request) => '${request.method} ${request.path}'),
+        [
+          'GET /api/v1/courses',
+          'GET /api/v1/courses/101/delete-impact',
+          'POST /api/v1/courses/101/archive',
+          'POST /api/v1/courses/101/restore',
+          'DELETE /api/v1/courses/101',
+        ]);
+    expect(adapter.requests.first.queryParameters, {
+      'q': '线代',
+      'learningStatus': 'learning_ready',
+      'source': 'bilibili',
+      'archived': 'include',
+      'sort': 'title_asc',
+    });
+  });
+
   test('resource upload methods use frozen Week 2 paths', () async {
     final adapter = _RecordingHttpClientAdapter(
       onFetch: (options, _) async {
@@ -797,8 +878,24 @@ void main() {
               'items': [
                 {
                   'sessionId': 6001,
+                  'messageId': 6001,
+                  'role': 'user',
+                  'contentMd': '这个定义和题型有什么联系？',
+                  'question': '这个定义和题型有什么联系？',
+                  'answerMd': null,
+                  'answerType': null,
+                  'createdAt': '2026-04-18T15:00:00Z',
+                  'citations': [],
+                },
+                {
+                  'sessionId': 6001,
                   'messageId': 6002,
+                  'role': 'assistant',
+                  'contentMd': '定义控制了题型的判断边界。',
+                  'question': '这个定义和题型有什么联系？',
                   'answerMd': '定义控制了题型的判断边界。',
+                  'answerType': 'direct_answer',
+                  'createdAt': '2026-04-18T15:00:01Z',
                   'citations': [],
                 },
               ],
@@ -855,7 +952,10 @@ void main() {
     expect(jumpTarget.displayText, '视频 501 2:00 · 文档 502 第 2 页');
     expect(answer.sessionId, 6001);
     expect(answer.citations.single.refLabel, 'PDF 第 2 页');
-    expect(session.items.single.messageId, 6002);
+    expect(session.items.first.role, 'user');
+    expect(session.items.first.answerMd, '');
+    expect(session.items.last.messageId, 6002);
+    expect(session.items.last.question, '这个定义和题型有什么联系？');
     expect(adapter.requests.map((request) => request.path), [
       '/api/v1/courses/101/handouts/generate',
       '/api/v1/handout-versions/3001/status',
@@ -1769,6 +1869,22 @@ Map<String, dynamic> _courseJson() {
     'pipelineStage': 'handout',
     'pipelineStatus': 'succeeded',
     'updatedAt': '2026-05-11T10:00:00+00:00',
+  };
+}
+
+Map<String, dynamic> _courseLibraryJson() {
+  return {
+    ..._courseJson(),
+    'isCurrent': true,
+    'learningStatus': 'learning_ready',
+    'lastActivityAt': '2026-06-01T09:30:00+08:00',
+    'lessonCount': 6,
+    'courseResourceCount': 3,
+    'currentLessonId': 'l-2',
+    'currentLessonTitle': '关系模型',
+    'overallMasteryScore': 0.72,
+    'pendingReviewCount': 4,
+    'archivedAt': null,
   };
 }
 

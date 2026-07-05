@@ -210,6 +210,9 @@ class BilibiliImportCreateRequestModel {
     required this.selectionMode,
     required this.selectedPartIds,
     this.qualityPreference = 'android_safe',
+    this.lessonMode,
+    this.targetLessonId,
+    this.createLessonIfMissing,
   });
 
   final String previewId;
@@ -217,6 +220,9 @@ class BilibiliImportCreateRequestModel {
   final String selectionMode;
   final List<String> selectedPartIds;
   final String qualityPreference;
+  final String? lessonMode;
+  final String? targetLessonId;
+  final bool? createLessonIfMissing;
 
   Map<String, dynamic> toJson() {
     return {
@@ -225,6 +231,10 @@ class BilibiliImportCreateRequestModel {
       'selectionMode': selectionMode,
       'selectedPartIds': selectedPartIds,
       'qualityPreference': qualityPreference,
+      if (lessonMode != null) 'lessonMode': lessonMode,
+      if (targetLessonId != null) 'targetLessonId': targetLessonId,
+      if (createLessonIfMissing != null)
+        'createLessonIfMissing': createLessonIfMissing,
     };
   }
 }

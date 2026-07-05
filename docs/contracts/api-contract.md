@@ -1167,9 +1167,24 @@ V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知
   "items": [
     {
       "sessionId": 6001,
+      "messageId": 6001,
+      "role": "user",
+      "contentMd": "这个定义和题型有什么联系？",
+      "question": "这个定义和题型有什么联系？",
+      "answerMd": null,
+      "answerType": null,
+      "createdAt": "2026-04-18T15:00:00+00:00",
+      "citations": []
+    },
+    {
+      "sessionId": 6001,
       "messageId": 6002,
+      "role": "assistant",
+      "contentMd": "定义控制了题型的判断边界。",
+      "question": "这个定义和题型有什么联系？",
       "answerMd": "定义控制了题型的判断边界。",
       "answerType": "direct_answer",
+      "createdAt": "2026-04-18T15:00:01+00:00",
       "generationMetadata": {
         "source": "model",
         "reason": "model_response"
@@ -1185,6 +1200,8 @@ V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知
   ]
 }
 ```
+
+历史消息按 user / assistant 双行返回；前端必须允许 `role=user` 行的 `answerMd = null`，并以 `question` 或 `contentMd` 展示原始提问。`role=assistant` 行的 `question` 回填同一轮用户提问，便于嵌入式 QA 或历史会话直接展示问答对。
 
 ### `POST /api/v1/courses/{courseId}/quizzes/generate`
 
@@ -1205,6 +1222,42 @@ V1 不冻结复杂知识图谱 API。V2 按 `docs/v2/phase-plan.md` 做复杂知
 - DeepSeek 未配置、超时、坏 JSON、题数不在档位范围、引用未知 block / segment 或 schema 校验失败时，异步任务失败，不回退模板题。
 
 响应结构与其他异步生成接口一致，`entity.type = quiz`。
+
+### `GET /api/v1/courses/{courseId}/quizzes`
+
+Response `data`:
+
+```json
+{
+  "items": [
+    {
+      "quizId": 8001,
+      "courseId": 101,
+      "scopeType": "course",
+      "lessonId": null,
+      "status": "ready",
+      "quizMode": "objective",
+      "questionCount": 3,
+      "createdAt": "2026-07-01T10:00:00+00:00",
+      "updatedAt": "2026-07-01T10:02:00+00:00",
+      "latestAttempt": {
+        "attemptId": 8201,
+        "score": 2,
+        "totalScore": 3,
+        "accuracy": 0.6667,
+        "reviewTaskRunId": 8301,
+        "createdAt": "2026-07-01T10:05:00+00:00"
+      }
+    }
+  ]
+}
+```
+
+Notes:
+
+- The list is scoped by path `courseId` and ordered newest quiz first.
+- `latestAttempt` is the latest attempt for that quiz by `createdAt` then id; it is `null` when the quiz has no attempts.
+- This endpoint only exposes objective quiz history metadata. It does not add subjective grading or expose `correctAnswer`.
 
 ### `GET /api/v1/quizzes/{quizId}`
 

@@ -236,6 +236,29 @@ void main() {
     });
   });
 
+  test('create request serializes bind existing lesson fields', () {
+    const request = BilibiliImportCreateRequestModel(
+      previewId: 'bili_preview_9101',
+      sourceUrl: 'https://www.bilibili.com/video/BV1xx411c7mD',
+      selectionMode: 'current_part',
+      selectedPartIds: ['cid-1001'],
+      lessonMode: 'bind_existing',
+      targetLessonId: 'l-new',
+      createLessonIfMissing: false,
+    );
+
+    expect(request.toJson(), {
+      'previewId': 'bili_preview_9101',
+      'sourceUrl': 'https://www.bilibili.com/video/BV1xx411c7mD',
+      'selectionMode': 'current_part',
+      'selectedPartIds': ['cid-1001'],
+      'qualityPreference': 'android_safe',
+      'lessonMode': 'bind_existing',
+      'targetLessonId': 'l-new',
+      'createLessonIfMissing': false,
+    });
+  });
+
   test('run parses status fields and exposes terminal recoverable helpers', () {
     final downloading = BilibiliImportRunModel.fromJson({
       'importRunId': 9001,

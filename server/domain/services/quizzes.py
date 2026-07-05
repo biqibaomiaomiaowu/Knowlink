@@ -157,6 +157,11 @@ class QuizService:
             )
         return quiz
 
+    def list_course_quizzes(self, *, course_id: int) -> dict[str, object]:
+        self._ensure_course(course_id)
+        quiz_repository = getattr(self.quizzes, "store", self.quizzes)
+        return {"items": quiz_repository.list_course_quizzes(course_id)}
+
     def generate_lesson_quiz(
         self,
         *,

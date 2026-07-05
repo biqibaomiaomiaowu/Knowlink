@@ -30,7 +30,7 @@ def _scoped_idempotency_record_expired(expires_at: object) -> bool:
 _SCOPED_ARTIFACT_ALLOWED_SCOPES = {
     "handout_version": {"course", "lesson"},
     "qa_session": {"course", "lesson"},
-    "quiz": {"course", "lesson"},
+    "quiz": {"course", "lesson", "lesson_range"},
     "review_task_run": {"course", "lesson"},
     "mastery_record": {"course", "lesson"},
     "graph_snapshot": {"course", "lesson"},
@@ -1710,6 +1710,7 @@ class RuntimeStore:
         }
         if generation_metadata:
             payload["generationMetadata"] = generation_metadata
+        now = utcnow()
         self.qa_sessions[session_id] = {
             "context": {
                 "courseId": context.get("courseId"),
@@ -1728,8 +1729,9 @@ class RuntimeStore:
                     "answerMd": None,
                     "answerType": None,
                     "citations": [],
+                    "createdAt": now,
                 },
-                {"role": "assistant", **payload},
+                {"role": "assistant", "contentMd": response["answerMd"], "createdAt": now, **payload},
             ],
         }
         return payload
@@ -1845,6 +1847,7 @@ class RuntimeStore:
                     "answerMd": None,
                     "answerType": None,
                     "citations": [],
+                    "createdAt": now,
                 },
                 {
                     "sessionId": session_id,
@@ -1855,6 +1858,7 @@ class RuntimeStore:
                     "answerType": "placeholder",
                     "citations": list(citations),
                     "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+                    "createdAt": now,
                 },
             ]
         )
@@ -2033,7 +2037,10 @@ class RuntimeStore:
         if session is None:
             return None
         if session.get("scopeType") in {"course", "lesson"}:
-            return list(session.get("messages") or [])
+            return _qa_messages_with_questions(
+                list(session.get("messages") or []),
+                fallback_created_at=session.get("lastMessageAt"),
+            )
         context = session.get("context") or {}
         live_context = self.get_qa_context(int(context.get("courseId") or 0), int(context.get("handoutBlockId") or 0))
         if (
@@ -2042,7 +2049,10 @@ class RuntimeStore:
             or live_context.get("activeHandoutVersionId") != context.get("activeHandoutVersionId")
         ):
             return None
-        return list(session.get("messages") or [])
+        return _qa_messages_with_questions(
+            list(session.get("messages") or []),
+            fallback_created_at=session.get("lastMessageAt"),
+        )
 
     def create_quiz(
         self,
@@ -2056,6 +2066,7 @@ class RuntimeStore:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         quiz_id = self.next_id("quiz")
         task_id = self.next_id("task")
+        now = utcnow()
         course = self.courses.get(course_id, {})
         handout_version_id = course.get("activeHandoutVersionId")
         source_parse_run_id = course.get("activeParseRunId")
@@ -2082,6 +2093,9 @@ class RuntimeStore:
             "status": "queued",
             "questionCount": 0,
             "questions": [],
+            "attempts": [],
+            "createdAt": now,
+            "updatedAt": now,
         }
         self.quizzes[quiz_id] = quiz
         self.register_async_task(
@@ -2192,6 +2206,7 @@ class RuntimeStore:
                 "questionCount": len(questions),
                 "questions": questions,
                 "questionCountLevel": question_count_level,
+                "updatedAt": utcnow(),
             }
         )
         return self.public_quiz(quiz_id) or quiz
@@ -2203,6 +2218,15 @@ class RuntimeStore:
         public_quiz = dict(quiz)
         public_quiz["questions"] = [_public_quiz_question(question) for question in quiz.get("questions") or []]
         return public_quiz
+
+    def list_course_quizzes(self, course_id: int) -> list[dict[str, Any]]:
+        quizzes = [
+            quiz
+            for quiz in self.quizzes.values()
+            if int(quiz.get("courseId") or 0) == course_id
+        ]
+        quizzes.sort(key=lambda item: (item.get("createdAt") or datetime.min.replace(tzinfo=timezone.utc), item.get("quizId") or 0), reverse=True)
+        return [_memory_quiz_history_item(quiz) for quiz in quizzes]
 
     def get_quiz_submission_context(self, quiz_id: int) -> dict[str, Any] | None:
         quiz = self.quizzes.get(quiz_id)
@@ -2240,7 +2264,8 @@ class RuntimeStore:
             for item in quiz_attempt_result.get("items", [])
             if isinstance(item, dict)
         ]
-        return {
+        now = utcnow()
+        result = {
             "attemptId": attempt_id,
             "score": int(quiz_attempt_result.get("score", 0)),
             "totalScore": int(quiz_attempt_result.get("totalScore", 0)),
@@ -2249,7 +2274,11 @@ class RuntimeStore:
             "masteryDelta": list(quiz_attempt_result.get("masteryDelta", [])),
             "recommendedReviewAction": quiz_attempt_result.get("recommendedReviewAction"),
             "items": items,
+            "createdAt": now,
         }
+        quiz.setdefault("attempts", []).append(result)
+        quiz["updatedAt"] = now
+        return result
 
     def create_review_run(self, course_id: int) -> dict[str, Any]:
         review_run_id = self.next_id("review_run")
@@ -2458,6 +2487,28 @@ def _as_positive_int(value: Any) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def _qa_messages_with_questions(
+    messages: Sequence[dict[str, Any]],
+    *,
+    fallback_created_at: Any = None,
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    current_question: str | None = None
+    created_at = fallback_created_at or utcnow()
+    for message in messages:
+        item = dict(message)
+        role = str(item.get("role") or "")
+        content_md = item.get("contentMd")
+        if role == "user":
+            current_question = str(content_md or "")
+            item["question"] = current_question
+        elif role == "assistant":
+            item["question"] = item.get("question") or current_question
+        item["createdAt"] = item.get("createdAt") or created_at
+        output.append(item)
+    return output
+
+
 def _normalized_search_limit(limit: int) -> int:
     if isinstance(limit, bool):
         return 0
@@ -2555,6 +2606,30 @@ def _public_quiz_attempt_item(item: Mapping[str, Any], *, question: Mapping[str,
     if question_id is not None:
         output["questionId"] = question_id
     return output
+
+
+def _memory_quiz_history_item(quiz: Mapping[str, Any]) -> dict[str, Any]:
+    attempts = [attempt for attempt in list(quiz.get("attempts") or []) if isinstance(attempt, Mapping)]
+    latest_attempt = attempts[-1] if attempts else None
+    return {
+        "quizId": quiz.get("quizId"),
+        "courseId": quiz.get("courseId"),
+        "scopeType": quiz.get("scopeType", "course"),
+        "lessonId": quiz.get("lessonId"),
+        "status": quiz.get("status", "unknown"),
+        "quizMode": quiz.get("quizMode", "objective"),
+        "questionCount": quiz.get("questionCount", 0),
+        "createdAt": quiz.get("createdAt"),
+        "updatedAt": quiz.get("updatedAt"),
+        "latestAttempt": None if latest_attempt is None else {
+            "attemptId": latest_attempt.get("attemptId"),
+            "score": latest_attempt.get("score", 0),
+            "totalScore": latest_attempt.get("totalScore", 0),
+            "accuracy": latest_attempt.get("accuracy", 0.0),
+            "reviewTaskRunId": latest_attempt.get("reviewTaskRunId"),
+            "createdAt": latest_attempt.get("createdAt"),
+        },
+    }
 
 
 def _quiz_has_review_context(quiz: Mapping[str, Any]) -> bool:

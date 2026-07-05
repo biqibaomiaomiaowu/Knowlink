@@ -146,11 +146,11 @@ void main() {
     await tester.tap(find.byTooltip('暂停'));
     await tester.pumpAndSettle();
     expect(videoControllers.last.pauseCalls, 1);
-    await tester.tap(find.widgetWithText(TextButton, '-30').first);
+    await tester.tap(find.widgetWithText(TextButton, '-30s').first);
     await tester.pumpAndSettle();
     expect(videoControllers.last.seekPositions,
         contains(const Duration(minutes: 1, seconds: 30)));
-    await tester.tap(find.widgetWithText(TextButton, '+30').first);
+    await tester.tap(find.widgetWithText(TextButton, '+30s').first);
     await tester.pumpAndSettle();
     expect(videoControllers.last.seekPositions,
         contains(const Duration(minutes: 2)));
@@ -453,10 +453,10 @@ void main() {
     expect(find.byTooltip('展开讲义块信息'), findsOneWidget);
   });
 
-  testWidgets('handout page keeps three columns on tablet landscape', (
+  testWidgets('handout page keeps three columns on desktop layout', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(1024, 768);
+    tester.view.physicalSize = const Size(1448, 1086);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);

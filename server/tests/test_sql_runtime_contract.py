@@ -1547,6 +1547,173 @@ def test_quiz_service_sql_submit_persists_attempt_and_review_refresh_task():
     engine.dispose()
 
 
+def test_sql_quiz_history_lists_latest_attempt():
+    repository_cls = _discover_sql_repository_class()
+    repo, session, engine = _build_sqlite_repository(repository_cls)
+
+    course = repo.create_course(
+        title="SQLite quiz history",
+        entry_type="manual_import",
+        goal_text="verify quiz history",
+        preferred_style="balanced",
+    )
+    course_id = _value(course, "courseId", "course_id", "id")
+    other_course = repo.create_course(
+        title="Other quiz history",
+        entry_type="manual_import",
+        goal_text="verify isolation",
+        preferred_style="balanced",
+    )
+    other_course_id = _value(other_course, "courseId", "course_id", "id")
+    resource = repo.create_resource(
+        course_id,
+        {
+            "resourceType": "pdf",
+            "objectKey": f"raw/1/{course_id}/quiz-history.pdf",
+            "originalName": "quiz-history.pdf",
+            "mimeType": "application/pdf",
+            "sizeBytes": 1024,
+            "checksum": "sha256:quiz-history",
+        },
+    )
+    parse_run, _ = repo.create_parse_run(course_id)
+    parse_run_id = _value(parse_run, "parseRunId", "parse_run_id", "id")
+    repo.mark_parse_run_succeeded(parse_run_id)
+    segments = repo.create_course_segments(
+        course_id=course_id,
+        resource_id=resource["resourceId"],
+        parse_run_id=parse_run_id,
+        segments=[
+            {
+                "segmentType": "pdf_page_text",
+                "title": "Quiz history evidence",
+                "textContent": "Quiz history evidence.",
+                "plainText": "Quiz history evidence.",
+                "pageNo": 1,
+                "orderNo": 1,
+                "tokenCount": 20,
+            }
+        ],
+    )
+    segment_key = segments[0]["segmentKey"]
+    _, _, blocks = repo.create_handout(
+        course_id,
+        outline={
+            "title": "Quiz history handout",
+            "summary": "History handout.",
+            "items": [
+                {
+                    "outlineKey": "section-history",
+                    "title": "History",
+                    "summary": "History.",
+                    "sortNo": 1,
+                    "children": [
+                        {
+                            "outlineKey": "block-history",
+                            "title": "History block",
+                            "summary": "History block.",
+                            "startSec": 0,
+                            "endSec": 60,
+                            "sortNo": 1,
+                            "generationStatus": "pending",
+                            "sourceSegmentKeys": [segment_key],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    repo.save_handout_block_result(
+        blocks[0]["blockId"],
+        {
+            "title": "Quiz history block",
+            "summary": "History block.",
+            "contentMd": "Quiz history evidence.",
+            "knowledgePoints": [
+                {
+                    "knowledgePointKey": "kp-quiz-history",
+                    "displayName": "Quiz history",
+                    "description": "History evidence.",
+                    "difficultyLevel": "medium",
+                    "importanceScore": 90,
+                }
+            ],
+            "citations": [{"resourceId": resource["resourceId"], "segmentKey": segment_key}],
+        },
+    )
+    quiz, _ = repo.create_quiz(course_id)
+    repo.save_quiz_generation_result(
+        quiz["quizId"],
+        {
+            "quizType": "chapter_review",
+            "questions": [
+                {
+                    "questionKey": "q1-history",
+                    "questionType": "single_choice",
+                    "stemMd": "What verifies quiz history?",
+                    "options": ["A. evidence", "B. nothing"],
+                    "correctAnswer": "A",
+                    "explanationMd": "Use history evidence.",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-quiz-history",
+                    "knowledgePointName": "Quiz history",
+                    "sourceBlockKey": str(blocks[0]["blockId"]),
+                    "sourceSegmentKeys": [segment_key],
+                }
+            ],
+        },
+        [],
+    )
+    other_quiz = repo.create_scoped_quiz(
+        course_id=other_course_id,
+        scope_type="course",
+        quiz_payload={"questions": []},
+    )
+    first_question = repo.get_quiz(quiz["quizId"])["questions"][0]
+    service = QuizService(
+        courses=repo,
+        quizzes=repo,
+        idempotency=repo,
+        task_dispatcher=_RecordingDispatcher(),
+        async_tasks=repo,
+    )
+
+    first_attempt = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest(
+            answers=[{"questionId": first_question["questionId"], "selectedOption": "B"}],
+        ),
+    )
+    latest_attempt = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest(
+            answers=[{"questionId": first_question["questionId"], "selectedOption": "A"}],
+        ),
+    )
+
+    history = repo.list_course_quizzes(course_id)
+
+    assert [item["quizId"] for item in history] == [quiz["quizId"]]
+    assert other_quiz["quizId"] not in [item["quizId"] for item in history]
+    item = history[0]
+    assert item["courseId"] == course_id
+    assert item["scopeType"] == "course"
+    assert item["lessonId"] is None
+    assert item["status"] == "ready"
+    assert item["quizMode"] == "objective"
+    assert item["questionCount"] == 1
+    assert item["createdAt"] is not None
+    assert item["updatedAt"] is not None
+    assert item["latestAttempt"]["attemptId"] == latest_attempt["attemptId"]
+    assert item["latestAttempt"]["score"] == latest_attempt["score"]
+    assert item["latestAttempt"]["totalScore"] == latest_attempt["totalScore"]
+    assert item["latestAttempt"]["accuracy"] == latest_attempt["accuracy"]
+    assert item["latestAttempt"]["attemptId"] != first_attempt["attemptId"]
+
+    session.close()
+    engine.dispose()
+
+
 def test_review_service_sql_reads_persisted_task_evidence_fields():
     repository_cls = _discover_sql_repository_class()
     repo, session, engine = _build_sqlite_repository(repository_cls)

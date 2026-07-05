@@ -131,11 +131,41 @@ class _CourseLibraryBodyState extends ConsumerState<_CourseLibraryBody> {
 
   Future<void> _confirmAndDeleteSelected() async {
     final count = _selectedCourseIds.length;
+    final ids = _selectedCourseIds.toList(growable: false);
+    setState(() {
+      _isDeleting = true;
+    });
+
+    final api = ref.read(courseLessonApiProvider);
+    final impacts = <CourseDeleteImpactModel>[];
+    try {
+      for (final id in ids) {
+        impacts.add(await api.fetchCourseDeleteImpact(id));
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isDeleting = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('删除影响获取失败：$error')),
+      );
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除课程'),
-        content: Text('确定删除已选择的 $count 门课程吗？相关课时、资料和学习记录将按后端删除规则处理。'),
+        content: Text(
+          '确定删除已选择的 $count 门课程吗？相关课时、资料和学习记录将按后端删除规则处理。\n'
+          '影响：${_deleteImpactText(impacts)}',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -149,15 +179,15 @@ class _CourseLibraryBodyState extends ConsumerState<_CourseLibraryBody> {
       ),
     );
     if (confirmed != true || !mounted) {
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+      }
       return;
     }
 
-    final ids = _selectedCourseIds.toList(growable: false);
-    setState(() {
-      _isDeleting = true;
-    });
     try {
-      final api = ref.read(courseLessonApiProvider);
       for (final id in ids) {
         await api.deleteCourse(id);
       }
@@ -187,6 +217,40 @@ class _CourseLibraryBodyState extends ConsumerState<_CourseLibraryBody> {
       }
     }
   }
+}
+
+String _deleteImpactText(List<CourseDeleteImpactModel> impacts) {
+  final totals = <String, int>{};
+  for (final impact in impacts) {
+    for (final entry in impact.blockers.entries) {
+      totals.update(
+        entry.key,
+        (value) => value + entry.value,
+        ifAbsent: () => entry.value,
+      );
+    }
+  }
+  final parts = totals.entries
+      .where((entry) => entry.value > 0)
+      .map((entry) => '${_blockerLabel(entry.key)} ${entry.value}')
+      .toList();
+  if (parts.isEmpty) {
+    return '无关联课时、资料或学习产物';
+  }
+  return parts.join('、');
+}
+
+String _blockerLabel(String key) {
+  return switch (key) {
+    'lessons' => '课时',
+    'resources' => '资料',
+    'asyncTasks' => '任务',
+    'handouts' => '讲义',
+    'qaSessions' => 'QA 会话',
+    'quizzes' => '测验',
+    'reviewTasks' => '复习任务',
+    _ => key,
+  };
 }
 
 class _LibraryTitleBar extends StatelessWidget {
@@ -388,20 +452,159 @@ int _libraryColumnCount(double width) {
   return 1;
 }
 
-class _LibraryFilterCard extends StatelessWidget {
+class _LibraryFilterCard extends ConsumerStatefulWidget {
   const _LibraryFilterCard();
 
   @override
+  ConsumerState<_LibraryFilterCard> createState() => _LibraryFilterCardState();
+}
+
+class _LibraryFilterCardState extends ConsumerState<_LibraryFilterCard> {
+  late final TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(
+      text: ref.read(courseLibraryQueryProvider).query ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final query = ref.watch(courseLibraryQueryProvider);
     return SectionCard(
       padding: const EdgeInsets.all(16),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 760;
-          const fields = [
-            _InsetField(label: '搜索：数据结构'),
-            _InsetField(label: '状态：全部课程'),
-            _InsetField(label: '排序：最近学习优先'),
+          final fields = [
+            _FilterTextField(
+              key: const Key('course_library_search_field'),
+              controller: _searchController,
+              onChanged: _setSearchQuery,
+            ),
+            _FilterDropdown<String?>(
+              key: const Key('course_library_status_filter'),
+              value: query.learningStatus,
+              fallbackLabel: '全部课程',
+              options: const [
+                _FilterOption<String?>(
+                  label: '全部课程',
+                  value: null,
+                  itemKey: Key('course_library_status_all'),
+                ),
+                _FilterOption<String?>(
+                  label: '可继续学习',
+                  value: 'learning_ready',
+                  itemKey: Key('course_library_status_learning_ready'),
+                ),
+                _FilterOption<String?>(
+                  label: '草稿',
+                  value: 'draft',
+                  itemKey: Key('course_library_status_draft'),
+                ),
+                _FilterOption<String?>(
+                  label: '已完成',
+                  value: 'completed',
+                  itemKey: Key('course_library_status_completed'),
+                ),
+              ],
+              onChanged: (value) => _updateQuery(
+                (query) => query.copyWith(learningStatus: value),
+              ),
+            ),
+            _FilterDropdown<String?>(
+              key: const Key('course_library_source_filter'),
+              value: query.source,
+              fallbackLabel: '全部来源',
+              options: const [
+                _FilterOption<String?>(
+                  label: '全部来源',
+                  value: null,
+                  itemKey: Key('course_library_source_all'),
+                ),
+                _FilterOption<String?>(
+                  label: '手动导入',
+                  value: 'manual_import',
+                  itemKey: Key('course_library_source_manual_import'),
+                ),
+                _FilterOption<String?>(
+                  label: '推荐入课',
+                  value: 'recommendation',
+                  itemKey: Key('course_library_source_recommendation'),
+                ),
+                _FilterOption<String?>(
+                  label: 'B站导入',
+                  value: 'bilibili',
+                  itemKey: Key('course_library_source_bilibili'),
+                ),
+              ],
+              onChanged: (value) => _updateQuery(
+                (query) => query.copyWith(source: value),
+              ),
+            ),
+            _FilterDropdown<String>(
+              key: const Key('course_library_archived_filter'),
+              value: query.archived,
+              fallbackLabel: '未归档',
+              options: const [
+                _FilterOption<String>(
+                  label: '未归档',
+                  value: 'exclude',
+                  itemKey: Key('course_library_archived_exclude'),
+                ),
+                _FilterOption<String>(
+                  label: '包含归档',
+                  value: 'include',
+                  itemKey: Key('course_library_archived_include'),
+                ),
+                _FilterOption<String>(
+                  label: '仅归档',
+                  value: 'only',
+                  itemKey: Key('course_library_archived_only'),
+                ),
+              ],
+              onChanged: (value) => _updateQuery(
+                (query) => query.copyWith(archived: value),
+              ),
+            ),
+            _FilterDropdown<String>(
+              key: const Key('course_library_sort_filter'),
+              value: query.sort,
+              fallbackLabel: '最近学习优先',
+              options: const [
+                _FilterOption<String>(
+                  label: '最近学习优先',
+                  value: 'recent_activity_desc',
+                  itemKey: Key('course_library_sort_recent_activity_desc'),
+                ),
+                _FilterOption<String>(
+                  label: '最近创建优先',
+                  value: 'created_at_desc',
+                  itemKey: Key('course_library_sort_created_at_desc'),
+                ),
+                _FilterOption<String>(
+                  label: '考试时间优先',
+                  value: 'exam_at_asc',
+                  itemKey: Key('course_library_sort_exam_at_asc'),
+                ),
+                _FilterOption<String>(
+                  label: '标题 A-Z',
+                  value: 'title_asc',
+                  itemKey: Key('course_library_sort_title_asc'),
+                ),
+              ],
+              onChanged: (value) => _updateQuery(
+                (query) => query.copyWith(sort: value),
+              ),
+            ),
           ];
           if (compact) {
             return Column(
@@ -426,35 +629,133 @@ class _LibraryFilterCard extends StatelessWidget {
       ),
     );
   }
+
+  void _setSearchQuery(String value) {
+    final normalized = value.trim();
+    _updateQuery(
+      (query) => query.copyWith(
+        query: normalized.isEmpty ? null : normalized,
+      ),
+    );
+  }
+
+  void _updateQuery(CourseLibraryQuery Function(CourseLibraryQuery) update) {
+    final notifier = ref.read(courseLibraryQueryProvider.notifier);
+    notifier.state = update(notifier.state);
+  }
 }
 
-class _InsetField extends StatelessWidget {
-  const _InsetField({required this.label});
+class _FilterTextField extends StatelessWidget {
+  const _FilterTextField({
+    super.key,
+    required this.controller,
+    required this.onChanged,
+  });
 
-  final String label;
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       constraints: const BoxConstraints(minHeight: 50),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: AppTheme.shadowInsetLook,
       ),
-      alignment: Alignment.centerLeft,
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      alignment: Alignment.center,
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          isDense: true,
+          icon: Icon(Icons.search, color: AppTheme.muted, size: 18),
+          hintText: '搜索课程',
+          hintStyle: TextStyle(
+            color: AppTheme.muted,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
         style: const TextStyle(
-          color: AppTheme.muted,
+          color: AppTheme.ink,
           fontWeight: FontWeight.w800,
         ),
       ),
     );
   }
+}
+
+class _FilterDropdown<T> extends StatelessWidget {
+  const _FilterDropdown({
+    super.key,
+    required this.value,
+    required this.fallbackLabel,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final T? value;
+  final String fallbackLabel;
+  final List<_FilterOption<T>> options;
+  final ValueChanged<T?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 50),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppTheme.shadowInsetLook,
+      ),
+      alignment: Alignment.center,
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T?>(
+          value: value,
+          hint: Text(fallbackLabel),
+          isExpanded: true,
+          icon: const Icon(
+            Icons.keyboard_arrow_down_rounded,
+            color: AppTheme.muted,
+          ),
+          style: const TextStyle(
+            color: AppTheme.ink,
+            fontWeight: FontWeight.w800,
+          ),
+          dropdownColor: AppTheme.surface,
+          items: [
+            for (final option in options)
+              DropdownMenuItem<T?>(
+                value: option.value,
+                child: Text(
+                  option.label,
+                  key: option.itemKey,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterOption<T> {
+  const _FilterOption({
+    required this.label,
+    required this.value,
+    required this.itemKey,
+  });
+
+  final String label;
+  final T? value;
+  final Key itemKey;
 }
 
 class _CourseTile extends ConsumerStatefulWidget {
@@ -476,6 +777,7 @@ class _CourseTile extends ConsumerStatefulWidget {
 
 class _CourseTileState extends ConsumerState<_CourseTile> {
   var _hovered = false;
+  var _isMutatingArchiveState = false;
 
   @override
   Widget build(BuildContext context) {
@@ -544,18 +846,37 @@ class _CourseTileState extends ConsumerState<_CourseTile> {
                     color: progressColor,
                   ),
                   const SizedBox(height: 14),
-                  _CourseTileButton(
-                    label: widget.selectionMode
-                        ? (widget.selected ? '已选择' : '选择课程')
-                        : '继续学习',
-                    icon: widget.selectionMode
-                        ? (widget.selected
-                            ? Icons.check_rounded
-                            : Icons.check_box_outline_blank)
-                        : Icons.play_arrow_rounded,
-                    onPressed: widget.selectionMode
-                        ? () => widget.onSelectionChanged(!widget.selected)
-                        : () => _continueLearning(context),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _CourseTileButton(
+                        label: widget.selectionMode
+                            ? (widget.selected ? '已选择' : '选择课程')
+                            : '继续学习',
+                        icon: widget.selectionMode
+                            ? (widget.selected
+                                ? Icons.check_rounded
+                                : Icons.check_box_outline_blank)
+                            : Icons.play_arrow_rounded,
+                        onPressed: widget.selectionMode
+                            ? () => widget.onSelectionChanged(!widget.selected)
+                            : () => _continueLearning(context),
+                      ),
+                      if (!widget.selectionMode)
+                        _CourseTileButton(
+                          label: _isMutatingArchiveState
+                              ? '处理中'
+                              : (item.archivedAt == null ? '归档' : '恢复'),
+                          icon: item.archivedAt == null
+                              ? Icons.archive_outlined
+                              : Icons.unarchive_outlined,
+                          primary: false,
+                          onPressed: _isMutatingArchiveState
+                              ? null
+                              : _toggleArchivedState,
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -593,6 +914,43 @@ class _CourseTileState extends ConsumerState<_CourseTile> {
     _go(context, '/courses/${item.courseId}');
   }
 
+  Future<void> _toggleArchivedState() async {
+    final item = widget.item;
+    setState(() {
+      _isMutatingArchiveState = true;
+    });
+    try {
+      final api = ref.read(courseLessonApiProvider);
+      if (item.archivedAt == null) {
+        await api.archiveCourse(item.courseId);
+      } else {
+        await api.restoreCourse(item.courseId);
+      }
+      if (!mounted) {
+        return;
+      }
+      ref.invalidate(courseLibraryProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(item.archivedAt == null ? '已归档课程' : '已恢复课程'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('课程状态更新失败：$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isMutatingArchiveState = false;
+        });
+      }
+    }
+  }
+
   void _go(BuildContext context, String path) {
     try {
       context.go(path);
@@ -607,49 +965,61 @@ class _CourseTileButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.primary = true,
   });
 
   final String label;
   final IconData icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
+  final bool primary;
 
   @override
   Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    final background = primary ? AppTheme.brandBlue : AppTheme.surface;
+    final foreground = primary ? Colors.white : AppTheme.ink;
     return Align(
       alignment: Alignment.centerLeft,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: AppTheme.brandBlue,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: AppTheme.shadowAccent,
-        ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-          child: InkWell(
-            onTap: onPressed,
+      widthFactor: 1,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.55,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: background,
             borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, color: Colors.white, size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
+            boxShadow: primary ? AppTheme.shadowAccent : AppTheme.shadowRaised,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              onTap: onPressed,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, color: foreground, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: foreground,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ],
+                    if (primary) ...[
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: foreground,
+                        size: 18,
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),

@@ -21,7 +21,7 @@ RUN sed -i \
     rm -rf /var/lib/apt/lists/* && \
     find /usr/local -name '*.pyc' -delete && \
     find /usr/local -type d -name '__pycache__' -prune -exec rm -rf '{}' + && \
-    pip install --index-url "${PIP_INDEX_URL}" --no-cache-dir --no-compile --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --no-compile --upgrade pip setuptools wheel --index-url "${PIP_INDEX_URL}" && \
     python -c "import pathlib, tomllib; data = tomllib.load(open('pyproject.toml', 'rb')); deps = list(data['project']['dependencies']) + list(data.get('project', {}).get('optional-dependencies', {}).get('dev', [])); pathlib.Path('/tmp/requirements.txt').write_text('\n'.join(deps) + '\n')" && \
     pip install --index-url "${PIP_INDEX_URL}" --no-cache-dir --no-compile -r /tmp/requirements.txt && \
     rm -f /tmp/requirements.txt && \
@@ -32,7 +32,8 @@ COPY README.md /workspace/
 COPY server /workspace/server
 COPY schemas /workspace/schemas
 
-RUN find /workspace -name '*.pyc' -delete && \
+RUN pip install --no-cache-dir --no-compile .[dev] --no-deps --index-url "${PIP_INDEX_URL}" && \
+    find /workspace -name '*.pyc' -delete && \
     find /workspace -type d -name '__pycache__' -prune -exec rm -rf '{}' +
 
 EXPOSE 8000

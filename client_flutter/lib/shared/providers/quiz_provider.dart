@@ -371,3 +371,8 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
 
 final quizProvider =
     AutoDisposeNotifierProvider<QuizController, QuizState>(QuizController.new);
+
+final courseQuizHistoryProvider = FutureProvider.autoDispose
+    .family<List<CourseQuizHistoryItemModel>, String>((ref, courseId) {
+  return ref.read(apiClientProvider).fetchCourseQuizHistory(courseId);
+});

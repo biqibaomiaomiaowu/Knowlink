@@ -15,6 +15,7 @@ import '../../core/widgets/app_error_view.dart';
 import '../../core/widgets/app_loading_view.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../core/widgets/knowlink_widgets.dart';
+import '../../shared/models/bilibili_import_models.dart';
 import '../../shared/models/course_lesson_models.dart';
 import '../../shared/models/handout_models.dart';
 import '../../shared/models/pipeline_status.dart';
@@ -77,7 +78,11 @@ class _WorkbenchBody extends ConsumerWidget {
         const SizedBox(height: 16),
         _WorkspaceCards(model: model),
         const SizedBox(height: 16),
-        _LessonGrid(courseId: course.courseId, lessons: model.lessons),
+        _LessonGrid(
+          courseId: course.courseId,
+          lessons: model.lessons,
+          resources: model.courseResources,
+        ),
       ],
     );
   }
@@ -95,6 +100,14 @@ class _WorkbenchBody extends ConsumerWidget {
           return;
         }
         ref.invalidate(courseWorkbenchProvider(courseId));
+        if (!result.runPreparation) {
+          _safeGo(
+            context,
+            result.routeAfterCreation ??
+                '/courses/$courseId/lessons/${result.lesson.lessonId}/handout',
+          );
+          return;
+        }
         _safeGo(
           context,
           '/courses/$courseId/lessons/${result.lesson.lessonId}/preparing',
@@ -212,10 +225,14 @@ class LessonPreparationPayload {
   const LessonPreparationPayload({
     required this.lesson,
     required this.files,
+    this.runPreparation = true,
+    this.routeAfterCreation,
   });
 
   final LessonSummaryModel lesson;
   final List<LessonPreparationUploadDraft> files;
+  final bool runPreparation;
+  final String? routeAfterCreation;
 }
 
 class _LessonCreateDialog extends ConsumerStatefulWidget {
@@ -242,6 +259,7 @@ class _LessonCreateDialogState extends ConsumerState<_LessonCreateDialog> {
   var _mastery = '零基础';
   var _isPickingFiles = false;
   var _isSubmitting = false;
+  LessonSummaryModel? _createdBilibiliLesson;
 
   @override
   void initState() {
@@ -454,6 +472,13 @@ class _LessonCreateDialogState extends ConsumerState<_LessonCreateDialog> {
       _titleFocusNode.requestFocus();
       return;
     }
+    final timeBudgetMinutes = _parseTimeBudgetMinutes();
+    if (timeBudgetMinutes == _invalidTimeBudget) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('时间预算必须大于 0')),
+      );
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
@@ -461,12 +486,22 @@ class _LessonCreateDialogState extends ConsumerState<_LessonCreateDialog> {
 
     LessonSummaryModel? createdLesson;
     try {
+      final bilibiliSourceUrl = _bilibiliController.text.trim();
+      if (bilibiliSourceUrl.isNotEmpty) {
+        await _submitBilibiliLesson(
+          title: title,
+          timeBudgetMinutes: timeBudgetMinutes,
+          sourceUrl: bilibiliSourceUrl,
+        );
+        return;
+      }
       createdLesson = await ref.read(courseLessonApiProvider).createLesson(
             courseId: widget.courseId,
-            request: {
-              'title': title,
-              'sourceType': 'manual',
-            },
+            request: _lessonCreateRequest(
+              title: title,
+              sourceType: 'manual',
+              timeBudgetMinutes: timeBudgetMinutes,
+            ),
             idempotencyKey:
                 'lesson-create-${DateTime.now().microsecondsSinceEpoch}',
           );
@@ -491,10 +526,134 @@ class _LessonCreateDialogState extends ConsumerState<_LessonCreateDialog> {
     }
   }
 
-  void _finishCreation(LessonSummaryModel lesson) {
+  int? _parseTimeBudgetMinutes() {
+    final raw = _timeBudgetController.text.trim();
+    if (raw.isEmpty) {
+      return null;
+    }
+    final hours = double.tryParse(raw);
+    if (hours == null || hours <= 0) {
+      return _invalidTimeBudget;
+    }
+    return (hours * 60).round();
+  }
+
+  Map<String, dynamic> _lessonCreateRequest({
+    required String title,
+    required String sourceType,
+    required int? timeBudgetMinutes,
+    String? bilibiliSourceUrl,
+  }) {
+    final metaJson = <String, dynamic>{
+      'learningGoal': _goal,
+      'initialMasteryLevel': _mastery,
+      if (timeBudgetMinutes != null) 'timeBudgetMinutes': timeBudgetMinutes,
+      if (bilibiliSourceUrl != null && bilibiliSourceUrl.isNotEmpty)
+        'bilibiliSourceUrl': bilibiliSourceUrl,
+    };
+    return {
+      'title': title,
+      'sourceType': sourceType,
+      'metaJson': metaJson,
+    };
+  }
+
+  Future<void> _submitBilibiliLesson({
+    required String title,
+    required int? timeBudgetMinutes,
+    required String sourceUrl,
+  }) async {
+    final apiClient = ref.read(apiClientProvider);
+    final authSession = await apiClient.fetchBilibiliAuthSession();
+    if (!authSession.isActive) {
+      throw StateError('B 站登录已失效，请先完成登录后再导入。');
+    }
+    final preview = await apiClient.previewBilibiliImport(
+      courseId: widget.courseId,
+      sourceUrl: sourceUrl,
+    );
+    final selectedPartIds = preview.defaultSelectedPartIds;
+    if (selectedPartIds.isEmpty) {
+      throw StateError('B 站预览没有可导入条目。');
+    }
+
+    final lesson = _createdBilibiliLesson ??
+        await ref.read(courseLessonApiProvider).createLesson(
+              courseId: widget.courseId,
+              request: _lessonCreateRequest(
+                title: title,
+                sourceType: 'bilibili_part',
+                timeBudgetMinutes: timeBudgetMinutes,
+                bilibiliSourceUrl: sourceUrl,
+              ),
+              idempotencyKey:
+                  'lesson-create-bilibili-${widget.courseId}-${sourceUrl.hashCode}',
+            );
+    _createdBilibiliLesson = lesson;
+
+    final task = await apiClient.createBilibiliImport(
+      courseId: widget.courseId,
+      request: BilibiliImportCreateRequestModel(
+        previewId: preview.previewId,
+        sourceUrl: sourceUrl,
+        selectionMode: _selectionModeForPreview(
+          preview: preview,
+          selectedPartIds: selectedPartIds,
+        ),
+        selectedPartIds: selectedPartIds,
+        lessonMode: 'bind_existing',
+        targetLessonId: lesson.lessonId,
+        createLessonIfMissing: false,
+      ),
+      idempotencyKey:
+          'bilibili-bind-${widget.courseId}-${lesson.lessonId}-${sourceUrl.hashCode}',
+    );
+    final importRunId = task.importRunId;
+    if (importRunId == null) {
+      throw StateError('B 站导入任务未返回 importRunId。');
+    }
+    final run = await _pollBilibiliImport(apiClient, importRunId);
+    if (run?.isImported != true) {
+      throw StateError(run?.failureReason ?? 'B 站导入失败，请重试。');
+    }
+    if (!mounted) {
+      return;
+    }
+    _finishCreation(
+      lesson,
+      runPreparation: false,
+      routeAfterCreation:
+          '/courses/${widget.courseId}/lessons/${lesson.lessonId}/handout',
+    );
+  }
+
+  Future<BilibiliImportRunModel?> _pollBilibiliImport(
+    ApiClient apiClient,
+    int importRunId,
+  ) async {
+    BilibiliImportRunModel? latest;
+    for (var attempt = 0;
+        attempt < _bilibiliLessonImportMaxAttempts;
+        attempt++) {
+      latest = await apiClient.fetchBilibiliImportRunStatus(importRunId);
+      if (latest.isTerminal) {
+        return latest;
+      }
+      await Future<void>.delayed(_bilibiliLessonImportPollInterval);
+    }
+    return latest;
+  }
+
+  void _finishCreation(
+    LessonSummaryModel lesson, {
+    bool runPreparation = true,
+    String? routeAfterCreation,
+  }) {
     final payload = LessonPreparationPayload(
       lesson: lesson,
       files: List<LessonPreparationUploadDraft>.unmodifiable(_selectedFiles),
+      runPreparation: runPreparation,
+      routeAfterCreation: routeAfterCreation,
     );
     Navigator.of(context).pop();
     scheduleMicrotask(() {
@@ -522,6 +681,9 @@ class LessonPreparationPage extends ConsumerStatefulWidget {
 
 const _lessonPreparationPollInterval = Duration(seconds: 1);
 const _lessonPreparationMaxAttempts = 60;
+const _bilibiliLessonImportPollInterval = Duration(seconds: 2);
+const _bilibiliLessonImportMaxAttempts = 30;
+const _invalidTimeBudget = -1;
 
 class _LessonPreparationPageState extends ConsumerState<LessonPreparationPage>
     with SingleTickerProviderStateMixin {
@@ -1591,7 +1753,10 @@ class _WorkspaceCards extends StatelessWidget {
           children: [
             SizedBox(
               width: width,
-              child: _ResourceCard(resources: model.courseResources),
+              child: _ResourceCard(
+                courseId: model.course.courseId,
+                resources: model.courseResources,
+              ),
             ),
             SizedBox(
               width: width,
@@ -1604,10 +1769,21 @@ class _WorkspaceCards extends StatelessWidget {
   }
 }
 
-class _ResourceCard extends StatelessWidget {
-  const _ResourceCard({required this.resources});
+class _ResourceCard extends ConsumerStatefulWidget {
+  const _ResourceCard({
+    required this.courseId,
+    required this.resources,
+  });
 
+  final String courseId;
   final List<ScopedResourceModel> resources;
+
+  @override
+  ConsumerState<_ResourceCard> createState() => _ResourceCardState();
+}
+
+class _ResourceCardState extends ConsumerState<_ResourceCard> {
+  var _isUploading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1621,31 +1797,102 @@ class _ResourceCard extends StatelessWidget {
               const Expanded(child: _SectionLabel('课程资料')),
               const SizedBox(width: 12),
               FilledButton.icon(
-                onPressed: _noop,
+                onPressed: _isUploading ? null : _uploadCourseResources,
                 icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('上传资料'),
+                label: Text(_isUploading ? '上传中...' : '上传资料'),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          if (resources.isEmpty)
+          if (widget.resources.isEmpty)
             const Text('暂无课程级资料。')
           else
             Column(
               children: [
-                for (final resource in resources) ...[
+                for (final resource in widget.resources) ...[
                   _SoftRow(
                     leading: _ResourceBadge(type: resource.resourceType),
                     title: resource.originalName,
                     subtitle: '${resource.scopeType} · ${resource.usageRole}',
                   ),
-                  if (resource != resources.last) const SizedBox(height: 12),
+                  if (resource != widget.resources.last)
+                    const SizedBox(height: 12),
                 ],
               ],
             ),
         ],
       ),
     );
+  }
+
+  Future<void> _uploadCourseResources() async {
+    if (_isUploading) {
+      return;
+    }
+    setState(() {
+      _isUploading = true;
+    });
+    try {
+      final drafts = await _pickLessonUploadDrafts();
+      final apiClient = ref.read(apiClientProvider);
+      for (final file in drafts) {
+        final uploadInit = await apiClient.initResourceUpload(
+          courseId: widget.courseId,
+          request: ResourceUploadInitRequestModel(
+            resourceType: file.resourceType,
+            filename: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            checksum: file.checksum,
+            scopeType: 'course',
+            lessonId: null,
+            usageRole: 'course_material',
+            lessonPlacement: 'course_material',
+            visibleToCourseQa: true,
+          ),
+        );
+        await apiClient.uploadObject(
+          uploadUrl: uploadInit.uploadUrl,
+          bytes: file.bytes,
+          headers: uploadInit.headers,
+          mimeType: file.mimeType,
+        );
+        await apiClient.completeResourceUpload(
+          courseId: widget.courseId,
+          request: ResourceUploadCompleteRequestModel(
+            resourceType: file.resourceType,
+            objectKey: uploadInit.objectKey,
+            originalName: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            checksum: file.checksum,
+            scopeType: 'course',
+            lessonId: null,
+            usageRole: 'course_material',
+            lessonPlacement: 'course_material',
+            visibleToCourseQa: true,
+          ),
+          idempotencyKey: 'course-upload-${widget.courseId}-${file.id}',
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      ref.invalidate(courseWorkbenchProvider(widget.courseId));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('上传课程资料失败：$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
+    }
   }
 }
 
@@ -1667,7 +1914,8 @@ class _QuizCard extends StatelessWidget {
       'course_quiz',
       '/courses/${course.courseId}/quiz',
     );
-    final historyRoute = '/courses/${course.courseId}/quiz';
+    final regenerateRoute = '/courses/${course.courseId}/quiz?regenerate=1';
+    final historyRoute = '/courses/${course.courseId}/quizzes';
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1715,7 +1963,7 @@ class _QuizCard extends StatelessWidget {
                 child: const Text('开始课程测试'),
               ),
               OutlinedButton(
-                onPressed: () => _safeGo(context, quizRoute),
+                onPressed: () => _safeGo(context, regenerateRoute),
                 child: const Text('重新生成课程测试'),
               ),
               OutlinedButton(
@@ -1786,10 +2034,12 @@ class _LessonGrid extends StatelessWidget {
   const _LessonGrid({
     required this.courseId,
     required this.lessons,
+    required this.resources,
   });
 
   final String courseId;
   final List<LessonSummaryModel> lessons;
+  final List<ScopedResourceModel> resources;
 
   @override
   Widget build(BuildContext context) {
@@ -1817,6 +2067,8 @@ class _LessonGrid extends StatelessWidget {
                         child: _LessonTile(
                           courseId: courseId,
                           lesson: lesson,
+                          lessons: lessons,
+                          resources: resources,
                         ),
                       ),
                   ],
@@ -1833,10 +2085,14 @@ class _LessonTile extends StatelessWidget {
   const _LessonTile({
     required this.courseId,
     required this.lesson,
+    required this.lessons,
+    required this.resources,
   });
 
   final String courseId;
   final LessonSummaryModel lesson;
+  final List<LessonSummaryModel> lessons;
+  final List<ScopedResourceModel> resources;
 
   @override
   Widget build(BuildContext context) {
@@ -1865,9 +2121,21 @@ class _LessonTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  StatusPill(
-                    label: completed ? '已完成' : '未完成',
-                    color: completed ? AppTheme.success : AppTheme.accentLight,
+                  Row(
+                    children: [
+                      StatusPill(
+                        label: completed ? '已完成' : '未完成',
+                        color:
+                            completed ? AppTheme.success : AppTheme.accentLight,
+                      ),
+                      const Spacer(),
+                      _LessonManagementMenu(
+                        courseId: courseId,
+                        lesson: lesson,
+                        lessons: lessons,
+                        resources: resources,
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -1899,6 +2167,346 @@ class _LessonTile extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _LessonManagementAction {
+  rename,
+  moveUp,
+  moveDown,
+  mergeNext,
+  split,
+  primaryVideo,
+  delete,
+}
+
+class _LessonManagementMenu extends ConsumerWidget {
+  const _LessonManagementMenu({
+    required this.courseId,
+    required this.lesson,
+    required this.lessons,
+    required this.resources,
+  });
+
+  final String courseId;
+  final LessonSummaryModel lesson;
+  final List<LessonSummaryModel> lessons;
+  final List<ScopedResourceModel> resources;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final index =
+        lessons.indexWhere((item) => item.lessonId == lesson.lessonId);
+    return PopupMenuButton<_LessonManagementAction>(
+      key: Key('lesson_management_${lesson.lessonId}'),
+      tooltip: '管理课时',
+      icon: const Icon(Icons.more_horiz_rounded),
+      onSelected: (action) => _handleAction(context, ref, action, index),
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: _LessonManagementAction.rename,
+          child: Text('重命名'),
+        ),
+        PopupMenuItem(
+          value: _LessonManagementAction.moveUp,
+          enabled: index > 0,
+          child: const Text('上移'),
+        ),
+        PopupMenuItem(
+          value: _LessonManagementAction.moveDown,
+          enabled: index >= 0 && index < lessons.length - 1,
+          child: const Text('下移'),
+        ),
+        PopupMenuItem(
+          value: _LessonManagementAction.mergeNext,
+          enabled: index >= 0 && index < lessons.length - 1,
+          child: const Text('合并下一课时'),
+        ),
+        const PopupMenuItem(
+          value: _LessonManagementAction.split,
+          child: Text('按时间拆分'),
+        ),
+        PopupMenuItem(
+          value: _LessonManagementAction.primaryVideo,
+          enabled: _videoResources.isNotEmpty,
+          child: const Text('设为主视频'),
+        ),
+        const PopupMenuItem(
+          value: _LessonManagementAction.delete,
+          child: Text('删除'),
+        ),
+      ],
+    );
+  }
+
+  List<ScopedResourceModel> get _videoResources {
+    return resources
+        .where((resource) => resource.resourceType.toLowerCase() == 'mp4')
+        .toList();
+  }
+
+  Future<void> _handleAction(
+    BuildContext context,
+    WidgetRef ref,
+    _LessonManagementAction action,
+    int index,
+  ) async {
+    final api = ref.read(courseLessonApiProvider);
+    try {
+      switch (action) {
+        case _LessonManagementAction.rename:
+          final title = await _showLessonRenameDialog(context, lesson.title);
+          if (title == null || title.isEmpty) {
+            return;
+          }
+          await api.updateLesson(
+            courseId: courseId,
+            lessonId: lesson.lessonId,
+            request: {'title': title},
+          );
+          break;
+        case _LessonManagementAction.moveUp:
+        case _LessonManagementAction.moveDown:
+          if (index < 0) {
+            return;
+          }
+          final ids = lessons.map((item) => item.lessonId).toList();
+          final targetIndex =
+              action == _LessonManagementAction.moveUp ? index - 1 : index + 1;
+          if (targetIndex < 0 || targetIndex >= ids.length) {
+            return;
+          }
+          final current = ids[index];
+          ids[index] = ids[targetIndex];
+          ids[targetIndex] = current;
+          await api.reorderLessons(courseId: courseId, lessonIds: ids);
+          break;
+        case _LessonManagementAction.mergeNext:
+          if (index < 0 || index >= lessons.length - 1) {
+            return;
+          }
+          final result = await api.mergeLessons(
+            courseId: courseId,
+            lessonIds: [
+              lesson.lessonId,
+              lessons[index + 1].lessonId,
+            ],
+            targetTitle: lesson.title,
+          );
+          if (!context.mounted) {
+            return;
+          }
+          _showStaleArtifactSnack(context, result);
+          break;
+        case _LessonManagementAction.split:
+          final splitAtSec = await _showLessonSplitDialog(context);
+          if (splitAtSec == null) {
+            return;
+          }
+          final result = await api.splitLesson(
+            courseId: courseId,
+            lessonId: lesson.lessonId,
+            splitAtSec: splitAtSec,
+          );
+          if (!context.mounted) {
+            return;
+          }
+          _showStaleArtifactSnack(context, result);
+          break;
+        case _LessonManagementAction.primaryVideo:
+          final resource = await _showPrimaryVideoDialog(
+            context,
+            _videoResources,
+          );
+          if (resource == null) {
+            return;
+          }
+          final endSec =
+              resource.durationSec != null && resource.durationSec! > 0
+                  ? resource.durationSec!
+                  : 1;
+          await api.setLessonPrimaryVideo(
+            courseId: courseId,
+            lessonId: lesson.lessonId,
+            resourceId: resource.resourceId,
+            startSec: 0,
+            endSec: endSec,
+          );
+          break;
+        case _LessonManagementAction.delete:
+          final confirmed = await _showLessonDeleteDialog(context);
+          if (confirmed != true) {
+            return;
+          }
+          await api.deleteLesson(courseId: courseId, lessonId: lesson.lessonId);
+          break;
+      }
+      ref.invalidate(courseWorkbenchProvider(courseId));
+    } catch (error) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('课时管理失败：$error')),
+      );
+    }
+  }
+
+  void _showStaleArtifactSnack(
+    BuildContext context,
+    Map<String, dynamic> result,
+  ) {
+    if (!context.mounted) {
+      return;
+    }
+    final staleIds = result['staleArtifactIds'] as List<dynamic>? ?? const [];
+    if (staleIds.isEmpty) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已标记 ${staleIds.length} 个产物需要重新生成')),
+    );
+  }
+}
+
+Future<String?> _showLessonRenameDialog(
+  BuildContext context,
+  String initialTitle,
+) {
+  final controller = TextEditingController(text: initialTitle);
+  return showDialog<String>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('重命名课时'),
+        content: TextField(
+          key: const Key('lesson_rename_title'),
+          controller: controller,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Future<int?> _showLessonSplitDialog(BuildContext context) {
+  final controller = TextEditingController();
+  return showDialog<int>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('按时间拆分'),
+        content: TextField(
+          key: const Key('lesson_split_seconds'),
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: '拆分秒数'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = int.tryParse(controller.text.trim());
+              if (value == null || value <= 0) {
+                return;
+              }
+              Navigator.of(context).pop(value);
+            },
+            child: const Text('拆分'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Future<ScopedResourceModel?> _showPrimaryVideoDialog(
+  BuildContext context,
+  List<ScopedResourceModel> resources,
+) {
+  if (resources.isEmpty) {
+    return Future.value(null);
+  }
+  var selected = resources.first.resourceId;
+  return showDialog<ScopedResourceModel>(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('设为主视频'),
+            content: DropdownButton<String>(
+              value: selected,
+              isExpanded: true,
+              items: [
+                for (final resource in resources)
+                  DropdownMenuItem(
+                    value: resource.resourceId,
+                    child: Text(resource.originalName),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => selected = value);
+                }
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(context).pop(
+                    resources.firstWhere(
+                      (resource) => resource.resourceId == selected,
+                    ),
+                  );
+                },
+                child: const Text('保存'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
+Future<bool?> _showLessonDeleteDialog(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('删除课时'),
+        content: const Text('删除后该课时将从工作台移除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 class _SoftRow extends StatelessWidget {
@@ -2222,6 +2830,30 @@ PlaceholderEntryModel? _entryFor(
   return null;
 }
 
+String _selectionModeForPreview({
+  required BilibiliPreviewModel preview,
+  required List<String> selectedPartIds,
+}) {
+  final selectedSet = selectedPartIds.toSet();
+  final allSet = preview.parts.map((part) => part.partId).toSet();
+  if (selectedSet.length == allSet.length && selectedSet.containsAll(allSet)) {
+    return 'all_parts';
+  }
+
+  final defaultSet = preview.defaultSelectedPartIds.toSet();
+  final isDefaultSelection = selectedSet.length == defaultSet.length &&
+      selectedSet.containsAll(defaultSet);
+  if (isDefaultSelection &&
+      {
+        'current_part',
+        'selected_parts',
+      }.contains(preview.defaultSelectionMode)) {
+    return preview.defaultSelectionMode;
+  }
+
+  return 'selected_parts';
+}
+
 int? _intValue(Object? value) {
   if (value == null) {
     return null;
@@ -2264,5 +2896,3 @@ void _safeGo(BuildContext context, String path, {Object? extra}) {
     // Widget tests can mount this page without a router.
   }
 }
-
-void _noop() {}

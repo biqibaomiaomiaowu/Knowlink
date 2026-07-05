@@ -283,7 +283,12 @@ class BilibiliImportController
     );
   }
 
-  Future<void> createImport(String courseId) async {
+  Future<void> createImport(
+    String courseId, {
+    String? lessonMode,
+    String? targetLessonId,
+    bool? createLessonIfMissing,
+  }) async {
     if (!_ensureActiveCourse(courseId)) {
       return;
     }
@@ -302,6 +307,9 @@ class BilibiliImportController
       sourceUrl: state.sourceUrl.trim(),
       selectionMode: selectionMode,
       selectedPartIds: selectedPartIds,
+      lessonMode: lessonMode,
+      targetLessonId: targetLessonId,
+      createLessonIfMissing: createLessonIfMissing,
     );
     final fingerprint = _createFingerprint(
       courseId: courseId,

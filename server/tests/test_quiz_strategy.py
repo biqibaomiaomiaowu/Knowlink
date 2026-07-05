@@ -617,6 +617,84 @@ def test_course_quiz_submit_with_review_context_creates_review_run():
     assert result["reviewTaskRunId"] in store.review_runs
 
 
+def test_course_quiz_history_lists_latest_attempt():
+    store = RuntimeStore()
+    repository = MemoryScaffoldRepository(store)
+    service = QuizService(
+        courses=repository,
+        quizzes=repository,
+        idempotency=repository,
+    )
+    course = store.create_course(
+        title="Database Systems",
+        entry_type="manual_import",
+        goal_text="Prepare final exam",
+        preferred_style="balanced",
+    )
+    other_course = store.create_course(
+        title="Linear Algebra",
+        entry_type="manual_import",
+        goal_text="Review vectors",
+        preferred_style="balanced",
+    )
+    quiz, _trigger = store.create_quiz(course["courseId"], question_count_level="small")
+    other_quiz, _ = store.create_quiz(other_course["courseId"], question_count_level="small")
+    for target in (quiz, other_quiz):
+        target.update(
+            {
+                "status": "ready",
+                "questionCount": 1,
+                "questions": [
+                    {
+                        "questionId": target["quizId"] * 100 + 1,
+                        "questionKey": "course-q1",
+                        "questionType": "single_choice",
+                        "stemMd": "Which answer is supported by the course evidence?",
+                        "options": ["A. Supported", "B. Unsupported"],
+                        "correctAnswer": "A",
+                        "explanationMd": "The answer is supported.",
+                        "difficultyLevel": "medium",
+                        "knowledgePointKey": "kp-course",
+                        "knowledgePointName": "Course evidence",
+                        "sourceBlockKey": "course-block",
+                        "sourceSegmentKeys": ["course-segment"],
+                    }
+                ],
+            }
+        )
+
+    first_attempt = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest.model_validate(
+            {"answers": [{"questionId": quiz["questions"][0]["questionId"], "selectedOption": "B"}]}
+        ),
+    )
+    latest_attempt = service.submit_quiz(
+        quiz_id=quiz["quizId"],
+        payload=SubmitQuizRequest.model_validate(
+            {"answers": [{"questionId": quiz["questions"][0]["questionId"], "selectedOption": "A"}]}
+        ),
+    )
+
+    history = service.list_course_quizzes(course_id=course["courseId"])
+
+    assert [item["quizId"] for item in history["items"]] == [quiz["quizId"]]
+    item = history["items"][0]
+    assert item["courseId"] == course["courseId"]
+    assert item["scopeType"] == "course"
+    assert item["lessonId"] is None
+    assert item["status"] == "ready"
+    assert item["quizMode"] == "objective"
+    assert item["questionCount"] == 1
+    assert item["createdAt"] is not None
+    assert item["updatedAt"] is not None
+    assert item["latestAttempt"]["attemptId"] == latest_attempt["attemptId"]
+    assert item["latestAttempt"]["score"] == latest_attempt["score"]
+    assert item["latestAttempt"]["totalScore"] == latest_attempt["totalScore"]
+    assert item["latestAttempt"]["accuracy"] == latest_attempt["accuracy"]
+    assert item["latestAttempt"]["attemptId"] != first_attempt["attemptId"]
+
+
 def test_lesson_quiz_generation_fails_without_lesson_handout_or_resources():
     store = RuntimeStore()
     repository = MemoryScaffoldRepository(store)

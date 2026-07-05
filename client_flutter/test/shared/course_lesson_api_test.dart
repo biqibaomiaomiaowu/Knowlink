@@ -34,6 +34,20 @@ void main() {
     expect(libraryItem.currentLessonTitle, '关系模型');
     expect(libraryItem.overallMasteryScore, 0.72);
 
+    final impact = CourseDeleteImpactModel.fromJson({
+      'courseId': 101,
+      'canDelete': false,
+      'blockerCount': 3,
+      'blockers': {
+        'lessons': 2,
+        'resources': 1,
+      },
+    });
+    expect(impact.courseId, '101');
+    expect(impact.canDelete, isFalse);
+    expect(impact.blockerCount, 3);
+    expect(impact.blockers['lessons'], 2);
+
     final detail = LessonDetailModel.fromJson(_lessonDetailData());
     expect(detail.lesson.lessonId, 'l-2');
     expect(detail.primaryVideo?.usageRole, 'primary_video');
@@ -80,6 +94,25 @@ void main() {
         final data = switch ('${options.method} ${options.path}') {
           'GET /api/v1/courses' => {
               'items': [_courseLibraryItem()],
+            },
+          'GET /api/v1/courses/101/delete-impact' => {
+              'courseId': 101,
+              'canDelete': false,
+              'blockerCount': 3,
+              'blockers': {
+                'lessons': 2,
+                'resources': 1,
+              },
+            },
+          'POST /api/v1/courses/101/archive' => {
+              'course': {
+                ..._courseLibraryItem(),
+                'lifecycleStatus': 'archived',
+                'archivedAt': '2026-06-02T10:00:00+08:00',
+              },
+            },
+          'POST /api/v1/courses/101/restore' => {
+              'course': _courseLibraryItem(),
             },
           'DELETE /api/v1/courses/101' => {},
           'GET /api/v1/courses/101/workbench' => _workbenchData(),
@@ -155,6 +188,9 @@ void main() {
     final api = CourseLessonApi(client);
 
     final courses = await api.fetchCourseLibrary();
+    final impact = await api.fetchCourseDeleteImpact('101');
+    final archived = await api.archiveCourse('101');
+    final restored = await api.restoreCourse('101');
     await api.deleteCourse('101');
     final workbench = await api.fetchCourseWorkbench('101');
     final lessons = await api.fetchLessons('101');
@@ -210,6 +246,9 @@ void main() {
     final exportPlaceholder = await api.fetchCourseExportPlaceholder('101');
 
     expect(courses.single.title, '数据库系统');
+    expect(impact.blockers['lessons'], 2);
+    expect(archived.archivedAt, isNotNull);
+    expect(restored.archivedAt, isNull);
     expect(workbench.lessons.single.title, '关系模型');
     expect(workbench.nextActions.single.label, '继续学习关系模型');
     expect(
@@ -233,6 +272,9 @@ void main() {
         adapter.requests.map((request) => '${request.method} ${request.path}'),
         [
           'GET /api/v1/courses',
+          'GET /api/v1/courses/101/delete-impact',
+          'POST /api/v1/courses/101/archive',
+          'POST /api/v1/courses/101/restore',
           'DELETE /api/v1/courses/101',
           'GET /api/v1/courses/101/workbench',
           'GET /api/v1/courses/101/lessons',

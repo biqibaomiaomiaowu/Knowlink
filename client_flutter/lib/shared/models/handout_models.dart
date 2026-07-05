@@ -611,18 +611,35 @@ class QaMessageModel {
     required this.messageId,
     required this.answerMd,
     required this.citations,
+    this.role,
+    this.contentMd,
+    this.question,
+    this.answerType,
+    this.createdAt,
+    this.generationMetadata,
   });
 
   final int sessionId;
   final int messageId;
+  final String? role;
+  final String? contentMd;
+  final String? question;
   final String answerMd;
+  final String? answerType;
   final List<CitationModel> citations;
+  final DateTime? createdAt;
+  final Map<String, dynamic>? generationMetadata;
 
   factory QaMessageModel.fromJson(Map<String, dynamic> json) {
+    final answerMd = json['answerMd'] as String?;
     return QaMessageModel(
       sessionId: json['sessionId'] as int,
       messageId: json['messageId'] as int,
-      answerMd: json['answerMd'] as String,
+      role: json['role'] as String?,
+      contentMd: json['contentMd'] as String?,
+      question: json['question'] as String?,
+      answerMd: answerMd ?? '',
+      answerType: json['answerType'] as String?,
       citations: (json['citations'] as List<dynamic>? ?? const [])
           .map(
             (item) => CitationModel.fromJson(
@@ -630,6 +647,10 @@ class QaMessageModel {
             ),
           )
           .toList(),
+      createdAt: _parseDateTime(json['createdAt']),
+      generationMetadata: json['generationMetadata'] == null
+          ? null
+          : Map<String, dynamic>.from(json['generationMetadata'] as Map),
     );
   }
 }
@@ -654,8 +675,95 @@ class QaSessionMessagesModel {
   }
 }
 
+class QaSessionModel {
+  const QaSessionModel({
+    required this.sessionId,
+    required this.courseId,
+    required this.scopeType,
+    this.lessonId,
+    this.handoutBlockId,
+    this.title,
+    this.lastMessageAt,
+  });
+
+  final int sessionId;
+  final String courseId;
+  final String scopeType;
+  final String? lessonId;
+  final int? handoutBlockId;
+  final String? title;
+  final DateTime? lastMessageAt;
+
+  String get displayTitle {
+    final explicitTitle = title?.trim();
+    if (explicitTitle != null && explicitTitle.isNotEmpty) {
+      return explicitTitle;
+    }
+    return scopeType == 'lesson'
+        ? 'Lesson QA #$sessionId'
+        : 'Course QA #$sessionId';
+  }
+
+  factory QaSessionModel.fromJson(Map<String, dynamic> json) {
+    return QaSessionModel(
+      sessionId: json['sessionId'] as int,
+      courseId: _stringId(json['courseId']),
+      scopeType: json['scopeType'] as String? ?? 'course',
+      lessonId: _nullableString(json['lessonId']),
+      handoutBlockId: json['handoutBlockId'] as int?,
+      title: json['title'] as String?,
+      lastMessageAt: _parseDateTime(json['lastMessageAt']),
+    );
+  }
+}
+
+class QaSessionsModel {
+  const QaSessionsModel({
+    required this.items,
+  });
+
+  final List<QaSessionModel> items;
+
+  factory QaSessionsModel.fromJson(Map<String, dynamic> json) {
+    return QaSessionsModel(
+      items: (json['items'] as List<dynamic>? ?? const [])
+          .map(
+            (item) => QaSessionModel.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
 String _formatSec(int seconds) {
   final minutes = seconds ~/ 60;
   final rest = seconds % 60;
   return '$minutes:${rest.toString().padLeft(2, '0')}';
+}
+
+String _stringId(Object? value) {
+  if (value == null) {
+    return '';
+  }
+  return value.toString();
+}
+
+String? _nullableString(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  final text = value.toString();
+  return text.isEmpty ? null : text;
+}
+
+DateTime? _parseDateTime(Object? value) {
+  if (value is DateTime) {
+    return value;
+  }
+  if (value is String && value.isNotEmpty) {
+    return DateTime.tryParse(value);
+  }
+  return null;
 }

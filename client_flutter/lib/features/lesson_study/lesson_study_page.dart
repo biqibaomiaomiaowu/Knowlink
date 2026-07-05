@@ -139,7 +139,7 @@ class _LessonStudyBody extends ConsumerWidget {
       barrierColor: Colors.black.withValues(alpha: 0.20),
       builder: (context) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 9, sigmaY: 9),
-        child: _MaterialsDialog(materials: state.materials),
+        child: const _MaterialsDialog(),
       ),
     );
     if (context.mounted) {
@@ -486,6 +486,20 @@ class _VideoPanelState extends ConsumerState<_VideoPanel> {
   }
 
   void _handleControllerChanged() {
+    final controller = _controller;
+    if (controller != null && controller.isInitialized) {
+      final positionSec = controller.position.inSeconds;
+      final isPlaying = controller.isPlaying;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _controller != controller) {
+          return;
+        }
+        ref.read(lessonStudyProvider.notifier).recordPlaybackProgress(
+              positionSec: positionSec,
+              isPlaying: isPlaying,
+            );
+      });
+    }
     if (mounted) {
       setState(() {});
     }
@@ -894,7 +908,7 @@ class _AiPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final messages = state.selectedBlockQaMessages;
+    final entries = state.selectedBlockQaEntries;
     return _LessonCard(
       key: const Key('lesson_study_ai_panel'),
       surfaceKey: const Key('lesson_ai_card_surface'),
@@ -914,19 +928,20 @@ class _AiPanel extends ConsumerWidget {
               title: 'AI 问答',
             ),
             const SizedBox(height: 12),
-            if (messages.isEmpty)
+            if (entries.isEmpty)
               const _ChatBubble(
                 surfaceKey: Key('lesson_ai_bubble_ai_surface'),
                 text: '我会基于当前视频、课件和字幕回答。你可以问“循环队列为什么要空一个位置？”',
                 isUser: false,
               )
             else
-              ...messages.map(
-                (message) => _ChatBubble(
-                  text: message.answerMd,
-                  isUser: false,
+              for (final entry in entries)
+                _QaEntryView(
+                  entry: entry,
+                  onRetry: () => ref
+                      .read(lessonStudyProvider.notifier)
+                      .retryQuestion(entry),
                 ),
-              ),
             const SizedBox(height: 14),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -975,6 +990,76 @@ class _AiPanel extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _QaEntryView extends StatelessWidget {
+  const _QaEntryView({
+    required this.entry,
+    required this.onRetry,
+  });
+
+  final LessonStudyQaEntry entry;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ChatBubble(
+          surfaceKey: Key('lesson_ai_entry_question_${entry.entryId}'),
+          text: entry.question,
+          isUser: true,
+        ),
+        entry.answer.map(
+          data: (answer) => _ChatBubble(
+            surfaceKey: Key('lesson_ai_entry_answer_${entry.entryId}'),
+            text: answer.value.answerMd,
+            isUser: false,
+          ),
+          loading: (_) => _ChatBubble(
+            surfaceKey: Key('lesson_ai_entry_loading_${entry.entryId}'),
+            text: '正在生成回答...',
+            isUser: false,
+          ),
+          error: (errorState) => Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              key: Key('lesson_ai_entry_error_${entry.entryId}'),
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7ED),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFF97316)),
+              ),
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    '回答失败：${errorState.error}',
+                    style: const TextStyle(
+                      color: AppTheme.ink,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  TextButton.icon(
+                    key: Key('lesson_ai_retry_${entry.entryId}'),
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('重试'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1243,13 +1328,15 @@ class _OutlineChildButton extends StatelessWidget {
   }
 }
 
-class _MaterialsDialog extends StatelessWidget {
-  const _MaterialsDialog({required this.materials});
-
-  final List<ScopedResourceModel> materials;
+class _MaterialsDialog extends ConsumerWidget {
+  const _MaterialsDialog();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(lessonStudyProvider);
+    final materials = state.materials;
+    final actionLoading = state.materialAction.isLoading;
+    final preview = state.materialPreview;
     return Dialog(
       key: const Key('lesson_materials_dialog'),
       elevation: 0,
@@ -1284,6 +1371,18 @@ class _MaterialsDialog extends StatelessWidget {
                           ),
                         ),
                         _SoftIconButton(
+                          tooltip: '刷新资料',
+                          icon: Icons.refresh,
+                          onPressed: actionLoading
+                              ? null
+                              : () => ref
+                                  .read(lessonStudyProvider.notifier)
+                                  .refreshMaterials(),
+                          size: 42,
+                          radius: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        _SoftIconButton(
                           tooltip: '关闭',
                           icon: Icons.close,
                           onPressed: () => Navigator.of(context).pop(),
@@ -1293,6 +1392,31 @@ class _MaterialsDialog extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    if (state.materialAction.hasError) ...[
+                      _InlineErrorText(
+                        text: '资料操作失败：${state.materialAction.error}',
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    preview.when(
+                      data: (playback) => playback == null
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _InlineInfoText(
+                                key: const Key('lesson_material_preview_url'),
+                                text: playback.playbackUrl,
+                              ),
+                            ),
+                      loading: () => const Padding(
+                        padding: EdgeInsets.only(bottom: 10),
+                        child: _InlineInfoText(text: '正在获取视频预览...'),
+                      ),
+                      error: (error, _) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _InlineErrorText(text: '预览失败：$error'),
+                      ),
+                    ),
                     if (materials.isEmpty)
                       const Text('暂无本节资料。')
                     else
@@ -1325,6 +1449,46 @@ class _MaterialsDialog extends StatelessWidget {
                                 subtitle: Text(
                                   '${material.resourceType} · ${material.usageRole}',
                                 ),
+                                trailing: Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    if (_materialIsVideo(material))
+                                      _SoftIconButton(
+                                        tooltip: '预览',
+                                        icon: Icons.play_arrow_outlined,
+                                        onPressed: actionLoading
+                                            ? null
+                                            : () => ref
+                                                .read(
+                                                  lessonStudyProvider.notifier,
+                                                )
+                                                .previewMaterial(material),
+                                        size: 38,
+                                        radius: 14,
+                                      )
+                                    else
+                                      const _SoftIconButton(
+                                        tooltip: '下载暂未接入',
+                                        icon: Icons.download_outlined,
+                                        onPressed: null,
+                                        size: 38,
+                                        radius: 14,
+                                      ),
+                                    _SoftIconButton(
+                                      tooltip: '删除',
+                                      icon: Icons.delete_outline,
+                                      onPressed: actionLoading
+                                          ? null
+                                          : () => ref
+                                              .read(
+                                                lessonStudyProvider.notifier,
+                                              )
+                                              .deleteMaterial(material),
+                                      size: 38,
+                                      radius: 14,
+                                    ),
+                                  ],
+                                ),
                               ),
                             );
                           },
@@ -1347,12 +1511,14 @@ class _MaterialRowContent extends StatelessWidget {
     required this.leading,
     required this.title,
     required this.subtitle,
+    this.trailing,
   });
 
   final EdgeInsetsGeometry contentPadding;
   final Widget leading;
   final Widget title;
   final Widget subtitle;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -1389,7 +1555,47 @@ class _MaterialRowContent extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[
+            const SizedBox(width: 12),
+            trailing!,
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _InlineInfoText extends StatelessWidget {
+  const _InlineInfoText({required this.text, super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: AppTheme.muted,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
+class _InlineErrorText extends StatelessWidget {
+  const _InlineErrorText({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: Color(0xFFB42318),
+        fontSize: 12,
+        fontWeight: FontWeight.w800,
       ),
     );
   }
@@ -1608,6 +1814,11 @@ String _fileBadgeLabel(String resourceType) {
     return 'MP4';
   }
   return normalized.length <= 4 ? normalized : normalized.substring(0, 4);
+}
+
+bool _materialIsVideo(ScopedResourceModel material) {
+  final type = material.resourceType.toLowerCase();
+  return type == 'mp4' || type == 'video';
 }
 
 Color _fileBadgeColor(String resourceType) {

@@ -311,6 +311,51 @@ def test_create_import_persists_part_level_lesson_mapping() -> None:
     assert isinstance(run["selection"]["requestFingerprint"], str)
 
 
+def test_create_import_bind_existing_requires_target_lesson_in_course() -> None:
+    service, repo, *_ = build_service()
+    course_id = create_course(repo)
+    target_lesson = repo.store.create_lesson(course_id=course_id, title="绑定课时")
+    other_course_id = create_course(repo)
+    other_lesson = repo.store.create_lesson(course_id=other_course_id, title="其他课程课时")
+    save_auth(repo)
+    preview = service.preview_import(course_id=course_id, source_url="https://www.bilibili.com/video/BVdemo/")
+
+    response = service.create_import(
+        course_id=course_id,
+        preview_id=preview["previewId"],
+        source_url=preview["sourceUrl"],
+        selection_mode="current_part",
+        selected_part_ids=[],
+        quality_preference="android_safe",
+        lesson_mode="bind_existing",
+        target_lesson_id=target_lesson["lessonId"],
+        create_lesson_if_missing=False,
+        idempotency_key="bili-create-bind-existing",
+    )
+
+    run = repo.get_bilibili_import_run(response["entity"]["id"])
+    assert run["selection"]["lessonMode"] == "bind_existing"
+    assert run["selection"]["targetLessonId"] == target_lesson["lessonId"]
+    assert run["selection"]["createLessonIfMissing"] is False
+
+    with pytest.raises(ServiceError) as exc:
+        service.create_import(
+            course_id=course_id,
+            preview_id=preview["previewId"],
+            source_url=preview["sourceUrl"],
+            selection_mode="current_part",
+            selected_part_ids=[],
+            quality_preference="android_safe",
+            lesson_mode="bind_existing",
+            target_lesson_id=other_lesson["lessonId"],
+            create_lesson_if_missing=False,
+            idempotency_key="bili-create-bind-existing-wrong-course",
+        )
+
+    assert exc.value.error_code == "resource.lesson_mismatch"
+    assert exc.value.status_code == 400
+
+
 def test_create_import_rejects_client_supplied_part_resource_mapping() -> None:
     service, repo, *_ = build_service()
     course_id = create_course(repo)

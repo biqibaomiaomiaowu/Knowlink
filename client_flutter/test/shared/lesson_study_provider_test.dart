@@ -13,7 +13,7 @@ import 'package:knowlink_client/shared/providers/course_recommend_provider.dart'
 import 'package:knowlink_client/shared/providers/lesson_study_provider.dart';
 
 void main() {
-  test('load reads lesson study data and selects the first outline child',
+  test('load reads lesson study data and selects the current handout block',
       () async {
     final fakeApiClient = _LessonStudyFakeApiClient();
     final container = _container(fakeApiClient);
@@ -37,14 +37,67 @@ void main() {
     expect(state.currentBlock.valueOrNull?.blockId, 4202);
     expect(state.playback.valueOrNull?.resourceId, 501);
     expect(state.playback.valueOrNull?.playbackUrl, 'https://cdn.test/501.mp4');
-    expect(state.selectedBlockId, 4201);
-    expect(state.selectedBlock?.blockId, 4201);
-    expect(container.read(activeBlockProvider), 4201);
+    expect(state.selectedBlockId, 4202);
+    expect(state.selectedBlock?.blockId, 4202);
+    expect(container.read(activeBlockProvider), 4202);
     expect(container.read(activeLessonProvider)?.courseId, '101');
     expect(container.read(activeLessonProvider)?.lessonId, '42');
     expect(container.read(activeLessonProvider)?.positionSec, 128);
     expect(fakeApiClient.currentBlockRequests.single.currentSec, 128);
     expect(fakeApiClient.playbackResourceIds, [501]);
+  });
+
+  test('load prefers persisted lesson progress over local detail position',
+      () async {
+    final fakeApiClient = _LessonStudyFakeApiClient(
+      progressPositionSec: 186,
+    );
+    final container = _container(fakeApiClient);
+    container.read(playerStateProvider.notifier).state =
+        const PlayerState(positionSec: 21);
+
+    await container.read(lessonStudyProvider.notifier).load(
+          courseId: '101',
+          lessonId: '42',
+        );
+
+    final state = container.read(lessonStudyProvider);
+    expect(fakeApiClient.progressRequests.single, ('101', '42'));
+    expect(state.lessonProgress.valueOrNull?.lastPositionSec, 186);
+    expect(state.selectedBlockId, 4202);
+    expect(container.read(activeBlockProvider), 4202);
+    expect(container.read(playerStateProvider).positionSec, 186);
+    expect(container.read(activeLessonProvider)?.positionSec, 186);
+    expect(fakeApiClient.currentBlockRequests.single.currentSec, 186);
+  });
+
+  test('flushProgress persists current position once per unchanged value',
+      () async {
+    final fakeApiClient = _LessonStudyFakeApiClient();
+    final container = _container(fakeApiClient);
+    final controller = container.read(lessonStudyProvider.notifier);
+
+    await controller.load(courseId: '101', lessonId: '42');
+    container.read(playerStateProvider.notifier).state =
+        const PlayerState(positionSec: 182);
+
+    await controller.flushProgress();
+    await controller.flushProgress();
+
+    expect(fakeApiClient.progressUpdates, hasLength(1));
+    final update = fakeApiClient.progressUpdates.single;
+    expect(update.courseId, '101');
+    expect(update.lessonId, '42');
+    expect(update.request['lastPositionSec'], 182);
+    expect(update.request['lastHandoutBlockId'], '4202');
+    expect(
+      container
+          .read(lessonStudyProvider)
+          .progressSave
+          .valueOrNull
+          ?.lastPositionSec,
+      182,
+    );
   });
 
   test('load keeps lesson data when lesson handout is still placeholder',
@@ -144,7 +197,7 @@ void main() {
     expect(qaCall.request.scopeType, 'lesson');
     expect(qaCall.request.courseId, '101');
     expect(qaCall.request.lessonId, '42');
-    expect(qaCall.request.handoutBlockId, 4201);
+    expect(qaCall.request.handoutBlockId, 4202);
     expect(qaCall.request.question, 'Explain this block');
     expect(container.read(courseFlowProvider).sessionId, 6201);
     expect(
@@ -155,6 +208,43 @@ void main() {
           .messageId,
       6202,
     );
+    expect(
+      container
+          .read(lessonStudyProvider)
+          .selectedBlockQaEntries
+          .single
+          .question,
+      'Explain this block',
+    );
+  });
+
+  test('retryQuestion reuses the failed QA entry without duplicating it',
+      () async {
+    final fakeApiClient = _FailThenSucceedQaLessonStudyFakeApiClient();
+    final container = _container(fakeApiClient);
+    final controller = container.read(lessonStudyProvider.notifier);
+
+    await controller.load(courseId: '101', lessonId: '42');
+    await controller.askQuestion('Why does the queue wrap?');
+
+    var state = container.read(lessonStudyProvider);
+    expect(state.selectedBlockQaEntries, hasLength(1));
+    expect(state.selectedBlockQaEntries.single.question,
+        'Why does the queue wrap?');
+    expect(state.selectedBlockQaEntries.single.answer.hasError, isTrue);
+
+    await controller.retryQuestion(state.selectedBlockQaEntries.single);
+
+    state = container.read(lessonStudyProvider);
+    expect(fakeApiClient.lessonQaRequests, hasLength(2));
+    expect(state.selectedBlockQaEntries, hasLength(1));
+    expect(state.selectedBlockQaEntries.single.question,
+        'Why does the queue wrap?');
+    expect(
+      state.selectedBlockQaEntries.single.answer.value?.answerMd,
+      'Recovered answer',
+    );
+    expect(state.selectedBlockQaMessages.single.answerMd, 'Recovered answer');
   });
 
   test(
@@ -172,13 +262,13 @@ void main() {
         .generateSelectedBlock();
 
     expect(accepted, isTrue);
-    expect(fakeApiClient.generatedBlockIds, [4201]);
+    expect(fakeApiClient.generatedBlockIds, [4202]);
     expect(fakeApiClient.outlineRequestCount, 2);
     expect(fakeApiClient.blocksRequestCount, 2);
     expect(container.read(lessonStudyProvider).blockGenerateRequest.valueOrNull,
         isNotNull);
-    expect(container.read(lessonStudyProvider).selectedBlockId, 4201);
-    expect(container.read(activeBlockProvider), 4201);
+    expect(container.read(lessonStudyProvider).selectedBlockId, 4202);
+    expect(container.read(activeBlockProvider), 4202);
   });
 
   test('stale QA response is ignored after selecting another block', () async {
@@ -193,13 +283,13 @@ void main() {
         container.read(lessonStudyProvider.notifier).askQuestion('slow answer');
     await fakeApiClient.qaRequested.future;
 
-    final secondBlock = container
+    final firstBlock = container
         .read(lessonStudyProvider)
         .blocks
         .valueOrNull!
         .items
-        .singleWhere((block) => block.blockId == 4202);
-    container.read(lessonStudyProvider.notifier).selectBlock(secondBlock);
+        .singleWhere((block) => block.blockId == 4201);
+    container.read(lessonStudyProvider.notifier).selectBlock(firstBlock);
     fakeApiClient.qaResponse.complete(
       handouts.QaMessageModel.fromJson({
         'sessionId': 6201,
@@ -211,11 +301,11 @@ void main() {
     await pendingQa;
 
     final state = container.read(lessonStudyProvider);
-    expect(state.selectedBlockId, 4202);
+    expect(state.selectedBlockId, 4201);
     expect(state.selectedBlockQaMessages, isEmpty);
     expect(state.qaMessagesByBlockId, isEmpty);
     expect(state.qaSubmit.isLoading, isFalse);
-    expect(container.read(activeBlockProvider), 4202);
+    expect(container.read(activeBlockProvider), 4201);
     expect(container.read(courseFlowProvider).sessionId, isNull);
   });
 
@@ -233,29 +323,29 @@ void main() {
         .syncCurrentBlockFromPosition(positionSec: 130);
     await fakeApiClient.currentBlockRequested.future;
 
-    final secondBlock = container
+    final firstBlock = container
         .read(lessonStudyProvider)
         .blocks
         .valueOrNull!
         .items
-        .singleWhere((block) => block.blockId == 4202);
-    container.read(lessonStudyProvider.notifier).selectBlock(secondBlock);
+        .singleWhere((block) => block.blockId == 4201);
+    container.read(lessonStudyProvider.notifier).selectBlock(firstBlock);
     fakeApiClient.currentBlockResponse.complete(
       handouts.CurrentHandoutBlockModel.fromJson({
-        'blockId': 4201,
-        'outlineKey': 'block-42-a',
-        'startSec': 0,
-        'endSec': 120,
+        'blockId': 4202,
+        'outlineKey': 'block-42-b',
+        'startSec': 120,
+        'endSec': 240,
         'generationStatus': 'ready',
       }),
     );
     await pendingCurrent;
 
     final state = container.read(lessonStudyProvider);
-    expect(state.selectedBlockId, 4202);
+    expect(state.selectedBlockId, 4201);
     expect(state.currentBlock.isLoading, isFalse);
     expect(state.currentBlock.valueOrNull, isNull);
-    expect(container.read(activeBlockProvider), 4202);
+    expect(container.read(activeBlockProvider), 4201);
   });
 
   test('stale load response cannot overwrite a newer lesson', () async {
@@ -301,10 +391,15 @@ ProviderContainer _container(ApiClient apiClient) {
 }
 
 class _LessonStudyFakeApiClient extends ApiClient {
+  _LessonStudyFakeApiClient({this.progressPositionSec});
+
+  final int? progressPositionSec;
   final lessonQaRequests = <_LessonQaCall>[];
   final currentBlockRequests = <_CurrentBlockCall>[];
   final playbackResourceIds = <int>[];
   final generatedBlockIds = <int>[];
+  final progressRequests = <(String, String)>[];
+  final progressUpdates = <_ProgressUpdateCall>[];
   var outlineRequestCount = 0;
   var blocksRequestCount = 0;
 
@@ -400,6 +495,44 @@ class _LessonStudyFakeApiClient extends ApiClient {
   }
 
   @override
+  Future<lessons.LessonProgressModel> fetchLessonProgress({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    progressRequests.add((courseId, lessonId));
+    return lessons.LessonProgressModel.fromJson(
+      _lessonProgressJson(
+        courseId: courseId,
+        lessonId: lessonId,
+        lastPositionSec: progressPositionSec,
+      ),
+    );
+  }
+
+  @override
+  Future<lessons.LessonProgressModel> updateLessonProgress({
+    required String courseId,
+    required String lessonId,
+    required Map<String, dynamic> request,
+  }) async {
+    progressUpdates.add(
+      _ProgressUpdateCall(
+        courseId: courseId,
+        lessonId: lessonId,
+        request: Map<String, dynamic>.from(request),
+      ),
+    );
+    return lessons.LessonProgressModel.fromJson(
+      _lessonProgressJson(
+        courseId: courseId,
+        lessonId: lessonId,
+        lastPositionSec: request['lastPositionSec'] as int?,
+        lastHandoutBlockId: request['lastHandoutBlockId'] as String?,
+      ),
+    );
+  }
+
+  @override
   Future<handouts.QaMessageModel> createLessonQaMessage({
     required String courseId,
     required String lessonId,
@@ -416,6 +549,36 @@ class _LessonStudyFakeApiClient extends ApiClient {
       'sessionId': 6201,
       'messageId': 6202,
       'answerMd': 'Answer for ${request.handoutBlockId}',
+      'citations': [],
+    });
+  }
+}
+
+class _FailThenSucceedQaLessonStudyFakeApiClient
+    extends _LessonStudyFakeApiClient {
+  var _attempt = 0;
+
+  @override
+  Future<handouts.QaMessageModel> createLessonQaMessage({
+    required String courseId,
+    required String lessonId,
+    required handouts.ScopedQaMessageRequestModel request,
+  }) async {
+    lessonQaRequests.add(
+      _LessonQaCall(
+        courseId: courseId,
+        lessonId: lessonId,
+        request: request,
+      ),
+    );
+    _attempt++;
+    if (_attempt == 1) {
+      throw StateError('temporary qa failure');
+    }
+    return handouts.QaMessageModel.fromJson({
+      'sessionId': 6201,
+      'messageId': 6203,
+      'answerMd': 'Recovered answer',
       'citations': [],
     });
   }
@@ -566,6 +729,18 @@ class _CurrentBlockCall {
   final int currentSec;
 }
 
+class _ProgressUpdateCall {
+  const _ProgressUpdateCall({
+    required this.courseId,
+    required this.lessonId,
+    required this.request,
+  });
+
+  final String courseId;
+  final String lessonId;
+  final Map<String, dynamic> request;
+}
+
 Map<String, dynamic> _lessonDetailJson({
   String courseId = '101',
   required String lessonId,
@@ -622,6 +797,24 @@ Map<String, dynamic> _lessonDetailJson({
     'sourceOverview': {},
     'knowledgePointPlaceholders': [],
     'weaknessPlaceholders': [],
+  };
+}
+
+Map<String, dynamic> _lessonProgressJson({
+  required String courseId,
+  required String lessonId,
+  int? lastPositionSec,
+  String? lastHandoutBlockId,
+}) {
+  return {
+    'courseId': courseId,
+    'lessonId': lessonId,
+    'lastPositionSec': lastPositionSec,
+    'lastHandoutBlockId': lastHandoutBlockId,
+    'handoutReadPercent': 0,
+    'quizStatus': 'not_generated',
+    'reviewStatus': 'not_due',
+    'lastActivityAt': '2026-07-05T12:00:00Z',
   };
 }
 

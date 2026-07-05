@@ -526,6 +526,27 @@ class ApiClient {
     return QaSessionMessagesModel.fromJson(data);
   }
 
+  Future<QaSessionsModel> fetchCourseQaSessions(String courseId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/qa/sessions',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return QaSessionsModel.fromJson(data);
+  }
+
+  Future<QaSessionsModel> fetchLessonQaSessions({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/lessons/$lessonId/qa/sessions',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return QaSessionsModel.fromJson(data);
+  }
+
   Future<QuizGenerateResultModel> generateQuiz({
     required String courseId,
     required String idempotencyKey,
@@ -588,6 +609,24 @@ class ApiClient {
 
     final data = response.data?['data'] as Map<String, dynamic>;
     return QuizModel.fromJson(data);
+  }
+
+  Future<List<CourseQuizHistoryItemModel>> fetchCourseQuizHistory(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/quizzes',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    final items = data['items'] as List<dynamic>? ?? const [];
+    return items
+        .map(
+          (item) => CourseQuizHistoryItemModel.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
   }
 
   Future<SubmitQuizResultModel> submitQuizAttempt({
@@ -857,6 +896,39 @@ class ApiClient {
           ),
         )
         .toList();
+  }
+
+  Future<CourseDeleteImpactModel> fetchCourseDeleteImpact(
+    String courseId,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/delete-impact',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseDeleteImpactModel.fromJson(data);
+  }
+
+  Future<CourseLibraryItemModel> archiveCourse(String courseId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/archive',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseLibraryItemModel.fromJson(
+      Map<String, dynamic>.from(data['course'] as Map),
+    );
+  }
+
+  Future<CourseLibraryItemModel> restoreCourse(String courseId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/courses/$courseId/restore',
+    );
+
+    final data = response.data?['data'] as Map<String, dynamic>;
+    return CourseLibraryItemModel.fromJson(
+      Map<String, dynamic>.from(data['course'] as Map),
+    );
   }
 
   Future<void> deleteCourse(String courseId) async {

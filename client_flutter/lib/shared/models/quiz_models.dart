@@ -67,6 +67,81 @@ class QuizStatusModel {
   }
 }
 
+class CourseQuizHistoryItemModel {
+  const CourseQuizHistoryItemModel({
+    required this.quizId,
+    required this.courseId,
+    required this.scopeType,
+    required this.status,
+    required this.quizMode,
+    required this.questionCount,
+    this.lessonId,
+    this.createdAt,
+    this.updatedAt,
+    this.latestAttempt,
+  });
+
+  final int quizId;
+  final int courseId;
+  final String scopeType;
+  final int? lessonId;
+  final String status;
+  final String quizMode;
+  final int questionCount;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final QuizHistoryAttemptModel? latestAttempt;
+
+  factory CourseQuizHistoryItemModel.fromJson(Map<String, dynamic> json) {
+    final latestAttemptJson = json['latestAttempt'] as Map?;
+    return CourseQuizHistoryItemModel(
+      quizId: json['quizId'] as int,
+      courseId: json['courseId'] as int,
+      scopeType: json['scopeType'] as String? ?? 'course',
+      lessonId: json['lessonId'] as int?,
+      status: json['status'] as String? ?? 'unknown',
+      quizMode: json['quizMode'] as String? ?? 'objective',
+      questionCount: json['questionCount'] as int? ?? 0,
+      createdAt: _parseDateTime(json['createdAt']),
+      updatedAt: _parseDateTime(json['updatedAt']),
+      latestAttempt: latestAttemptJson == null
+          ? null
+          : QuizHistoryAttemptModel.fromJson(
+              Map<String, dynamic>.from(latestAttemptJson),
+            ),
+    );
+  }
+}
+
+class QuizHistoryAttemptModel {
+  const QuizHistoryAttemptModel({
+    required this.attemptId,
+    required this.score,
+    required this.totalScore,
+    required this.accuracy,
+    this.reviewTaskRunId,
+    this.createdAt,
+  });
+
+  final int attemptId;
+  final int score;
+  final int totalScore;
+  final double accuracy;
+  final int? reviewTaskRunId;
+  final DateTime? createdAt;
+
+  factory QuizHistoryAttemptModel.fromJson(Map<String, dynamic> json) {
+    return QuizHistoryAttemptModel(
+      attemptId: json['attemptId'] as int,
+      score: json['score'] as int? ?? 0,
+      totalScore: json['totalScore'] as int? ?? 0,
+      accuracy: (json['accuracy'] as num?)?.toDouble() ?? 0,
+      reviewTaskRunId: json['reviewTaskRunId'] as int?,
+      createdAt: _parseDateTime(json['createdAt']),
+    );
+  }
+}
+
 class QuizModel {
   const QuizModel({
     required this.quizId,
@@ -333,4 +408,11 @@ class RecommendedReviewActionModel {
       targetId: json['targetId'] as int?,
     );
   }
+}
+
+DateTime? _parseDateTime(Object? value) {
+  if (value is! String || value.isEmpty) {
+    return null;
+  }
+  return DateTime.tryParse(value);
 }

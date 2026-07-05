@@ -4,21 +4,48 @@ import 'course_lesson_models.dart';
 import 'handout_models.dart';
 import 'resource_upload_models.dart';
 
+class LessonStudyQaEntry {
+  const LessonStudyQaEntry({
+    required this.entryId,
+    required this.question,
+    required this.answer,
+  });
+
+  final int entryId;
+  final String question;
+  final AsyncValue<QaMessageModel> answer;
+
+  LessonStudyQaEntry copyWith({
+    String? question,
+    AsyncValue<QaMessageModel>? answer,
+  }) {
+    return LessonStudyQaEntry(
+      entryId: entryId,
+      question: question ?? this.question,
+      answer: answer ?? this.answer,
+    );
+  }
+}
+
 class LessonStudyState {
   const LessonStudyState({
     this.courseId,
     this.lessonId,
     this.lessonDetail = const AsyncData<LessonDetailModel?>(null),
+    this.lessonProgress = const AsyncData<LessonProgressModel?>(null),
+    this.progressSave = const AsyncData<LessonProgressModel?>(null),
     this.latestHandout = const AsyncData<HandoutLatestModel?>(null),
     this.outline = const AsyncData<HandoutOutlineModel?>(null),
     this.blocks = const AsyncData<HandoutBlocksModel?>(null),
     this.currentBlock = const AsyncData<CurrentHandoutBlockModel?>(null),
     this.playback = const AsyncData<CourseResourcePlaybackModel?>(null),
+    this.materialAction = const AsyncData<void>(null),
+    this.materialPreview = const AsyncData<CourseResourcePlaybackModel?>(null),
     this.blockGenerateRequest =
         const AsyncData<HandoutBlockGenerateResultModel?>(null),
     this.qaSubmit = const AsyncData<QaMessageModel?>(null),
     this.selectedBlockId,
-    this.qaMessagesByBlockId = const {},
+    this.qaEntriesByBlockId = const {},
     this.isOutlineOpen = false,
     this.isMaterialsOpen = false,
   });
@@ -26,15 +53,19 @@ class LessonStudyState {
   final String? courseId;
   final String? lessonId;
   final AsyncValue<LessonDetailModel?> lessonDetail;
+  final AsyncValue<LessonProgressModel?> lessonProgress;
+  final AsyncValue<LessonProgressModel?> progressSave;
   final AsyncValue<HandoutLatestModel?> latestHandout;
   final AsyncValue<HandoutOutlineModel?> outline;
   final AsyncValue<HandoutBlocksModel?> blocks;
   final AsyncValue<CurrentHandoutBlockModel?> currentBlock;
   final AsyncValue<CourseResourcePlaybackModel?> playback;
+  final AsyncValue<void> materialAction;
+  final AsyncValue<CourseResourcePlaybackModel?> materialPreview;
   final AsyncValue<HandoutBlockGenerateResultModel?> blockGenerateRequest;
   final AsyncValue<QaMessageModel?> qaSubmit;
   final int? selectedBlockId;
-  final Map<int, List<QaMessageModel>> qaMessagesByBlockId;
+  final Map<int, List<LessonStudyQaEntry>> qaEntriesByBlockId;
   final bool isOutlineOpen;
   final bool isMaterialsOpen;
 
@@ -54,12 +85,41 @@ class LessonStudyState {
     return blockForId(blockId);
   }
 
+  List<LessonStudyQaEntry> get selectedBlockQaEntries {
+    final blockId = selectedBlockId;
+    if (blockId == null) {
+      return const [];
+    }
+    return qaEntriesByBlockId[blockId] ?? const [];
+  }
+
   List<QaMessageModel> get selectedBlockQaMessages {
     final blockId = selectedBlockId;
     if (blockId == null) {
       return const [];
     }
-    return qaMessagesByBlockId[blockId] ?? const [];
+    return [
+      for (final entry in qaEntriesByBlockId[blockId] ?? const [])
+        ...entry.answer.map(
+          data: (answer) => [answer.value],
+          error: (_) => const <QaMessageModel>[],
+          loading: (_) => const <QaMessageModel>[],
+        ),
+    ];
+  }
+
+  Map<int, List<QaMessageModel>> get qaMessagesByBlockId {
+    return {
+      for (final blockEntries in qaEntriesByBlockId.entries)
+        blockEntries.key: [
+          for (final entry in blockEntries.value)
+            ...entry.answer.map(
+              data: (answer) => [answer.value],
+              error: (_) => const <QaMessageModel>[],
+              loading: (_) => const <QaMessageModel>[],
+            ),
+        ],
+    };
   }
 
   bool get isLoading {
@@ -72,6 +132,7 @@ class LessonStudyState {
   }
 
   bool get isSubmittingQuestion => qaSubmit.isLoading;
+  bool get isSavingProgress => progressSave.isLoading;
   bool get isGeneratingSelectedBlock => blockGenerateRequest.isLoading;
 
   HandoutBlockModel? blockForId(int blockId) {
@@ -90,16 +151,21 @@ class LessonStudyState {
     String? lessonId,
     bool clearLessonId = false,
     AsyncValue<LessonDetailModel?>? lessonDetail,
+    AsyncValue<LessonProgressModel?>? lessonProgress,
+    AsyncValue<LessonProgressModel?>? progressSave,
     AsyncValue<HandoutLatestModel?>? latestHandout,
     AsyncValue<HandoutOutlineModel?>? outline,
     AsyncValue<HandoutBlocksModel?>? blocks,
     AsyncValue<CurrentHandoutBlockModel?>? currentBlock,
     AsyncValue<CourseResourcePlaybackModel?>? playback,
+    AsyncValue<void>? materialAction,
+    AsyncValue<CourseResourcePlaybackModel?>? materialPreview,
+    bool clearMaterialPreview = false,
     AsyncValue<HandoutBlockGenerateResultModel?>? blockGenerateRequest,
     AsyncValue<QaMessageModel?>? qaSubmit,
     int? selectedBlockId,
     bool clearSelectedBlockId = false,
-    Map<int, List<QaMessageModel>>? qaMessagesByBlockId,
+    Map<int, List<LessonStudyQaEntry>>? qaEntriesByBlockId,
     bool clearQaMessages = false,
     bool? isOutlineOpen,
     bool? isMaterialsOpen,
@@ -108,18 +174,24 @@ class LessonStudyState {
       courseId: clearCourseId ? null : courseId ?? this.courseId,
       lessonId: clearLessonId ? null : lessonId ?? this.lessonId,
       lessonDetail: lessonDetail ?? this.lessonDetail,
+      lessonProgress: lessonProgress ?? this.lessonProgress,
+      progressSave: progressSave ?? this.progressSave,
       latestHandout: latestHandout ?? this.latestHandout,
       outline: outline ?? this.outline,
       blocks: blocks ?? this.blocks,
       currentBlock: currentBlock ?? this.currentBlock,
       playback: playback ?? this.playback,
+      materialAction: materialAction ?? this.materialAction,
+      materialPreview: clearMaterialPreview
+          ? const AsyncData(null)
+          : materialPreview ?? this.materialPreview,
       blockGenerateRequest: blockGenerateRequest ?? this.blockGenerateRequest,
       qaSubmit: qaSubmit ?? this.qaSubmit,
       selectedBlockId:
           clearSelectedBlockId ? null : selectedBlockId ?? this.selectedBlockId,
-      qaMessagesByBlockId: clearQaMessages
+      qaEntriesByBlockId: clearQaMessages
           ? const {}
-          : qaMessagesByBlockId ?? this.qaMessagesByBlockId,
+          : qaEntriesByBlockId ?? this.qaEntriesByBlockId,
       isOutlineOpen: isOutlineOpen ?? this.isOutlineOpen,
       isMaterialsOpen: isMaterialsOpen ?? this.isMaterialsOpen,
     );

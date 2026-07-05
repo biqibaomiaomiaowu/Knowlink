@@ -293,9 +293,13 @@ class JumpTargetData(CamelModel):
 class QaMessageData(CamelModel):
     session_id: int
     message_id: int
-    answer_md: str
+    role: str | None = None
+    content_md: str | None = None
+    question: str | None = None
+    answer_md: str | None = None
     answer_type: str | None = None
     citations: list[Citation]
+    created_at: datetime | None = None
     generation_metadata: dict[str, object] | None = None
 
 

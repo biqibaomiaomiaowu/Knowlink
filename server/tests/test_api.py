@@ -13,7 +13,7 @@ from server.app import app
 from server.config.logging import JsonFormatter, configure_logging
 from server.domain.services import BilibiliService
 from server.infra.repositories.memory import MemoryScaffoldRepository
-from server.infra.repositories.memory_runtime import RuntimeStore
+from server.infra.repositories.memory_runtime import RuntimeStore, runtime_store
 from server.tasks.repositories import InMemoryAsyncTaskRepository
 from server.tests.test_bilibili_service import FakeBiliClient, RecordingDispatcher, save_auth
 
@@ -885,6 +885,65 @@ def test_quiz_generate_rejects_same_idempotency_key_with_different_body():
     assert first["data"]["entity"]["type"] == "quiz"
     assert second_status == 409
     assert second["errorCode"] == "idempotency.body_mismatch"
+
+
+def test_course_quiz_history_endpoint_returns_latest_attempt():
+    course_id, _ = create_manual_course(
+        idempotency_key="quiz-history-course-1",
+        title="Quiz history course",
+    )
+    quiz, _trigger = runtime_store.create_quiz(course_id, question_count_level="small")
+    quiz.update(
+        {
+            "status": "ready",
+            "questionCount": 1,
+            "questions": [
+                {
+                    "questionId": quiz["quizId"] * 100 + 1,
+                    "questionKey": "course-q1",
+                    "questionType": "single_choice",
+                    "stemMd": "Which answer is supported?",
+                    "options": ["A. Supported", "B. Unsupported"],
+                    "correctAnswer": "A",
+                    "explanationMd": "The answer is supported.",
+                    "difficultyLevel": "medium",
+                    "knowledgePointKey": "kp-course",
+                    "knowledgePointName": "Course evidence",
+                    "sourceBlockKey": "course-block",
+                    "sourceSegmentKeys": ["course-segment"],
+                }
+            ],
+        }
+    )
+    submit_status, submit_body = asyncio.run(
+        request(
+            "POST",
+            f"/api/v1/quizzes/{quiz['quizId']}/submit",
+            headers=AUTH_HEADERS,
+            json_body={
+                "answers": [
+                    {
+                        "questionId": quiz["questions"][0]["questionId"],
+                        "selectedOption": "A",
+                    }
+                ]
+            },
+        )
+    )
+    assert submit_status == 200
+
+    status, body = asyncio.run(
+        request("GET", f"/api/v1/courses/{course_id}/quizzes", headers=AUTH_HEADERS)
+    )
+
+    assert status == 200
+    items = body["data"]["items"]
+    assert [item["quizId"] for item in items] == [quiz["quizId"]]
+    assert items[0]["courseId"] == course_id
+    assert items[0]["scopeType"] == "course"
+    assert items[0]["quizMode"] == "objective"
+    assert items[0]["questionCount"] == 1
+    assert items[0]["latestAttempt"]["attemptId"] == submit_body["data"]["attemptId"]
 
 
 def test_review_regenerate_is_idempotent():

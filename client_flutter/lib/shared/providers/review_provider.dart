@@ -83,23 +83,13 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
         return;
       }
 
-      ReviewRunStatusModel? latestStatus;
-      for (var attempt = 0; attempt < maxAttempts; attempt++) {
-        if (!_shouldApply(requestId, courseId: courseId)) {
-          return;
-        }
-        latestStatus = await ref
-            .read(apiClientProvider)
-            .fetchReviewRunStatus(result.entity.id);
-        if (!_shouldApply(requestId, courseId: courseId)) {
-          return;
-        }
-        state = state.copyWith(runStatus: AsyncData(latestStatus));
-        if (latestStatus.isTerminal) {
-          break;
-        }
-        await Future<void>.delayed(interval);
-      }
+      final latestStatus = await _pollRunStatus(
+        requestId: requestId,
+        courseId: courseId,
+        reviewTaskRunId: result.entity.id,
+        interval: interval,
+        maxAttempts: maxAttempts,
+      );
 
       if (_canFetchReviewAfterRun(latestStatus)) {
         final review = await ref.read(apiClientProvider).fetchCourseReview(
@@ -115,6 +105,63 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
         return;
       }
       state = state.copyWith(regeneration: AsyncError(error, stackTrace));
+    } finally {
+      if (_shouldApply(requestId, courseId: courseId)) {
+        state = state.copyWith(isPolling: false);
+      }
+    }
+  }
+
+  Future<void> pollExistingRunAndLoad(
+    String courseId,
+    int reviewTaskRunId, {
+    Duration interval = const Duration(seconds: 2),
+    int maxAttempts = 30,
+  }) async {
+    if (state.isRegenerating) {
+      return;
+    }
+    final requestId = ++_latestRequestId;
+    _activeCourseId = courseId;
+    ref.read(courseFlowProvider.notifier).startCourse(courseId);
+    state = state.copyWith(
+      review: const AsyncLoading(),
+      regeneration: const AsyncData<ReviewRegenerateResultModel?>(null),
+      runStatus: const AsyncLoading(),
+      completion: const AsyncData<CompleteReviewTaskResultModel?>(null),
+      clearCompletingTaskId: true,
+      isPolling: true,
+    );
+
+    try {
+      final latestStatus = await _pollRunStatus(
+        requestId: requestId,
+        courseId: courseId,
+        reviewTaskRunId: reviewTaskRunId,
+        interval: interval,
+        maxAttempts: maxAttempts,
+      );
+
+      if (_canFetchReviewAfterRun(latestStatus)) {
+        final review = await ref.read(apiClientProvider).fetchCourseReview(
+              courseId: courseId,
+            );
+        if (!_shouldApply(requestId, courseId: courseId)) {
+          return;
+        }
+        state = state.copyWith(review: AsyncData(review));
+      } else if (_shouldApply(requestId, courseId: courseId)) {
+        state =
+            state.copyWith(review: const AsyncData<CourseReviewModel?>(null));
+      }
+    } catch (error, stackTrace) {
+      if (!_shouldApply(requestId, courseId: courseId)) {
+        return;
+      }
+      state = state.copyWith(
+        review: AsyncError(error, stackTrace),
+        runStatus: AsyncError(error, stackTrace),
+      );
     } finally {
       if (_shouldApply(requestId, courseId: courseId)) {
         state = state.copyWith(isPolling: false);
@@ -186,6 +233,35 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
       }
     }
     return null;
+  }
+
+  Future<ReviewRunStatusModel?> _pollRunStatus({
+    required int requestId,
+    required String courseId,
+    required int reviewTaskRunId,
+    required Duration interval,
+    required int maxAttempts,
+  }) async {
+    ReviewRunStatusModel? latestStatus;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      if (!_shouldApply(requestId, courseId: courseId)) {
+        return null;
+      }
+      latestStatus = await ref
+          .read(apiClientProvider)
+          .fetchReviewRunStatus(reviewTaskRunId);
+      if (!_shouldApply(requestId, courseId: courseId)) {
+        return null;
+      }
+      state = state.copyWith(runStatus: AsyncData(latestStatus));
+      if (latestStatus.isTerminal) {
+        break;
+      }
+      if (attempt < maxAttempts - 1) {
+        await Future<void>.delayed(interval);
+      }
+    }
+    return latestStatus;
   }
 
   bool _canFetchReviewAfterRun(ReviewRunStatusModel? status) {

@@ -77,6 +77,7 @@ class CreateLessonRequest(CamelModel):
     primary_video_resource_id: int | None = None
     primary_video_start_sec: int | None = Field(default=None, ge=0)
     primary_video_end_sec: int | None = Field(default=None, ge=0)
+    meta_json: dict[str, Any] | None = None
 
 
 class UpdateLessonRequest(CamelModel):

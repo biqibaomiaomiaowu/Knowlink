@@ -37,6 +37,18 @@ class CourseLessonApi {
     return _client.deleteCourse(courseId);
   }
 
+  Future<CourseDeleteImpactModel> fetchCourseDeleteImpact(String courseId) {
+    return _client.fetchCourseDeleteImpact(courseId);
+  }
+
+  Future<CourseLibraryItemModel> archiveCourse(String courseId) {
+    return _client.archiveCourse(courseId);
+  }
+
+  Future<CourseLibraryItemModel> restoreCourse(String courseId) {
+    return _client.restoreCourse(courseId);
+  }
+
   Future<List<LessonSummaryModel>> fetchLessons(String courseId) {
     return _client.fetchLessons(courseId);
   }

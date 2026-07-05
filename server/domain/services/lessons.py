@@ -64,6 +64,7 @@ class LessonService:
             primary_video_resource_id=payload.primary_video_resource_id,
             primary_video_start_sec=payload.primary_video_start_sec,
             primary_video_end_sec=payload.primary_video_end_sec,
+            meta_json=payload.meta_json,
         )
         return {"lesson": self._lesson_summary(course_id=course_id, lesson=lesson)}
 

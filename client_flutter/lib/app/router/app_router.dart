@@ -17,6 +17,7 @@ import '../../features/lesson_detail/lesson_detail_page.dart';
 import '../../features/lesson_study/lesson_study_page.dart';
 import '../../features/parse_progress/parse_progress_page.dart';
 import '../../features/qa/qa_page.dart';
+import '../../features/quiz/quiz_history_page.dart';
 import '../../features/quiz/quiz_page.dart';
 import '../../features/review/review_page.dart';
 import '../../shared/providers/course_flow_providers.dart';
@@ -264,7 +265,20 @@ class AppRouter {
             final courseId = state.pathParameters['courseId']!;
             return _CourseFlowSync(
               courseId: courseId,
-              child: QuizPage(courseId: courseId),
+              child: QuizPage(
+                courseId: courseId,
+                autoRegenerate: state.uri.queryParameters['regenerate'] == '1',
+              ),
+            );
+          },
+        ),
+        GoRoute(
+          path: '/courses/:courseId/quizzes',
+          builder: (context, state) {
+            final courseId = state.pathParameters['courseId']!;
+            return _CourseFlowSync(
+              courseId: courseId,
+              child: CourseQuizHistoryPage(courseId: courseId),
             );
           },
         ),

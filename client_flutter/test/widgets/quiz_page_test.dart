@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
+import 'package:knowlink_client/features/quiz/quiz_history_page.dart';
 import 'package:knowlink_client/features/quiz/quiz_page.dart';
 import 'package:knowlink_client/shared/models/quiz_models.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
@@ -130,6 +132,74 @@ void main() {
     expect(find.text('极限定义关注什么？'), findsOneWidget);
   });
 
+  testWidgets('course quiz page auto regenerates once for regenerate route', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _QuizPageFakeApiClient();
+
+    Widget buildPage() {
+      return ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(
+          home: QuizPage(courseId: '101', autoRegenerate: true),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(buildPage());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(buildPage());
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.generatedCourseIds, ['101']);
+    expect(fakeApiClient.fetchedQuizIds, [8001]);
+  });
+
+  testWidgets('quiz history page opens selected quiz detail route', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _QuizPageFakeApiClient();
+    final router = GoRouter(
+      initialLocation: '/courses/101/quizzes',
+      routes: [
+        GoRoute(
+          path: '/courses/:courseId/quizzes',
+          builder: (context, state) => CourseQuizHistoryPage(
+            courseId: state.pathParameters['courseId']!,
+          ),
+        ),
+        GoRoute(
+          path: '/quizzes/:quizId',
+          builder: (context, state) => Text(
+            'quiz-detail ${state.pathParameters['quizId']}',
+          ),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.historyCourseIds, ['101']);
+    expect(find.textContaining('8001'), findsWidgets);
+
+    await tester.tap(find.textContaining('8001').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('quiz-detail 8001'), findsOneWidget);
+  });
+
   testWidgets('course quiz page keeps generate disabled while polling', (
     tester,
   ) async {
@@ -211,6 +281,7 @@ class _QuizPageFakeApiClient extends ApiClient {
   final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
   final submittedAnswers = <SubmitQuizRequestModel>[];
+  final historyCourseIds = <String>[];
 
   @override
   Future<QuizGenerateResultModel> generateQuiz({
@@ -259,6 +330,45 @@ class _QuizPageFakeApiClient extends ApiClient {
   }
 
   @override
+  Future<List<CourseQuizHistoryItemModel>> fetchCourseQuizHistory(
+    String courseId,
+  ) async {
+    historyCourseIds.add(courseId);
+    return [
+      CourseQuizHistoryItemModel.fromJson({
+        'quizId': 8001,
+        'courseId': int.parse(courseId),
+        'scopeType': 'course',
+        'lessonId': null,
+        'status': 'ready',
+        'quizMode': 'objective',
+        'questionCount': 2,
+        'createdAt': '2026-07-01T10:00:00Z',
+        'updatedAt': '2026-07-01T10:02:00Z',
+        'latestAttempt': {
+          'attemptId': 8201,
+          'score': 80,
+          'totalScore': 100,
+          'accuracy': 0.8,
+          'createdAt': '2026-07-01T10:05:00Z',
+        },
+      }),
+      CourseQuizHistoryItemModel.fromJson({
+        'quizId': 8002,
+        'courseId': int.parse(courseId),
+        'scopeType': 'lesson',
+        'lessonId': 42,
+        'status': 'ready',
+        'quizMode': 'objective',
+        'questionCount': 1,
+        'createdAt': '2026-07-01T11:00:00Z',
+        'updatedAt': '2026-07-01T11:02:00Z',
+        'latestAttempt': null,
+      }),
+    ];
+  }
+
+  @override
   Future<QuizModel> fetchCurrentLessonQuiz({
     required String courseId,
     required String lessonId,
@@ -274,7 +384,8 @@ class _QuizPageFakeApiClient extends ApiClient {
     required String idempotencyKey,
     required QuizQuestionCountLevel questionCountLevel,
   }) async {
-    expect(idempotencyKey, startsWith('quiz-generate-lesson-$courseId-$lessonId-'));
+    expect(idempotencyKey,
+        startsWith('quiz-generate-lesson-$courseId-$lessonId-'));
     generatedLessonQuizRequests.add('$courseId/$lessonId');
     generatedLevels.add(questionCountLevel);
     return QuizGenerateResultModel.fromJson({

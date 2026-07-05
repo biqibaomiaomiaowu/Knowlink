@@ -8,6 +8,89 @@ import 'package:knowlink_client/shared/models/handout_models.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
 void main() {
+  testWidgets('loads a course session history and continues with session id',
+      (tester) async {
+    _useTestSurface(tester, const Size(1200, 1400));
+    final api = _CourseQaFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: CourseQaPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.courseSessionFetches, contains('101'));
+    expect(find.text('Stored course session'), findsOneWidget);
+
+    await tester.tap(find.text('Stored course session'));
+    await tester.pumpAndSettle();
+
+    expect(api.messageFetches, [7001]);
+    expect(find.text('What is stored?'), findsOneWidget);
+    expect(find.text('Stored answer'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Follow up');
+    await tester.tap(find.byIcon(Icons.send_outlined));
+    await tester.pumpAndSettle();
+
+    expect(api.courseQaRequests.last.request.sessionId, 7001);
+    expect(find.text('Course answer: Follow up'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('qa_new_session_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Stored answer'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), 'Fresh question');
+    await tester.tap(find.byIcon(Icons.send_outlined));
+    await tester.pumpAndSettle();
+
+    expect(api.courseQaRequests.last.request.sessionId, isNull);
+    expect(find.text('Course answer: Fresh question'), findsOneWidget);
+  });
+
+  testWidgets('course and lesson history scopes do not leak', (tester) async {
+    _useTestSurface(tester, const Size(1200, 1400));
+    final api = _CourseQaFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [apiClientProvider.overrideWithValue(api)],
+        child: const MaterialApp(
+          home: CourseQaPage(courseId: '101', lessonId: '2'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.lessonSessionFetches, contains('101/2'));
+    expect(find.text('Stored lesson session'), findsOneWidget);
+
+    await tester.tap(find.text('Stored lesson session'));
+    await tester.pumpAndSettle();
+    expect(api.messageFetches, [8001]);
+    expect(find.text('Lesson stored question'), findsOneWidget);
+    expect(find.text('Lesson stored answer'), findsOneWidget);
+
+    await tester.tap(find.byType(ChoiceChip).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Stored course session'), findsOneWidget);
+    expect(find.text('Lesson stored answer'), findsNothing);
+
+    await tester.tap(find.text('Stored course session'));
+    await tester.pumpAndSettle();
+    expect(api.messageFetches, [8001, 7001]);
+    expect(find.text('Stored answer'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Course follow up');
+    await tester.tap(find.byIcon(Icons.send_outlined));
+    await tester.pumpAndSettle();
+
+    expect(api.courseQaRequests.last.request.sessionId, 7001);
+    expect(api.lessonQaRequests, isEmpty);
+  });
+
   testWidgets('course scope sends course QA messages only', (tester) async {
     _useTestSurface(tester, const Size(1200, 1400));
     final api = _CourseQaFakeApiClient();
@@ -94,6 +177,9 @@ void _useTestSurface(WidgetTester tester, Size size) {
 class _CourseQaFakeApiClient extends ApiClient {
   final courseQaRequests = <_CourseQaCall>[];
   final lessonQaRequests = <_LessonQaCall>[];
+  final courseSessionFetches = <String>[];
+  final lessonSessionFetches = <String>[];
+  final messageFetches = <int>[];
 
   @override
   Future<PlaceholderEntryModel> fetchCourseQaPlaceholder(
@@ -121,15 +207,107 @@ class _CourseQaFakeApiClient extends ApiClient {
   }
 
   @override
+  Future<QaSessionsModel> fetchCourseQaSessions(String courseId) async {
+    courseSessionFetches.add(courseId);
+    return QaSessionsModel(
+      items: [
+        QaSessionModel(
+          sessionId: 7001,
+          courseId: courseId,
+          scopeType: 'course',
+          title: 'Stored course session',
+          lastMessageAt: DateTime.utc(2026, 4, 18, 15, 2),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<QaSessionsModel> fetchLessonQaSessions({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    lessonSessionFetches.add('$courseId/$lessonId');
+    return QaSessionsModel(
+      items: [
+        QaSessionModel(
+          sessionId: 8001,
+          courseId: courseId,
+          scopeType: 'lesson',
+          lessonId: lessonId,
+          title: 'Stored lesson session',
+          lastMessageAt: DateTime.utc(2026, 4, 18, 15, 3),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<QaSessionMessagesModel> fetchQaSessionMessages(int sessionId) async {
+    messageFetches.add(sessionId);
+    if (sessionId == 8001) {
+      return const QaSessionMessagesModel(
+        items: [
+          QaMessageModel(
+            sessionId: 8001,
+            messageId: 1,
+            role: 'user',
+            contentMd: 'Lesson stored question',
+            question: 'Lesson stored question',
+            answerMd: '',
+            citations: [],
+          ),
+          QaMessageModel(
+            sessionId: 8001,
+            messageId: 2,
+            role: 'assistant',
+            contentMd: 'Lesson stored answer',
+            question: 'Lesson stored question',
+            answerMd: 'Lesson stored answer',
+            citations: [],
+          ),
+        ],
+      );
+    }
+    return const QaSessionMessagesModel(
+      items: [
+        QaMessageModel(
+          sessionId: 7001,
+          messageId: 1,
+          role: 'user',
+          contentMd: 'What is stored?',
+          question: 'What is stored?',
+          answerMd: '',
+          citations: [],
+        ),
+        QaMessageModel(
+          sessionId: 7001,
+          messageId: 2,
+          role: 'assistant',
+          contentMd: 'Stored answer',
+          question: 'What is stored?',
+          answerMd: 'Stored answer',
+          citations: [],
+        ),
+      ],
+    );
+  }
+
+  @override
   Future<QaMessageModel> createCourseQaMessage({
     required String courseId,
     required ScopedQaMessageRequestModel request,
   }) async {
     courseQaRequests.add(_CourseQaCall(courseId: courseId, request: request));
     return QaMessageModel(
-      sessionId: 7001,
+      sessionId: request.sessionId ?? 7002,
       messageId: courseQaRequests.length,
-      answerMd: '课程回答：${request.question}',
+      question: request.question,
+      answerMd: request.question.startsWith('Follow up') ||
+              request.question.startsWith('Fresh question') ||
+              request.question.startsWith('Course follow up')
+          ? 'Course answer: ${request.question}'
+          : '课程回答：${request.question}',
       citations: const [],
     );
   }
@@ -148,8 +326,9 @@ class _CourseQaFakeApiClient extends ApiClient {
       ),
     );
     return QaMessageModel(
-      sessionId: 8001,
+      sessionId: request.sessionId ?? 8002,
       messageId: lessonQaRequests.length,
+      question: request.question,
       answerMd: '课时回答：${request.question}',
       citations: const [],
     );
