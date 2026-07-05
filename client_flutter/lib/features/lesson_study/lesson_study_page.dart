@@ -385,9 +385,10 @@ class _LessonWorkspace extends ConsumerWidget {
           children: [
             lessonGrid,
             Positioned(
-              left: -30,
+              left: -8,
               top: 16,
               child: _OutlineTrigger(
+                key: const Key('lesson_outline_trigger'),
                 onPressed: () =>
                     ref.read(lessonStudyProvider.notifier).openOutline(),
               ),
@@ -809,7 +810,7 @@ class _AiPanel extends ConsumerWidget {
 }
 
 class _OutlineTrigger extends StatelessWidget {
-  const _OutlineTrigger({required this.onPressed});
+  const _OutlineTrigger({required this.onPressed, super.key});
 
   final VoidCallback onPressed;
 

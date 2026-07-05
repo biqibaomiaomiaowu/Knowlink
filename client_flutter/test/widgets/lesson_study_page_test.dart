@@ -44,6 +44,20 @@ void main() {
     expect(aiRect.right, moreOrLessEquals(blockRect.right, epsilon: 1));
   });
 
+  testWidgets('lesson outline trigger is moved into the workspace', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    await _pumpLessonStudy(tester);
+
+    final videoRect =
+        tester.getRect(find.byKey(const Key('lesson_study_video_panel')));
+    final triggerRect =
+        tester.getRect(find.byKey(const Key('lesson_outline_trigger')));
+
+    expect(triggerRect.left, greaterThanOrEqualTo(videoRect.left - 12));
+  });
+
   testWidgets('lesson soft-ui surfaces use prototype tokens', (tester) async {
     _useTestSurface(tester);
     await _pumpLessonStudy(tester);
