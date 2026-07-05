@@ -119,3 +119,12 @@ Manual acceptance checklist:
 - B站导入重试需要幂等记录 `sourcePartId`、`lessonId` 与 item `resourceId`，否则可能重复创建 lesson 或丢失部分 `partLessonMap`。
 - Flutter 与后端并行时必须以冻结 DTO 为准，避免页面层拼接低级接口。
 - 当前本地 Flutter 验证依赖 Windows SDK；若 WSL wrapper 或 Windows Dart compiler 崩溃，需要在最终交接中记录环境证据。
+
+## Prototype Redesign Verification
+
+- Frontend parity source is `recreateUI/index-soft-ui-neumorphism.html`. The lesson-study prototype exposes top actions `本节资料` and `进入测试`, an outline trigger `讲义目录`, and the generation CTA `生成讲义`; `加入复习` only appears as contextual prototype copy, not as a lesson top action.
+- Real Flutter parity is implemented on `/courses/:courseId/lessons/:lessonId/handout`. `LessonStudyPage` keeps the stable panels and surfaces `lesson_study_video_panel`, `lesson_study_ai_panel`, `lesson_study_block_panel`, `lesson_outline_drawer`, and `lesson_materials_dialog`; widget tests assert `本节资料` / `进入测试` are present and `加入复习` is absent from the top action surface.
+- Lesson handout generation and reading reuse the course handout strategy with lesson scope: `scopeType=lesson`, `lessonId`, and `artifactKind=lesson_handout`. Lesson QA, quiz, and review routes are verified through scoped backend and Flutter tests.
+- Backend verification command passed: `python -m pytest server/tests/test_course_lesson_contract.py server/tests/test_scaffold_consistency.py server/tests/test_home_lesson_continuation.py server/tests/test_course_workbench_api.py server/tests/test_handout_outline_runtime.py server/tests/test_handout_block.py server/tests/test_no_db_handout_flow.py server/tests/test_qa_runtime.py server/tests/test_qa_course_wide_behavior.py server/tests/test_quiz_strategy.py server/tests/test_review_strategy.py server/tests/test_scoped_learning_artifacts.py server/tests/test_sql_runtime_contract.py -q`.
+- Flutter wrapper note: use the direct `flutter_tools.snapshot` invocation in this workspace because the wrapper can hang. Direct snapshot `analyze` passed, and the specified Flutter tests passed in three sequential chunks: app/router + home/library/workbench/lesson study, handout/detail/quiz/course QA/review, and lesson/home/quiz/review providers plus API client.
+- Prototype parity grep passed for `本节资料|进入测试|加入复习|生成讲义|讲义目录|lesson_study_video_panel|lesson_study_ai_panel|lesson_study_block_panel|lesson_outline_drawer|lesson_materials_dialog` across `client_flutter/lib`, `client_flutter/test`, and `recreateUI/index-soft-ui-neumorphism.html`.
