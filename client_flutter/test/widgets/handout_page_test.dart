@@ -3,14 +3,43 @@ import 'package:dio/dio.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:knowlink_client/app/router/app_router.dart';
 import 'package:knowlink_client/core/network/api_client.dart';
 import 'package:knowlink_client/features/handout/handout_page.dart';
 import 'package:knowlink_client/features/handout/handout_video_controller.dart';
 import 'package:knowlink_client/shared/models/handout_models.dart';
+import 'package:knowlink_client/shared/models/home_dashboard_models.dart';
 import 'package:knowlink_client/shared/models/resource_upload_models.dart';
 import 'package:knowlink_client/shared/providers/course_recommend_provider.dart';
 
 void main() {
+  testWidgets('course handout route offers lesson study compatibility path', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_HandoutPageFakeApiClient()),
+      ],
+    );
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    router.go('/courses/101/handout');
+    await tester.pumpAndSettle();
+
+    expect(find.text('选择课时继续学习'), findsOneWidget);
+    expect(find.text('课程级讲义工作台'), findsNothing);
+    expect(find.byType(HandoutPage), findsNothing);
+  });
+
   testWidgets('handout page renders blocks, markdown, citations, and QA', (
     tester,
   ) async {
@@ -553,6 +582,25 @@ class _HandoutPageFakeApiClient extends ApiClient {
   final List<QaMessageRequestModel> qaRequests = [];
   final String qaAnswerMd;
   final List<Map<String, Object?>> qaCitations;
+
+  @override
+  Future<HomeDashboardModel> fetchHomeDashboard() async {
+    return HomeDashboardModel.fromJson({
+      'recentCourses': [],
+      'topReviewTasks': [],
+      'recommendationEntryEnabled': true,
+      'dailyRecommendedKnowledgePoints': [],
+      'learningStats': {},
+      'currentCourse': null,
+      'currentLesson': null,
+      'continueLearning': null,
+      'nextStep': null,
+      'todayReviewTasks': [],
+      'recommendedNextLesson': null,
+      'recommendedStageQuiz': null,
+      'courseQuickEntries': [],
+    });
+  }
 
   @override
   Future<HandoutLatestModel> fetchLatestHandout(String courseId) async {
