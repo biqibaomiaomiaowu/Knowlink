@@ -24,23 +24,24 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
     _activeCourseId = courseId;
     ref.read(courseFlowProvider.notifier).startCourse(courseId);
     state = state.copyWith(
-      tasks: const AsyncLoading(),
+      review: const AsyncLoading(),
       completion: const AsyncData<CompleteReviewTaskResultModel?>(null),
       clearCompletingTaskId: true,
     );
 
     try {
-      final tasks =
-          await ref.read(apiClientProvider).fetchReviewTasks(courseId);
+      final review = await ref.read(apiClientProvider).fetchCourseReview(
+            courseId: courseId,
+          );
       if (!_shouldApply(requestId, courseId: courseId)) {
         return;
       }
-      state = state.copyWith(tasks: AsyncData(tasks));
+      state = state.copyWith(review: AsyncData(review));
     } catch (error, stackTrace) {
       if (!_shouldApply(requestId, courseId: courseId)) {
         return;
       }
-      state = state.copyWith(tasks: AsyncError(error, stackTrace));
+      state = state.copyWith(review: AsyncError(error, stackTrace));
     }
   }
 
@@ -56,7 +57,7 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
     _activeCourseId = courseId;
     ref.read(courseFlowProvider.notifier).startCourse(courseId);
     state = state.copyWith(
-      tasks: const AsyncData<ReviewTasksModel?>(null),
+      review: const AsyncData<CourseReviewModel?>(null),
       regeneration: const AsyncLoading(),
       runStatus: const AsyncData<ReviewRunStatusModel?>(null),
       completion: const AsyncData<CompleteReviewTaskResultModel?>(null),
@@ -100,14 +101,14 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
         await Future<void>.delayed(interval);
       }
 
-      if (_canFetchTasksAfterRun(latestStatus)) {
-        final tasks = await ref.read(apiClientProvider).fetchReviewTasks(
-              courseId,
+      if (_canFetchReviewAfterRun(latestStatus)) {
+        final review = await ref.read(apiClientProvider).fetchCourseReview(
+              courseId: courseId,
             );
         if (!_shouldApply(requestId, courseId: courseId)) {
           return;
         }
-        state = state.copyWith(tasks: AsyncData(tasks));
+        state = state.copyWith(review: AsyncData(review));
       }
     } catch (error, stackTrace) {
       if (!_shouldApply(requestId, courseId: courseId)) {
@@ -128,6 +129,10 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
     if (state.isCompleting) {
       return;
     }
+    final task = _findTask(reviewTaskId);
+    if (task != null && !task.completionSupported) {
+      return;
+    }
     final requestId = ++_latestRequestId;
     _activeCourseId = courseId;
     state = state.copyWith(
@@ -142,14 +147,15 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
       if (!_shouldApply(requestId, courseId: courseId)) {
         return;
       }
-      final tasks =
-          await ref.read(apiClientProvider).fetchReviewTasks(courseId);
+      final review = await ref.read(apiClientProvider).fetchCourseReview(
+            courseId: courseId,
+          );
       if (!_shouldApply(requestId, courseId: courseId)) {
         return;
       }
       state = state.copyWith(
         completion: AsyncData(result),
-        tasks: AsyncData(tasks),
+        review: AsyncData(review),
         clearCompletingTaskId: true,
       );
     } catch (error, stackTrace) {
@@ -169,7 +175,20 @@ class ReviewController extends AutoDisposeNotifier<ReviewState> {
         _activeCourseId == courseId;
   }
 
-  bool _canFetchTasksAfterRun(ReviewRunStatusModel? status) {
+  ReviewTaskModel? _findTask(int reviewTaskId) {
+    final review = state.reviewValue;
+    if (review == null) {
+      return null;
+    }
+    for (final task in [...review.topTasks, ...review.items]) {
+      if (task.reviewTaskId == reviewTaskId) {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  bool _canFetchReviewAfterRun(ReviewRunStatusModel? status) {
     return status != null &&
         (status.status == 'ready' ||
             status.status == 'succeeded' ||

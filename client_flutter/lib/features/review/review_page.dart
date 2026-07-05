@@ -45,7 +45,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(reviewProvider);
     return AppScaffold(
-      title: 'AI 复习推荐',
+      title: '复习中心',
       activeTab: KnowLinkTab.review,
       courseId: widget.courseId,
       body: SingleChildScrollView(
@@ -76,8 +76,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                         courseId: widget.courseId,
                         reviewTaskId: taskId,
                       ),
-              onOpenSegment: (task) => _openSegment(task),
-              onPractice: (entry) => _openPractice(entry),
+              onOpenHandout: _openHandout,
+              onEnterQuiz: _enterQuiz,
             ),
           ],
         ),
@@ -98,8 +98,13 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     });
   }
 
-  void _openSegment(ReviewTaskModel task) {
-    final blockId = task.recommendedSegment?.blockId;
+  void _openHandout(ReviewTaskModel task) {
+    final route = task.jumpRoute;
+    if (route == null || route.isEmpty) {
+      return;
+    }
+
+    final blockId = task.linkedHandoutBlockId;
     if (blockId != null) {
       ref.read(activeBlockProvider.notifier).state = blockId;
       ref.read(handoutResumeTargetProvider.notifier).state =
@@ -108,15 +113,24 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         blockId: blockId,
       );
     } else {
+      ref.read(activeBlockProvider.notifier).state = null;
       ref.read(handoutResumeTargetProvider.notifier).state = null;
     }
-    context.go('/courses/${widget.courseId}/handout');
+    context.go(route);
   }
 
-  void _openPractice(PracticeEntryModel entry) {
-    if (entry.type == 'quiz' && entry.targetId != null) {
-      context.go('/quizzes/${entry.targetId}');
+  void _enterQuiz(ReviewTaskModel task) {
+    final lessonId = task.lessonId ??
+        task.practiceEntry?.lessonId ??
+        task.sourceLesson?.lessonId;
+    if (lessonId == null) {
+      return;
     }
+    ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+      courseId: widget.courseId,
+      lessonId: lessonId.toString(),
+    );
+    context.go('/courses/${widget.courseId}/lessons/$lessonId/quiz');
   }
 }
 
@@ -136,14 +150,15 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final runStatus = state.runStatusValue;
+    final review = state.reviewValue;
     return SectionCard(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const PageTitle(
-            title: 'AI 复习推荐',
-            subtitle: '根据测验结果、掌握度和可追溯来源，优先展示今天最值得处理的 Top3 复习任务。',
+            title: '复习中心',
+            subtitle: '聚合今日任务、薄弱点、错题和掌握度，安排下一步可追溯复习。',
           ),
           Wrap(
             spacing: 12,
@@ -151,6 +166,11 @@ class _Header extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               StatusPill(label: '课程编号：$courseId'),
+              if (review != null)
+                StatusPill(
+                  label: '复习 ${_reviewStatusLabel(review.status)}',
+                  color: _reviewStatusColor(review.status),
+                ),
               if (runStatus != null)
                 StatusPill(
                   label:
@@ -158,7 +178,7 @@ class _Header extends StatelessWidget {
                   color: _statusColor(runStatus.status),
                 ),
               OutlinedButton.icon(
-                onPressed: state.tasks.isLoading || state.isCompleting
+                onPressed: state.review.isLoading || state.isCompleting
                     ? null
                     : onRefresh,
                 icon: const Icon(Icons.refresh),
@@ -190,25 +210,25 @@ class _ReviewBody extends StatelessWidget {
     required this.state,
     required this.onRetry,
     required this.onComplete,
-    required this.onOpenSegment,
-    required this.onPractice,
+    required this.onOpenHandout,
+    required this.onEnterQuiz,
   });
 
   final String courseId;
   final ReviewState state;
   final VoidCallback onRetry;
   final void Function(int taskId) onComplete;
-  final void Function(ReviewTaskModel task) onOpenSegment;
-  final void Function(PracticeEntryModel entry) onPractice;
+  final void Function(ReviewTaskModel task) onOpenHandout;
+  final void Function(ReviewTaskModel task) onEnterQuiz;
 
   @override
   Widget build(BuildContext context) {
-    if (state.tasks.isLoading && state.tasksValue == null) {
-      return const AppLoadingView(label: '正在加载复习任务...');
+    if (state.review.isLoading && state.reviewValue == null) {
+      return const AppLoadingView(label: '正在加载复习中心...');
     }
-    if (state.tasks.hasError) {
+    if (state.review.hasError) {
       return AppErrorView(
-        message: '复习任务加载失败：${state.tasks.error}',
+        message: '复习中心加载失败：${state.review.error}',
         onRetry: onRetry,
       );
     }
@@ -219,37 +239,45 @@ class _ReviewBody extends StatelessWidget {
       );
     }
 
-    final tasks = state.tasksValue?.topThree ?? const <ReviewTaskModel>[];
-    if (tasks.isEmpty) {
+    final review = state.reviewValue;
+    if (review == null || !_hasReviewContent(review)) {
       return _EmptyReviewCard(courseId: courseId);
     }
 
+    final tasks = _visibleTasks(review);
     final wide = MediaQuery.sizeOf(context).width >= 980;
     final taskList = _TaskList(
       tasks: tasks,
+      totalTaskCount: review.todayTaskCount,
       state: state,
       onComplete: onComplete,
-      onOpenSegment: onOpenSegment,
-      onPractice: onPractice,
+      onOpenHandout: onOpenHandout,
+      onEnterQuiz: onEnterQuiz,
     );
-    final summary = _SummaryPanel(tasks: tasks, state: state);
-
-    if (wide) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 3, child: taskList),
-          const SizedBox(width: 16),
-          Expanded(flex: 2, child: summary),
-        ],
-      );
-    }
+    final summary = _SummaryPanel(review: review, tasks: tasks);
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        taskList,
+        _OverviewGrid(review: review),
         const SizedBox(height: 16),
-        summary,
+        if (wide)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 3, child: taskList),
+              const SizedBox(width: 16),
+              Expanded(flex: 2, child: summary),
+            ],
+          )
+        else
+          Column(
+            children: [
+              taskList,
+              const SizedBox(height: 16),
+              summary,
+            ],
+          ),
       ],
     );
   }
@@ -271,7 +299,7 @@ class _EmptyReviewCard extends StatelessWidget {
           Text('暂无复习任务', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 10),
           Text(
-            '课程 $courseId 还没有可展示的复习任务。完成测验后可生成 Top3 复习建议。',
+            '课程 $courseId 还没有可展示的复习任务。完成测验后可生成复习中心数据。',
             style: const TextStyle(
               color: AppTheme.muted,
               fontWeight: FontWeight.w600,
@@ -283,20 +311,80 @@ class _EmptyReviewCard extends StatelessWidget {
   }
 }
 
+class _OverviewGrid extends StatelessWidget {
+  const _OverviewGrid({
+    required this.review,
+  });
+
+  final CourseReviewModel review;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        SizedBox(
+          width: 260,
+          child: MetricBox(
+            icon: Icons.task_alt_outlined,
+            label: '今日任务',
+            value: '${review.todayTaskCount}',
+            detail: '待处理复习项',
+            color: AppTheme.brandBlue,
+          ),
+        ),
+        SizedBox(
+          width: 260,
+          child: MetricBox(
+            icon: Icons.trending_down,
+            label: '薄弱点',
+            value: '${review.weakPointCount}',
+            detail: '跨课时弱点',
+            color: const Color(0xFFF97316),
+          ),
+        ),
+        SizedBox(
+          width: 260,
+          child: MetricBox(
+            icon: Icons.error_outline,
+            label: '错题',
+            value: '${review.mistakeCount}',
+            detail: '需回看的题目线索',
+            color: const Color(0xFFEF4444),
+          ),
+        ),
+        SizedBox(
+          width: 260,
+          child: MetricBox(
+            icon: Icons.speed_outlined,
+            label: '掌握度',
+            value: _formatMastery(review.masteryScore),
+            detail: '当前课程掌握估计',
+            color: const Color(0xFF16A34A),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _TaskList extends StatelessWidget {
   const _TaskList({
     required this.tasks,
+    required this.totalTaskCount,
     required this.state,
     required this.onComplete,
-    required this.onOpenSegment,
-    required this.onPractice,
+    required this.onOpenHandout,
+    required this.onEnterQuiz,
   });
 
   final List<ReviewTaskModel> tasks;
+  final int totalTaskCount;
   final ReviewState state;
   final void Function(int taskId) onComplete;
-  final void Function(ReviewTaskModel task) onOpenSegment;
-  final void Function(PracticeEntryModel entry) onPractice;
+  final void Function(ReviewTaskModel task) onOpenHandout;
+  final void Function(ReviewTaskModel task) onEnterQuiz;
 
   @override
   Widget build(BuildContext context) {
@@ -307,9 +395,9 @@ class _TaskList extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text('今日 Top3', style: Theme.of(context).textTheme.titleLarge),
+              Text('今日任务', style: Theme.of(context).textTheme.titleLarge),
               const Spacer(),
-              StatusPill(label: '${tasks.length} 条'),
+              StatusPill(label: '${tasks.length}/$totalTaskCount 条'),
             ],
           ),
           const SizedBox(height: 16),
@@ -319,10 +407,8 @@ class _TaskList extends StatelessWidget {
               task: tasks[index],
               completing: state.completingTaskId == tasks[index].reviewTaskId,
               onComplete: () => onComplete(tasks[index].reviewTaskId),
-              onOpenSegment: () => onOpenSegment(tasks[index]),
-              onPractice: tasks[index].practiceEntry == null
-                  ? null
-                  : () => onPractice(tasks[index].practiceEntry!),
+              onOpenHandout: () => onOpenHandout(tasks[index]),
+              onEnterQuiz: () => onEnterQuiz(tasks[index]),
             ),
             if (index != tasks.length - 1) const SizedBox(height: 14),
           ],
@@ -336,6 +422,10 @@ class _TaskList extends StatelessWidget {
               ),
             ),
           ],
+          if (state.completion.valueOrNull?.completed ?? false) ...[
+            const SizedBox(height: 12),
+            const StatusPill(label: '已记录完成', color: Color(0xFF16A34A)),
+          ],
         ],
       ),
     );
@@ -348,20 +438,23 @@ class _TaskCard extends StatelessWidget {
     required this.task,
     required this.completing,
     required this.onComplete,
-    required this.onOpenSegment,
-    required this.onPractice,
+    required this.onOpenHandout,
+    required this.onEnterQuiz,
   });
 
   final int rank;
   final ReviewTaskModel task;
   final bool completing;
   final VoidCallback onComplete;
-  final VoidCallback onOpenSegment;
-  final VoidCallback? onPractice;
+  final VoidCallback onOpenHandout;
+  final VoidCallback onEnterQuiz;
 
   @override
   Widget build(BuildContext context) {
-    final segment = task.recommendedSegment;
+    final lessonTitle = task.sourceLesson?.title;
+    final blockTitle = task.recommendedHandoutBlock?.title;
+    final canOpenHandout = task.jumpRoute != null && task.jumpRoute!.isNotEmpty;
+    final canEnterQuiz = _lessonIdForQuiz(task) != null;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -384,6 +477,11 @@ class _TaskCard extends StatelessWidget {
                   label: _intensityLabel(task.intensity!),
                   color: const Color(0xFFF97316),
                 ),
+              if (!task.completionSupported)
+                const StatusPill(
+                  label: '无需手动完成',
+                  color: Color(0xFF64748B),
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -405,18 +503,23 @@ class _TaskCard extends StatelessWidget {
                 icon: Icons.schedule,
                 label: '建议 ${task.recommendedMinutes} 分钟',
               ),
-              if (segment != null)
+              if (lessonTitle != null && lessonTitle.isNotEmpty)
                 SourceChip(
-                  icon: Icons.play_circle_outline,
-                  label: segment.displayText,
-                  onTap: onOpenSegment,
+                  icon: Icons.video_library_outlined,
+                  label: lessonTitle,
+                  color: const Color(0xFF0F766E),
                 ),
-              if (task.practiceEntry != null)
+              if (blockTitle != null && blockTitle.isNotEmpty)
                 SourceChip(
-                  icon: Icons.quiz_outlined,
-                  label: task.practiceEntry!.label ?? '再练',
-                  color: const Color(0xFF8B5CF6),
-                  onTap: onPractice,
+                  icon: Icons.menu_book_outlined,
+                  label: blockTitle,
+                  onTap: canOpenHandout ? onOpenHandout : null,
+                ),
+              if (task.sourceQuestionKeys.isNotEmpty)
+                SourceChip(
+                  icon: Icons.fact_check_outlined,
+                  label: '错题 ${task.sourceQuestionKeys.take(2).join('、')}',
+                  color: const Color(0xFFEF4444),
                 ),
             ],
           ),
@@ -426,24 +529,25 @@ class _TaskCard extends StatelessWidget {
             runSpacing: 10,
             children: [
               OutlinedButton.icon(
-                onPressed: segment == null ? null : onOpenSegment,
+                onPressed: canOpenHandout ? onOpenHandout : null,
                 icon: const Icon(Icons.menu_book_outlined),
-                label: const Text('跳回讲义'),
+                label: const Text('回到讲义'),
               ),
               OutlinedButton.icon(
-                onPressed: onPractice,
+                onPressed: canEnterQuiz ? onEnterQuiz : null,
                 icon: const Icon(Icons.quiz_outlined),
-                label: const Text('再练'),
+                label: const Text('进入测试'),
               ),
               FilledButton.icon(
-                onPressed: completing ? null : onComplete,
+                onPressed:
+                    completing || !task.completionSupported ? null : onComplete,
                 icon: completing
                     ? const SizedBox.square(
                         dimension: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.check),
-                label: Text(completing ? '提交中' : '完成任务'),
+                label: Text(completing ? '提交中' : '标记完成'),
               ),
             ],
           ),
@@ -455,12 +559,12 @@ class _TaskCard extends StatelessWidget {
 
 class _SummaryPanel extends StatelessWidget {
   const _SummaryPanel({
+    required this.review,
     required this.tasks,
-    required this.state,
   });
 
+  final CourseReviewModel review;
   final List<ReviewTaskModel> tasks;
-  final ReviewState state;
 
   @override
   Widget build(BuildContext context) {
@@ -468,52 +572,159 @@ class _SummaryPanel extends StatelessWidget {
       0,
       (sum, task) => sum + task.recommendedMinutes,
     );
-    final top = tasks.isEmpty ? null : tasks.first;
     return SectionCard(
       padding: const EdgeInsets.all(22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('复习概览', style: Theme.of(context).textTheme.titleLarge),
+          Text('复习摘要', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              MetricBox(
-                icon: Icons.flag_outlined,
-                label: '任务数',
-                value: '${tasks.length}',
-                detail: '只展示 Top3',
-              ),
-              MetricBox(
-                icon: Icons.timer_outlined,
-                label: '建议用时',
-                value: '$totalMinutes 分钟',
-              ),
-            ],
+          _SummaryBlock(
+            title: '任务摘要',
+            body: review.todayTaskCount == 0
+                ? '今天暂无待处理任务。'
+                : '今天共有 ${review.todayTaskCount} 个复习任务，当前展示 ${tasks.length} 个优先项，建议投入 $totalMinutes 分钟。',
           ),
-          const SizedBox(height: 16),
-          if (top != null) ...[
-            Text('最高优先级', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            Text(
-              top.reasonText,
-              style: const TextStyle(
-                color: AppTheme.muted,
-                height: 1.55,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-          if (state.completion.valueOrNull?.completed ?? false) ...[
-            const SizedBox(height: 14),
-            const StatusPill(label: '已记录完成', color: Color(0xFF16A34A)),
-          ],
+          const SizedBox(height: 12),
+          _SummaryBlock(
+            title: '薄弱摘要',
+            body: _weakSummary(review),
+          ),
+          const SizedBox(height: 12),
+          _SummaryBlock(
+            title: '错题摘要',
+            body: _mistakeSummary(review, tasks),
+          ),
+          const SizedBox(height: 12),
+          _SummaryBlock(
+            title: '掌握摘要',
+            body: _masterySummary(review),
+          ),
         ],
       ),
     );
   }
+}
+
+class _SummaryBlock extends StatelessWidget {
+  const _SummaryBlock({
+    required this.title,
+    required this.body,
+  });
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.panel,
+        border: Border.all(color: AppTheme.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            style: const TextStyle(
+              color: AppTheme.muted,
+              height: 1.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+bool _hasReviewContent(CourseReviewModel review) {
+  return review.todayTaskCount > 0 ||
+      review.weakPointCount > 0 ||
+      review.mistakeCount > 0 ||
+      review.masteryScore != null ||
+      review.items.isNotEmpty ||
+      review.topTasks.isNotEmpty ||
+      review.weakLessons.isNotEmpty ||
+      review.crossLessonWeakPoints.isNotEmpty;
+}
+
+List<ReviewTaskModel> _visibleTasks(CourseReviewModel review) {
+  if (review.topTasks.isNotEmpty) {
+    return review.topTasks;
+  }
+  return review.items;
+}
+
+int? _lessonIdForQuiz(ReviewTaskModel task) {
+  return task.lessonId ??
+      task.practiceEntry?.lessonId ??
+      task.sourceLesson?.lessonId;
+}
+
+String _weakSummary(CourseReviewModel review) {
+  final lessonTitles = review.weakLessons
+      .map((lesson) => lesson.title)
+      .whereType<String>()
+      .where((title) => title.isNotEmpty);
+  final weakPointTitles = review.crossLessonWeakPoints
+      .map((point) => point.title)
+      .whereType<String>()
+      .where((title) => title.isNotEmpty);
+  final highlights = [...lessonTitles, ...weakPointTitles].take(3).toList();
+  if (highlights.isEmpty) {
+    return review.weakPointCount == 0
+        ? '暂未识别跨课时薄弱点。'
+        : '已识别 ${review.weakPointCount} 个薄弱点，优先按今日任务处理。';
+  }
+  return '已识别 ${review.weakPointCount} 个薄弱点：${highlights.join('、')}。';
+}
+
+String _mistakeSummary(
+  CourseReviewModel review,
+  List<ReviewTaskModel> tasks,
+) {
+  final questionKeys = tasks
+      .expand((task) => task.sourceQuestionKeys)
+      .where((key) => key.isNotEmpty)
+      .take(4)
+      .toList();
+  if (questionKeys.isEmpty) {
+    return review.mistakeCount == 0
+        ? '暂无错题线索。'
+        : '累计 ${review.mistakeCount} 道错题线索，建议先回看关联讲义后进入测试。';
+  }
+  return '累计 ${review.mistakeCount} 道错题线索，优先关注 ${questionKeys.join('、')}。';
+}
+
+String _masterySummary(CourseReviewModel review) {
+  final mastery = _formatMastery(review.masteryScore);
+  final weakestLesson = review.weakLessons
+      .where((lesson) => lesson.masteryScore != null)
+      .toList()
+    ..sort((a, b) => a.masteryScore!.compareTo(b.masteryScore!));
+  if (weakestLesson.isEmpty) {
+    return '当前课程掌握度 $mastery，继续通过任务完成情况校准。';
+  }
+  final lesson = weakestLesson.first;
+  final title = lesson.title == null || lesson.title!.isEmpty
+      ? '课时 ${lesson.lessonId}'
+      : lesson.title!;
+  return '当前课程掌握度 $mastery，最低掌握课时为 $title（${_formatMastery(lesson.masteryScore)}）。';
+}
+
+String _formatMastery(double? score) {
+  if (score == null) {
+    return '--';
+  }
+  final normalized = score <= 1 ? score * 100 : score;
+  return '${normalized.round()}%';
 }
 
 String _statusLabel(String status) {
@@ -532,6 +743,25 @@ Color _statusColor(String status) {
     'ready' || 'succeeded' => const Color(0xFF16A34A),
     'failed' => const Color(0xFFEF4444),
     'queued' || 'running' => const Color(0xFFF97316),
+    _ => const Color(0xFF64748B),
+  };
+}
+
+String _reviewStatusLabel(String status) {
+  return switch (status) {
+    'ready' || 'succeeded' => '已就绪',
+    'empty' || 'placeholder' => '待生成',
+    'running' => '生成中',
+    'failed' => '失败',
+    _ => status,
+  };
+}
+
+Color _reviewStatusColor(String status) {
+  return switch (status) {
+    'ready' || 'succeeded' => const Color(0xFF16A34A),
+    'failed' => const Color(0xFFEF4444),
+    'running' => const Color(0xFFF97316),
     _ => const Color(0xFF64748B),
   };
 }

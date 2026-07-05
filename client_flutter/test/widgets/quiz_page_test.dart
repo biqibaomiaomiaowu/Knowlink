@@ -51,6 +51,95 @@ void main() {
     expect(find.text('Practice similar questions'), findsOneWidget);
   });
 
+  testWidgets('quiz center shows supported objective test scopes', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _QuizPageFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: QuizPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('测试中心'), findsWidgets);
+    expect(find.text('课程测试'), findsOneWidget);
+    expect(find.text('课时测试'), findsOneWidget);
+    expect(find.text('阶段测试'), findsOneWidget);
+    expect(find.text('综合测试'), findsOneWidget);
+    expect(find.text('主观题' '判卷'), findsNothing);
+  });
+
+  testWidgets('lesson quiz route preselects lesson test scope', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _QuizPageFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(
+          home: QuizPage(courseId: '101', lessonId: '42'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.currentLessonQuizRequests, ['101/42']);
+    expect(find.text('当前范围：课时测试'), findsOneWidget);
+    expect(find.text('课时编号：42'), findsOneWidget);
+
+    await tester.tap(find.text('生成测验'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.generatedLessonQuizRequests, ['101/42']);
+    expect(fakeApiClient.generatedCourseIds, isEmpty);
+  });
+
+  testWidgets('stage and comprehensive scopes call dedicated quiz generators', (
+    tester,
+  ) async {
+    _useTestSurface(tester);
+    final fakeApiClient = _QuizPageFakeApiClient();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          apiClientProvider.overrideWithValue(fakeApiClient),
+        ],
+        child: const MaterialApp(home: QuizPage(courseId: '101')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('阶段测试'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('quiz-stage-start')), '41');
+    await tester.enterText(find.byKey(const Key('quiz-stage-end')), '43');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('生成测验'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.generatedStageQuizRequests, ['101/41/43']);
+    expect(find.text('阶段测试题'), findsOneWidget);
+
+    await tester.tap(find.text('综合测试'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('生成测验'));
+    await tester.pumpAndSettle();
+
+    expect(fakeApiClient.generatedComprehensiveCourseIds, ['101']);
+    expect(find.text('综合测试题'), findsOneWidget);
+  });
+
   testWidgets('course quiz page can generate a quiz', (tester) async {
     _useTestSurface(tester);
     final fakeApiClient = _QuizPageFakeApiClient();
@@ -153,6 +242,10 @@ void _useTestSurface(WidgetTester tester) {
 
 class _QuizPageFakeApiClient extends ApiClient {
   final generatedCourseIds = <String>[];
+  final generatedLessonQuizRequests = <String>[];
+  final generatedStageQuizRequests = <String>[];
+  final generatedComprehensiveCourseIds = <String>[];
+  final currentLessonQuizRequests = <String>[];
   final generatedLevels = <QuizQuestionCountLevel>[];
   final fetchedQuizIds = <int>[];
   final submittedAnswers = <SubmitQuizRequestModel>[];
@@ -201,7 +294,95 @@ class _QuizPageFakeApiClient extends ApiClient {
   }
 
   @override
-  Future<SubmitQuizResultModel> submitQuizAttempt({
+  Future<QuizModel> fetchCurrentLessonQuiz({
+    required String courseId,
+    required String lessonId,
+  }) async {
+    currentLessonQuizRequests.add('$courseId/$lessonId');
+    return _lessonQuiz(8401, courseId, lessonId);
+  }
+
+  @override
+  Future<QuizModel> generateLessonQuiz({
+    required String courseId,
+    required String lessonId,
+    required QuizQuestionCountLevel questionCountLevel,
+  }) async {
+    generatedLessonQuizRequests.add('$courseId/$lessonId');
+    generatedLevels.add(questionCountLevel);
+    return _lessonQuiz(8402, courseId, lessonId);
+  }
+
+  @override
+  Future<QuizModel> generateStageQuiz({
+    required String courseId,
+    required String startLessonId,
+    required String endLessonId,
+    required QuizQuestionCountLevel questionCountLevel,
+  }) async {
+    generatedStageQuizRequests.add('$courseId/$startLessonId/$endLessonId');
+    generatedLevels.add(questionCountLevel);
+    return QuizModel.fromJson({
+      'quizId': 8501,
+      'courseId': int.parse(courseId),
+      'scopeType': 'lesson_range',
+      'startLessonId': int.parse(startLessonId),
+      'endLessonId': int.parse(endLessonId),
+      'status': 'ready',
+      'questionCount': 1,
+      'questions': [
+        {
+          'questionId': 85010,
+          'stemMd': '阶段测试题',
+          'options': ['A', 'B'],
+        },
+      ],
+    });
+  }
+
+  @override
+  Future<QuizModel> generateComprehensiveQuiz({
+    required String courseId,
+    required QuizQuestionCountLevel questionCountLevel,
+  }) async {
+    generatedComprehensiveCourseIds.add(courseId);
+    generatedLevels.add(questionCountLevel);
+    return QuizModel.fromJson({
+      'quizId': 8601,
+      'courseId': int.parse(courseId),
+      'scopeType': 'course',
+      'status': 'ready',
+      'questionCount': 1,
+      'questions': [
+        {
+          'questionId': 86010,
+          'stemMd': '综合测试题',
+          'options': ['A', 'B'],
+        },
+      ],
+    });
+  }
+
+  QuizModel _lessonQuiz(int quizId, String courseId, String lessonId) {
+    return QuizModel.fromJson({
+      'quizId': quizId,
+      'courseId': int.parse(courseId),
+      'scopeType': 'lesson',
+      'lessonId': int.parse(lessonId),
+      'status': 'ready',
+      'questionCount': 1,
+      'questions': [
+        {
+          'questionId': 84010,
+          'stemMd': '课时测试题',
+          'options': ['A', 'B'],
+        },
+      ],
+    });
+  }
+
+  @override
+  Future<SubmitQuizResultModel> submitQuiz({
     required int quizId,
     required SubmitQuizRequestModel request,
   }) async {

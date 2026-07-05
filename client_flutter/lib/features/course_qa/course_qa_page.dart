@@ -5,6 +5,8 @@ import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/course_lesson_models.dart';
+import '../../shared/models/handout_models.dart';
+import '../../shared/providers/course_recommend_provider.dart';
 import '../../shared/services/course_lesson_api.dart';
 
 class CourseQaPage extends ConsumerStatefulWidget {
@@ -22,14 +24,29 @@ class CourseQaPage extends ConsumerStatefulWidget {
 }
 
 class _CourseQaPageState extends ConsumerState<CourseQaPage> {
-  late Future<PlaceholderEntryModel> _placeholderFuture;
+  final _questionController = TextEditingController();
+  final Map<_QaScope, List<_LocalQaMessage>> _messagesByScope = {
+    _QaScope.course: <_LocalQaMessage>[],
+    _QaScope.lesson: <_LocalQaMessage>[],
+  };
+  final Map<_QaScope, int?> _sessionIds = {
+    _QaScope.course: null,
+    _QaScope.lesson: null,
+  };
 
-  bool get _isLessonScope => widget.lessonId != null;
+  late _QaScope _selectedScope;
+  late Future<PlaceholderEntryModel> _coursePlaceholderFuture;
+  Future<PlaceholderEntryModel>? _lessonPlaceholderFuture;
+  var _isSubmitting = false;
+  Object? _submitError;
+
+  bool get _hasLessonScope => widget.lessonId != null;
 
   @override
   void initState() {
     super.initState();
-    _placeholderFuture = _loadPlaceholder();
+    _selectedScope = _hasLessonScope ? _QaScope.lesson : _QaScope.course;
+    _loadPlaceholders();
   }
 
   @override
@@ -37,89 +54,242 @@ class _CourseQaPageState extends ConsumerState<CourseQaPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.courseId != widget.courseId ||
         oldWidget.lessonId != widget.lessonId) {
-      _placeholderFuture = _loadPlaceholder();
+      _selectedScope = _hasLessonScope ? _QaScope.lesson : _QaScope.course;
+      _messagesByScope[_QaScope.course] = <_LocalQaMessage>[];
+      _messagesByScope[_QaScope.lesson] = <_LocalQaMessage>[];
+      _sessionIds[_QaScope.course] = null;
+      _sessionIds[_QaScope.lesson] = null;
+      _submitError = null;
+      _questionController.clear();
+      _loadPlaceholders();
     }
   }
 
   @override
+  void dispose() {
+    _questionController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final title = _selectedScope == _QaScope.lesson ? '课时问答' : '课程问答';
     return AppScaffold(
-      title: _isLessonScope ? '本节 QA' : '全课程 QA',
+      title: title,
       activeTab: KnowLinkTab.inquiry,
       courseId: widget.courseId,
       body: FutureBuilder<PlaceholderEntryModel>(
-        future: _placeholderFuture,
+        future: _placeholderFutureFor(_selectedScope),
         builder: (context, snapshot) {
           final placeholder = snapshot.data ??
               PlaceholderEntryModel(
-                key: _isLessonScope ? 'lesson_qa' : 'course_qa',
-                title: _isLessonScope ? '本节 QA' : '全课程 QA',
+                key: _selectedScope == _QaScope.lesson
+                    ? 'lesson_qa'
+                    : 'course_qa',
+                title: title,
                 status: snapshot.connectionState == ConnectionState.waiting
-                    ? 'generating'
-                    : 'placeholder',
-                message: snapshot.error?.toString() ?? '暂无会话',
+                    ? 'loading'
+                    : 'ready',
+                message: snapshot.hasError
+                    ? '暂时无法加载历史会话，可以继续发起新问题。'
+                    : '还没有问答记录。',
               );
           return _QaLayout(
             courseId: widget.courseId,
             lessonId: widget.lessonId,
+            selectedScope: _selectedScope,
             placeholder: placeholder,
+            messages: _messagesByScope[_selectedScope] ?? const [],
+            questionController: _questionController,
+            isSubmitting: _isSubmitting,
+            submitError: _submitError,
+            onScopeChanged: _handleScopeChanged,
+            onSubmit: _submitQuestion,
           );
         },
       ),
     );
   }
 
-  Future<PlaceholderEntryModel> _loadPlaceholder() {
+  void _loadPlaceholders() {
     final api = ref.read(courseLessonApiProvider);
-    if (_isLessonScope) {
-      return api.fetchLessonQaPlaceholder(
-        courseId: widget.courseId,
-        lessonId: widget.lessonId!,
-      );
-    }
-    return api.fetchCourseQaPlaceholder(widget.courseId);
+    _coursePlaceholderFuture = api.fetchCourseQaPlaceholder(widget.courseId);
+    _lessonPlaceholderFuture = _hasLessonScope
+        ? api.fetchLessonQaPlaceholder(
+            courseId: widget.courseId,
+            lessonId: widget.lessonId!,
+          )
+        : null;
   }
+
+  Future<PlaceholderEntryModel> _placeholderFutureFor(_QaScope scope) {
+    if (scope == _QaScope.lesson) {
+      return _lessonPlaceholderFuture ?? _coursePlaceholderFuture;
+    }
+    return _coursePlaceholderFuture;
+  }
+
+  void _handleScopeChanged(_QaScope scope) {
+    if (scope == _QaScope.lesson && !_hasLessonScope) {
+      return;
+    }
+    setState(() {
+      _selectedScope = scope;
+      _submitError = null;
+    });
+  }
+
+  Future<void> _submitQuestion() async {
+    final question = _questionController.text.trim();
+    if (question.isEmpty || _isSubmitting) {
+      return;
+    }
+    if (_selectedScope == _QaScope.lesson && !_hasLessonScope) {
+      return;
+    }
+
+    final scope = _selectedScope;
+    final localMessage = _LocalQaMessage(question: question);
+    setState(() {
+      _isSubmitting = true;
+      _submitError = null;
+      _messagesByScope[scope] = [
+        ...(_messagesByScope[scope] ?? const <_LocalQaMessage>[]),
+        localMessage,
+      ];
+      _questionController.clear();
+    });
+
+    try {
+      final api = ref.read(apiClientProvider);
+      final request = ScopedQaMessageRequestModel(
+        question: question,
+        sessionId: _sessionIds[scope],
+        scopeType: scope.apiValue,
+        courseId: widget.courseId,
+        lessonId: scope == _QaScope.lesson ? widget.lessonId : null,
+      );
+      final answer = scope == _QaScope.lesson
+          ? await api.createLessonQaMessage(
+              courseId: widget.courseId,
+              lessonId: widget.lessonId!,
+              request: request,
+            )
+          : await api.createCourseQaMessage(
+              courseId: widget.courseId,
+              request: request,
+            );
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sessionIds[scope] = answer.sessionId;
+        _messagesByScope[scope] = [
+          for (final message in _messagesByScope[scope] ??
+              const <_LocalQaMessage>[])
+            if (identical(message, localMessage))
+              message.copyWith(answer: answer)
+            else
+              message,
+        ];
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _submitError = error;
+        _messagesByScope[scope] = [
+          for (final message in _messagesByScope[scope] ??
+              const <_LocalQaMessage>[])
+            if (identical(message, localMessage))
+              message.copyWith(errorText: '提交失败，请稍后重试。')
+            else
+              message,
+        ];
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+}
+
+enum _QaScope {
+  course('course'),
+  lesson('lesson');
+
+  const _QaScope(this.apiValue);
+
+  final String apiValue;
 }
 
 class _QaLayout extends StatelessWidget {
   const _QaLayout({
     required this.courseId,
     required this.lessonId,
+    required this.selectedScope,
     required this.placeholder,
+    required this.messages,
+    required this.questionController,
+    required this.isSubmitting,
+    required this.submitError,
+    required this.onScopeChanged,
+    required this.onSubmit,
   });
 
   final String courseId;
   final String? lessonId;
+  final _QaScope selectedScope;
   final PlaceholderEntryModel placeholder;
-
-  bool get _isLessonScope => lessonId != null;
+  final List<_LocalQaMessage> messages;
+  final TextEditingController questionController;
+  final bool isSubmitting;
+  final Object? submitError;
+  final ValueChanged<_QaScope> onScopeChanged;
+  final VoidCallback onSubmit;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 820;
-        final history = _HistoryPanel(isLessonScope: _isLessonScope);
-        final chat = _ChatPanel(
+        final wide = constraints.maxWidth >= 860;
+        final sidePanel = _ScopePanel(
           courseId: courseId,
           lessonId: lessonId,
+          selectedScope: selectedScope,
+          onScopeChanged: onScopeChanged,
+        );
+        final chatPanel = _ChatPanel(
+          courseId: courseId,
+          lessonId: lessonId,
+          selectedScope: selectedScope,
           placeholder: placeholder,
+          messages: messages,
+          questionController: questionController,
+          isSubmitting: isSubmitting,
+          submitError: submitError,
+          onSubmit: onSubmit,
         );
         if (wide) {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(width: 280, child: history),
+              SizedBox(width: 280, child: sidePanel),
               const SizedBox(width: 14),
-              Expanded(child: chat),
+              Expanded(child: chatPanel),
             ],
           );
         }
         return Column(
           children: [
-            SizedBox(height: 150, child: history),
+            SizedBox(height: 154, child: sidePanel),
             const SizedBox(height: 12),
-            Expanded(child: chat),
+            Expanded(child: chatPanel),
           ],
         );
       },
@@ -127,35 +297,120 @@ class _QaLayout extends StatelessWidget {
   }
 }
 
-class _HistoryPanel extends StatelessWidget {
-  const _HistoryPanel({required this.isLessonScope});
+class _ScopePanel extends StatelessWidget {
+  const _ScopePanel({
+    required this.courseId,
+    required this.lessonId,
+    required this.selectedScope,
+    required this.onScopeChanged,
+  });
 
-  final bool isLessonScope;
+  final String courseId;
+  final String? lessonId;
+  final _QaScope selectedScope;
+  final ValueChanged<_QaScope> onScopeChanged;
 
   @override
   Widget build(BuildContext context) {
+    final lessonAvailable = lessonId != null;
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '历史会话',
+            '问答范围',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 12),
-          Expanded(
-            child: ListView(
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.chat_bubble_outline),
-                  title: Text(isLessonScope ? '本节问题' : '全课程问题'),
-                  subtitle: const Text('暂无历史消息'),
-                ),
-              ],
-            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('课程问答'),
+                selected: selectedScope == _QaScope.course,
+                onSelected: (_) => onScopeChanged(_QaScope.course),
+              ),
+              ChoiceChip(
+                label: const Text('课时问答'),
+                selected: selectedScope == _QaScope.lesson,
+                onSelected: lessonAvailable
+                    ? (_) => onScopeChanged(_QaScope.lesson)
+                    : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _ScopeSummary(
+            icon: Icons.school_outlined,
+            label: '课程',
+            value: courseId,
+            active: selectedScope == _QaScope.course,
+          ),
+          const SizedBox(height: 10),
+          _ScopeSummary(
+            icon: Icons.menu_book_outlined,
+            label: '课时',
+            value: lessonId ?? '未选择',
+            active: selectedScope == _QaScope.lesson,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ScopeSummary extends StatelessWidget {
+  const _ScopeSummary({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.active,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: active ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+        border: Border.all(
+          color: active ? AppTheme.brandBlue : AppTheme.line,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(icon, color: active ? AppTheme.brandBlue : AppTheme.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -165,18 +420,33 @@ class _ChatPanel extends StatelessWidget {
   const _ChatPanel({
     required this.courseId,
     required this.lessonId,
+    required this.selectedScope,
     required this.placeholder,
+    required this.messages,
+    required this.questionController,
+    required this.isSubmitting,
+    required this.submitError,
+    required this.onSubmit,
   });
 
   final String courseId;
   final String? lessonId;
+  final _QaScope selectedScope;
   final PlaceholderEntryModel placeholder;
+  final List<_LocalQaMessage> messages;
+  final TextEditingController questionController;
+  final bool isSubmitting;
+  final Object? submitError;
+  final VoidCallback onSubmit;
 
   @override
   Widget build(BuildContext context) {
-    final scopeLabel = lessonId == null
-        ? '当前范围：全课程 $courseId'
-        : '当前范围：课程 $courseId / 课时 $lessonId';
+    final isLesson = selectedScope == _QaScope.lesson;
+    final scopeText = isLesson
+        ? '当前范围：课程 $courseId / 课时 $lessonId'
+        : '当前范围：课程 $courseId';
+    final hintText = isLesson ? '向当前课时提问' : '向整门课程提问';
+
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -185,16 +455,24 @@ class _ChatPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  scopeLabel,
+                  isLesson ? '课时问答' : '课程问答',
                   style: const TextStyle(
                     color: AppTheme.ink,
-                    fontSize: 18,
+                    fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
               StatusPill(label: placeholder.status),
             ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            scopeText,
+            style: const TextStyle(
+              color: AppTheme.muted,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 12),
           Expanded(
@@ -204,32 +482,62 @@ class _ChatPanel extends StatelessWidget {
                 border: Border.all(color: AppTheme.line),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _AnswerBubble(
-                    title: placeholder.title,
-                    message: placeholder.message.isEmpty
-                        ? '此入口已预留，等待后端会话返回。'
-                        : placeholder.message,
-                  ),
-                ],
-              ),
+              child: messages.isEmpty
+                  ? _EmptyQaState(placeholder: placeholder)
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: messages.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        return _MessagePair(message: messages[index]);
+                      },
+                    ),
             ),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            minLines: 3,
-            maxLines: 5,
-            decoration: InputDecoration(
-              hintText: lessonId == null ? '向整门课程提问' : '只向当前课时提问',
-              border: const OutlineInputBorder(),
-              suffixIcon: const IconButton(
-                tooltip: '发送',
-                onPressed: null,
-                icon: Icon(Icons.send_outlined),
+          if (submitError != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              '提交 QA 失败：$submitError',
+              style: const TextStyle(
+                color: Color(0xFFB91C1C),
+                fontWeight: FontWeight.w700,
               ),
             ),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: questionController,
+                  minLines: 2,
+                  maxLines: 4,
+                  textInputAction: TextInputAction.newline,
+                  decoration: InputDecoration(
+                    hintText: hintText,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 52,
+                height: 52,
+                child: IconButton.filled(
+                  tooltip: '发送',
+                  onPressed: isSubmitting ? null : onSubmit,
+                  icon: isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_outlined),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -237,51 +545,194 @@ class _ChatPanel extends StatelessWidget {
   }
 }
 
-class _AnswerBubble extends StatelessWidget {
-  const _AnswerBubble({
-    required this.title,
-    required this.message,
-  });
+class _EmptyQaState extends StatelessWidget {
+  const _EmptyQaState({required this.placeholder});
 
-  final String title;
-  final String message;
+  final PlaceholderEntryModel placeholder;
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 620),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: AppTheme.line),
-            borderRadius: BorderRadius.circular(8),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.forum_outlined,
+                color: AppTheme.brandBlue,
+                size: 34,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                placeholder.title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                placeholder.message.isEmpty
+                    ? '还没有问答记录。'
+                    : placeholder.message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppTheme.muted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 8),
-                Text(message),
-                const SizedBox(height: 10),
-                const Text(
-                  '引用：等待后端返回结构化 citation',
-                  style: TextStyle(
-                    color: AppTheme.muted,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MessagePair extends StatelessWidget {
+  const _MessagePair({required this.message});
+
+  final _LocalQaMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: _QuestionBubble(question: message.question),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: _AnswerBubble(message: message),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuestionBubble extends StatelessWidget {
+  const _QuestionBubble({required this.question});
+
+  final String question;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 620),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.brandBlue,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Text(
+            question,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AnswerBubble extends StatelessWidget {
+  const _AnswerBubble({required this.message});
+
+  final _LocalQaMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final answer = message.answer;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 620),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: AppTheme.line),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '回答',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              if (message.errorText != null)
+                Text(
+                  message.errorText!,
+                  style: const TextStyle(
+                    color: Color(0xFFB91C1C),
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              else if (answer == null)
+                const Text(
+                  '正在生成回答...',
+                  style: TextStyle(
+                    color: AppTheme.muted,
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              else ...[
+                Text(answer.answerMd),
+                if (answer.citations.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final citation in answer.citations)
+                        Chip(
+                          label: Text(
+                            '${citation.refLabel} ${citation.locatorText}',
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocalQaMessage {
+  const _LocalQaMessage({
+    required this.question,
+    this.answer,
+    this.errorText,
+  });
+
+  final String question;
+  final QaMessageModel? answer;
+  final String? errorText;
+
+  _LocalQaMessage copyWith({
+    QaMessageModel? answer,
+    String? errorText,
+  }) {
+    return _LocalQaMessage(
+      question: question,
+      answer: answer ?? this.answer,
+      errorText: errorText ?? this.errorText,
     );
   }
 }

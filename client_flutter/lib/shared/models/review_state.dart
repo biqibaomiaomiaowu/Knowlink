@@ -4,7 +4,7 @@ import 'review_models.dart';
 
 class ReviewState {
   const ReviewState({
-    required this.tasks,
+    required this.review,
     required this.regeneration,
     required this.runStatus,
     required this.completion,
@@ -14,27 +14,28 @@ class ReviewState {
 
   factory ReviewState.initial() {
     return const ReviewState(
-      tasks: AsyncData<ReviewTasksModel?>(null),
+      review: AsyncData<CourseReviewModel?>(null),
       regeneration: AsyncData<ReviewRegenerateResultModel?>(null),
       runStatus: AsyncData<ReviewRunStatusModel?>(null),
       completion: AsyncData<CompleteReviewTaskResultModel?>(null),
     );
   }
 
-  final AsyncValue<ReviewTasksModel?> tasks;
+  final AsyncValue<CourseReviewModel?> review;
   final AsyncValue<ReviewRegenerateResultModel?> regeneration;
   final AsyncValue<ReviewRunStatusModel?> runStatus;
   final AsyncValue<CompleteReviewTaskResultModel?> completion;
   final int? completingTaskId;
   final bool isPolling;
 
-  ReviewTasksModel? get tasksValue => tasks.valueOrNull;
+  CourseReviewModel? get reviewValue => review.valueOrNull;
+  CourseReviewModel? get tasksValue => reviewValue;
   ReviewRunStatusModel? get runStatusValue => runStatus.valueOrNull;
   bool get isRegenerating => regeneration.isLoading || isPolling;
   bool get isCompleting => completion.isLoading;
 
   ReviewState copyWith({
-    AsyncValue<ReviewTasksModel?>? tasks,
+    AsyncValue<CourseReviewModel?>? review,
     AsyncValue<ReviewRegenerateResultModel?>? regeneration,
     AsyncValue<ReviewRunStatusModel?>? runStatus,
     AsyncValue<CompleteReviewTaskResultModel?>? completion,
@@ -43,7 +44,7 @@ class ReviewState {
     bool? isPolling,
   }) {
     return ReviewState(
-      tasks: tasks ?? this.tasks,
+      review: review ?? this.review,
       regeneration: regeneration ?? this.regeneration,
       runStatus: runStatus ?? this.runStatus,
       completion: completion ?? this.completion,

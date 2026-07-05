@@ -261,6 +261,100 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
     }
   }
 
+  Future<void> generateStageAndPoll({
+    required String courseId,
+    required String startLessonId,
+    required String endLessonId,
+  }) async {
+    if (state.isGenerating) {
+      return;
+    }
+    final requestId = ++_latestRequestId;
+    _activeCourseId = courseId;
+    _activeLessonId = null;
+    ref.read(courseFlowProvider.notifier).startCourse(courseId);
+    state = state.copyWith(
+      quiz: const AsyncData<QuizModel?>(null),
+      generation: const AsyncLoading(),
+      status: const AsyncData<QuizStatusModel?>(null),
+      submission: const AsyncData<SubmitQuizResultModel?>(null),
+      selectedAnswers: const <int, String>{},
+      isPolling: true,
+    );
+
+    try {
+      final quiz = await ref.read(apiClientProvider).generateStageQuiz(
+            courseId: courseId,
+            startLessonId: startLessonId,
+            endLessonId: endLessonId,
+            questionCountLevel: state.questionCountLevel,
+          );
+      if (!_shouldApply(requestId, courseId: courseId)) {
+        return;
+      }
+      ref.read(courseFlowProvider.notifier).setQuiz(quiz.quizId);
+      state = state.copyWith(
+        quiz: AsyncData(quiz),
+        generation: const AsyncData<QuizGenerateResultModel?>(null),
+        status: AsyncData(QuizStatusModel.fromQuiz(quiz)),
+      );
+    } catch (error, stackTrace) {
+      if (!_shouldApply(requestId, courseId: courseId)) {
+        return;
+      }
+      state = state.copyWith(generation: AsyncError(error, stackTrace));
+    } finally {
+      if (_shouldApply(requestId, courseId: courseId)) {
+        state = state.copyWith(isPolling: false);
+      }
+    }
+  }
+
+  Future<void> generateComprehensiveAndPoll({
+    required String courseId,
+  }) async {
+    if (state.isGenerating) {
+      return;
+    }
+    final requestId = ++_latestRequestId;
+    _activeCourseId = courseId;
+    _activeLessonId = null;
+    ref.read(courseFlowProvider.notifier).startCourse(courseId);
+    state = state.copyWith(
+      quiz: const AsyncData<QuizModel?>(null),
+      generation: const AsyncLoading(),
+      status: const AsyncData<QuizStatusModel?>(null),
+      submission: const AsyncData<SubmitQuizResultModel?>(null),
+      selectedAnswers: const <int, String>{},
+      isPolling: true,
+    );
+
+    try {
+      final quiz = await ref.read(apiClientProvider).generateComprehensiveQuiz(
+            courseId: courseId,
+            questionCountLevel: state.questionCountLevel,
+          );
+      if (!_shouldApply(requestId, courseId: courseId)) {
+        return;
+      }
+      ref.read(courseFlowProvider.notifier).setQuiz(quiz.quizId);
+      state = state.copyWith(
+        quiz: AsyncData(quiz),
+        generation: const AsyncData<QuizGenerateResultModel?>(null),
+        status: AsyncData(QuizStatusModel.fromQuiz(quiz)),
+      );
+    } catch (error, stackTrace) {
+      if (!_shouldApply(requestId, courseId: courseId)) {
+        return;
+      }
+      state = state.copyWith(generation: AsyncError(error, stackTrace));
+    } finally {
+      if (_shouldApply(requestId, courseId: courseId)) {
+        state = state.copyWith(isPolling: false);
+      }
+    }
+  }
+
   void selectAnswer({
     required int questionId,
     required String selectedOption,
@@ -294,7 +388,7 @@ class QuizController extends AutoDisposeNotifier<QuizState> {
     );
 
     try {
-      final result = await ref.read(apiClientProvider).submitQuizAttempt(
+      final result = await ref.read(apiClientProvider).submitQuiz(
             quizId: quizId,
             request: request,
           );
