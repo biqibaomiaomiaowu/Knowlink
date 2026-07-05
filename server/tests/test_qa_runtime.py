@@ -154,6 +154,74 @@ def test_lesson_qa_creates_lesson_scoped_exchange_with_citations_and_block_scope
         engine.dispose()
 
 
+def test_lesson_qa_can_answer_from_course_scoped_resource_segments_without_lesson_handout():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course = repo.create_course(
+            title="Set theory basics",
+            entry_type="manual_import",
+            goal_text="Understand sets, subsets, and set operations.",
+            preferred_style="balanced",
+        )
+        course_id = course["courseId"]
+        lesson = repo.create_lesson(course_id=course_id, title="Lesson 1: sets", source_type="manual")
+        resource = repo.create_resource(
+            course_id,
+            {
+                "resourceType": "pdf",
+                "objectKey": f"raw/1/{course_id}/set-theory.pdf",
+                "originalName": "set-theory.pdf",
+                "mimeType": "application/pdf",
+                "sizeBytes": 1024,
+                "checksum": "sha256:set-theory-course-resource",
+            },
+        )
+        parse_run, _ = repo.create_parse_run(course_id)
+        parse_run_id = parse_run["parseRunId"]
+        repo.create_course_segments(
+            course_id=course_id,
+            resource_id=resource["resourceId"],
+            parse_run_id=parse_run_id,
+            segments=[
+                {
+                    "segmentType": "pdf_page_text",
+                    "orderNo": 1,
+                    "textContent": "Set theory studies sets, elements, subsets, and set operations.",
+                    "pageNo": 1,
+                }
+            ],
+        )
+        repo.mark_parse_run_succeeded(parse_run_id)
+        service = QaService(
+            courses=repo,
+            qa=repo,
+            lessons=repo,
+            resources=repo,
+            qa_answer_client=_DeterministicQaAnswerClient(),
+        )
+
+        result = service.create_lesson_message(
+            course_id=course_id,
+            lesson_id=lesson["lessonId"],
+            payload=_ScopedQaPayload(
+                question="what is set theory?",
+                session_id=None,
+                handout_block_id=None,
+            ),
+        )
+
+        assert result["scopeType"] == "lesson"
+        assert result["lessonId"] == lesson["lessonId"]
+        assert result["handoutBlockId"] is None
+        assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert result["citations"]
+        assert result["citations"][0]["resourceId"] == resource["resourceId"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_course_qa_without_handout_block_uses_real_qa_generation():
     repo, session, engine = _build_sqlite_repository()
     try:

@@ -1831,8 +1831,10 @@ class SqlAlchemyRuntimeRepository:
         course = self._get_course_model(course_id)
         if course is None:
             return None
+        lesson = None
         if scope_type == "lesson":
-            if lesson_id is None or self._get_lesson_model(course_id=course_id, lesson_id=lesson_id) is None:
+            lesson = self._get_lesson_model(course_id=course_id, lesson_id=lesson_id) if lesson_id is not None else None
+            if lesson is None:
                 raise ValueError("qa.scope_invalid")
         elif scope_type != "course" or lesson_id is not None:
             raise ValueError("qa.scope_invalid")
@@ -1909,6 +1911,7 @@ class SqlAlchemyRuntimeRepository:
             "courseScope": self._qa_course_scope_from_blocks(
                 course=course,
                 blocks=[item for item in [current_block, *adjacent_blocks, *ready_blocks] if item is not None],
+                lesson=lesson if scope_type == "lesson" else None,
             ),
         }
         if current_block is not None:
@@ -1946,7 +1949,7 @@ class SqlAlchemyRuntimeRepository:
             )
         )
         if scope.scope_type == "lesson":
-            stmt = stmt.where(CourseResource.scope_type == "lesson", CourseResource.lesson_id == scope.lesson_id)
+            stmt = stmt.where(_qa_lesson_resource_scope_clause(scope.lesson_id))
         elif scope.scope_type == "course":
             stmt = stmt.where(
                 or_(
@@ -1999,7 +2002,7 @@ class SqlAlchemyRuntimeRepository:
                 )
             )
             if scope.scope_type == "lesson":
-                stmt = stmt.where(CourseResource.scope_type == "lesson", CourseResource.lesson_id == scope.lesson_id)
+                stmt = stmt.where(_qa_lesson_resource_scope_clause(scope.lesson_id))
             elif scope.scope_type == "course":
                 stmt = stmt.where(
                     or_(
@@ -4176,7 +4179,7 @@ class SqlAlchemyRuntimeRepository:
             )
         )
         if scope_type == "lesson":
-            stmt = stmt.where(CourseResource.scope_type == "lesson", CourseResource.lesson_id == lesson_id)
+            stmt = stmt.where(_qa_lesson_resource_scope_clause(lesson_id))
         elif scope_type == "course":
             stmt = stmt.where(
                 or_(
@@ -4223,6 +4226,7 @@ class SqlAlchemyRuntimeRepository:
         *,
         course: Course,
         blocks: Sequence[dict[str, Any]],
+        lesson: CourseLesson | None = None,
     ) -> dict[str, Any]:
         resources = self.session.scalars(
             select(CourseResource)
@@ -4230,7 +4234,9 @@ class SqlAlchemyRuntimeRepository:
             .order_by(CourseResource.sort_order.asc(), CourseResource.id.asc())
         ).all()
         scoped_blocks = list(blocks)
-        handout_titles = [_qa_scope_block_label(block) for block in scoped_blocks]
+        lesson_title = str(lesson.title).strip() if lesson is not None and isinstance(lesson.title, str) else ""
+        handout_titles = [lesson_title] if lesson_title else []
+        handout_titles.extend(_qa_scope_block_label(block) for block in scoped_blocks)
         knowledge_point_names = _qa_scope_knowledge_point_names(scoped_blocks)
         return {
             "title": course.title,
@@ -5818,6 +5824,13 @@ def _normalized_search_limit(limit: int) -> int:
         return max(0, min(int(limit), 50))
     except (TypeError, ValueError):
         return 0
+
+
+def _qa_lesson_resource_scope_clause(lesson_id: int | None):
+    return or_(
+        and_(CourseResource.scope_type == "course", CourseResource.lesson_id.is_(None)),
+        and_(CourseResource.scope_type == "lesson", CourseResource.lesson_id == lesson_id),
+    )
 
 
 def _qa_lexical_overlap_score(query: str, text: str) -> float:

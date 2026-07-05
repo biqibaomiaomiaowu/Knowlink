@@ -254,6 +254,74 @@ def test_orchestrator_wrong_query_embedding_dimension_falls_back_to_lexical_sear
     assert {ref["segmentKey"] for ref in result.refs} == {"video-superkey-lexical"}
 
 
+def test_orchestrator_falls_through_to_handout_context_when_model_rejects_original_evidence():
+    from server.ai.qa_orchestrator import QaOrchestrator
+
+    context = _qa_context(
+        current_block=_handout_block(block_id=4002, sort_no=2, title="Set basics", content="Current block introduces sets."),
+        ready_blocks=[
+            _handout_block(
+                block_id=4007,
+                sort_no=7,
+                title="Set theory",
+                content="Set theory studies sets, elements, subsets, and operations.",
+            )
+        ],
+        course_scope={
+            "title": "Set theory basics",
+            "goalText": "Understand sets and subsets.",
+            "knowledgePointNames": ["set theory", "sets"],
+        },
+    )
+    orchestrator = QaOrchestrator(
+        retrieval_repository=_FakeCourseWideRetrievalRepository(
+            original_segments=[
+                _course_segment(
+                    segment_key="video-set-definition",
+                    text="A set is a collection of determined objects.",
+                    start_sec=10,
+                    end_sec=30,
+                )
+            ]
+        ),
+        answer_client=_InsufficientOriginalAnswerClient(),
+    )
+
+    result = orchestrator.answer("what is set theory?", context)
+
+    assert result.response["answerType"] == "direct_answer"
+    assert result.response["generationMetadata"]["evidenceTier"] == "handout_context"
+    assert result.response["citations"] == []
+    assert result.refs == []
+
+
+def test_orchestrator_lets_model_judge_course_prior_when_lexical_scope_is_weak():
+    from server.ai.qa_orchestrator import QaOrchestrator
+
+    context = _qa_context(
+        current_block=_handout_block(block_id=4002, sort_no=2, title="Study plan", content="This block only lists homework."),
+        ready_blocks=[],
+        course_scope={
+            "title": "Advanced mathematics",
+            "goalText": "Build mathematical foundations for the current lesson.",
+            "knowledgePointNames": [],
+        },
+    )
+    client = _CoursePriorJudgementAnswerClient()
+    orchestrator = QaOrchestrator(
+        retrieval_repository=_FakeCourseWideRetrievalRepository(original_segments=[]),
+        answer_client=client,
+    )
+
+    result = orchestrator.answer("what is set theory?", context)
+
+    assert result.response["answerType"] == "direct_answer"
+    assert result.response["generationMetadata"]["evidenceTier"] == "course_prior"
+    assert result.response["citations"] == []
+    assert result.refs == []
+    assert client.course_prior_questions == ["what is set theory?"]
+
+
 def test_orchestrator_uses_runtime_hybrid_handout_search_when_context_ready_blocks_are_empty():
     from server.ai.qa_orchestrator import QaOrchestrator
     from server.ai.qa_types import LexicalSearchHit
@@ -560,7 +628,9 @@ class _FakeHybridRetrievalRepository:
 
 class _FakeEmbeddingClient:
     def embed_texts(self, sentences):
-        return [[0.01] * 1536 for _sentence in sentences]
+        from server.infra.db.models import VectorDocument
+
+        return [[0.01] * VectorDocument.EMBEDDING_DIM for _sentence in sentences]
 
 
 class _WrongDimEmbeddingClient:
@@ -597,6 +667,42 @@ class _DeterministicAnswerClient:
             "answerType": "direct_answer",
             "citations": [],
         }
+
+
+class _InsufficientOriginalAnswerClient(_DeterministicAnswerClient):
+    def generate_answer(self, question: str, candidates: list[Any]) -> dict[str, Any]:
+        return {
+            "answerMd": "Candidate evidence is insufficient for a reliable answer.",
+            "answerType": "insufficient_evidence",
+            "citations": [],
+        }
+
+
+class _CoursePriorJudgementAnswerClient(_DeterministicAnswerClient):
+    def __init__(self) -> None:
+        self.course_prior_questions: list[str] = []
+
+    def generate_unreferenced_answer(
+        self,
+        question: str,
+        *,
+        context_text: str,
+        evidence_tier: str,
+        course_scope: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if evidence_tier == "course_prior":
+            self.course_prior_questions.append(question)
+            return {
+                "answerMd": "Set theory studies sets and their relationships.",
+                "answerType": "direct_answer",
+                "citations": [],
+            }
+        return super().generate_unreferenced_answer(
+            question,
+            context_text=context_text,
+            evidence_tier=evidence_tier,
+            course_scope=course_scope,
+        )
 
 
 def _qa_context(

@@ -13,7 +13,7 @@ from server.tasks.vector_backfill import rebuild_vector_documents
 def test_vector_document_exposes_hybrid_qa_embedding_fields():
     columns = VectorDocument.__table__.c
 
-    assert VectorDocument.EMBEDDING_DIM == 1536
+    assert VectorDocument.EMBEDDING_DIM == 768
 
     for column_name in (
         "embedding",
@@ -148,9 +148,9 @@ def test_handout_block_vector_replace_writes_ready_embedding_when_client_is_avai
         row = session.query(VectorDocument).one()
         assert row.embedding_status == "ready"
         assert row.embedding_model == "fake-embedding"
-        assert row.embedding_dim == 1536
-        assert row.embedding_vector == [0.01] * 1536
-        assert row.embedding == [0.01] * 1536
+        assert row.embedding_dim == VectorDocument.EMBEDDING_DIM
+        assert row.embedding_vector == [0.01] * VectorDocument.EMBEDDING_DIM
+        assert row.embedding == [0.01] * VectorDocument.EMBEDDING_DIM
         assert row.embedding_error is None
     finally:
         session.close()
@@ -176,7 +176,7 @@ def test_handout_block_vector_replace_records_failed_status_for_wrong_embedding_
         assert row.embedding_status == "failed"
         assert row.embedding_vector is None
         assert row.embedding_dim is None
-        assert "expected 1536" in row.embedding_error
+        assert "expected 768" in row.embedding_error
     finally:
         session.close()
         session.bind.dispose()
@@ -264,7 +264,7 @@ class _FakeEmbeddingClient:
     model = "fake-embedding"
 
     def embed_texts(self, sentences):
-        return [[0.01] * 1536 for _sentence in sentences]
+        return [[0.01] * VectorDocument.EMBEDDING_DIM for _sentence in sentences]
 
 
 class _WrongDimEmbeddingClient:

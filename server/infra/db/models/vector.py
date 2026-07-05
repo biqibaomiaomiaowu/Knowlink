@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from server.infra.db.base import Base, ID_TYPE, JSON_TYPE, TimestampMixin
 
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 768
 VECTOR_TYPE = Vector(EMBEDDING_DIM).with_variant(JSON(), "sqlite")
 
 

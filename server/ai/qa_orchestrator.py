@@ -27,10 +27,11 @@ from server.ai.qa_scope import (
     scope_matches_payload,
 )
 from server.ai.qa_types import HandoutContextCandidate, QaEvidenceCandidate, QaGenerationResult, QaScope, RetrievalTrace
+from server.infra.db.models.vector import EMBEDDING_DIM
 from server.parsers.base import clean_text
 
 
-EXPECTED_QUERY_EMBEDDING_DIM = 1536
+EXPECTED_QUERY_EMBEDDING_DIM = EMBEDDING_DIM
 
 
 class QaOrchestrator:
@@ -66,12 +67,14 @@ class QaOrchestrator:
             _dedupe_candidates([*exact_candidates, *hybrid_original_candidates, *context_original_candidates]),
         )
         if original_candidates:
-            return self._answer_with_original_evidence(
+            original_result = self._answer_with_original_evidence(
                 question,
                 original_candidates,
                 scope=scope,
                 trace=RetrievalTrace(current_block_candidate_count=len(exact_candidates), original_evidence_count=len(exact_candidates)),
             )
+            if original_result.response.get("answerType") != "insufficient_evidence":
+                return original_result
 
         if is_source_fact:
             return QaGenerationResult(
@@ -105,8 +108,13 @@ class QaOrchestrator:
                 retrieval_trace=RetrievalTrace(handout_context_candidate_count=len(handout_contexts), handout_context_count=1),
             )
 
-        if guard.is_course_related(question):
-            response = self._answer_with_course_prior(question, context)
+        is_course_related = guard.is_course_related(question)
+        if is_course_related or (self.answer_client is not None and _has_course_scope(context)):
+            response = self._answer_with_course_prior(
+                question,
+                context,
+                allow_fallback=is_course_related,
+            )
             return QaGenerationResult(
                 response=_force_unreferenced_response(response),
                 refs=[],
@@ -181,7 +189,13 @@ class QaOrchestrator:
                 return _fallback_handout_context_response(context, reason=fallback_reason_for_error(exc))
         return _fallback_handout_context_response(context, reason="handout_context_match")
 
-    def _answer_with_course_prior(self, question: str, context: Mapping[str, Any]) -> dict[str, Any]:
+    def _answer_with_course_prior(
+        self,
+        question: str,
+        context: Mapping[str, Any],
+        *,
+        allow_fallback: bool = True,
+    ) -> dict[str, Any]:
         course_scope = context.get("courseScope") or context.get("course_scope") or {}
         if self.answer_client is not None:
             try:
@@ -196,7 +210,11 @@ class QaOrchestrator:
                     reason="course_related_prior",
                 )
             except Exception as exc:
+                if not allow_fallback:
+                    return _out_of_scope_response()
                 return _fallback_course_prior_response(question, reason=fallback_reason_for_error(exc))
+        if not allow_fallback:
+            return _out_of_scope_response()
         return _fallback_course_prior_response(question, reason="course_related_prior")
 
     def _hybrid_original_candidates(
@@ -310,6 +328,10 @@ def _exact_context(context: Mapping[str, Any]) -> dict[str, Any]:
     merged = dict(context)
     merged["segments"] = [*_mapping_sequence(context.get("segments")), *_mapping_sequence(context.get("currentSegments") or context.get("current_segments"))]
     return merged
+
+
+def _has_course_scope(context: Mapping[str, Any]) -> bool:
+    return bool(_course_scope_text(context.get("courseScope") or context.get("course_scope")))
 
 
 def _course_wide_context_segment_candidates(context: Mapping[str, Any], *, scope: QaScope) -> list[QaEvidenceCandidate]:

@@ -260,7 +260,7 @@ def test_parse_pipeline_keeps_lexical_vector_documents_on_embedding_dimension_mi
     assert vector.embedding_model == "wrong-dim"
     assert vector.embedding_dim == 2
     assert vector.embedding_status == "failed"
-    assert "expected 1536" in vector.embedding_error
+    assert "expected 768" in vector.embedding_error
     assert "embedding dimension mismatch" in vector.search_text
     assert "pdf_page_text" in vector.search_text
     vectorize_task = session.scalar(
