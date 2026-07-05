@@ -575,40 +575,6 @@ class ApiClient {
     return QuizModel.fromJson(_firstPayload(data, 'quiz'));
   }
 
-  Future<QuizModel> generateStageQuiz({
-    required String courseId,
-    required String startLessonId,
-    required String endLessonId,
-    required QuizQuestionCountLevel questionCountLevel,
-  }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
-      '/api/v1/courses/$courseId/quizzes/stage/generate',
-      data: {
-        'startLessonId': startLessonId,
-        'endLessonId': endLessonId,
-        'questionCountLevel': questionCountLevel.apiValue,
-      },
-    );
-
-    final data = response.data?['data'] as Map<String, dynamic>;
-    return QuizModel.fromJson(_firstPayload(data, 'quiz'));
-  }
-
-  Future<QuizModel> generateComprehensiveQuiz({
-    required String courseId,
-    required QuizQuestionCountLevel questionCountLevel,
-  }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
-      '/api/v1/courses/$courseId/quizzes/comprehensive/generate',
-      data: {
-        'questionCountLevel': questionCountLevel.apiValue,
-      },
-    );
-
-    final data = response.data?['data'] as Map<String, dynamic>;
-    return QuizModel.fromJson(_firstPayload(data, 'quiz'));
-  }
-
   Future<QuizModel> fetchQuiz(int quizId) async {
     final response = await _dio.get<Map<String, dynamic>>(
       '/api/v1/quizzes/$quizId',
