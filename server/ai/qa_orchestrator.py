@@ -281,6 +281,8 @@ class QaOrchestrator:
             parse_run_id=scope.active_parse_run_id,
             handout_version_id=scope.active_handout_version_id,
             handout_block_id=scope.current_handout_block_id,
+            scope_type=scope.scope_type,
+            lesson_id=scope.lesson_id,
             limit=8,
         )
         return _segment_candidates(raw_segments, scope=scope, source="course_wide_segment_lexical", start_rank=1)

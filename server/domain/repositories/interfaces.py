@@ -357,6 +357,15 @@ class HandoutRepository(Protocol):
 class QaRepository(Protocol):
     def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None: ...
 
+    def get_scoped_qa_context(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        handout_block_id: int | None = None,
+    ) -> dict[str, Any] | None: ...
+
     def search_vector_segments(
         self,
         scope: QaScope,
@@ -393,6 +402,8 @@ class QaRepository(Protocol):
         parse_run_id: int | None,
         handout_version_id: int | None = None,
         handout_block_id: int | str | None = None,
+        scope_type: str | None = None,
+        lesson_id: int | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]: ...
 
@@ -424,6 +435,10 @@ class QaRepository(Protocol):
         question: str,
         answer_md: str,
         citations: Sequence[dict[str, Any]],
+        answer_type: str | None = None,
+        generation_metadata: Mapping[str, Any] | None = None,
+        refs: Sequence[dict[str, Any]] | None = None,
+        candidate_count: int = 0,
         session_id: int | None = None,
         handout_block_id: int | None = None,
     ) -> dict[str, Any]: ...

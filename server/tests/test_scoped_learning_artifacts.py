@@ -115,6 +115,14 @@ def test_course_and_lesson_qa_sessions_are_separate_and_lesson_citations_are_sco
         resource_type="pdf",
         lesson_id=other_lesson["lessonId"],
     )
+    _handout, _trigger, blocks = runtime_store.create_handout(
+        course["courseId"],
+        scope_type="lesson",
+        lesson_id=lesson["lessonId"],
+        artifact_kind="lesson_handout",
+    )
+    blocks[0]["status"] = "ready"
+    blocks[0]["generationStatus"] = "ready"
 
     course_status, course_body = _api(
         "POST",
@@ -124,7 +132,7 @@ def test_course_and_lesson_qa_sessions_are_separate_and_lesson_citations_are_sco
     lesson_status, lesson_body = _api(
         "POST",
         f"/api/v1/courses/{course['courseId']}/lessons/{lesson['lessonId']}/qa/messages",
-        json_body={"question": "本节课讲了什么？"},
+        json_body={"question": blocks[0]["title"]},
     )
     course_list_status, course_list_body = _api("GET", f"/api/v1/courses/{course['courseId']}/qa/sessions")
     lesson_list_status, lesson_list_body = _api(
@@ -147,9 +155,10 @@ def test_course_and_lesson_qa_sessions_are_separate_and_lesson_citations_are_sco
     assert [item["sessionId"] for item in course_list_body["data"]["items"]] == [course_body["data"]["sessionId"]]
     assert lesson_list_status == 200
     assert [item["sessionId"] for item in lesson_list_body["data"]["items"]] == [lesson_body["data"]["sessionId"]]
+    assert lesson_body["data"]["answerType"] == "direct_answer"
+    assert lesson_body["data"]["generationMetadata"]["evidenceTier"] == "original_evidence"
+    assert lesson_body["data"]["generationMetadata"]["reason"] != "scoped_qa_placeholder"
     assert {citation["resourceId"] for citation in lesson_body["data"]["citations"]} == {lesson_video["resourceId"]}
-    assert all(citation["lessonId"] == lesson["lessonId"] for citation in lesson_body["data"]["citations"])
-    assert all(citation["lessonTitle"] == "关系模型" for citation in lesson_body["data"]["citations"])
     assert other_resource["resourceId"] not in {citation["resourceId"] for citation in lesson_body["data"]["citations"]}
     assert resource_qa_status == 404
 

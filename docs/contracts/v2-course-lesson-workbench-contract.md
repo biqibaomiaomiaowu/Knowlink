@@ -397,6 +397,7 @@ Scoped QA message request / response fields:
 - `handoutBlockId` is only a block anchor for course QA or lesson QA. It is not single-resource QA and does not create a resource-specific route.
 - For embedded lesson-study QA, `handoutBlockId` must belong to the requested `courseId + scopeType + lessonId` handout version. Unknown blocks return `qa.block_not_found`; cross-course or cross-scope blocks return `qa.scope_invalid`.
 - Responses are non-streaming in this phase.
+- Scoped QA messages must use the same QA generation pipeline as block QA. They must not return hard-coded placeholder answers; when no model is configured, they return the existing QA fallback with `generationMetadata.source=fallback`.
 
 Course QA 检索范围:
 

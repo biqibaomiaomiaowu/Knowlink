@@ -14,6 +14,8 @@ class EvidenceTier(StrEnum):
 
 @dataclass(frozen=True)
 class QaScope:
+    scope_type: str | None = None
+    lesson_id: int | None = None
     course_id: int | None = None
     active_parse_run_id: int | None = None
     active_handout_version_id: int | None = None

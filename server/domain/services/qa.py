@@ -40,8 +40,14 @@ class QaService:
         }
 
     def create_course_message(self, *, course_id: int, payload) -> dict[str, object]:
-        course = self._ensure_course(course_id)
-        citations = self._course_citations(course_id=course_id)
+        self._ensure_course(course_id)
+        response, refs, candidate_count = self._generate_scoped_answer(
+            course_id=course_id,
+            scope_type="course",
+            lesson_id=None,
+            handout_block_id=getattr(payload, "handout_block_id", None),
+            question=payload.question,
+        )
         return self._create_scoped_message(
             course_id=course_id,
             scope_type="course",
@@ -49,13 +55,20 @@ class QaService:
             session_id=payload.session_id,
             handout_block_id=getattr(payload, "handout_block_id", None),
             question=payload.question,
-            answer_md=f"这是《{course.get('title') or '当前课程'}》的课程级 QA 占位回答。",
-            citations=citations,
+            response=response,
+            refs=refs,
+            candidate_count=candidate_count,
         )
 
     def create_lesson_message(self, *, course_id: int, lesson_id: int, payload) -> dict[str, object]:
-        lesson = self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
-        citations = self._lesson_citations(course_id=course_id, lesson=lesson)
+        self._ensure_lesson(course_id=course_id, lesson_id=lesson_id)
+        response, refs, candidate_count = self._generate_scoped_answer(
+            course_id=course_id,
+            scope_type="lesson",
+            lesson_id=lesson_id,
+            handout_block_id=getattr(payload, "handout_block_id", None),
+            question=payload.question,
+        )
         return self._create_scoped_message(
             course_id=course_id,
             scope_type="lesson",
@@ -63,8 +76,9 @@ class QaService:
             session_id=payload.session_id,
             handout_block_id=getattr(payload, "handout_block_id", None),
             question=payload.question,
-            answer_md=f"这是《{lesson.get('title') or '当前课时'}》的课时级 QA 占位回答。",
-            citations=citations,
+            response=response,
+            refs=refs,
+            candidate_count=candidate_count,
         )
 
     def create_message(self, *, payload) -> dict[str, object]:
@@ -122,8 +136,9 @@ class QaService:
         session_id: int | None,
         handout_block_id: int | None,
         question: str,
-        answer_md: str,
-        citations: list[dict[str, object]],
+        response: dict[str, object],
+        refs: list[dict[str, object]],
+        candidate_count: int,
     ) -> dict[str, object]:
         try:
             return self.qa.create_scoped_qa_exchange(
@@ -133,11 +148,90 @@ class QaService:
                 session_id=session_id,
                 handout_block_id=handout_block_id,
                 question=question,
-                answer_md=answer_md,
-                citations=citations,
+                answer_md=str(response["answerMd"]),
+                answer_type=str(response.get("answerType") or "direct_answer"),
+                citations=list(response.get("citations") or []),
+                generation_metadata=response.get("generationMetadata")
+                if isinstance(response.get("generationMetadata"), dict)
+                else None,
+                refs=refs,
+                candidate_count=candidate_count,
             )
         except ValueError as exc:
             raise self._service_error_from_value_error(exc) from exc
+
+    def _generate_scoped_answer(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+        handout_block_id: int | None,
+        question: str,
+    ) -> tuple[dict[str, object], list[dict[str, object]], int]:
+        try:
+            context = self.qa.get_scoped_qa_context(
+                course_id=course_id,
+                scope_type=scope_type,
+                lesson_id=lesson_id,
+                handout_block_id=handout_block_id,
+            )
+        except ValueError as exc:
+            raise self._service_error_from_value_error(exc) from exc
+        if context is None:
+            if handout_block_id is not None:
+                raise self._service_error_from_value_error(ValueError("qa.block_not_found"))
+            context = self._minimal_scoped_context(
+                course_id=course_id,
+                scope_type=scope_type,
+                lesson_id=lesson_id,
+            )
+
+        generation_result = QaOrchestrator(
+            retrieval_repository=self.qa,
+            embedding_client=self.embedding_client,
+            qa_answer_client=self.qa_answer_client,
+        ).answer(question, context)
+        response = generation_result.response
+        refs = generation_result.refs
+        if response.get("generationMetadata", {}).get("evidenceTier") != "original_evidence":
+            response = {**response, "citations": []}
+            refs = []
+        return response, refs, generation_result.candidate_count
+
+    def _minimal_scoped_context(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None,
+    ) -> dict[str, object]:
+        course = self._ensure_course(course_id)
+        lesson = self._ensure_lesson(course_id=course_id, lesson_id=lesson_id) if scope_type == "lesson" else None
+        lesson_title = lesson.get("title") if lesson is not None else None
+        return {
+            "courseId": course_id,
+            "activeCourseId": course_id,
+            "activeParseRunId": course.get("activeParseRunId"),
+            "activeHandoutVersionId": course.get("activeHandoutVersionId"),
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "segments": [],
+            "readyBlocks": [],
+            "knowledgePointEvidences": [],
+            "courseScope": {
+                "title": " / ".join(str(item) for item in (course.get("title"), lesson_title) if item),
+                "summary": course.get("summary"),
+                "goalText": course.get("goalText"),
+                "resourceTitles": [
+                    str(resource.get("originalName"))
+                    for resource in (self.resources.list_resources(course_id) if self.resources is not None else [])
+                    if str(resource.get("originalName") or "").strip()
+                ],
+                "handoutTitles": [str(lesson_title)] if lesson_title else [],
+                "knowledgePointNames": [],
+            },
+        }
 
     def _ensure_course(self, course_id: int) -> dict[str, object]:
         course = self.courses.get_course(course_id)

@@ -468,6 +468,21 @@ class MemoryScaffoldRepository:
     def get_qa_context(self, course_id: int, handout_block_id: int) -> dict[str, Any] | None:
         return self.store.get_qa_context(course_id, handout_block_id)
 
+    def get_scoped_qa_context(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        handout_block_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        return self.store.get_scoped_qa_context(
+            course_id=course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+            handout_block_id=handout_block_id,
+        )
+
     def search_vector_segments(
         self,
         scope: QaScope,
@@ -508,6 +523,8 @@ class MemoryScaffoldRepository:
         parse_run_id: int | None,
         handout_version_id: int | None = None,
         handout_block_id: int | str | None = None,
+        scope_type: str | None = None,
+        lesson_id: int | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
         return self.store.search_course_wide_original_segments(
@@ -516,6 +533,8 @@ class MemoryScaffoldRepository:
             parse_run_id=parse_run_id,
             handout_version_id=handout_version_id,
             handout_block_id=handout_block_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
             limit=limit,
         )
 
@@ -550,6 +569,10 @@ class MemoryScaffoldRepository:
         question: str,
         answer_md: str,
         citations: Sequence[dict[str, Any]],
+        answer_type: str | None = None,
+        generation_metadata: Mapping[str, Any] | None = None,
+        refs: Sequence[dict[str, Any]] | None = None,
+        candidate_count: int = 0,
         session_id: int | None = None,
         handout_block_id: int | None = None,
     ) -> dict[str, Any]:
@@ -560,6 +583,10 @@ class MemoryScaffoldRepository:
             question=question,
             answer_md=answer_md,
             citations=list(citations),
+            answer_type=answer_type,
+            generation_metadata=generation_metadata,
+            refs=list(refs or []),
+            candidate_count=candidate_count,
             session_id=session_id,
             handout_block_id=handout_block_id,
         )

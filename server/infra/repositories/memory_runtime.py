@@ -1498,6 +1498,106 @@ class RuntimeStore:
             ),
         }
 
+    def get_scoped_qa_context(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        handout_block_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        course = self.courses.get(course_id)
+        if course is None:
+            return None
+        if scope_type == "lesson":
+            if lesson_id is None or self.get_lesson(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("qa.scope_invalid")
+        elif scope_type != "course" or lesson_id is not None:
+            raise ValueError("qa.scope_invalid")
+
+        handout = self.get_latest_handout(
+            course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id if scope_type == "lesson" else None,
+        )
+        active_parse_run_id = course.get("activeParseRunId")
+        if handout is not None and active_parse_run_id is not None and handout.get("sourceParseRunId") != active_parse_run_id:
+            if handout_block_id is not None:
+                raise ValueError("qa.block_not_found")
+            handout = None
+
+        block = None
+        if handout_block_id is not None:
+            if handout is None:
+                raise ValueError("qa.block_not_found")
+            block = next((item for item in handout.get("blocks", []) if item.get("blockId") == handout_block_id), None)
+            if block is None:
+                raise ValueError("qa.block_not_found")
+
+        handout_version_id = handout.get("handoutVersionId") if handout is not None else course.get("activeHandoutVersionId")
+        parse_run_id = handout.get("sourceParseRunId") if handout is not None else active_parse_run_id
+        all_blocks = list(handout.get("blocks") or []) if handout is not None else []
+        adjacent_blocks = []
+        if block is not None:
+            adjacent_blocks = [
+                self._qa_block_payload_from_memory(
+                    adjacent,
+                    course_id=course_id,
+                    parse_run_id=parse_run_id,
+                    handout_version_id=int(handout_version_id or 0),
+                )
+                for adjacent in all_blocks
+                if adjacent.get("blockId") != handout_block_id
+                and abs(int(adjacent.get("startSec") or 0) - int(block.get("startSec") or 0)) <= 300
+            ]
+        ready_blocks = [
+            self._qa_block_payload_from_memory(
+                ready_block,
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout_version_id=int(handout_version_id or 0),
+            )
+            for ready_block in all_blocks
+            if ready_block.get("status") == "ready" or ready_block.get("generationStatus") == "ready"
+        ]
+        current_block = (
+            self._qa_block_payload_from_memory(
+                block,
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout_version_id=int(handout_version_id or 0),
+            )
+            if block is not None
+            else None
+        )
+        context: dict[str, Any] = {
+            "courseId": course_id,
+            "activeCourseId": course_id,
+            "activeParseRunId": parse_run_id,
+            "activeHandoutVersionId": handout_version_id,
+            "handoutBlockId": handout_block_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "segments": self._qa_segments_from_memory_handout(
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+                handout=handout,
+            )
+            if handout is not None
+            else [],
+            "knowledgePointEvidences": [],
+            "adjacentBlocks": adjacent_blocks,
+            "readyBlocks": ready_blocks,
+            "courseScope": self._qa_course_scope_from_memory_blocks(
+                course=course,
+                course_id=course_id,
+                blocks=[item for item in [current_block, *adjacent_blocks, *ready_blocks] if item is not None],
+            ),
+        }
+        if current_block is not None:
+            context["currentBlock"] = current_block
+        return context
+
     def search_course_wide_original_segments(
         self,
         *,
@@ -1506,13 +1606,19 @@ class RuntimeStore:
         parse_run_id: int | None,
         handout_version_id: int | None = None,
         handout_block_id: int | str | None = None,
+        scope_type: str | None = None,
+        lesson_id: int | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
         active_course_id = _as_positive_int(course_id)
         if active_course_id is None:
             return []
         course = self.courses.get(active_course_id)
-        handout = self.get_latest_handout(active_course_id)
+        handout = self.get_latest_handout(
+            active_course_id,
+            scope_type=scope_type or "course",
+            lesson_id=lesson_id if scope_type == "lesson" else None,
+        )
         if course is None or handout is None:
             return []
         active_parse_run_id = _as_positive_int(parse_run_id) or _as_positive_int(course.get("activeParseRunId"))
@@ -1566,7 +1672,11 @@ class RuntimeStore:
         if active_course_id is None or active_parse_run_id is None or normalized_limit <= 0:
             return []
         course = self.courses.get(active_course_id)
-        handout = self.get_latest_handout(active_course_id)
+        handout = self.get_latest_handout(
+            active_course_id,
+            scope_type=scope.scope_type or "course",
+            lesson_id=scope.lesson_id if scope.scope_type == "lesson" else None,
+        )
         if course is None or handout is None or handout.get("sourceParseRunId") != active_parse_run_id:
             return []
 
@@ -1632,7 +1742,11 @@ class RuntimeStore:
             or normalized_limit <= 0
         ):
             return []
-        handout = self.get_latest_handout(active_course_id)
+        handout = self.get_latest_handout(
+            active_course_id,
+            scope_type=scope.scope_type or "course",
+            lesson_id=scope.lesson_id if scope.scope_type == "lesson" else None,
+        )
         if (
             handout is None
             or handout.get("sourceParseRunId") != active_parse_run_id
@@ -1773,6 +1887,10 @@ class RuntimeStore:
         question: str,
         answer_md: str,
         citations: list[dict[str, Any]],
+        answer_type: str | None = None,
+        generation_metadata: Mapping[str, Any] | None = None,
+        refs: Sequence[dict[str, Any]] | None = None,
+        candidate_count: int = 0,
         session_id: int | None = None,
         handout_block_id: int | None = None,
     ) -> dict[str, Any]:
@@ -1837,6 +1955,17 @@ class RuntimeStore:
 
         user_message_id = self.next_id("qa_message")
         assistant_message_id = self.next_id("qa_message")
+        normalized_answer_type = answer_type or "direct_answer"
+        normalized_generation_metadata = dict(generation_metadata or {})
+        if not normalized_generation_metadata:
+            normalized_generation_metadata = {"source": "fallback", "reason": "model_unavailable", "evidenceTier": "course_prior"}
+        context_snapshot = {
+            "source": "scoped_qa",
+            "handoutBlockId": handout_block_id,
+            "candidateCount": candidate_count,
+            "generationMetadata": normalized_generation_metadata,
+        }
+        session["context"] = context_snapshot
         session.setdefault("messages", []).extend(
             [
                 {
@@ -1855,9 +1984,10 @@ class RuntimeStore:
                     "role": "assistant",
                     "contentMd": answer_md,
                     "answerMd": answer_md,
-                    "answerType": "placeholder",
+                    "answerType": normalized_answer_type,
                     "citations": list(citations),
-                    "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+                    "generationMetadata": normalized_generation_metadata,
+                    "refs": list(refs or []),
                     "createdAt": now,
                 },
             ]
@@ -1870,10 +2000,11 @@ class RuntimeStore:
             "scopeType": scope_type,
             "lessonId": lesson_id if scope_type == "lesson" else None,
             "handoutBlockId": handout_block_id,
+            "question": question,
             "answerMd": answer_md,
-            "answerType": "placeholder",
+            "answerType": normalized_answer_type,
             "citations": list(citations),
-            "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+            "generationMetadata": normalized_generation_metadata,
         }
 
     def _qa_block_payload_from_memory(
@@ -1916,6 +2047,20 @@ class RuntimeStore:
             ),
             *adjacent_blocks,
         ]
+        return self._qa_course_scope_from_memory_blocks(
+            course=course,
+            course_id=course_id,
+            blocks=scoped_blocks,
+        )
+
+    def _qa_course_scope_from_memory_blocks(
+        self,
+        *,
+        course: dict[str, Any],
+        course_id: int,
+        blocks: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        scoped_blocks = list(blocks)
         handout_titles = [_qa_scope_block_label(block) for block in scoped_blocks]
         return {
             "title": course.get("title"),

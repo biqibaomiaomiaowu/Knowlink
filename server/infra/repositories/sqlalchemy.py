@@ -6,7 +6,7 @@ import hashlib
 import re
 from typing import Any, TypeVar
 
-from sqlalchemy import delete, func, literal_column, select, text, update
+from sqlalchemy import and_, delete, func, literal_column, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1820,6 +1820,94 @@ class SqlAlchemyRuntimeRepository:
             ),
         }
 
+    def get_scoped_qa_context(
+        self,
+        *,
+        course_id: int,
+        scope_type: str,
+        lesson_id: int | None = None,
+        handout_block_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        course = self._get_course_model(course_id)
+        if course is None:
+            return None
+        if scope_type == "lesson":
+            if lesson_id is None or self._get_lesson_model(course_id=course_id, lesson_id=lesson_id) is None:
+                raise ValueError("qa.scope_invalid")
+        elif scope_type != "course" or lesson_id is not None:
+            raise ValueError("qa.scope_invalid")
+
+        version = self._get_latest_handout_version_model(
+            course_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id if scope_type == "lesson" else None,
+        )
+        block = None
+        if handout_block_id is not None:
+            block = self._get_active_handout_block(handout_block_id)
+            if block is None:
+                raise ValueError("qa.block_not_found")
+            block_version = self.session.get(HandoutVersion, block.handout_version_id)
+            if (
+                block_version is None
+                or block_version.course_id != course_id
+                or block_version.scope_type != scope_type
+                or block_version.lesson_id != (lesson_id if scope_type == "lesson" else None)
+            ):
+                raise ValueError("qa.scope_invalid")
+            version = block_version
+
+        parse_run_id = version.source_parse_run_id if version is not None else course.active_parse_run_id
+        handout_version_id = version.id if version is not None else course.active_handout_version_id
+        active_block_vectors = self._active_handout_block_vectors(course=course, version=version) if version is not None else []
+        current_block = self._qa_block_payload(block, course=course, version=version) if block is not None and version is not None else None
+        adjacent_blocks = (
+            self._qa_adjacent_blocks(
+                block,
+                course=course,
+                version=version,
+                vector_documents=active_block_vectors,
+            )
+            if block is not None and version is not None
+            else []
+        )
+        ready_blocks = (
+            self._qa_ready_blocks(
+                course=course,
+                version=version,
+                vector_documents=active_block_vectors,
+            )
+            if version is not None
+            else []
+        )
+        context: dict[str, Any] = {
+            "courseId": course.id,
+            "activeCourseId": course.id,
+            "activeParseRunId": parse_run_id,
+            "activeHandoutVersionId": handout_version_id,
+            "handoutBlockId": handout_block_id,
+            "scopeType": scope_type,
+            "lessonId": lesson_id if scope_type == "lesson" else None,
+            "segments": self._qa_segments(
+                course_id=course.id,
+                parse_run_id=parse_run_id,
+                scope_type=scope_type,
+                lesson_id=lesson_id if scope_type == "lesson" else None,
+            )
+            if parse_run_id is not None
+            else [],
+            "knowledgePointEvidences": [],
+            "adjacentBlocks": adjacent_blocks,
+            "readyBlocks": ready_blocks,
+            "courseScope": self._qa_course_scope_from_blocks(
+                course=course,
+                blocks=[item for item in [current_block, *adjacent_blocks, *ready_blocks] if item is not None],
+            ),
+        }
+        if current_block is not None:
+            context["currentBlock"] = current_block
+        return context
+
     def search_vector_segments(
         self,
         scope: QaScope,
@@ -1834,9 +1922,10 @@ class SqlAlchemyRuntimeRepository:
 
         self.session.execute(text("SET LOCAL hnsw.ef_search = :value"), {"value": 80})
         distance = VectorDocument.embedding_vector.cosine_distance(list(embedding))
-        rows = self.session.execute(
+        stmt = (
             select(VectorDocument, CourseSegment, distance.label("distance"))
             .join(CourseSegment, CourseSegment.id == VectorDocument.owner_id)
+            .join(CourseResource, CourseResource.id == CourseSegment.resource_id)
             .where(
                 VectorDocument.course_id == course_id,
                 VectorDocument.parse_run_id == parse_run_id,
@@ -1846,10 +1935,19 @@ class SqlAlchemyRuntimeRepository:
                 CourseSegment.course_id == course_id,
                 CourseSegment.parse_run_id == parse_run_id,
                 CourseSegment.is_active.is_(True),
+                CourseResource.course_id == course_id,
             )
-            .order_by(distance.asc(), VectorDocument.id.asc())
-            .limit(normalized_limit)
-        ).all()
+        )
+        if scope.scope_type == "lesson":
+            stmt = stmt.where(CourseResource.scope_type == "lesson", CourseResource.lesson_id == scope.lesson_id)
+        elif scope.scope_type == "course":
+            stmt = stmt.where(
+                or_(
+                    and_(CourseResource.scope_type == "course", CourseResource.lesson_id.is_(None)),
+                    and_(CourseResource.scope_type == "lesson", CourseResource.visible_to_course_qa.is_(True)),
+                )
+            )
+        rows = self.session.execute(stmt.order_by(distance.asc(), VectorDocument.id.asc()).limit(normalized_limit)).all()
         return [
             _vector_document_vector_hit(
                 document,
@@ -1878,9 +1976,10 @@ class SqlAlchemyRuntimeRepository:
             search_tsv = literal_column("vector_documents.search_tsv")
             tsquery = func.websearch_to_tsquery("simple", fts_query)
             rank = func.ts_rank_cd(search_tsv, tsquery)
-            rows = self.session.execute(
+            stmt = (
                 select(VectorDocument, CourseSegment, rank.label("rank_score"))
                 .join(CourseSegment, CourseSegment.id == VectorDocument.owner_id)
+                .join(CourseResource, CourseResource.id == CourseSegment.resource_id)
                 .where(
                     VectorDocument.course_id == course_id,
                     VectorDocument.parse_run_id == parse_run_id,
@@ -1889,10 +1988,19 @@ class SqlAlchemyRuntimeRepository:
                     CourseSegment.course_id == course_id,
                     CourseSegment.parse_run_id == parse_run_id,
                     CourseSegment.is_active.is_(True),
+                    CourseResource.course_id == course_id,
                 )
-                .order_by(rank.desc(), VectorDocument.id.asc())
-                .limit(normalized_limit)
-            ).all()
+            )
+            if scope.scope_type == "lesson":
+                stmt = stmt.where(CourseResource.scope_type == "lesson", CourseResource.lesson_id == scope.lesson_id)
+            elif scope.scope_type == "course":
+                stmt = stmt.where(
+                    or_(
+                        and_(CourseResource.scope_type == "course", CourseResource.lesson_id.is_(None)),
+                        and_(CourseResource.scope_type == "lesson", CourseResource.visible_to_course_qa.is_(True)),
+                    )
+                )
+            rows = self.session.execute(stmt.order_by(rank.desc(), VectorDocument.id.asc()).limit(normalized_limit)).all()
             return [
                 _vector_document_lexical_hit(
                     document,
@@ -1904,7 +2012,12 @@ class SqlAlchemyRuntimeRepository:
             ]
 
         scored: list[tuple[float, int, LexicalSearchHit]] = []
-        for segment in self._qa_segments(course_id=course_id, parse_run_id=parse_run_id):
+        for segment in self._qa_segments(
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+            scope_type=scope.scope_type,
+            lesson_id=scope.lesson_id,
+        ):
             text = str(segment.get("textContent") or "")
             score = _qa_lexical_overlap_score(query, text)
             if score <= 0:
@@ -2080,6 +2193,8 @@ class SqlAlchemyRuntimeRepository:
         parse_run_id: int | None,
         handout_version_id: int | None = None,
         handout_block_id: int | str | None = None,
+        scope_type: str | None = None,
+        lesson_id: int | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
         active_course_id = _as_positive_int(course_id)
@@ -2088,7 +2203,12 @@ class SqlAlchemyRuntimeRepository:
         if active_course_id is None or active_parse_run_id is None or normalized_limit <= 0:
             return []
         scored: list[tuple[float, int, str, dict[str, Any]]] = []
-        for segment in self._qa_segments(course_id=active_course_id, parse_run_id=active_parse_run_id):
+        for segment in self._qa_segments(
+            course_id=active_course_id,
+            parse_run_id=active_parse_run_id,
+            scope_type=scope_type,
+            lesson_id=lesson_id,
+        ):
             score = _qa_lexical_overlap_score(question, str(segment.get("textContent") or ""))
             if score <= 0:
                 continue
@@ -2256,6 +2376,10 @@ class SqlAlchemyRuntimeRepository:
         question: str,
         answer_md: str,
         citations: Sequence[dict[str, Any]],
+        answer_type: str | None = None,
+        generation_metadata: Mapping[str, Any] | None = None,
+        refs: Sequence[dict[str, Any]] | None = None,
+        candidate_count: int = 0,
         session_id: int | None = None,
         handout_block_id: int | None = None,
     ) -> dict[str, Any]:
@@ -2280,6 +2404,20 @@ class SqlAlchemyRuntimeRepository:
                 raise ValueError("qa.scope_invalid")
 
         now = utcnow()
+        normalized_answer_type = answer_type or "direct_answer"
+        normalized_generation_metadata = _generation_metadata_from_response(
+            {
+                "generationMetadata": generation_metadata
+                if isinstance(generation_metadata, Mapping)
+                else {"source": "fallback", "reason": "model_unavailable", "evidenceTier": "course_prior"}
+            }
+        )
+        context_snapshot = {
+            "source": "scoped_qa",
+            "handoutBlockId": handout_block_id,
+            "candidateCount": candidate_count,
+            "generationMetadata": normalized_generation_metadata,
+        }
         if session_id is None:
             qa_session = QaSession(
                 user_id=self.user_id,
@@ -2289,10 +2427,7 @@ class SqlAlchemyRuntimeRepository:
                 handout_block_id=handout_block_id,
                 title=question[:80],
                 status="active",
-                context_snapshot_json={
-                    "source": "scoped_placeholder",
-                    "handoutBlockId": handout_block_id,
-                },
+                context_snapshot_json=context_snapshot,
                 message_count=0,
                 last_message_at=now,
             )
@@ -2312,6 +2447,7 @@ class SqlAlchemyRuntimeRepository:
             )
             if qa_session is None:
                 raise ValueError("qa.scope_invalid")
+            qa_session.context_snapshot_json = context_snapshot
 
         user_message = QaMessage(
             session_id=qa_session.id,
@@ -2327,27 +2463,30 @@ class SqlAlchemyRuntimeRepository:
             role="assistant",
             content_md=answer_md,
             content_text=clean_text(answer_md),
-            answer_type="placeholder",
+            answer_type=normalized_answer_type,
         )
         self.session.add(assistant_message)
         self.session.flush()
-        for sort_no, citation in enumerate(citations, start=1):
-            resource_id = _as_positive_int(_payload_value(citation, "resourceId", "resource_id"))
-            if resource_id is None:
+        for sort_no, ref in enumerate(refs or [], start=1):
+            resource_id = _as_positive_int(_payload_value(ref, "resourceId", "resource_id"))
+            ref_type = _payload_value(ref, "refType", "ref_type")
+            ref_label = _payload_value(ref, "refLabel", "ref_label")
+            if resource_id is None or not ref_type or not ref_label:
                 continue
+            citation = ref
             self.session.add(
                 QaMessageRef(
                     qa_message_id=assistant_message.id,
                     resource_id=resource_id,
-                    segment_id=None,
-                    ref_type="scoped_placeholder",
-                    quote_text=None,
-                    page_no=_as_positive_int(_payload_value(citation, "pageNo", "page_no")),
-                    slide_no=_as_positive_int(_payload_value(citation, "slideNo", "slide_no")),
-                    anchor_key=_payload_value(citation, "anchorKey", "anchor_key"),
-                    start_sec=_as_positive_int(_payload_value(citation, "startSec", "start_sec")),
-                    end_sec=_as_positive_int(_payload_value(citation, "endSec", "end_sec")),
-                    bbox_json=None,
+                    segment_id=_as_positive_int(_payload_value(ref, "segmentId", "segment_id")),
+                    ref_type=str(ref_type),
+                    quote_text=_payload_value(ref, "quoteText", "quote_text"),
+                    page_no=_as_positive_int(_payload_value(ref, "pageNo", "page_no")),
+                    slide_no=_as_positive_int(_payload_value(ref, "slideNo", "slide_no")),
+                    anchor_key=_payload_value(ref, "anchorKey", "anchor_key"),
+                    start_sec=_payload_value(ref, "startSec", "start_sec"),
+                    end_sec=_payload_value(ref, "endSec", "end_sec"),
+                    bbox_json=_payload_value(ref, "bboxJson", "bbox_json"),
                     ref_label=str(_payload_value(citation, "refLabel", "ref_label", default="引用资料")),
                     sort_no=sort_no,
                     rank=sort_no,
@@ -2363,10 +2502,11 @@ class SqlAlchemyRuntimeRepository:
             "scopeType": scope_type,
             "lessonId": lesson_id if scope_type == "lesson" else None,
             "handoutBlockId": handout_block_id,
+            "question": question,
             "answerMd": answer_md,
-            "answerType": "placeholder",
+            "answerType": normalized_answer_type,
             "citations": list(citations),
-            "generationMetadata": {"source": "placeholder", "reason": "scoped_qa_placeholder"},
+            "generationMetadata": normalized_generation_metadata,
         }
 
     def get_session_messages(self, session_id: int) -> list[dict[str, Any]] | None:
@@ -3877,16 +4017,34 @@ class SqlAlchemyRuntimeRepository:
             .order_by(AsyncTask.id.desc())
         ).first()
 
-    def _qa_segments(self, *, course_id: int, parse_run_id: int) -> list[dict[str, Any]]:
-        rows = self.session.scalars(
+    def _qa_segments(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int,
+        scope_type: str | None = None,
+        lesson_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        stmt = (
             select(CourseSegment)
+            .join(CourseResource, CourseResource.id == CourseSegment.resource_id)
             .where(
                 CourseSegment.course_id == course_id,
                 CourseSegment.parse_run_id == parse_run_id,
                 CourseSegment.is_active.is_(True),
+                CourseResource.course_id == course_id,
             )
-            .order_by(CourseSegment.order_no.asc(), CourseSegment.id.asc())
-        ).all()
+        )
+        if scope_type == "lesson":
+            stmt = stmt.where(CourseResource.scope_type == "lesson", CourseResource.lesson_id == lesson_id)
+        elif scope_type == "course":
+            stmt = stmt.where(
+                or_(
+                    and_(CourseResource.scope_type == "course", CourseResource.lesson_id.is_(None)),
+                    and_(CourseResource.scope_type == "lesson", CourseResource.visible_to_course_qa.is_(True)),
+                )
+            )
+        rows = self.session.scalars(stmt.order_by(CourseSegment.order_no.asc(), CourseSegment.id.asc())).all()
         return [_course_segment_dict(row) | {"resourceType": self._resource_type(row.resource_id)} for row in rows]
 
     def _qa_block_payload(
@@ -3918,12 +4076,20 @@ class SqlAlchemyRuntimeRepository:
         current_block: dict[str, Any],
         adjacent_blocks: Sequence[dict[str, Any]],
     ) -> dict[str, Any]:
+        return self._qa_course_scope_from_blocks(course=course, blocks=[current_block, *adjacent_blocks])
+
+    def _qa_course_scope_from_blocks(
+        self,
+        *,
+        course: Course,
+        blocks: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
         resources = self.session.scalars(
             select(CourseResource)
             .where(CourseResource.course_id == course.id)
             .order_by(CourseResource.sort_order.asc(), CourseResource.id.asc())
         ).all()
-        scoped_blocks = [current_block, *adjacent_blocks]
+        scoped_blocks = list(blocks)
         handout_titles = [_qa_scope_block_label(block) for block in scoped_blocks]
         knowledge_point_names = _qa_scope_knowledge_point_names(scoped_blocks)
         return {

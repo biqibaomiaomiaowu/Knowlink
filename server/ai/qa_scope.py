@@ -53,6 +53,8 @@ _SOURCE_FACT_TERMS: tuple[str, ...] = (
 def build_qa_scope(context: Mapping[str, Any]) -> QaScope:
     current_block = _mapping_value(context.get("currentBlock")) or _mapping_value(context.get("current_block")) or {}
     return QaScope(
+        scope_type=_string_value(_field_value(context, "scopeType", "scope_type")),
+        lesson_id=_as_positive_int(_field_value(context, "lessonId", "lesson_id")),
         course_id=_as_positive_int(_field_value(context, "activeCourseId", "active_course_id"))
         or _as_positive_int(_field_value(current_block, "courseId", "course_id")),
         active_parse_run_id=_as_positive_int(_field_value(context, "activeParseRunId", "active_parse_run_id"))
@@ -196,6 +198,13 @@ def _field_value(payload: Mapping[str, Any], *keys: str) -> Any:
         if key in payload:
             return payload[key]
     return None
+
+
+def _string_value(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _as_int(value: Any) -> int | None:

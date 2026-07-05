@@ -97,11 +97,12 @@ def test_lesson_qa_creates_lesson_scoped_exchange_with_citations_and_block_scope
         block = handout_service.get_lesson_blocks(course_id=course_id, lesson_id=lesson_id)["items"][0]
         service = QaService(courses=repo, qa=repo, lessons=repo, resources=repo)
 
+        question = str(block["title"])
         result = service.create_lesson_message(
             course_id=course_id,
             lesson_id=lesson_id,
             payload=_ScopedQaPayload(
-                question="lesson question",
+                question=question,
                 session_id=None,
                 handout_block_id=block["blockId"],
             ),
@@ -112,14 +113,25 @@ def test_lesson_qa_creates_lesson_scoped_exchange_with_citations_and_block_scope
         assert result["sessionId"] > 0
         assert result["messageId"] > 0
         assert result["answerMd"]
+        assert result["question"] == question
+        assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert result["generationMetadata"]["source"] in {"fallback", "model"}
         assert result["citations"]
+        assert result["generationMetadata"]["reason"] != "scoped_qa_placeholder"
         assert "stream" not in result
 
         qa_sessions = Base.metadata.tables["qa_sessions"]
+        qa_messages = Base.metadata.tables["qa_messages"]
         session_row = session.execute(sa.select(qa_sessions)).mappings().one()
+        message_rows = session.execute(
+            sa.select(qa_messages).order_by(qa_messages.c.id.asc())
+        ).mappings().all()
         assert session_row["scope_type"] == "lesson"
         assert session_row["lesson_id"] == lesson_id
         assert session_row["handout_block_id"] == block["blockId"]
+        assert session_row["context_snapshot_json"]["generationMetadata"] == result["generationMetadata"]
+        assert message_rows[1]["answer_type"] == "direct_answer"
 
         sessions = service.list_lesson_sessions(course_id=course_id, lesson_id=lesson_id)
         assert sessions["items"] == [
@@ -129,10 +141,51 @@ def test_lesson_qa_creates_lesson_scoped_exchange_with_citations_and_block_scope
                 "scopeType": "lesson",
                 "lessonId": lesson_id,
                 "handoutBlockId": block["blockId"],
-                "title": "lesson question",
+                "title": question,
                 "lastMessageAt": session_row["last_message_at"].replace(tzinfo=datetime.UTC),
             }
         ]
+        messages = service.get_session_messages(session_id=result["sessionId"])
+        assert messages["items"][1]["answerType"] == "direct_answer"
+        assert messages["items"][1]["generationMetadata"] == result["generationMetadata"]
+        assert messages["items"][1]["citations"] == result["citations"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_course_qa_without_handout_block_uses_real_qa_generation():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, _segment_keys = _create_course_with_active_video_segments(repo)
+        handout_service = _handout_service(repo)
+        handout_service.generate_handout(course_id=course_id, idempotency_key=None)
+        block = repo.get_latest_handout(course_id)["blocks"][0]
+        service = QaService(courses=repo, qa=repo)
+
+        result = service.create_course_message(
+            course_id=course_id,
+            payload=_ScopedQaPayload(
+                question=str(block["title"]),
+                session_id=None,
+                handout_block_id=None,
+            ),
+        )
+
+        assert result["scopeType"] == "course"
+        assert result["lessonId"] is None
+        assert result["handoutBlockId"] is None
+        assert result["answerType"] == "direct_answer"
+        assert result["citations"]
+        assert result["generationMetadata"]["source"] in {"fallback", "model"}
+        assert result["generationMetadata"]["evidenceTier"] == "original_evidence"
+        assert result["generationMetadata"]["reason"] != "scoped_qa_placeholder"
+        assert "placeholder" not in str(result["generationMetadata"]).lower()
+
+        messages = service.get_session_messages(session_id=result["sessionId"])
+        assert messages["items"][1]["answerType"] == "direct_answer"
+        assert messages["items"][1]["generationMetadata"] == result["generationMetadata"]
+        assert messages["items"][1]["citations"] == result["citations"]
     finally:
         session.close()
         engine.dispose()
