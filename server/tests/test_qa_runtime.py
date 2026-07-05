@@ -246,6 +246,87 @@ def test_course_qa_without_course_handout_uses_active_parse_run_original_evidenc
         engine.dispose()
 
 
+def test_course_qa_uses_ready_lesson_handout_blocks_when_course_handout_missing():
+    repo, session, engine = _build_sqlite_repository()
+    try:
+        course_id, segment_keys = _create_course_with_active_video_segments(repo)
+        lesson = repo.create_lesson(course_id=course_id, title="不动点定理", source_type="manual")
+        _, _, blocks = repo.create_handout(
+            course_id,
+            scope_type="lesson",
+            lesson_id=lesson["lessonId"],
+            artifact_kind="lesson_handout",
+            outline={
+                "title": "不动点定理课时讲义",
+                "summary": "Banach fixed point 的课时讲义",
+                "items": [
+                    {
+                        "outlineKey": "fixed-point-section",
+                        "title": "不动点定理",
+                        "summary": "Banach fixed point",
+                        "startSec": 0,
+                        "endSec": 60,
+                        "sortNo": 1,
+                        "children": [
+                            {
+                                "outlineKey": "banach-fixed-point",
+                                "title": "Banach fixed point",
+                                "summary": "Banach fixed point 的核心结论",
+                                "startSec": 0,
+                                "endSec": 60,
+                                "sortNo": 1,
+                                "generationStatus": "pending",
+                                "sourceSegmentKeys": [segment_keys[0]],
+                                "topicTags": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        saved_block = repo.save_handout_block_result(
+            blocks[0]["blockId"],
+            {
+                "title": "Banach fixed point",
+                "summary": "Banach fixed point 的核心结论",
+                "contentMd": "Banach fixed point 说明压缩映射在完备度量空间中存在唯一不动点。",
+                "knowledgePoints": [{"knowledgePointKey": "kp-banach", "displayName": "Banach fixed point"}],
+                "citations": [],
+            },
+        )
+        assert saved_block is not None
+        course = repo.get_course(course_id)
+        assert course["activeHandoutVersionId"] is None
+
+        service = QaService(
+            courses=repo,
+            qa=repo,
+            qa_answer_client=_DeterministicQaAnswerClient(),
+        )
+
+        result = service.create_course_message(
+            course_id=course_id,
+            payload=_ScopedQaPayload(
+                question="Banach fixed point 的核心结论是什么？",
+                session_id=None,
+                handout_block_id=None,
+            ),
+        )
+
+        assert result["scopeType"] == "course"
+        assert result["lessonId"] is None
+        assert result["handoutBlockId"] is None
+        assert result["answerType"] == "direct_answer"
+        assert result["generationMetadata"]["evidenceTier"] == "handout_context"
+        assert result["generationMetadata"]["reason"] == "handout_context_match"
+        assert result["generationMetadata"]["handoutContext"]["handoutBlockId"] == blocks[0]["blockId"]
+        assert result["citations"] == []
+        assert "压缩映射" in result["answerMd"]
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_memory_lesson_qa_unknown_handout_block_raises_block_not_found():
     repo = RuntimeStore()
     course = repo.create_course(

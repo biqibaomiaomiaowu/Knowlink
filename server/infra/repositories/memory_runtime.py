@@ -1417,6 +1417,34 @@ class RuntimeStore:
             return None
         return max(candidates, key=lambda item: int(item.get("handoutVersionId") or 0))
 
+    def _latest_lesson_handouts(
+        self,
+        *,
+        course_id: int,
+        parse_run_id: int | None,
+    ) -> list[dict[str, Any]]:
+        candidates = [
+            handout
+            for handout in self.handouts.values()
+            if handout.get("courseId") == course_id
+            and handout.get("scopeType") == "lesson"
+            and handout.get("lessonId") is not None
+            and handout.get("sourceParseRunId") == parse_run_id
+        ]
+        latest_by_lesson: dict[int, dict[str, Any]] = {}
+        for handout in sorted(
+            candidates,
+            key=lambda item: (
+                int(item.get("lessonId") or 0),
+                -int(item.get("handoutVersionId") or 0),
+            ),
+        ):
+            lesson_id = _as_positive_int(handout.get("lessonId"))
+            if lesson_id is None:
+                continue
+            latest_by_lesson.setdefault(lesson_id, handout)
+        return list(latest_by_lesson.values())
+
     def get_latest_outline(
         self,
         course_id: int,
@@ -1560,6 +1588,19 @@ class RuntimeStore:
             for ready_block in all_blocks
             if ready_block.get("status") == "ready" or ready_block.get("generationStatus") == "ready"
         ]
+        if scope_type == "course":
+            for lesson_handout in self._latest_lesson_handouts(course_id=course_id, parse_run_id=parse_run_id):
+                lesson_handout_version_id = int(lesson_handout.get("handoutVersionId") or 0)
+                ready_blocks.extend(
+                    self._qa_block_payload_from_memory(
+                        ready_block,
+                        course_id=course_id,
+                        parse_run_id=parse_run_id,
+                        handout_version_id=lesson_handout_version_id,
+                    )
+                    for ready_block in lesson_handout.get("blocks") or []
+                    if ready_block.get("status") == "ready" or ready_block.get("generationStatus") == "ready"
+                )
         current_block = (
             self._qa_block_payload_from_memory(
                 block,
@@ -1733,57 +1774,53 @@ class RuntimeStore:
     ) -> list[LexicalSearchHit]:
         active_course_id = _as_positive_int(scope.course_id)
         active_parse_run_id = _as_positive_int(scope.active_parse_run_id)
-        active_handout_version_id = _as_positive_int(scope.active_handout_version_id)
         normalized_limit = _normalized_search_limit(limit)
         if (
             active_course_id is None
             or active_parse_run_id is None
-            or active_handout_version_id is None
             or normalized_limit <= 0
         ):
             return []
-        handout = self.get_latest_handout(
-            active_course_id,
-            scope_type=scope.scope_type or "course",
-            lesson_id=scope.lesson_id if scope.scope_type == "lesson" else None,
+        handouts = self._qa_search_handouts(
+            scope,
+            course_id=active_course_id,
+            parse_run_id=active_parse_run_id,
         )
-        if (
-            handout is None
-            or handout.get("sourceParseRunId") != active_parse_run_id
-            or handout.get("handoutVersionId") != active_handout_version_id
-        ):
+        if not handouts:
             return []
 
         scored: list[tuple[float, int, LexicalSearchHit]] = []
-        for block in handout.get("blocks") or []:
-            if block.get("status") != "ready" and block.get("generationStatus") != "ready":
-                continue
-            search_text = " ".join(
-                item
-                for item in (block.get("title"), block.get("summary"), block.get("contentMd"))
-                if isinstance(item, str) and item
-            )
-            score = _qa_lexical_overlap_score(query, search_text)
-            if score <= 0:
-                continue
-            block_id = block.get("blockId")
-            scored.append(
-                (
-                    score,
-                    int(block.get("sortNo") or 0),
-                    LexicalSearchHit(
-                        identity_key=f"handout:{block_id}",
-                        score=score,
-                        text=str(block.get("contentMd") or block.get("summary") or block.get("title") or ""),
-                        owner_type="handout_block",
-                        handout_block_id=block_id,
-                        course_id=active_course_id,
-                        parse_run_id=active_parse_run_id,
-                        handout_version_id=active_handout_version_id,
-                        metadata_json={"outlineKey": block.get("outlineKey"), "title": block.get("title")},
-                    ),
+        for handout in handouts:
+            handout_version_id = _as_positive_int(handout.get("handoutVersionId"))
+            for block in handout.get("blocks") or []:
+                if block.get("status") != "ready" and block.get("generationStatus") != "ready":
+                    continue
+                search_text = " ".join(
+                    item
+                    for item in (block.get("title"), block.get("summary"), block.get("contentMd"))
+                    if isinstance(item, str) and item
                 )
-            )
+                score = _qa_lexical_overlap_score(query, search_text)
+                if score <= 0:
+                    continue
+                block_id = block.get("blockId")
+                scored.append(
+                    (
+                        score,
+                        int(block.get("sortNo") or 0),
+                        LexicalSearchHit(
+                            identity_key=f"handout:{block_id}",
+                            score=score,
+                            text=str(block.get("contentMd") or block.get("summary") or block.get("title") or ""),
+                            owner_type="handout_block",
+                            handout_block_id=block_id,
+                            course_id=active_course_id,
+                            parse_run_id=active_parse_run_id,
+                            handout_version_id=handout_version_id,
+                            metadata_json={"outlineKey": block.get("outlineKey"), "title": block.get("title")},
+                        ),
+                    )
+                )
         return [
             _ranked_lexical_hit(hit, rank=index)
             for index, (_score, _sort_no, hit) in enumerate(
@@ -1791,6 +1828,34 @@ class RuntimeStore:
                 start=1,
             )
         ]
+
+    def _qa_search_handouts(
+        self,
+        scope: QaScope,
+        *,
+        course_id: int,
+        parse_run_id: int,
+    ) -> list[dict[str, Any]]:
+        if scope.scope_type == "lesson":
+            handout = self.get_latest_handout(
+                course_id,
+                scope_type="lesson",
+                lesson_id=scope.lesson_id,
+            )
+            if handout is None or handout.get("sourceParseRunId") != parse_run_id:
+                return []
+            active_handout_version_id = _as_positive_int(scope.active_handout_version_id)
+            if active_handout_version_id is not None and handout.get("handoutVersionId") != active_handout_version_id:
+                return []
+            return [handout]
+        if scope.scope_type != "course":
+            return []
+        handouts: list[dict[str, Any]] = []
+        handout = self.get_latest_handout(course_id, scope_type="course")
+        if handout is not None and handout.get("sourceParseRunId") == parse_run_id:
+            handouts.append(handout)
+        handouts.extend(self._latest_lesson_handouts(course_id=course_id, parse_run_id=parse_run_id))
+        return handouts
 
     def save_qa_exchange(
         self,

@@ -1871,15 +1871,22 @@ class SqlAlchemyRuntimeRepository:
             if block is not None and version is not None
             else []
         )
-        ready_blocks = (
-            self._qa_ready_blocks(
-                course=course,
-                version=version,
-                vector_documents=active_block_vectors,
+        ready_blocks = []
+        if version is not None:
+            ready_blocks.extend(
+                self._qa_ready_blocks(
+                    course=course,
+                    version=version,
+                    vector_documents=active_block_vectors,
+                )
             )
-            if version is not None
-            else []
-        )
+        if scope_type == "course" and parse_run_id is not None:
+            ready_blocks.extend(
+                self._qa_course_lesson_ready_blocks(
+                    course=course,
+                    parse_run_id=parse_run_id,
+                )
+            )
         context: dict[str, Any] = {
             "courseId": course.id,
             "activeCourseId": course.id,
@@ -2062,12 +2069,16 @@ class SqlAlchemyRuntimeRepository:
     ) -> list[VectorSearchHit]:
         course_id = _as_positive_int(scope.course_id)
         parse_run_id = _as_positive_int(scope.active_parse_run_id)
-        handout_version_id = _as_positive_int(scope.active_handout_version_id)
+        handout_version_ids = self._qa_handout_search_version_ids(
+            scope,
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+        )
         normalized_limit = _normalized_search_limit(limit)
         if (
             course_id is None
             or parse_run_id is None
-            or handout_version_id is None
+            or not handout_version_ids
             or normalized_limit <= 0
             or not self._is_postgresql
         ):
@@ -2081,11 +2092,11 @@ class SqlAlchemyRuntimeRepository:
             .where(
                 VectorDocument.course_id == course_id,
                 VectorDocument.parse_run_id == parse_run_id,
-                VectorDocument.handout_version_id == handout_version_id,
+                VectorDocument.handout_version_id.in_(handout_version_ids),
                 VectorDocument.owner_type == "handout_block",
                 VectorDocument.embedding_status == "ready",
                 VectorDocument.embedding_vector.is_not(None),
-                HandoutBlock.handout_version_id == handout_version_id,
+                HandoutBlock.handout_version_id.in_(handout_version_ids),
                 HandoutBlock.status == "ready",
             )
             .order_by(distance.asc(), VectorDocument.id.asc())
@@ -2104,9 +2115,13 @@ class SqlAlchemyRuntimeRepository:
     ) -> list[LexicalSearchHit]:
         course_id = _as_positive_int(scope.course_id)
         parse_run_id = _as_positive_int(scope.active_parse_run_id)
-        handout_version_id = _as_positive_int(scope.active_handout_version_id)
+        handout_version_ids = self._qa_handout_search_version_ids(
+            scope,
+            course_id=course_id,
+            parse_run_id=parse_run_id,
+        )
         normalized_limit = _normalized_search_limit(limit)
-        if course_id is None or parse_run_id is None or handout_version_id is None or normalized_limit <= 0:
+        if course_id is None or parse_run_id is None or not handout_version_ids or normalized_limit <= 0:
             return []
         if self._is_postgresql:
             fts_query = _postgres_fts_query(query)
@@ -2121,10 +2136,10 @@ class SqlAlchemyRuntimeRepository:
                 .where(
                     VectorDocument.course_id == course_id,
                     VectorDocument.parse_run_id == parse_run_id,
-                    VectorDocument.handout_version_id == handout_version_id,
+                    VectorDocument.handout_version_id.in_(handout_version_ids),
                     VectorDocument.owner_type == "handout_block",
                     search_tsv.op("@@")(tsquery),
-                    HandoutBlock.handout_version_id == handout_version_id,
+                    HandoutBlock.handout_version_id.in_(handout_version_ids),
                     HandoutBlock.status == "ready",
                 )
                 .order_by(rank.desc(), VectorDocument.id.asc())
@@ -2141,10 +2156,8 @@ class SqlAlchemyRuntimeRepository:
             .join(Course, Course.id == HandoutVersion.course_id)
             .where(
                 Course.id == course_id,
-                Course.active_parse_run_id == parse_run_id,
-                Course.active_handout_version_id == handout_version_id,
                 HandoutVersion.source_parse_run_id == parse_run_id,
-                HandoutBlock.handout_version_id == handout_version_id,
+                HandoutBlock.handout_version_id.in_(handout_version_ids),
                 HandoutBlock.status == "ready",
             )
             .order_by(HandoutBlock.sort_no.asc(), HandoutBlock.id.asc())
@@ -2171,7 +2184,7 @@ class SqlAlchemyRuntimeRepository:
                         handout_block_id=block.id,
                         course_id=course_id,
                         parse_run_id=parse_run_id,
-                        handout_version_id=handout_version_id,
+                        handout_version_id=block.handout_version_id,
                         metadata_json={"outlineKey": block.outline_key, "title": block.title},
                     ),
                 )
@@ -4193,6 +4206,26 @@ class SqlAlchemyRuntimeRepository:
             payloads.append(payload)
         return payloads
 
+    def _qa_course_lesson_ready_blocks(
+        self,
+        *,
+        course: Course,
+        parse_run_id: int,
+    ) -> list[dict[str, Any]]:
+        blocks: list[dict[str, Any]] = []
+        for version in self._latest_lesson_handout_versions_for_quiz(
+            course_id=course.id,
+            parse_run_id=parse_run_id,
+        ):
+            blocks.extend(
+                self._qa_ready_blocks(
+                    course=course,
+                    version=version,
+                    vector_documents=self._active_handout_block_vectors(course=course, version=version),
+                )
+            )
+        return blocks
+
     def _active_handout_block_vectors(self, *, course: Course, version: HandoutVersion) -> list[VectorDocument]:
         if course.active_parse_run_id is None:
             return []
@@ -4323,6 +4356,48 @@ class SqlAlchemyRuntimeRepository:
                 continue
             latest_by_lesson.setdefault(version.lesson_id, version)
         return list(latest_by_lesson.values())
+
+    def _qa_handout_search_version_ids(
+        self,
+        scope: QaScope,
+        *,
+        course_id: int | None,
+        parse_run_id: int | None,
+    ) -> list[int]:
+        if course_id is None or parse_run_id is None:
+            return []
+        scope_type = scope.scope_type or "course"
+        if scope_type == "lesson":
+            handout_version_id = _as_positive_int(scope.active_handout_version_id)
+            return [handout_version_id] if handout_version_id is not None else []
+        if scope_type != "course":
+            return []
+
+        version_ids: list[int] = []
+        handout_version_id = _as_positive_int(scope.active_handout_version_id)
+        if handout_version_id is not None:
+            session_get = getattr(self.session, "get", None)
+            if session_get is None:
+                version_ids.append(handout_version_id)
+                return version_ids
+            else:
+                version = session_get(HandoutVersion, handout_version_id)
+                if (
+                    version is not None
+                    and version.course_id == course_id
+                    and version.scope_type == "course"
+                    and version.lesson_id is None
+                    and version.source_parse_run_id == parse_run_id
+                ):
+                    version_ids.append(version.id)
+        version_ids.extend(
+            version.id
+            for version in self._latest_lesson_handout_versions_for_quiz(
+                course_id=course_id,
+                parse_run_id=parse_run_id,
+            )
+        )
+        return version_ids
 
     def _course_has_ready_lesson_handout_blocks(
         self,

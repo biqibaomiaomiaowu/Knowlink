@@ -357,13 +357,14 @@ def _handout_context_candidates(context: Mapping[str, Any], *, scope: QaScope) -
         ]
     candidates: list[HandoutContextCandidate] = []
     for block in blocks:
-        if not scope_matches_payload(block, scope, require_handout_version=True):
+        if not _handout_block_matches_context_scope(block, scope):
             continue
         text = _block_text(block)
         if not text:
             continue
         block_id = _field_value(block, "handoutBlockId", "handout_block_id", "blockId", "block_id")
         is_current = block_id is not None and scope.current_handout_block_id is not None and str(block_id) == str(scope.current_handout_block_id)
+        handout_version_id = _as_int(_field_value(block, "handoutVersionId", "handout_version_id"))
         candidates.append(
             HandoutContextCandidate(
                 rank=len(candidates) + 1,
@@ -373,7 +374,7 @@ def _handout_context_candidates(context: Mapping[str, Any], *, scope: QaScope) -
                 title=_handout_context_title(block),
                 source="current_handout_block" if is_current else _handout_source(block, context),
                 course_id=scope.course_id,
-                handout_version_id=scope.active_handout_version_id,
+                handout_version_id=handout_version_id,
                 sort_no=_as_int(_field_value(block, "sortNo", "sort_no")),
             )
         )
@@ -458,6 +459,12 @@ def _semantic_original_candidate(candidate: QaEvidenceCandidate) -> bool:
     return candidate.source in {"course_wide_segment_semantic", "course_wide_segment_hybrid"}
 
 
+def _handout_block_matches_context_scope(block: Mapping[str, Any], scope: QaScope) -> bool:
+    if scope.scope_type == "course":
+        return scope_matches_payload(block, scope, require_course_parse=True)
+    return scope_matches_payload(block, scope, require_handout_version=True)
+
+
 def _handout_context_from_hybrid_candidate(
     candidate: HandoutBlockHybridCandidate,
     *,
@@ -480,7 +487,7 @@ def _handout_context_from_hybrid_candidate(
         score=candidate.score,
         matched_by=candidate.matched_by,
         course_id=scope.course_id,
-        handout_version_id=scope.active_handout_version_id,
+        handout_version_id=candidate.handout_version_id,
         metadata_json=metadata,
     )
 
