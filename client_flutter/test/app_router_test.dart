@@ -15,6 +15,7 @@ import 'package:knowlink_client/features/handout/handout_page.dart';
 import 'package:knowlink_client/features/home/home_page.dart';
 import 'package:knowlink_client/features/inquiry/inquiry_page.dart';
 import 'package:knowlink_client/features/lesson_detail/lesson_detail_page.dart';
+import 'package:knowlink_client/features/lesson_study/lesson_study_page.dart';
 import 'package:knowlink_client/features/parse_progress/parse_progress_page.dart';
 import 'package:knowlink_client/features/qa/qa_page.dart';
 import 'package:knowlink_client/features/quiz/quiz_page.dart';
@@ -67,12 +68,11 @@ void main() {
       '/courses/101/exports': find.byType(CourseExportsPage),
       '/courses/101/lessons/l-2': find.byType(LessonDetailPage),
       '/courses/101/lessons/l-2/qa': find.byType(CourseQaPage),
-      '/courses/101/lessons/l-2/handout': find.byType(CourseReviewPage),
+      '/courses/101/lessons/l-2/handout': find.byType(LessonStudyPage),
       '/courses/101/lessons/l-2/review': find.byType(CourseReviewPage),
       '/courses/101/lessons/l-2/graph': find.byType(CourseGraphPage),
       '/courses/101/progress': find.byType(ParseProgressPage),
       '/courses/101/inquiry': find.byType(InquiryPage),
-      '/courses/101/handout': find.byType(HandoutPage),
       '/courses/101/quiz': find.byType(QuizPage),
       '/quizzes/8001': find.byType(QuizPage),
     };
@@ -139,6 +139,132 @@ void main() {
 
     router.go('/');
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('lesson study route opens LessonStudyPage', (tester) async {
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    router.go('/courses/101/lessons/42/handout');
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LessonStudyPage), findsOneWidget);
+    expect(container.read(courseFlowProvider).courseId, '101');
+    expect(container.read(activeLessonProvider)?.lessonId, '42');
+    expect(find.textContaining('42'), findsOneWidget);
+  });
+
+  testWidgets('legacy course handout route prompts without active lesson', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    router.go('/courses/101/handout');
+    await tester.pumpAndSettle();
+
+    expect(find.text('选择课时继续学习'), findsOneWidget);
+    expect(find.byType(HandoutPage), findsNothing);
+  });
+
+  testWidgets('legacy course handout route resumes active lesson study', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+    container.read(courseFlowProvider.notifier).startCourse('101');
+    container.read(activeLessonProvider.notifier).state =
+        const LessonResumeTarget(courseId: '101', lessonId: 'l-2');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    router.go('/courses/101/handout');
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LessonStudyPage), findsOneWidget);
+    expect(find.textContaining('l-2'), findsOneWidget);
+  });
+
+  testWidgets('primary navigation uses prototype order', (tester) async {
+    _useTestSurface(tester, const Size(1448, 1086));
+    final container = ProviderContainer(
+      overrides: [
+        apiClientProvider.overrideWithValue(_RouterFakeApiClient()),
+      ],
+    );
+    final router = AppRouter.createRouter();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final labels = [
+      '学习总览',
+      '课程库',
+      '课时学习',
+      '测试中心',
+      'AI 问答',
+      '复习中心',
+    ];
+    var previousLeft = -1.0;
+    for (final label in labels) {
+      final finder = find.text(label);
+      expect(finder, findsOneWidget);
+      final left = tester.getTopLeft(finder).dx;
+      expect(left, greaterThan(previousLeft));
+      previousLeft = left;
+    }
+    expect(find.text('课程工作台'), findsNothing);
   });
 
   testWidgets('course routes sync URL courseId into course flow', (
@@ -209,17 +335,19 @@ void main() {
     expect(find.byType(HomePage), findsOneWidget);
     expect(container.read(courseFlowProvider).courseId, isNull);
 
-    await tester.tap(find.text('讲义').last);
+    await tester.tap(find.text('课时学习'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byType(CourseLibraryPage), findsOneWidget);
     expect(find.byType(HandoutPage), findsNothing);
     expect(container.read(courseFlowProvider).courseId, isNull);
 
-    await tester.tap(find.text('测验').last);
+    router.go('/');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('测试中心'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byType(CourseLibraryPage), findsOneWidget);
     expect(find.byType(QuizPage), findsNothing);
     expect(container.read(courseFlowProvider).courseId, isNull);
   });

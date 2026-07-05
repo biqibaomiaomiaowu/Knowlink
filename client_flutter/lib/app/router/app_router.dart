@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/widgets/app_scaffold.dart';
 import '../../features/course_exports/course_exports_page.dart';
 import '../../features/course_graph/course_graph_page.dart';
 import '../../features/course_import/course_import_page.dart';
@@ -10,10 +11,10 @@ import '../../features/course_qa/course_qa_page.dart';
 import '../../features/course_recommend/course_recommend_page.dart';
 import '../../features/course_review/course_review_page.dart';
 import '../../features/course_workbench/course_workbench_page.dart';
-import '../../features/handout/handout_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/inquiry/inquiry_page.dart';
 import '../../features/lesson_detail/lesson_detail_page.dart';
+import '../../features/lesson_study/lesson_study_page.dart';
 import '../../features/parse_progress/parse_progress_page.dart';
 import '../../features/qa/qa_page.dart';
 import '../../features/quiz/quiz_page.dart';
@@ -121,6 +122,7 @@ class AppRouter {
             final lessonId = state.pathParameters['lessonId']!;
             return _CourseFlowSync(
               courseId: courseId,
+              lessonId: lessonId,
               child: LessonDetailPage(courseId: courseId, lessonId: lessonId),
             );
           },
@@ -132,6 +134,7 @@ class AppRouter {
             final lessonId = state.pathParameters['lessonId']!;
             return _CourseFlowSync(
               courseId: courseId,
+              lessonId: lessonId,
               child: CourseQaPage(courseId: courseId, lessonId: lessonId),
             );
           },
@@ -143,10 +146,10 @@ class AppRouter {
             final lessonId = state.pathParameters['lessonId']!;
             return _CourseFlowSync(
               courseId: courseId,
-              child: CourseReviewPage(
+              lessonId: lessonId,
+              child: LessonStudyPage(
                 courseId: courseId,
                 lessonId: lessonId,
-                kind: CourseReviewPageKind.lessonHandout,
               ),
             );
           },
@@ -158,6 +161,7 @@ class AppRouter {
             final lessonId = state.pathParameters['lessonId']!;
             return _CourseFlowSync(
               courseId: courseId,
+              lessonId: lessonId,
               child: CourseReviewPage(
                 courseId: courseId,
                 lessonId: lessonId,
@@ -173,6 +177,7 @@ class AppRouter {
             final lessonId = state.pathParameters['lessonId']!;
             return _CourseFlowSync(
               courseId: courseId,
+              lessonId: lessonId,
               child: CourseGraphPage(courseId: courseId, lessonId: lessonId),
             );
           },
@@ -203,7 +208,7 @@ class AppRouter {
             final courseId = state.pathParameters['courseId']!;
             return _CourseFlowSync(
               courseId: courseId,
-              child: HandoutPage(courseId: courseId),
+              child: _CourseHandoutCompatibilityPage(courseId: courseId),
             );
           },
         ),
@@ -243,13 +248,55 @@ class AppRouter {
   static final router = createRouter();
 }
 
+class _CourseHandoutCompatibilityPage extends ConsumerWidget {
+  const _CourseHandoutCompatibilityPage({
+    required this.courseId,
+  });
+
+  final String courseId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeLesson = ref.watch(activeLessonProvider);
+    if (activeLesson != null && activeLesson.courseId == courseId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) {
+          return;
+        }
+        context.go(
+          '/courses/$courseId/lessons/${activeLesson.lessonId}/handout',
+        );
+      });
+      return const SizedBox.shrink();
+    }
+
+    return AppScaffold(
+      title: '课时学习',
+      activeTab: KnowLinkTab.handout,
+      courseId: courseId,
+      body: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('选择课时继续学习'),
+            SizedBox(height: 8),
+            Text('请先从课程工作台选择一个课时进入课时学习。'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CourseFlowSync extends ConsumerStatefulWidget {
   const _CourseFlowSync({
     required this.child,
     this.courseId,
+    this.lessonId,
   });
 
   final String? courseId;
+  final String? lessonId;
   final Widget child;
 
   @override
@@ -266,22 +313,32 @@ class _CourseFlowSyncState extends ConsumerState<_CourseFlowSync> {
   @override
   void didUpdateWidget(covariant _CourseFlowSync oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.courseId != widget.courseId) {
+    if (oldWidget.courseId != widget.courseId ||
+        oldWidget.lessonId != widget.lessonId) {
       _scheduleSync();
     }
   }
 
   void _scheduleSync() {
     final courseId = widget.courseId;
+    final lessonId = widget.lessonId;
     if (courseId == null || courseId.isEmpty) {
       return;
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || widget.courseId != courseId) {
+      if (!mounted ||
+          widget.courseId != courseId ||
+          widget.lessonId != lessonId) {
         return;
       }
       ref.read(courseFlowProvider.notifier).startCourse(courseId);
+      if (lessonId != null && lessonId.isNotEmpty) {
+        ref.read(activeLessonProvider.notifier).state = LessonResumeTarget(
+          courseId: courseId,
+          lessonId: lessonId,
+        );
+      }
     });
   }
 

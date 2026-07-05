@@ -18,7 +18,7 @@ class CourseLibraryPage extends ConsumerWidget {
     final courses = ref.watch(courseLibraryProvider);
     return AppScaffold(
       title: '课程库',
-      activeTab: KnowLinkTab.home,
+      activeTab: KnowLinkTab.library,
       body: courses.when(
         loading: () => const AppLoadingView(label: '正在加载课程库'),
         error: (error, _) => AppErrorView(

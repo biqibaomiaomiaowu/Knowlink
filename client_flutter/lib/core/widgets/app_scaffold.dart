@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_theme.dart';
+import '../../shared/providers/course_flow_providers.dart';
 
 enum KnowLinkTab {
   home,
+  library,
   import,
   recommend,
   parse,
@@ -14,7 +17,7 @@ enum KnowLinkTab {
   review,
 }
 
-class AppScaffold extends StatelessWidget {
+class AppScaffold extends ConsumerWidget {
   const AppScaffold({
     required this.title,
     required this.body,
@@ -33,8 +36,10 @@ class AppScaffold extends StatelessWidget {
   final String? quizId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tab = activeTab ?? _tabFromTitle(title);
+    final flow = ref.watch(courseFlowProvider);
+    final activeLesson = ref.watch(activeLessonProvider);
     return Scaffold(
       backgroundColor: AppTheme.page,
       body: SafeArea(
@@ -57,7 +62,8 @@ class AppScaffold extends StatelessWidget {
             ),
             _KnowLinkBottomNav(
               activeTab: tab,
-              courseId: courseId,
+              courseId: courseId ?? flow.courseId,
+              activeLesson: activeLesson,
               quizId: quizId,
             ),
           ],
@@ -67,6 +73,9 @@ class AppScaffold extends StatelessWidget {
   }
 
   KnowLinkTab _tabFromTitle(String title) {
+    if (title.contains('课程库')) {
+      return KnowLinkTab.library;
+    }
     if (title.contains('导入')) {
       return KnowLinkTab.import;
     }
@@ -79,10 +88,10 @@ class AppScaffold extends StatelessWidget {
     if (title.contains('问询') || title.contains('问答')) {
       return KnowLinkTab.inquiry;
     }
-    if (title.contains('讲义')) {
+    if (title.contains('课时学习') || title.contains('讲义')) {
       return KnowLinkTab.handout;
     }
-    if (title.contains('测验')) {
+    if (title.contains('测试') || title.contains('测验')) {
       return KnowLinkTab.quiz;
     }
     if (title.contains('复习')) {
@@ -291,66 +300,70 @@ class _KnowLinkBottomNav extends StatelessWidget {
   const _KnowLinkBottomNav({
     required this.activeTab,
     required this.courseId,
+    required this.activeLesson,
     required this.quizId,
   });
 
   static const double _itemWidth = 166;
-  static const double _navWidth = _itemWidth * 8;
+  static const double _navWidth = _itemWidth * 6;
 
   final KnowLinkTab activeTab;
   final String? courseId;
+  final LessonResumeTarget? activeLesson;
   final String? quizId;
 
   @override
   Widget build(BuildContext context) {
     final currentCourseId = courseId;
+    final currentLesson = activeLesson;
+    final lessonStudyPath = currentCourseId != null &&
+            currentLesson != null &&
+            currentLesson.courseId == currentCourseId
+        ? '/courses/$currentCourseId/lessons/${currentLesson.lessonId}/handout'
+        : '/courses';
+    final quizPath = quizId == null
+        ? currentCourseId == null
+            ? '/courses'
+            : '/courses/$currentCourseId/quiz'
+        : '/quizzes/$quizId';
     final items = [
-      const _NavItem(KnowLinkTab.home, Icons.home_outlined, '首页', '/'),
       const _NavItem(
-        KnowLinkTab.import,
-        Icons.file_upload_outlined,
-        '导入',
-        '/import',
+        KnowLinkTab.home,
+        Icons.home_outlined,
+        '学习总览',
+        '/',
       ),
       const _NavItem(
-        KnowLinkTab.recommend,
-        Icons.auto_awesome_outlined,
-        '推荐',
-        '/recommend',
-      ),
-      _NavItem(
-        KnowLinkTab.parse,
-        Icons.bar_chart_outlined,
-        '解析',
-        currentCourseId == null ? null : '/courses/$currentCourseId/progress',
-      ),
-      _NavItem(
-        KnowLinkTab.inquiry,
-        Icons.forum_outlined,
-        '问询',
-        currentCourseId == null ? null : '/courses/$currentCourseId/inquiry',
+        KnowLinkTab.library,
+        Icons.library_books_outlined,
+        '课程库',
+        '/courses',
       ),
       _NavItem(
         KnowLinkTab.handout,
         Icons.menu_book_outlined,
-        '讲义',
-        currentCourseId == null ? null : '/courses/$currentCourseId/handout',
+        '课时学习',
+        lessonStudyPath,
       ),
       _NavItem(
         KnowLinkTab.quiz,
         Icons.check_box_outlined,
-        '测验',
-        quizId == null
-            ? currentCourseId == null
-                ? null
-                : '/courses/$currentCourseId/quiz'
-            : '/quizzes/$quizId',
+        '测试中心',
+        quizPath,
+      ),
+      _NavItem(
+        KnowLinkTab.inquiry,
+        Icons.forum_outlined,
+        'AI 问答',
+        currentCourseId == null ? '/courses' : '/courses/$currentCourseId/qa',
       ),
       _NavItem(
         KnowLinkTab.review,
         Icons.calendar_today_outlined,
-        '复习',
-        currentCourseId == null ? null : '/courses/$currentCourseId/review',
+        '复习中心',
+        currentCourseId == null
+            ? '/courses'
+            : '/courses/$currentCourseId/review',
       ),
     ];
 
