@@ -193,7 +193,7 @@ class _LessonStudyHeader extends StatelessWidget {
               onPressed: onOpenMaterials,
             ),
             _SoftActionButton(
-              label: '进入测试',
+              label: '课时测试',
               icon: Icons.check_box_outlined,
               primary: true,
               onPressed: () => context.go(

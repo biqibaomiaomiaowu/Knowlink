@@ -1664,16 +1664,15 @@ class _QuizCard extends StatelessWidget {
         : (course.overallMasteryScore! * 100).round();
     final quizRoute = _entryRoute(
       model,
-      'comprehensive_quiz',
+      'course_quiz',
       '/courses/${course.courseId}/quiz',
     );
-    final reviewRoute = '/courses/${course.courseId}/review'
-        '?kind=comprehensive_quiz';
+    final historyRoute = '/courses/${course.courseId}/quiz';
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionLabel('综合测验'),
+          const _SectionLabel('课程测试'),
           const SizedBox(height: 14),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -1713,15 +1712,15 @@ class _QuizCard extends StatelessWidget {
             children: [
               FilledButton(
                 onPressed: () => _safeGo(context, quizRoute),
-                child: const Text('开始测验'),
+                child: const Text('开始课程测试'),
               ),
               OutlinedButton(
-                onPressed: () => _safeGo(context, reviewRoute),
-                child: const Text('重新生成'),
+                onPressed: () => _safeGo(context, quizRoute),
+                child: const Text('重新生成课程测试'),
               ),
               OutlinedButton(
-                onPressed: () => _safeGo(context, reviewRoute),
-                child: const Text('历史测验'),
+                onPressed: () => _safeGo(context, historyRoute),
+                child: const Text('历史课程测试'),
               ),
             ],
           ),
