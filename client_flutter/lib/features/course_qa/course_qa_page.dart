@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_theme.dart';
 import '../../core/widgets/app_scaffold.dart';
 import '../../core/widgets/knowlink_widgets.dart';
 import '../../shared/models/course_lesson_models.dart';
 import '../../shared/models/handout_models.dart';
+import '../../shared/providers/course_flow_providers.dart';
 import '../../shared/providers/course_qa_provider.dart';
 import '../../shared/services/course_lesson_api.dart';
 
@@ -26,29 +28,27 @@ class CourseQaPage extends ConsumerStatefulWidget {
 class _CourseQaPageState extends ConsumerState<CourseQaPage> {
   final _questionController = TextEditingController();
 
-  late _QaScope _selectedScope;
+  late String _selectedCourseId;
   late Future<PlaceholderEntryModel> _coursePlaceholderFuture;
-  Future<PlaceholderEntryModel>? _lessonPlaceholderFuture;
-
-  bool get _hasLessonScope => widget.lessonId != null;
+  late Future<List<CourseLibraryItemModel>> _courseOptionsFuture;
 
   @override
   void initState() {
     super.initState();
-    _selectedScope = _hasLessonScope ? _QaScope.lesson : _QaScope.course;
-    _loadPlaceholders();
-    _loadSessionsFor(_selectedScope);
+    _selectedCourseId = widget.courseId;
+    _loadCourseOptions();
+    _loadPlaceholderFor(_selectedCourseId);
+    _loadSessionsFor(_selectedCourseId);
   }
 
   @override
   void didUpdateWidget(covariant CourseQaPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.courseId != widget.courseId ||
-        oldWidget.lessonId != widget.lessonId) {
-      _selectedScope = _hasLessonScope ? _QaScope.lesson : _QaScope.course;
+    if (oldWidget.courseId != widget.courseId) {
+      _selectedCourseId = widget.courseId;
       _questionController.clear();
-      _loadPlaceholders();
-      _loadSessionsFor(_selectedScope);
+      _loadPlaceholderFor(_selectedCourseId);
+      _loadSessionsFor(_selectedCourseId);
     }
   }
 
@@ -60,21 +60,19 @@ class _CourseQaPageState extends ConsumerState<CourseQaPage> {
 
   @override
   Widget build(BuildContext context) {
-    final title = _selectedScope == _QaScope.lesson ? '课时问答' : '课程问答';
-    final scopeArgs = _scopeArgsFor(_selectedScope);
+    const title = '课程问答';
+    final scopeArgs = _scopeArgsFor(_selectedCourseId);
     final qaState = ref.watch(courseQaProvider(scopeArgs));
     return AppScaffold(
       title: title,
       activeTab: KnowLinkTab.inquiry,
-      courseId: widget.courseId,
+      courseId: _selectedCourseId,
       body: FutureBuilder<PlaceholderEntryModel>(
-        future: _placeholderFutureFor(_selectedScope),
+        future: _coursePlaceholderFuture,
         builder: (context, snapshot) {
           final placeholder = snapshot.data ??
               PlaceholderEntryModel(
-                key: _selectedScope == _QaScope.lesson
-                    ? 'lesson_qa'
-                    : 'course_qa',
+                key: 'course_qa',
                 title: title,
                 status: snapshot.connectionState == ConnectionState.waiting
                     ? 'loading'
@@ -83,13 +81,13 @@ class _CourseQaPageState extends ConsumerState<CourseQaPage> {
                     snapshot.hasError ? '暂时无法加载历史会话，可以继续发起新问题。' : '还没有问答记录。',
               );
           return _QaLayout(
-            courseId: widget.courseId,
-            lessonId: widget.lessonId,
-            selectedScope: _selectedScope,
+            courseId: _selectedCourseId,
+            courseOptionsFuture: _courseOptionsFuture,
             placeholder: placeholder,
             qaState: qaState,
             questionController: _questionController,
-            onScopeChanged: _handleScopeChanged,
+            onCourseChanged: _handleCourseChanged,
+            onCourseOptionsRetry: _reloadCourseOptions,
             onNewSession: () {
               ref.read(courseQaProvider(scopeArgs).notifier).startNewSession();
             },
@@ -105,32 +103,34 @@ class _CourseQaPageState extends ConsumerState<CourseQaPage> {
     );
   }
 
-  void _loadPlaceholders() {
-    final api = ref.read(courseLessonApiProvider);
-    _coursePlaceholderFuture = api.fetchCourseQaPlaceholder(widget.courseId);
-    _lessonPlaceholderFuture = _hasLessonScope
-        ? api.fetchLessonQaPlaceholder(
-            courseId: widget.courseId,
-            lessonId: widget.lessonId!,
-          )
-        : null;
+  void _loadCourseOptions() {
+    _courseOptionsFuture =
+        ref.read(courseLessonApiProvider).fetchCourseLibrary();
   }
 
-  Future<PlaceholderEntryModel> _placeholderFutureFor(_QaScope scope) {
-    if (scope == _QaScope.lesson) {
-      return _lessonPlaceholderFuture ?? _coursePlaceholderFuture;
-    }
-    return _coursePlaceholderFuture;
+  void _loadPlaceholderFor(String courseId) {
+    _coursePlaceholderFuture =
+        ref.read(courseLessonApiProvider).fetchCourseQaPlaceholder(courseId);
   }
 
-  void _handleScopeChanged(_QaScope scope) {
-    if (scope == _QaScope.lesson && !_hasLessonScope) {
+  void _reloadCourseOptions() {
+    setState(_loadCourseOptions);
+  }
+
+  void _handleCourseChanged(String courseId) {
+    if (courseId == _selectedCourseId) {
       return;
     }
+    final placeholderFuture =
+        ref.read(courseLessonApiProvider).fetchCourseQaPlaceholder(courseId);
     setState(() {
-      _selectedScope = scope;
+      _selectedCourseId = courseId;
+      _coursePlaceholderFuture = placeholderFuture;
+      _questionController.clear();
     });
-    _loadSessionsFor(scope);
+    ref.read(courseFlowProvider.notifier).startCourse(courseId);
+    _loadSessionsFor(courseId);
+    _goToCourseQa(courseId);
   }
 
   Future<void> _submitQuestion() async {
@@ -138,68 +138,60 @@ class _CourseQaPageState extends ConsumerState<CourseQaPage> {
     if (question.isEmpty) {
       return;
     }
-    if (_selectedScope == _QaScope.lesson && !_hasLessonScope) {
-      return;
-    }
 
     _questionController.clear();
     await ref
-        .read(courseQaProvider(_scopeArgsFor(_selectedScope)).notifier)
+        .read(courseQaProvider(_scopeArgsFor(_selectedCourseId)).notifier)
         .submitQuestion(question);
   }
 
-  QaScopeArgs _scopeArgsFor(_QaScope scope) {
+  QaScopeArgs _scopeArgsFor(String courseId) {
     return QaScopeArgs(
-      courseId: widget.courseId,
-      scopeType: scope.apiValue,
-      lessonId: scope == _QaScope.lesson ? widget.lessonId : null,
+      courseId: courseId,
+      scopeType: 'course',
     );
   }
 
-  void _loadSessionsFor(_QaScope scope) {
-    if (scope == _QaScope.lesson && !_hasLessonScope) {
-      return;
-    }
+  void _loadSessionsFor(String courseId) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
+      if (mounted && _selectedCourseId == courseId) {
         ref
-            .read(courseQaProvider(_scopeArgsFor(scope)).notifier)
+            .read(courseQaProvider(_scopeArgsFor(courseId)).notifier)
             .loadSessions();
       }
     });
   }
-}
 
-enum _QaScope {
-  course('course'),
-  lesson('lesson');
-
-  const _QaScope(this.apiValue);
-
-  final String apiValue;
+  void _goToCourseQa(String courseId) {
+    try {
+      context.go('/courses/$courseId/qa');
+    } catch (_) {
+      // Widget tests can mount this page without a router.
+    }
+  }
 }
 
 class _QaLayout extends StatelessWidget {
   const _QaLayout({
     required this.courseId,
-    required this.lessonId,
-    required this.selectedScope,
+    required this.courseOptionsFuture,
     required this.placeholder,
     required this.qaState,
     required this.questionController,
-    required this.onScopeChanged,
+    required this.onCourseChanged,
+    required this.onCourseOptionsRetry,
     required this.onNewSession,
     required this.onSessionSelected,
     required this.onSubmit,
   });
 
   final String courseId;
-  final String? lessonId;
-  final _QaScope selectedScope;
+  final Future<List<CourseLibraryItemModel>> courseOptionsFuture;
   final PlaceholderEntryModel placeholder;
   final CourseQaState qaState;
   final TextEditingController questionController;
-  final ValueChanged<_QaScope> onScopeChanged;
+  final ValueChanged<String> onCourseChanged;
+  final VoidCallback onCourseOptionsRetry;
   final VoidCallback onNewSession;
   final ValueChanged<QaSessionModel> onSessionSelected;
   final VoidCallback onSubmit;
@@ -211,17 +203,15 @@ class _QaLayout extends StatelessWidget {
         final wide = constraints.maxWidth >= 860;
         final sidePanel = _ScopePanel(
           courseId: courseId,
-          lessonId: lessonId,
-          selectedScope: selectedScope,
+          courseOptionsFuture: courseOptionsFuture,
           qaState: qaState,
-          onScopeChanged: onScopeChanged,
+          onCourseChanged: onCourseChanged,
+          onCourseOptionsRetry: onCourseOptionsRetry,
           onNewSession: onNewSession,
           onSessionSelected: onSessionSelected,
         );
         final chatPanel = _ChatPanel(
           courseId: courseId,
-          lessonId: lessonId,
-          selectedScope: selectedScope,
           placeholder: placeholder,
           qaState: qaState,
           questionController: questionController,
@@ -256,25 +246,24 @@ class _QaLayout extends StatelessWidget {
 class _ScopePanel extends StatelessWidget {
   const _ScopePanel({
     required this.courseId,
-    required this.lessonId,
-    required this.selectedScope,
+    required this.courseOptionsFuture,
     required this.qaState,
-    required this.onScopeChanged,
+    required this.onCourseChanged,
+    required this.onCourseOptionsRetry,
     required this.onNewSession,
     required this.onSessionSelected,
   });
 
   final String courseId;
-  final String? lessonId;
-  final _QaScope selectedScope;
+  final Future<List<CourseLibraryItemModel>> courseOptionsFuture;
   final CourseQaState qaState;
-  final ValueChanged<_QaScope> onScopeChanged;
+  final ValueChanged<String> onCourseChanged;
+  final VoidCallback onCourseOptionsRetry;
   final VoidCallback onNewSession;
   final ValueChanged<QaSessionModel> onSessionSelected;
 
   @override
   Widget build(BuildContext context) {
-    final lessonAvailable = lessonId != null;
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -290,31 +279,28 @@ class _ScopePanel extends StatelessWidget {
             children: [
               ChoiceChip(
                 label: const Text('课程问答'),
-                selected: selectedScope == _QaScope.course,
-                onSelected: (_) => onScopeChanged(_QaScope.course),
-              ),
-              ChoiceChip(
-                label: const Text('课时问答'),
-                selected: selectedScope == _QaScope.lesson,
-                onSelected: lessonAvailable
-                    ? (_) => onScopeChanged(_QaScope.lesson)
-                    : null,
+                selected: true,
+                onSelected: (_) {},
               ),
             ],
           ),
           const SizedBox(height: 16),
-          _ScopeSummary(
-            icon: Icons.school_outlined,
-            label: '课程',
-            value: courseId,
-            active: selectedScope == _QaScope.course,
-          ),
-          const SizedBox(height: 10),
-          _ScopeSummary(
-            icon: Icons.menu_book_outlined,
-            label: '课时',
-            value: lessonId ?? '未选择',
-            active: selectedScope == _QaScope.lesson,
+          FutureBuilder<List<CourseLibraryItemModel>>(
+            future: courseOptionsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.hasError && !snapshot.hasData) {
+                return _CourseSelectorError(
+                  selectedCourseId: courseId,
+                  onRetry: onCourseOptionsRetry,
+                );
+              }
+              return _CourseSelector(
+                selectedCourseId: courseId,
+                courses: snapshot.data ?? const <CourseLibraryItemModel>[],
+                loading: snapshot.connectionState == ConnectionState.waiting,
+                onChanged: onCourseChanged,
+              );
+            },
           ),
           const SizedBox(height: 14),
           Row(
@@ -426,54 +412,148 @@ class _SessionList extends StatelessWidget {
   }
 }
 
-class _ScopeSummary extends StatelessWidget {
-  const _ScopeSummary({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.active,
+class _CourseSelector extends StatelessWidget {
+  const _CourseSelector({
+    required this.selectedCourseId,
+    required this.courses,
+    required this.loading,
+    required this.onChanged,
   });
 
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool active;
+  final String selectedCourseId;
+  final List<CourseLibraryItemModel> courses;
+  final bool loading;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final options = _courseOptionsWithSelected(courses, selectedCourseId);
+    final canSelect = !loading && options.length > 1;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: active ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
-        border: Border.all(
-          color: active ? AppTheme.brandBlue : AppTheme.line,
-        ),
+        color: const Color(0xFFEFF6FF),
+        border: Border.all(color: AppTheme.brandBlue),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
-            Icon(icon, color: active ? AppTheme.brandBlue : AppTheme.muted),
+            const Icon(Icons.school_outlined, color: AppTheme.brandBlue),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
+                  const Text(
+                    '课程',
+                    style: TextStyle(
+                      color: AppTheme.muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      key: const ValueKey('qa_course_selector'),
+                      value: selectedCourseId,
+                      isExpanded: true,
+                      icon: const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: AppTheme.muted,
+                      ),
+                      dropdownColor: AppTheme.surface,
+                      style: const TextStyle(
+                        color: AppTheme.ink,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      items: [
+                        for (final option in options)
+                          DropdownMenuItem<String>(
+                            value: option.courseId,
+                            child: Text(
+                              option.title,
+                              key: ValueKey(
+                                'qa_course_option_${option.courseId}',
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: canSelect
+                          ? (value) {
+                              if (value != null) {
+                                onChanged(value);
+                              }
+                            }
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (loading) ...[
+              const SizedBox(width: 10),
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CourseSelectorError extends StatelessWidget {
+  const _CourseSelectorError({
+    required this.selectedCourseId,
+    required this.onRetry,
+  });
+
+  final String selectedCourseId;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        border: Border.all(color: AppTheme.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            const Icon(Icons.school_outlined, color: AppTheme.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '课程',
+                    style: TextStyle(
                       color: AppTheme.muted,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    value,
+                    '课程 $selectedCourseId',
                     style: const TextStyle(fontWeight: FontWeight.w800),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
+            ),
+            IconButton(
+              tooltip: '重新加载课程',
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
             ),
           ],
         ),
@@ -482,11 +562,38 @@ class _ScopeSummary extends StatelessWidget {
   }
 }
 
+class _CourseOption {
+  const _CourseOption({
+    required this.courseId,
+    required this.title,
+  });
+
+  final String courseId;
+  final String title;
+}
+
+List<_CourseOption> _courseOptionsWithSelected(
+  List<CourseLibraryItemModel> courses,
+  String selectedCourseId,
+) {
+  final options = [
+    for (final course in courses)
+      _CourseOption(courseId: course.courseId, title: course.title),
+  ];
+  final hasSelected =
+      options.any((option) => option.courseId == selectedCourseId);
+  if (hasSelected) {
+    return options;
+  }
+  return [
+    _CourseOption(courseId: selectedCourseId, title: '课程 $selectedCourseId'),
+    ...options,
+  ];
+}
+
 class _ChatPanel extends StatelessWidget {
   const _ChatPanel({
     required this.courseId,
-    required this.lessonId,
-    required this.selectedScope,
     required this.placeholder,
     required this.qaState,
     required this.questionController,
@@ -494,8 +601,6 @@ class _ChatPanel extends StatelessWidget {
   });
 
   final String courseId;
-  final String? lessonId;
-  final _QaScope selectedScope;
   final PlaceholderEntryModel placeholder;
   final CourseQaState qaState;
   final TextEditingController questionController;
@@ -503,10 +608,8 @@ class _ChatPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLesson = selectedScope == _QaScope.lesson;
-    final scopeText =
-        isLesson ? '当前范围：课程 $courseId / 课时 $lessonId' : '当前范围：课程 $courseId';
-    final hintText = isLesson ? '向当前课时提问' : '向整门课程提问';
+    final scopeText = '当前范围：课程 $courseId';
+    const hintText = '向整门课程提问';
     final messages = qaState.entries;
     final isSubmitting = qaState.submit.isLoading;
     final submitError = qaState.submit.hasError ? qaState.submit.error : null;
@@ -515,20 +618,13 @@ class _ChatPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  isLesson ? '课时问答' : '课程问答',
-                  style: const TextStyle(
-                    color: AppTheme.ink,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              StatusPill(label: placeholder.status),
-            ],
+          const Text(
+            '课程问答',
+            style: TextStyle(
+              color: AppTheme.ink,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -579,9 +675,9 @@ class _ChatPanel extends StatelessWidget {
                   minLines: 2,
                   maxLines: 4,
                   textInputAction: TextInputAction.newline,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     hintText: hintText,
-                    border: const OutlineInputBorder(),
+                    border: OutlineInputBorder(),
                   ),
                 ),
               ),

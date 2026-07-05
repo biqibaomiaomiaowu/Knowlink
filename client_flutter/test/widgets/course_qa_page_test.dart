@@ -23,6 +23,7 @@ void main() {
 
     expect(api.courseSessionFetches, contains('101'));
     expect(find.text('Stored course session'), findsOneWidget);
+    expect(find.text('ready'), findsNothing);
 
     await tester.tap(find.text('Stored course session'));
     await tester.pumpAndSettle();
@@ -50,7 +51,8 @@ void main() {
     expect(find.text('Course answer: Fresh question'), findsOneWidget);
   });
 
-  testWidgets('course and lesson history scopes do not leak', (tester) async {
+  testWidgets('lesson route stays course scoped without lesson UI',
+      (tester) async {
     _useTestSurface(tester, const Size(1200, 1400));
     final api = _CourseQaFakeApiClient();
 
@@ -64,23 +66,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(api.lessonSessionFetches, contains('101/2'));
-    expect(find.text('Stored lesson session'), findsOneWidget);
-
-    await tester.tap(find.text('Stored lesson session'));
-    await tester.pumpAndSettle();
-    expect(api.messageFetches, [8001]);
-    expect(find.text('Lesson stored question'), findsOneWidget);
-    expect(find.text('Lesson stored answer'), findsOneWidget);
-
-    await tester.tap(find.byType(ChoiceChip).first);
-    await tester.pumpAndSettle();
+    expect(api.courseSessionFetches, contains('101'));
+    expect(api.lessonSessionFetches, isEmpty);
+    expect(find.text('课时问答'), findsNothing);
+    expect(find.text('未选择'), findsNothing);
+    expect(find.text('ready'), findsNothing);
     expect(find.text('Stored course session'), findsOneWidget);
-    expect(find.text('Lesson stored answer'), findsNothing);
 
     await tester.tap(find.text('Stored course session'));
     await tester.pumpAndSettle();
-    expect(api.messageFetches, [8001, 7001]);
+    expect(api.messageFetches, [7001]);
     expect(find.text('Stored answer'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'Course follow up');
@@ -104,7 +99,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('课程问答'), findsWidgets);
-    expect(find.text('课时问答'), findsOneWidget);
+    expect(find.text('课时问答'), findsNothing);
+    expect(find.text('未选择'), findsNothing);
+    expect(find.text('ready'), findsNothing);
     expect(find.textContaining('流式输出'), findsNothing);
 
     await tester.enterText(find.byType(TextField), '这门课的重点是什么？');
@@ -121,7 +118,7 @@ void main() {
     expect(find.text('课程回答：这门课的重点是什么？'), findsOneWidget);
   });
 
-  testWidgets('lesson id preselects lesson scope and keeps sessions separate',
+  testWidgets('course selector switches the active course QA context',
       (tester) async {
     _useTestSurface(tester, const Size(1200, 1400));
     final api = _CourseQaFakeApiClient();
@@ -130,40 +127,34 @@ void main() {
       ProviderScope(
         overrides: [apiClientProvider.overrideWithValue(api)],
         child: const MaterialApp(
-          home: CourseQaPage(courseId: '101', lessonId: 'l-2'),
+          home: CourseQaPage(courseId: '101'),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('课时问答'), findsWidgets);
-    expect(find.textContaining('课时 l-2'), findsOneWidget);
+    expect(find.byKey(const ValueKey('qa_course_selector')), findsOneWidget);
+    expect(find.text('课程 1'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField), '这一课怎么复习？');
-    await tester.tap(find.byTooltip('发送'));
+    await tester.tap(find.byKey(const ValueKey('qa_course_selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('qa_course_option_202')).last);
     await tester.pumpAndSettle();
 
-    expect(api.lessonQaRequests, hasLength(1));
-    expect(api.lessonQaRequests.single.courseId, '101');
-    expect(api.lessonQaRequests.single.lessonId, 'l-2');
-    expect(api.lessonQaRequests.single.request.question, '这一课怎么复习？');
-    expect(api.lessonQaRequests.single.request.scopeType, 'lesson');
-    expect(api.lessonQaRequests.single.request.courseId, '101');
-    expect(api.lessonQaRequests.single.request.lessonId, 'l-2');
-    expect(api.courseQaRequests, isEmpty);
-    expect(find.text('课时回答：这一课怎么复习？'), findsOneWidget);
+    expect(api.courseSessionFetches, containsAllInOrder(['101', '202']));
+    expect(find.text('课程 2'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(ChoiceChip, '课程问答'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), '切回课程范围');
+    await tester.enterText(find.byType(TextField), '请总结新课程');
     await tester.tap(find.byTooltip('发送'));
     await tester.pumpAndSettle();
 
     expect(api.courseQaRequests, hasLength(1));
+    expect(api.courseQaRequests.single.courseId, '202');
     expect(api.courseQaRequests.single.request.scopeType, 'course');
-    expect(api.lessonQaRequests, hasLength(1));
-    expect(find.text('课时回答：这一课怎么复习？'), findsNothing);
-    expect(find.text('课程回答：切回课程范围'), findsOneWidget);
+    expect(api.courseQaRequests.single.request.courseId, '202');
+    expect(api.courseQaRequests.single.request.lessonId, isNull);
+    expect(api.lessonQaRequests, isEmpty);
+    expect(find.text('课程回答：请总结新课程'), findsOneWidget);
   });
 }
 
@@ -180,6 +171,44 @@ class _CourseQaFakeApiClient extends ApiClient {
   final courseSessionFetches = <String>[];
   final lessonSessionFetches = <String>[];
   final messageFetches = <int>[];
+
+  @override
+  Future<List<CourseLibraryItemModel>> fetchCourseLibrary({
+    String? query,
+    String? learningStatus,
+    String? source,
+    String archived = 'exclude',
+    String sort = 'recent_activity_desc',
+  }) async {
+    return const [
+      CourseLibraryItemModel(
+        courseId: '101',
+        title: '课程 1',
+        isCurrent: true,
+        entryType: 'manual_import',
+        learningStatus: 'learning_ready',
+        lessonCount: 3,
+        courseResourceCount: 2,
+        pendingReviewCount: 0,
+        pipelineStage: 'ready',
+        pipelineStatus: 'ready',
+        lifecycleStatus: 'learning_ready',
+      ),
+      CourseLibraryItemModel(
+        courseId: '202',
+        title: '课程 2',
+        isCurrent: false,
+        entryType: 'manual_import',
+        learningStatus: 'learning_ready',
+        lessonCount: 4,
+        courseResourceCount: 1,
+        pendingReviewCount: 1,
+        pipelineStage: 'ready',
+        pipelineStatus: 'ready',
+        lifecycleStatus: 'learning_ready',
+      ),
+    ];
+  }
 
   @override
   Future<PlaceholderEntryModel> fetchCourseQaPlaceholder(
